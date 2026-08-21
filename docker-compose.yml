@@ -1,0 +1,13 @@
+services:
+  netbox-yaml-hub:
+    build: .
+    container_name: netbox-yaml-hub
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    volumes:
+      - /opt/netbox-yaml-generator:/app # <-- Mounts host directory directly into the container
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    env_file:
+      - .env

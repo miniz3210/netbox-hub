@@ -1,0 +1,10 @@
+cat << 'EOF' > .gitignore
+.env
+__pycache__/
+*.pyc
+output_yamls/
+netbox_devicetypes.zip
+netbox_all_assets.zip
+.venv/
+venv/
+EOF
