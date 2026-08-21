@@ -87,18 +87,15 @@ def get_repo_catalog() -> Dict[str, List[str]]:
     return catalog
 
 def get_canonical_manufacturer(user_input: str, mfg_list: List[str]) -> str:
-    """Matches user input like 'broadcom' to official 'Broadcom Corporation'."""
     clean_in = re.sub(r"[^a-zA-Z0-9]", "", user_input).lower()
     if not clean_in:
         return user_input
 
-    # 1. Direct or substring match in catalog manufacturers
     for mfg in mfg_list:
         clean_m = re.sub(r"[^a-zA-Z0-9]", "", mfg).lower()
         if clean_in == clean_m or clean_in in clean_m or clean_m in clean_in:
             return mfg
 
-    # 2. Fuzzy match
     close = difflib.get_close_matches(user_input, mfg_list, n=1, cutoff=0.6)
     if close:
         return close[0]
@@ -163,6 +160,17 @@ def fetch_raw_content(path: str, binary: bool = False):
     res = requests.get(raw_url, timeout=10)
     if res.status_code == 200:
         return res.content if binary else res.text
+    return None
+
+def extract_reference_interface_pattern(content: Optional[str]) -> Optional[str]:
+    """Extracts existing interface naming pattern from an official YAML snippet."""
+    if not content:
+        return None
+    match = re.search(r"-\s+name:\s*['\"]?([^'\"\n\r]+)['\"]?", content)
+    if match:
+        name_sample = match.group(1).strip()
+        if "{module}" in name_sample:
+            return name_sample
     return None
 
 # --- 2. AI Multi-Engine Core Router ---
@@ -309,20 +317,33 @@ Output ONLY valid, raw YAML. Do not include markdown blocks or conversational te
 """
     return call_ai(prompt, provider)
 
-def generate_module_yaml(mfg: str, model: str, part_num: str, provider: str) -> str:
+def generate_module_yaml(mfg: str, model: str, part_num: str, provider: str, ref_pattern: Optional[str] = None) -> str:
+    if ref_pattern:
+        pattern_instruction = f"""
+- Interface Naming Rule (Matched pattern from similar existing library items):
+    - MUST follow this exact style: `{ref_pattern}` (e.g. replacing index with 1, 2, etc.)
+    - Always include literal '{{module}}' intact without replacing it.
+"""
+    else:
+        pattern_instruction = """
+- Interface Naming Rule (Strict Default when no match found):
+    - MUST strictly use: `name: '{module}/Port1'`, `name: '{module}/Port2'`, `name: '{module}/Port3'`, etc.
+    - DO NOT prepend 'Ethernet/' or manufacturer/model names.
+"""
+
     prompt = f"""
 Search official manufacturer datasheets and generate a NetBox Module-Type YAML following the official NetBox Library standard.
 Manufacturer: {mfg}
 Model: {model}
 Part Number: {part_num}
 
-CRITICAL SCHEMA RULES (Official NetBox Module-Type Pattern):
+CRITICAL SCHEMA RULES:
 - First line MUST be '---'
 - Required Keys:
     manufacturer: {mfg}
     model: <exact model or part number>
     part_number: <exact part number>
-    description: '<Clear hardware overview, e.g. Dual-Port 10GBASE-T Ethernet PCI Express 3.0 x8 Network Interface Card>'
+    description: '<Clear hardware overview, e.g. Dual-Port 10/25GbE SFP28 PCI Express 3.0 x8 Network Interface Card>'
 - Note on comments: DO NOT include the 'comments' key unless you have a verified, existing official datasheet link. If uncertain, omit 'comments' entirely.
 - DO NOT include 'u_height' or 'is_full_depth'.
 - Valid NetBox Interface Types:
@@ -331,14 +352,21 @@ CRITICAL SCHEMA RULES (Official NetBox Module-Type Pattern):
     - 25gbase-x-sfp28 (25G SFP28)
     - 1000base-t (1G RJ-45)
     - 1000base-x-sfp (1G SFP)
-- Interfaces / Ports naming rules (STRICT OFFICIAL CONVENTION):
-    - For Network Interface Cards (NICs/PCIe/OCP): use `name: Ethernet/{{module}}/1`, `name: Ethernet/{{module}}/2`, etc.
-    - For switch modules / linecards: use `name: '{{module}}/Port1'`, `name: '{{module}}/Port2'`, etc.
-    - Always include the literal string `{{module}}` intact.
+{pattern_instruction}
 
 Output ONLY valid, raw YAML.
 """
-    return call_ai(prompt, provider)
+    result = call_ai(prompt, provider)
+    
+    # If no custom reference pattern, guarantee {module}/PortX naming
+    if not ref_pattern:
+        result = re.sub(
+            r"name:\s*['\"]?(?:[a-zA-Z0-9_\-]+/)?(?:Ethernet/\{module\}/|Port\s*|eth|mgmt|Ethernet)(\d+)['\"]?",
+            r"name: '{module}/Port\1'",
+            result,
+            flags=re.IGNORECASE
+        )
+    return result
 
 def generate_rack_yaml(mfg: str, model: str, provider: str) -> str:
     prompt = f"""
@@ -434,11 +462,13 @@ with t1:
 with t2:
     col1, col2 = st.columns([1, 1])
     with col1:
-        m_mfg_raw = st.text_input("Manufacturer", placeholder="e.g., Broadcom, Intel, Dell", key="m_mfg")
-        m_model = st.text_input("Module Name / Part #", placeholder="e.g., BCM57416, C9300-NM-8X", key="m_mod")
+        m_mfg_raw = st.text_input("Manufacturer", placeholder="e.g., Broadcom, Mellanox, Dell", key="m_mfg")
+        m_model = st.text_input("Module Name / Part #", placeholder="e.g., ConnectX-4 Lx dual-port, BCM57416", key="m_mod")
         m_mfg = get_canonical_manufacturer(m_mfg_raw, catalog["manufacturers"]) if m_mfg_raw else ""
 
         selected_mod_choice = None
+        discovered_pattern = None
+
         if m_mfg and m_model:
             similar_mods = search_catalog_similar(catalog["module_types"], m_mfg, m_model)
             options = ["✨ Generate Fresh with AI (Auto-Researched)"] + similar_mods
@@ -451,9 +481,13 @@ with t2:
                     index=1 if len(similar_mods) == 1 else 0,
                     key="mod_select_box"
                 )
+                # Sample pattern from the first match
+                top_sample = fetch_raw_content(similar_mods[0], binary=False)
+                discovered_pattern = extract_reference_interface_pattern(top_sample)
             else:
-                st.warning("No exact match found in library. Click below to generate fresh with AI.")
+                st.warning("No exact match found in library. Interface naming will default to {module}/Port1, {module}/Port2.")
                 selected_mod_choice = "✨ Generate Fresh with AI (Auto-Researched)"
+                discovered_pattern = None
 
         m_search = st.button("Load / Generate Module Type", type="primary", key="btn_mod")
 
@@ -463,7 +497,7 @@ with t2:
                 if not active_provider:
                     st.error("Configure an AI API key in `.env` to enable AI generation.")
                     st.stop()
-                content = generate_module_yaml(m_mfg, m_model, m_model, active_provider)
+                content = generate_module_yaml(m_mfg, m_model, m_model, active_provider, ref_pattern=discovered_pattern)
                 src = f"🤖 AI Generated ({active_provider})"
             else:
                 content = fetch_raw_content(selected_mod_choice, binary=False)
@@ -591,7 +625,7 @@ with t5:
                         src = f"Official Repository ({matches[0]})"
                     else:
                         if cat == "module":
-                            content = gen_fn(mfg, model, model, active_provider)
+                            content = gen_fn(mfg, model, model, active_provider, ref_pattern=None)
                         else:
                             content = gen_fn(mfg, model, active_provider)
                         src = f"AI Generated ({active_provider})"
