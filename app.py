@@ -57,13 +57,18 @@ def get_repo_catalog() -> Dict[str, List[str]]:
         "module_types": [],
         "rack_types": [],
         "elevation_images": [],
-        "module_images": []
+        "module_images": [],
+        "manufacturers": set()
     }
     try:
         res = requests.get(url, timeout=15)
         if res.status_code == 200:
             for item in res.json().get("tree", []):
                 path = item["path"]
+                parts = path.split("/")
+                if len(parts) >= 3 and parts[0] in ["device-types", "module-types", "rack-types"]:
+                    catalog["manufacturers"].add(parts[1])
+
                 if path.startswith("device-types/") and path.endswith((".yaml", ".yml")):
                     catalog["device_types"].append(path)
                 elif path.startswith("module-types/") and path.endswith((".yaml", ".yml")):
@@ -77,7 +82,28 @@ def get_repo_catalog() -> Dict[str, List[str]]:
     except Exception as e:
         logger.error(f"Error fetching catalog from GitHub: {e}")
         st.error(f"Error fetching catalog from GitHub: {e}")
+    
+    catalog["manufacturers"] = sorted(list(catalog["manufacturers"]))
     return catalog
+
+def get_canonical_manufacturer(user_input: str, mfg_list: List[str]) -> str:
+    """Matches user input like 'broadcom' to official 'Broadcom Corporation'."""
+    clean_in = re.sub(r"[^a-zA-Z0-9]", "", user_input).lower()
+    if not clean_in:
+        return user_input
+
+    # 1. Direct or substring match in catalog manufacturers
+    for mfg in mfg_list:
+        clean_m = re.sub(r"[^a-zA-Z0-9]", "", mfg).lower()
+        if clean_in == clean_m or clean_in in clean_m or clean_m in clean_in:
+            return mfg
+
+    # 2. Fuzzy match
+    close = difflib.get_close_matches(user_input, mfg_list, n=1, cutoff=0.6)
+    if close:
+        return close[0]
+
+    return user_input
 
 def search_catalog_similar(file_list: List[str], manufacturer: str, query: str) -> List[str]:
     c_mfg = re.sub(r"[^a-zA-Z0-9]", "", manufacturer).lower()
@@ -158,7 +184,8 @@ def call_ai(prompt: str, selected_provider: str) -> str:
     system_msg = (
         "You are a strict NetBox hardware YAML specification generator. "
         "You MUST verify hardware specifications directly from official manufacturer datasheets. "
-        "Output ONLY valid, raw YAML starting with '---'. Use exact kebab-case hyphenated keys (never underscores)."
+        "Output ONLY valid, raw YAML starting with '---'. Use exact kebab-case hyphenated keys (never underscores). "
+        "Do NOT invent or hallucinate comments or URLs; omit 'comments' key entirely if no verified official datasheet URL is available."
     )
 
     try:
@@ -243,7 +270,7 @@ CRITICAL SCHEMA RULES (Use exact kebab-case hyphenated keys, NEVER underscores):
    airflow: <front-to-rear / rear-to-front / passive / side-to-rear>
    weight: <number e.g. 35.0>
    weight_unit: kg
-   comments: "<Brief hardware description>"
+   comments: "<Brief hardware description or omit if unknown>"
 
 3. Valid NetBox Interface Types:
    - 1000base-t (1GE Copper)
@@ -295,8 +322,8 @@ CRITICAL SCHEMA RULES (Official NetBox Module-Type Pattern):
     manufacturer: {mfg}
     model: <exact model or part number>
     part_number: <exact part number>
-    comments: '<Link or reference to official datasheet>'
     description: '<Clear hardware overview, e.g. Dual-Port 10GBASE-T Ethernet PCI Express 3.0 x8 Network Interface Card>'
+- Note on comments: DO NOT include the 'comments' key unless you have a verified, existing official datasheet link. If uncertain, omit 'comments' entirely.
 - DO NOT include 'u_height' or 'is_full_depth'.
 - Valid NetBox Interface Types:
     - 10gbase-t (10G RJ-45 Copper)
@@ -341,6 +368,8 @@ def generate_placeholder_svg(mfg: str, model: str, u_height: int = 1, view: str 
 st.title("⚡ NetBox Universal Library Hub")
 st.caption("Device Types | Module Types | Rack Types | Elevation & Module Images")
 
+catalog = get_repo_catalog()
+
 with st.sidebar:
     st.header("⚙️ AI Engine Status")
     if AVAILABLE_PROVIDERS:
@@ -349,8 +378,6 @@ with st.sidebar:
     else:
         active_provider = None
         st.warning("No AI API keys configured. Only official GitHub library lookups are enabled.")
-
-catalog = get_repo_catalog()
 
 t1, t2, t3, t4, t5 = st.tabs([
     "🖥️ Device Types", 
@@ -364,8 +391,9 @@ t1, t2, t3, t4, t5 = st.tabs([
 with t1:
     col1, col2 = st.columns([1, 1])
     with col1:
-        d_mfg = st.text_input("Manufacturer", placeholder="e.g., Cisco, Dell, Nutanix", key="d_mfg")
+        d_mfg_raw = st.text_input("Manufacturer", placeholder="e.g., Cisco, Dell, Nutanix", key="d_mfg")
         d_model = st.text_input("Device Model", placeholder="e.g., NX-TDT-4NL3-G6, PowerEdge R750", key="d_mod")
+        d_mfg = get_canonical_manufacturer(d_mfg_raw, catalog["manufacturers"]) if d_mfg_raw else ""
 
         selected_dev_choice = None
         if d_mfg and d_model:
@@ -406,8 +434,9 @@ with t1:
 with t2:
     col1, col2 = st.columns([1, 1])
     with col1:
-        m_mfg = st.text_input("Manufacturer", placeholder="e.g., Broadcom, Intel, Dell", key="m_mfg")
+        m_mfg_raw = st.text_input("Manufacturer", placeholder="e.g., Broadcom, Intel, Dell", key="m_mfg")
         m_model = st.text_input("Module Name / Part #", placeholder="e.g., BCM57416, C9300-NM-8X", key="m_mod")
+        m_mfg = get_canonical_manufacturer(m_mfg_raw, catalog["manufacturers"]) if m_mfg_raw else ""
 
         selected_mod_choice = None
         if m_mfg and m_model:
@@ -448,8 +477,9 @@ with t2:
 with t3:
     col1, col2 = st.columns([1, 1])
     with col1:
-        r_mfg = st.text_input("Rack Manufacturer", placeholder="e.g., APC, Eaton, Rittal", key="r_mfg")
+        r_mfg_raw = st.text_input("Rack Manufacturer", placeholder="e.g., APC, Eaton, Rittal", key="r_mfg")
         r_model = st.text_input("Rack Model", placeholder="e.g., NetShelter SX 42U", key="r_mod")
+        r_mfg = get_canonical_manufacturer(r_mfg_raw, catalog["manufacturers"]) if r_mfg_raw else ""
 
         selected_rack_choice = None
         if r_mfg and r_model:
@@ -491,8 +521,9 @@ with t4:
     col1, col2 = st.columns([1, 2])
     with col1:
         img_cat = st.selectbox("Image Target", ["Elevation Images (Rack Face)", "Module Images"])
-        i_mfg = st.text_input("Manufacturer", placeholder="e.g., Cisco, Dell", key="i_mfg")
+        i_mfg_raw = st.text_input("Manufacturer", placeholder="e.g., Cisco, Dell", key="i_mfg")
         i_model = st.text_input("Model Name", placeholder="e.g., PowerEdge R740, c9300l-24p-4x", key="i_mod")
+        i_mfg = get_canonical_manufacturer(i_mfg_raw, catalog["manufacturers"]) if i_mfg_raw else ""
         i_search = st.button("Find / Render Image", type="primary", key="btn_img")
 
     with col2:
@@ -518,7 +549,7 @@ with t5:
     st.write("Upload an Excel file with `Category` (`device`, `module`, or `rack`), `Manufacturer`, and `Model`.")
     sample_df = pd.DataFrame([
         {"Category": "device", "Manufacturer": "Cisco", "Model": "C9300-48P"},
-        {"Category": "module", "Manufacturer": "Dell", "Model": "Broadcom 57414"},
+        {"Category": "module", "Manufacturer": "Broadcom Corporation", "Model": "BCM57416"},
         {"Category": "rack", "Manufacturer": "APC", "Model": "NetShelter SX 42U"}
     ])
     st.download_button("📄 Download Sample Template (Excel)", sample_df.to_csv(index=False).encode('utf-8'), "template.csv", "text/csv")
@@ -540,10 +571,12 @@ with t5:
             with zipfile.ZipFile(zip_buf, "w") as zf:
                 for idx, row in df.iterrows():
                     cat = str(row.get("Category", "device")).lower().strip()
-                    mfg = str(row.get("Manufacturer", "")).strip()
+                    mfg_raw = str(row.get("Manufacturer", "")).strip()
                     model = str(row.get("Model", "")).strip()
-                    if not mfg or not model or mfg == "nan":
+                    if not mfg_raw or not model or mfg_raw == "nan":
                         continue
+
+                    mfg = get_canonical_manufacturer(mfg_raw, catalog["manufacturers"])
 
                     if cat == "module":
                         f_list, gen_fn, prefix = catalog["module_types"], generate_module_yaml, "module-types"
