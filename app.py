@@ -15,22 +15,32 @@ logger = logging.getLogger("netbox-hub")
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="NetBox All-in-One Asset Hub",
+    page_title="NetBox Universal Library Hub",
     page_icon="⚡",
     layout="wide"
 )
 
 GITHUB_REPO = "netbox-community/devicetype-library"
 BRANCH = "master"
-API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 
-# Display warning banner if API key is not supplied
-if not API_KEY:
-    st.error("⚠️ **GEMINI_API_KEY is not configured!** Official GitHub searching works, but AI auto-generation for unlisted models is disabled. Add it to your `.env` file.")
-    logger.warning("Application initialized without GEMINI_API_KEY.")
+# --- Provider Environment Keys ---
+GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GROQ_KEY = os.getenv("GROQ_API_KEY", "").strip()
+OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
+OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "").strip()  # e.g., "http://localhost:11434/v1"
 
-# --- 1. Global GitHub Asset Indexer ---
+# Identify available engines
+AVAILABLE_PROVIDERS = []
+if GROQ_KEY:
+    AVAILABLE_PROVIDERS.append("Groq (High Rate Limit)")
+if GEMINI_KEY:
+    AVAILABLE_PROVIDERS.append("Google Gemini (Search Grounded)")
+if OPENROUTER_KEY:
+    AVAILABLE_PROVIDERS.append("OpenRouter")
+if OLLAMA_URL:
+    AVAILABLE_PROVIDERS.append("Local Ollama")
+
+# --- Global GitHub Asset Indexer ---
 @st.cache_data(ttl=3600, show_spinner="Indexing all repository asset types from GitHub...")
 def get_repo_catalog() -> Dict[str, List[str]]:
     url = f"https://api.github.com/repos/{GITHUB_REPO}/git/trees/{BRANCH}?recursive=1"
@@ -65,7 +75,6 @@ def search_catalog(file_list: List[str], manufacturer: str, query: str) -> Optio
     c_query = re.sub(r"[^a-zA-Z0-9]", "", query).lower()
     c_mfg = re.sub(r"[^a-zA-Z0-9]", "", manufacturer).lower()
 
-    # Priority 1: Search in matching manufacturer directory
     for path in file_list:
         parts = path.split("/")
         if len(parts) >= 3:
@@ -74,7 +83,6 @@ def search_catalog(file_list: List[str], manufacturer: str, query: str) -> Optio
             if (c_mfg in r_mfg or r_mfg in c_mfg) and c_query in r_file:
                 return path
 
-    # Priority 2: Global search fallback
     for path in file_list:
         r_file = re.sub(r"[^a-zA-Z0-9]", "", path.split("/")[-1]).lower()
         if c_query in r_file:
@@ -88,94 +96,130 @@ def fetch_raw_content(path: str, binary: bool = False):
         return res.content if binary else res.text
     return None
 
-# --- 2. AI Spec Research & Schema Generators ---
-def call_gemini(prompt: str) -> str:
-    if not API_KEY:
-        error_msg = "GEMINI_API_KEY is not configured in the container environment."
-        logger.error(error_msg)
-        st.error(f"❌ {error_msg}")
-        st.stop()
+# --- Multi-AI Core Router ---
+def clean_ai_yaml(text: str) -> str:
+    text = text.strip()
+    text = re.sub(r"^```[a-zA-Z]*\n", "", text)
+    text = re.sub(r"\n```$", "", text)
+    return text.strip()
 
-    from google import genai
-    from google.genai import types
+def call_ai(prompt: str, selected_provider: str) -> str:
+    system_msg = (
+        "You are a strict NetBox hardware YAML specification generator. "
+        "Search or verify exact specifications. Output ONLY valid, raw YAML starting with '---'."
+    )
 
     try:
-        logger.info(f"Querying Gemini API using model '{GEMINI_MODEL}' with Google Search Grounding...")
-        client = genai.Client(api_key=API_KEY)
-        
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.1,  # Low temperature prevents creative hallucinations
-                tools=[{"google_search": {}}],  # Enables real-time web search for datasheets
-                system_instruction=(
-                    "You are a strict NetBox hardware specification extractor. "
-                    "You MUST verify technical specifications directly from official manufacturer datasheets, hardware manuals, or quickspecs. "
-                    "If the device model cannot be verified with official technical documentation, output: "
-                    "'# Error: Could not find verified manufacturer datasheet for this model.'"
+        # 1. Groq Router
+        if selected_provider.startswith("Groq"):
+            from groq import Groq
+            client = Groq(api_key=GROQ_KEY)
+            resp = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1
+            )
+            return clean_ai_yaml(resp.choices[0].message.content)
+
+        # 2. Google Gemini Router
+        elif selected_provider.startswith("Google Gemini"):
+            from google import genai
+            from google.genai import types
+            client = genai.Client(api_key=GEMINI_KEY)
+            resp = client.models.generate_content(
+                model=os.getenv("GEMINI_MODEL", "gemini-3.6-flash"),
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.1,
+                    tools=[{"google_search": {}}],
+                    system_instruction=system_msg
                 )
             )
-        )
-        text = response.text.strip()
-        text = re.sub(r"^```[a-zA-Z]*\n", "", text)
-        text = re.sub(r"\n```$", "", text)
-        return text.strip()
+            return clean_ai_yaml(resp.text)
+
+        # 3. OpenRouter
+        elif selected_provider.startswith("OpenRouter"):
+            from openai import OpenAI
+            client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=OPENROUTER_KEY)
+            resp = client.chat.completions.create(
+                model="meta-llama/llama-3.3-70b-instruct:free",
+                messages=[
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1
+            )
+            return clean_ai_yaml(resp.choices[0].message.content)
+
+        # 4. Local Ollama
+        elif selected_provider.startswith("Local Ollama"):
+            from openai import OpenAI
+            client = OpenAI(base_url=OLLAMA_URL, api_key="ollama")
+            resp = client.chat.completions.create(
+                model=os.getenv("OLLAMA_MODEL", "llama3.1:8b"),
+                messages=[
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1
+            )
+            return clean_ai_yaml(resp.choices[0].message.content)
+
+        else:
+            st.error("No valid AI provider selected.")
+            st.stop()
+
     except Exception as e:
-        logger.error(f"Gemini API error: {str(e)}")
-        st.error(f"❌ AI Generation Failed: {str(e)}")
+        logger.error(f"Error from {selected_provider}: {str(e)}")
+        st.error(f"❌ Generation Failed ({selected_provider}): {str(e)}")
         st.stop()
 
-def generate_device_yaml(mfg: str, model: str) -> str:
+def generate_device_yaml(mfg: str, model: str, provider: str) -> str:
     prompt = f"""
-Search the web for the official datasheet/technical manual of:
-Manufacturer: {mfg}
-Model: {model}
-
-Verify and extract:
-1. Exact rack height (u_height) and depth (is_full_depth).
-2. Physical fixed ports (Ethernet, Fiber, Serial Console, IPMI/iDRAC/iLO).
-3. Exact module bays: Expansion slots (PCIe/OCP) and Power Supply bays (PSU).
-   - Naming convention: name and position must match (e.g. PCIe1 / position: 'PCIe1', PSU1 / position: 'PSU1').
-4. Power inlet types (e.g., iec-60320-c14, iec-60320-c20).
-
-Generate valid NetBox Device-Type YAML starting with '---'.
-Output ONLY raw YAML.
-"""
-    return call_gemini(prompt)
-
-def generate_module_yaml(mfg: str, model: str, part_num: str = "") -> str:
-    prompt = f"""
-Search the web for the official datasheet of:
-Manufacturer: {mfg}, Model: {model}, Part Number: {part_num}
-
-Schema Rules (Strict NetBox Module-Type Standard):
-- First line MUST be '---'
-- Required Keys: manufacturer, model, part_number (if unknown, duplicate model into part_number)
-- DO NOT include 'u_height' or 'is_full_depth' (these belong only to Device-Types).
-- Interfaces / Ports naming convention:
-    - All interface names MUST start with '{{module}}/' without spaces.
-    - Example: name: '{{module}}/Port1', name: '{{module}}/Port2'
-    - Provide accurate NetBox type (e.g., 10gbase-t, 10gbase-x-sfpp, 25gbase-x-sfp28, 100gbase-x-qsfp28).
-- Console ports / Power outlets (if any):
-    - Must also use '{{module}}/' prefix (e.g., '{{module}}/Console').
-
-Output ONLY raw YAML.
-"""
-    return call_gemini(prompt)
-
-def generate_rack_yaml(mfg: str, model: str) -> str:
-    prompt = f"""
-Search the web for the official specifications of:
+Search official datasheets and generate a NetBox Device-Type YAML.
 Manufacturer: {mfg}, Model: {model}
 
 Schema Rules:
 - First line MUST be '---'
-- Keys: manufacturer, model, slug, width (19 or 23), u_height (e.g. 42, 48), form_factor (4-post-cabinet/4-post-frame/2-post-frame), starting_unit (default 1)
-- Optional dimensions (if known): outer_width, outer_depth, outer_unit (mm/in), mounting_depth_min, mounting_depth_max
+- Required Keys: manufacturer, model, slug, u_height, is_full_depth
+- Interfaces:
+    - Switch/Router: physical ports (e.g. 1G/10G/40G).
+    - Server/Chassis: ONLY management interface (e.g. IPMI/iDRAC/iLO) with mgmt_only: true.
+- Power Ports: PSU1, PSU2 (e.g. iec-60320-c14 or iec-60320-c20).
+- Module Bays (Mandatory):
+    - Name and position MUST match (e.g., PCIe1 / position: 'PCIe1', PSU1 / position: 'PSU1', OCP1 / position: 'OCP1').
 Output ONLY raw YAML.
 """
-    return call_gemini(prompt)
+    return call_ai(prompt, provider)
+
+def generate_module_yaml(mfg: str, model: str, part_num: str, provider: str) -> str:
+    prompt = f"""
+Search official datasheets and generate a NetBox Module-Type YAML.
+Manufacturer: {mfg}, Model: {model}, Part Number: {part_num}
+
+Schema Rules:
+- First line MUST be '---'
+- Required Keys: manufacturer, model, part_number
+- DO NOT include u_height or is_full_depth.
+- All interface names MUST start with '{{module}}/' (e.g., '{{module}}/Port1', '{{module}}/Port2').
+Output ONLY raw YAML.
+"""
+    return call_ai(prompt, provider)
+
+def generate_rack_yaml(mfg: str, model: str, provider: str) -> str:
+    prompt = f"""
+Search official specifications and generate a NetBox Rack-Type YAML.
+Manufacturer: {mfg}, Model: {model}
+
+Schema Rules:
+- First line MUST be '---'
+- Keys: manufacturer, model, slug, width (19 or 23), u_height (e.g. 42, 48), form_factor (4-post-cabinet), starting_unit (1)
+Output ONLY raw YAML.
+"""
+    return call_ai(prompt, provider)
 
 def generate_placeholder_svg(mfg: str, model: str, u_height: int = 1, view: str = "front") -> str:
     height_px = max(40, u_height * 40)
@@ -190,6 +234,16 @@ def generate_placeholder_svg(mfg: str, model: str, u_height: int = 1, view: str 
 # --- 3. UI Implementation ---
 st.title("⚡ NetBox Universal Library Hub")
 st.caption("Device Types | Module Types | Rack Types | Elevation & Module Images")
+
+# Sidebar for Provider Management
+with st.sidebar:
+    st.header("⚙️ AI Engine Status")
+    if AVAILABLE_PROVIDERS:
+        active_provider = st.selectbox("Active AI Engine", AVAILABLE_PROVIDERS)
+        st.success(f"Connected: `{active_provider}`")
+    else:
+        active_provider = None
+        st.warning("No AI API keys configured. Only official GitHub library lookups are enabled.")
 
 catalog = get_repo_catalog()
 
@@ -216,8 +270,11 @@ with t1:
                 content = fetch_raw_content(matched, binary=False)
                 src = f"✅ Official Repository (`{matched}`)"
             else:
-                content = generate_device_yaml(d_mfg, d_model)
-                src = "🤖 AI Generated (Datasheet Grounded)"
+                if not active_provider:
+                    st.error("Model not in official repo. Add an API key (GROQ_API_KEY, GEMINI_API_KEY, etc.) to enable AI auto-generation.")
+                    st.stop()
+                content = generate_device_yaml(d_mfg, d_model, active_provider)
+                src = f"🤖 AI Generated ({active_provider})"
         with col2:
             st.markdown(f"**Source:** {src}")
             st.code(content, language="yaml", line_numbers=True)
@@ -238,8 +295,11 @@ with t2:
                 content = fetch_raw_content(matched, binary=False)
                 src = f"✅ Official Repository (`{matched}`)"
             else:
-                content = generate_module_yaml(m_mfg, m_model)
-                src = "🤖 AI Generated (Datasheet Grounded)"
+                if not active_provider:
+                    st.error("Module not in official repo. Configure an API key to enable AI generation.")
+                    st.stop()
+                content = generate_module_yaml(m_mfg, m_model, m_model, active_provider)
+                src = f"🤖 AI Generated ({active_provider})"
         with col2:
             st.markdown(f"**Source:** {src}")
             st.code(content, language="yaml", line_numbers=True)
@@ -260,14 +320,17 @@ with t3:
                 content = fetch_raw_content(matched, binary=False)
                 src = f"✅ Official Repository (`{matched}`)"
             else:
-                content = generate_rack_yaml(r_mfg, r_model)
-                src = "🤖 AI Generated (Datasheet Grounded)"
+                if not active_provider:
+                    st.error("Rack not in official repo. Configure an API key to enable AI generation.")
+                    st.stop()
+                content = generate_rack_yaml(r_mfg, r_model, active_provider)
+                src = f"🤖 AI Generated ({active_provider})"
         with col2:
             st.markdown(f"**Source:** {src}")
             st.code(content, language="yaml", line_numbers=True)
             st.download_button("📥 Download Rack YAML", content, f"rack_{r_mfg}_{r_model}.yaml", "text/yaml")
 
-# --- Tab 4: Visual Images (Elevation & Module) ---
+# --- Tab 4: Visual Images ---
 with t4:
     col1, col2 = st.columns([1, 2])
     with col1:
@@ -279,7 +342,6 @@ with t4:
     with col2:
         if i_search and i_mfg and i_model:
             target_list = catalog["elevation_images"] if "Elevation" in img_cat else catalog["module_images"]
-            
             clean_f = re.sub(r"[^a-zA-Z0-9]", "", i_mfg).lower()
             clean_m = re.sub(r"[^a-zA-Z0-9]", "", i_model).lower() 
 
@@ -288,7 +350,6 @@ with t4:
                 if clean_f in path.lower():
                     r_file_literal = path.split("/")[-1].lower()
                     r_file_clean = re.sub(r"[^a-zA-Z0-9]", "", path.split("/")[-1]).lower()
-
                     if i_model.lower() in r_file_literal or clean_m in r_file_clean:
                         matched_images.append(path)
 
@@ -298,13 +359,9 @@ with t4:
                     raw_data = fetch_raw_content(img_path, binary=True)
                     st.write(f"**Path:** `{img_path}`")
                     st.image(raw_data, caption=img_path.split("/")[-1], use_container_width=True)
-                    st.download_button(
-                        f"📥 Download {img_path.split('/')[-1]}", 
-                        raw_data, 
-                        img_path.split('/')[-1]
-                    )
+                    st.download_button(f"📥 Download {img_path.split('/')[-1]}", raw_data, img_path.split('/')[-1])
             else:
-                st.warning("No official image found. Generating a standardized NetBox vector rack SVG template:")
+                st.warning("No official image found. Generating a standard vector SVG template:")
                 svg_front = generate_placeholder_svg(i_mfg, i_model, u_height=2, view="front")
                 st.image(svg_front, caption="Auto-Generated Front SVG", use_container_width=True)
                 st.download_button("📥 Download Vector (.svg)", svg_front, f"{i_mfg}_{i_model}.front.svg", "image/svg+xml")
@@ -317,12 +374,7 @@ with t5:
         {"Category": "module", "Manufacturer": "Dell", "Model": "Broadcom 57414"},
         {"Category": "rack", "Manufacturer": "APC", "Model": "NetShelter SX 42U"}
     ])
-    st.download_button(
-        "📄 Download Sample Template (Excel)", 
-        sample_df.to_csv(index=False).encode('utf-8'), 
-        "template.csv", 
-        "text/csv"
-    )
+    st.download_button("📄 Download Sample Template (Excel)", sample_df.to_csv(index=False).encode('utf-8'), "template.csv", "text/csv")
 
     batch_file = st.file_uploader("Upload Batch File (.xlsx, .csv)", type=["xlsx", "csv"])
     if batch_file:
@@ -330,6 +382,10 @@ with t5:
         st.dataframe(df.head(), use_container_width=True)
         
         if st.button("Start Universal Batch Processing", type="primary"):
+            if not active_provider:
+                st.error("Please configure at least one API key in `.env` to run batch generation.")
+                st.stop()
+
             pbar = st.progress(0)
             zip_buf = io.BytesIO()
             results = []
@@ -342,7 +398,6 @@ with t5:
                     if not mfg or not model or mfg == "nan":
                         continue
 
-                    # Route category
                     if cat == "module":
                         f_list, gen_fn, prefix = catalog["module_types"], generate_module_yaml, "module-types"
                     elif cat == "rack":
@@ -355,8 +410,11 @@ with t5:
                         content = fetch_raw_content(matched, binary=False)
                         src = "Official Repository"
                     else:
-                        content = gen_fn(mfg, model)
-                        src = "AI Generated (Grounded)"
+                        if cat == "module":
+                            content = gen_fn(mfg, model, model, active_provider)
+                        else:
+                            content = gen_fn(mfg, model, active_provider)
+                        src = f"AI Generated ({active_provider})"
 
                     clean_fname = f"{prefix}/{mfg}/{model}.yaml".replace(" ", "_")
                     zf.writestr(clean_fname, content)
@@ -365,9 +423,4 @@ with t5:
 
             st.success("Batch processing completed!")
             st.dataframe(pd.DataFrame(results), use_container_width=True)
-            st.download_button(
-                "📦 Download All NetBox Assets (.zip)",
-                zip_buf.getvalue(),
-                "netbox_all_assets.zip",
-                "application/zip"
-            )
+            st.download_button("📦 Download All NetBox Assets (.zip)", zip_buf.getvalue(), "netbox_all_assets.zip", "application/zip")
