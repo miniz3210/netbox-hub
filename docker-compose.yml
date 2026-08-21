@@ -1,17 +1,12 @@
 services:
   netbox-hub:
+    image: ghcr.io/miniz3210/netbox-hub:latest
     build: .
     container_name: netbox-hub
     restart: unless-stopped
     ports:
       - "8501:8501"
-    volumes:
-<<<<<<< Updated upstream
-      - .:/app # <-- Mounts host directory directly into the container
-=======
-      - /opt/netbox-hub:/app # <-- Mounts host directory directly into the container
->>>>>>> Stashed changes
     environment:
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - PYTHONUNBUFFERED=1
     env_file:
-      - .env
+      - ./netbox-hub/.env
