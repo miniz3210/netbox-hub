@@ -2,6 +2,7 @@ import os
 import re
 import io
 import sys
+import fnmatch
 import difflib
 import logging
 import zipfile
@@ -85,70 +86,77 @@ def get_repo_catalog() -> Dict[str, List[str]]:
     catalog["manufacturers"] = sorted(list(catalog["manufacturers"]))
     return catalog
 
+def wildcard_match(pattern: str, target: str) -> bool:
+    """Matches exact, wildcard (*, ?), substring, or word initials (e.g. hp -> Hewlett Packard)."""
+    p = pattern.strip().lower()
+    t = target.strip().lower()
+    if not p:
+        return True
+
+    # 1. Standard wildcard glob match
+    glob_p = p if any(c in p for c in ["*", "?", "["]) else f"*{p}*"
+    if fnmatch.fnmatch(t, glob_p):
+        return True
+
+    # 2. Substring match
+    clean_p = re.sub(r"[^a-zA-Z0-9]", "", p)
+    clean_t = re.sub(r"[^a-zA-Z0-9]", "", t)
+    if clean_p and clean_p in clean_t:
+        return True
+
+    # 3. Word initials / acronym match (e.g. 'hp' -> 'Hewlett Packard', 'pan' -> 'Palo Alto Networks')
+    words = re.findall(r"[a-zA-Z0-9]+", t)
+    initials = "".join(w[0] for w in words).lower()
+    if clean_p and (clean_p == initials or clean_p in initials):
+        return True
+
+    return False
+
 def get_canonical_manufacturer(user_input: str, mfg_list: List[str]) -> str:
-    clean_in = re.sub(r"[^a-zA-Z0-9]", "", user_input).lower()
-    if not clean_in:
+    cleaned = user_input.strip()
+    if not cleaned:
         return user_input
 
+    # Match by wildcard/acronym logic against real catalog
     for mfg in mfg_list:
-        clean_m = re.sub(r"[^a-zA-Z0-9]", "", mfg).lower()
-        if clean_in == clean_m or clean_in in clean_m or clean_m in clean_in:
+        if wildcard_match(cleaned, mfg):
             return mfg
 
-    close = difflib.get_close_matches(user_input, mfg_list, n=1, cutoff=0.6)
+    # Fuzzy match fallback
+    close = difflib.get_close_matches(user_input, mfg_list, n=1, cutoff=0.5)
     if close:
         return close[0]
 
     return user_input
 
-def search_catalog_similar(file_list: List[str], manufacturer: str, query: str) -> List[str]:
-    c_mfg = re.sub(r"[^a-zA-Z0-9]", "", manufacturer).lower()
-    c_query = re.sub(r"[^a-zA-Z0-9]", "", query).lower()
-    tokens = [t.lower() for t in re.findall(r"[a-zA-Z0-9]+", query) if len(t) > 1]
-    num_tokens = re.findall(r"\d+", query)
+def search_catalog_wildcard(file_list: List[str], manufacturer_query: str, model_query: str) -> List[str]:
+    """Pure dynamic wildcard matching across all repository file paths."""
+    mfg_q = manufacturer_query.strip().lower()
+    model_q = model_query.strip().lower()
 
-    exact_matches = []
-    mfg_matches = []
-    similar_matches = []
-
-    mfg_files = []
-    other_files = []
+    primary_matches = []
+    secondary_matches = []
 
     for path in file_list:
         parts = path.split("/")
-        r_mfg = re.sub(r"[^a-zA-Z0-9]", "", parts[1]).lower() if len(parts) >= 3 else ""
-        if c_mfg and (c_mfg in r_mfg or r_mfg in c_mfg):
-            mfg_files.append(path)
-        else:
-            other_files.append(path)
+        r_mfg = parts[1].lower() if len(parts) >= 3 else ""
+        r_file = parts[-1].lower()
+        r_file_noext = re.sub(r"\.(yaml|yml|png|svg|jpg)$", "", r_file)
 
-    # 1. Exact / Substring matches inside manufacturer folder
-    for path in mfg_files:
-        r_file = re.sub(r"[^a-zA-Z0-9]", "", path.split("/")[-1]).lower()
-        if c_query in r_file or r_file in c_query:
-            exact_matches.append(path)
-        elif any(num in r_file for num in num_tokens if len(num) >= 3):
-            mfg_matches.append(path)
-        elif any(tok in r_file for tok in tokens if len(tok) >= 3):
-            mfg_matches.append(path)
+        # Check manufacturer criteria
+        mfg_hit = wildcard_match(mfg_q, r_mfg) if mfg_q else True
 
-    # 2. Fuzzy matching across manufacturer folder
-    mfg_filenames = [p.split("/")[-1] for p in mfg_files]
-    fuzzy_hits = difflib.get_close_matches(query, mfg_filenames, n=8, cutoff=0.35)
-    for hit in fuzzy_hits:
-        for p in mfg_files:
-            if p.endswith(hit) and p not in exact_matches and p not in mfg_matches:
-                similar_matches.append(p)
+        # Check model criteria
+        model_hit = wildcard_match(model_q, r_file_noext) if model_q else True
 
-    # 3. Global search fallback
-    if not exact_matches and not mfg_matches and not similar_matches:
-        for path in other_files:
-            r_file = re.sub(r"[^a-zA-Z0-9]", "", path.split("/")[-1]).lower()
-            if any(num in r_file for num in num_tokens if len(num) >= 4):
-                similar_matches.append(path)
+        if mfg_hit and model_hit:
+            primary_matches.append(path)
+        elif model_hit and len(model_q) >= 3:
+            secondary_matches.append(path)
 
+    # Combine unique results prioritizing direct path matches
     combined = []
-    for item in exact_matches + mfg_matches + similar_matches:
+    for item in primary_matches + secondary_matches:
         if item not in combined:
             combined.append(item)
 
@@ -180,7 +188,6 @@ def clean_ai_yaml(text: str) -> str:
         lines = lines[:-1]
     cleaned = "\n".join(lines).strip()
     
-    # NetBox Interface Type Validation Map
     cleaned = re.sub(r"type:\s*10gbase-x-sfp\b", "type: 10gbase-x-sfpp", cleaned)
     cleaned = re.sub(r"type:\s*1gbase-t\b", "type: 1000base-t", cleaned)
     cleaned = re.sub(r"type:\s*1gbase-x-sfp\b", "type: 1000base-x-sfp", cleaned)
@@ -191,7 +198,7 @@ def call_ai(prompt: str, selected_provider: str) -> str:
         "You are a strict NetBox hardware YAML specification generator. "
         "You MUST verify hardware specifications directly from official manufacturer datasheets. "
         "Output ONLY valid, raw YAML starting with '---'. Use exact kebab-case hyphenated keys (never underscores). "
-        "Do NOT invent or hallucinate comments or URLs; omit 'comments' key entirely if no verified official datasheet URL is available."
+        "Do NOT invent comments or URLs; omit 'comments' key entirely if no verified official datasheet URL is available."
     )
 
     try:
@@ -264,12 +271,12 @@ Determine the physical hardware type of:
 Manufacturer: {mfg}
 Model: {model}
 
-Respond with ONLY ONE word from this list:
-- 'module' (if it is a plug-in PCIe/OCP NIC card, SFP/QSFP transceiver, power supply module, line card, or expansion board)
-- 'device' (if it is a standalone rackmount server chassis, network switch, router, firewall, or PDU)
-- 'rack' (if it is a server rack cabinet, frame, or enclosure)
+Respond with ONLY ONE word:
+- 'module' (if it is a plug-in PCIe/OCP NIC card, SFP transceiver, power supply module, line card)
+- 'device' (if it is a standalone rackmount server chassis, switch, router, firewall)
+- 'rack' (if it is a server rack cabinet, frame)
 
-Output ONLY the category word in lowercase.
+Output ONLY the word in lowercase.
 """
     res = call_ai(prompt, provider).strip().lower()
     if "module" in res:
@@ -280,7 +287,7 @@ Output ONLY the category word in lowercase.
 
 def generate_device_yaml(mfg: str, model: str, provider: str) -> str:
     prompt = f"""
-Search official datasheets and generate a complete, production-ready NetBox Device-Type YAML following the official NetBox Library standard.
+Search official datasheets and generate a complete, production-ready NetBox Device-Type YAML.
 Manufacturer: {mfg}
 Model: {model}
 
@@ -316,7 +323,7 @@ CRITICAL SCHEMA RULES (Use exact kebab-case hyphenated keys, NEVER underscores):
          type: iec-60320-c14
        - name: PSU2
          type: iec-60320-c14
-   - module-bays (Mandatory - name and position MUST match without spaces):
+   - module-bays:
        - name: PSU1
          position: 'PSU1'
        - name: PSU2
@@ -331,7 +338,7 @@ CRITICAL SCHEMA RULES (Use exact kebab-case hyphenated keys, NEVER underscores):
        - If switch/router: list physical interfaces.
        - If server/appliance/chassis: list ONLY the out-of-band management interface (e.g. IPMI/iDRAC/iLO) with `mgmt_only: true` and `type: 1000base-t`.
 
-Output ONLY valid, raw YAML. Do not include markdown blocks or conversational text.
+Output ONLY valid, raw YAML.
 """
     return call_ai(prompt, provider)
 
@@ -350,7 +357,7 @@ def generate_module_yaml(mfg: str, model: str, part_num: str, provider: str, ref
 """
 
     prompt = f"""
-Search official manufacturer datasheets and generate a NetBox Module-Type YAML following the official NetBox Library standard.
+Search official manufacturer datasheets and generate a NetBox Module-Type YAML.
 Manufacturer: {mfg}
 Model: {model}
 Part Number: {part_num}
@@ -361,8 +368,8 @@ CRITICAL SCHEMA RULES:
     manufacturer: {mfg}
     model: <exact model or part number>
     part_number: <exact part number>
-    description: '<Clear hardware overview, e.g. Dual-Port 10/25GbE SFP28 PCI Express 3.0 x8 Network Interface Card>'
-- Note on comments: DO NOT include the 'comments' key unless you have a verified, existing official datasheet link. If uncertain, omit 'comments' entirely.
+    description: '<Clear hardware overview>'
+- Note on comments: DO NOT include 'comments' key unless verified official datasheet link is known.
 - DO NOT include 'u_height' or 'is_full_depth'.
 - Valid NetBox Interface Types:
     - 10gbase-t (10G RJ-45 Copper)
@@ -436,29 +443,29 @@ t1, t2, t3, t4, t5 = st.tabs([
 with t1:
     col1, col2 = st.columns([1, 1])
     with col1:
-        d_mfg_raw = st.text_input("Manufacturer", placeholder="e.g., Cisco, Dell, Nutanix, Synology", key="d_mfg")
-        d_model = st.text_input("Device Model", placeholder="e.g., NX-TDT-4NL3-G6, PowerEdge R750", key="d_mod")
+        d_mfg_raw = st.text_input("Manufacturer", placeholder="e.g., HP, Cisco, Dell, Nutanix (Wildcards supported: *hp*, *cis*)", key="d_mfg")
+        d_model = st.text_input("Device Model", placeholder="e.g., *dl360*, PowerEdge R750", key="d_mod")
         d_mfg = get_canonical_manufacturer(d_mfg_raw, catalog["manufacturers"]) if d_mfg_raw else ""
 
         selected_dev_choice = None
-        if d_mfg and d_model:
-            # 1. Search device catalog
-            similar_devs = search_catalog_similar(catalog["device_types"], d_mfg, d_model)
-            # 2. Search cross-category in module-types
-            cross_mods = search_catalog_similar(catalog["module_types"], d_mfg, d_model)
-
+        if d_mfg_raw or d_model:
+            similar_devs = search_catalog_wildcard(catalog["device_types"], d_mfg_raw, d_model)
+            cross_mods = search_catalog_wildcard(catalog["module_types"], d_mfg_raw, d_model)
             all_official_matches = similar_devs + cross_mods
+
+            if d_mfg and d_mfg != d_mfg_raw.strip():
+                st.caption(f"ℹ️ Matched manufacturer: `{d_mfg_raw}` ➔ **`{d_mfg}`**")
 
             if cross_mods and not similar_devs:
                 st.info(f"💡 `{d_model}` was matched in official **Module Types** (`{cross_mods[0]}`). Available to load below:")
 
-            options = []
             if all_official_matches:
+                st.success(f"🔍 Found {len(all_official_matches)} matching definition(s) in Official Library:")
                 options = all_official_matches + ["✨ Generate Fresh with AI (Auto-Researched)"]
                 selected_dev_choice = st.selectbox(
                     "Select library definition or generate with AI:",
                     options,
-                    index=0,  # Default to official file
+                    index=0,
                     key="dev_select_box"
                 )
             else:
@@ -467,20 +474,21 @@ with t1:
 
         d_search = st.button("Load / Generate Device Type", type="primary", key="btn_dev")
 
-    if d_search and d_mfg and d_model and selected_dev_choice:
+    if d_search and (d_mfg or d_mfg_raw) and d_model and selected_dev_choice:
+        effective_mfg = d_mfg if d_mfg else d_mfg_raw
         with st.spinner("Processing..."):
             if selected_dev_choice.startswith("✨"):
                 if not active_provider:
                     st.error("Configure an AI API key in `.env` to enable AI generation.")
                     st.stop()
                 
-                detected_cat = classify_hardware_category(d_mfg, d_model, active_provider)
+                detected_cat = classify_hardware_category(effective_mfg, d_model, active_provider)
                 if detected_cat == "module":
                     st.warning(f"ℹ️ AI classified `{d_model}` as a plug-in **Module/Adapter Card**. Routing output to Module Type standard...")
-                    content = generate_module_yaml(d_mfg, d_model, d_model, active_provider, ref_pattern=None)
+                    content = generate_module_yaml(effective_mfg, d_model, d_model, active_provider, ref_pattern=None)
                     src = f"🤖 AI Generated (Auto-Classified as Module via {active_provider})"
                 else:
-                    content = generate_device_yaml(d_mfg, d_model, active_provider)
+                    content = generate_device_yaml(effective_mfg, d_model, active_provider)
                     src = f"🤖 AI Generated ({active_provider})"
             else:
                 content = fetch_raw_content(selected_dev_choice, binary=False)
@@ -488,36 +496,37 @@ with t1:
         with col2:
             st.markdown(f"**Source:** {src}")
             st.code(content, language="yaml", line_numbers=True)
-            st.download_button("📥 Download YAML", content, f"{d_mfg}_{d_model}.yaml", "text/yaml")
+            st.download_button("📥 Download YAML", content, f"{effective_mfg}_{d_model}.yaml", "text/yaml")
 
 # --- Tab 2: Module Types ---
 with t2:
     col1, col2 = st.columns([1, 1])
     with col1:
-        m_mfg_raw = st.text_input("Manufacturer", placeholder="e.g., Broadcom, Mellanox, Dell, Synology", key="m_mfg")
-        m_model = st.text_input("Module Name / Part #", placeholder="e.g., E10G21-F2, ConnectX-4, BCM57416", key="m_mod")
+        m_mfg_raw = st.text_input("Manufacturer", placeholder="e.g., Broadcom, Mellanox, Synology (*broad*, *syno*)", key="m_mfg")
+        m_model = st.text_input("Module Name / Part #", placeholder="e.g., *57416*, ConnectX-4", key="m_mod")
         m_mfg = get_canonical_manufacturer(m_mfg_raw, catalog["manufacturers"]) if m_mfg_raw else ""
 
         selected_mod_choice = None
         discovered_pattern = None
 
-        if m_mfg and m_model:
-            # 1. Search module catalog
-            similar_mods = search_catalog_similar(catalog["module_types"], m_mfg, m_model)
-            # 2. Search cross-category in device-types
-            cross_devs = search_catalog_similar(catalog["device_types"], m_mfg, m_model)
-
+        if m_mfg_raw or m_model:
+            similar_mods = search_catalog_wildcard(catalog["module_types"], m_mfg_raw, m_model)
+            cross_devs = search_catalog_wildcard(catalog["device_types"], m_mfg_raw, m_model)
             all_mod_matches = similar_mods + cross_devs
+
+            if m_mfg and m_mfg != m_mfg_raw.strip():
+                st.caption(f"ℹ️ Matched manufacturer: `{m_mfg_raw}` ➔ **`{m_mfg}`**")
 
             if cross_devs and not similar_mods:
                 st.info(f"💡 `{m_model}` was matched in official **Device Types** (`{cross_devs[0]}`). Available to load below:")
 
             if all_mod_matches:
+                st.success(f"🔍 Found {len(all_mod_matches)} matching module(s) in Official Library:")
                 options = all_mod_matches + ["✨ Generate Fresh with AI (Auto-Researched)"]
                 selected_mod_choice = st.selectbox(
                     "Select library definition or generate with AI:",
                     options,
-                    index=0,  # Default to official file
+                    index=0,
                     key="mod_select_box"
                 )
                 top_sample = fetch_raw_content(all_mod_matches[0], binary=False)
@@ -529,13 +538,14 @@ with t2:
 
         m_search = st.button("Load / Generate Module Type", type="primary", key="btn_mod")
 
-    if m_search and m_mfg and m_model and selected_mod_choice:
+    if m_search and (m_mfg or m_mfg_raw) and m_model and selected_mod_choice:
+        effective_mfg = m_mfg if m_mfg else m_mfg_raw
         with st.spinner("Processing..."):
             if selected_mod_choice.startswith("✨"):
                 if not active_provider:
                     st.error("Configure an AI API key in `.env` to enable AI generation.")
                     st.stop()
-                content = generate_module_yaml(m_mfg, m_model, m_model, active_provider, ref_pattern=discovered_pattern)
+                content = generate_module_yaml(effective_mfg, m_model, m_model, active_provider, ref_pattern=discovered_pattern)
                 src = f"🤖 AI Generated ({active_provider})"
             else:
                 content = fetch_raw_content(selected_mod_choice, binary=False)
@@ -543,25 +553,30 @@ with t2:
         with col2:
             st.markdown(f"**Source:** {src}")
             st.code(content, language="yaml", line_numbers=True)
-            st.download_button("📥 Download Module YAML", content, f"module_{m_mfg}_{m_model}.yaml", "text/yaml")
+            st.download_button("📥 Download Module YAML", content, f"module_{effective_mfg}_{m_model}.yaml", "text/yaml")
 
 # --- Tab 3: Rack Types ---
 with t3:
     col1, col2 = st.columns([1, 1])
     with col1:
         r_mfg_raw = st.text_input("Rack Manufacturer", placeholder="e.g., APC, Eaton, Rittal", key="r_mfg")
-        r_model = st.text_input("Rack Model", placeholder="e.g., NetShelter SX 42U", key="r_mod")
+        r_model = st.text_input("Rack Model", placeholder="e.g., *NetShelter*", key="r_mod")
         r_mfg = get_canonical_manufacturer(r_mfg_raw, catalog["manufacturers"]) if r_mfg_raw else ""
 
         selected_rack_choice = None
-        if r_mfg and r_model:
-            similar_racks = search_catalog_similar(catalog["rack_types"], r_mfg, r_model)
+        if r_mfg_raw or r_model:
+            similar_racks = search_catalog_wildcard(catalog["rack_types"], r_mfg_raw, r_model)
+
+            if r_mfg and r_mfg != r_mfg_raw.strip():
+                st.caption(f"ℹ️ Matched manufacturer: `{r_mfg_raw}` ➔ **`{r_mfg}`**")
+
             if similar_racks:
+                st.success(f"🔍 Found {len(similar_racks)} matching rack(s) in Official Library:")
                 options = similar_racks + ["✨ Generate Fresh with AI (Auto-Researched)"]
                 selected_rack_choice = st.selectbox(
                     "Select library definition or generate with AI:",
                     options,
-                    index=0,  # Default to official file
+                    index=0,
                     key="rack_select_box"
                 )
             else:
@@ -570,13 +585,14 @@ with t3:
 
         r_search = st.button("Load / Generate Rack Type", type="primary", key="btn_rack")
 
-    if r_search and r_mfg and r_model and selected_rack_choice:
+    if r_search and (r_mfg or r_mfg_raw) and r_model and selected_rack_choice:
+        effective_mfg = r_mfg if r_mfg else r_mfg_raw
         with st.spinner("Processing..."):
             if selected_rack_choice.startswith("✨"):
                 if not active_provider:
                     st.error("Configure an AI API key in `.env` to enable AI generation.")
                     st.stop()
-                content = generate_rack_yaml(r_mfg, r_model, active_provider)
+                content = generate_rack_yaml(effective_mfg, r_model, active_provider)
                 src = f"🤖 AI Generated ({active_provider})"
             else:
                 content = fetch_raw_content(selected_rack_choice, binary=False)
@@ -584,22 +600,23 @@ with t3:
         with col2:
             st.markdown(f"**Source:** {src}")
             st.code(content, language="yaml", line_numbers=True)
-            st.download_button("📥 Download Rack YAML", content, f"rack_{r_mfg}_{r_model}.yaml", "text/yaml")
+            st.download_button("📥 Download Rack YAML", content, f"rack_{effective_mfg}_{r_model}.yaml", "text/yaml")
 
 # --- Tab 4: Visual Images (Elevation & Module) ---
 with t4:
     col1, col2 = st.columns([1, 2])
     with col1:
         img_cat = st.selectbox("Image Target", ["Elevation Images (Rack Face)", "Module Images"])
-        i_mfg_raw = st.text_input("Manufacturer", placeholder="e.g., Cisco, Dell", key="i_mfg")
-        i_model = st.text_input("Model Name", placeholder="e.g., PowerEdge R740, c9300l-24p-4x", key="i_mod")
+        i_mfg_raw = st.text_input("Manufacturer", placeholder="e.g., HP, Cisco, Dell", key="i_mfg")
+        i_model = st.text_input("Model Name", placeholder="e.g., *DL360*", key="i_mod")
         i_mfg = get_canonical_manufacturer(i_mfg_raw, catalog["manufacturers"]) if i_mfg_raw else ""
         i_search = st.button("Find / Render Image", type="primary", key="btn_img")
 
     with col2:
-        if i_search and i_mfg and i_model:
+        if i_search and (i_mfg or i_mfg_raw) and i_model:
             target_list = catalog["elevation_images"] if "Elevation" in img_cat else catalog["module_images"]
-            matched_images = search_catalog_similar(target_list, i_mfg, i_model)
+            matched_images = search_catalog_wildcard(target_list, i_mfg_raw, i_model)
+            effective_mfg = i_mfg if i_mfg else i_mfg_raw
 
             if matched_images:
                 st.success(f"Found {len(matched_images)} matching image(s) in Official Library:")
@@ -610,15 +627,15 @@ with t4:
                     st.download_button(f"📥 Download {img_path.split('/')[-1]}", raw_data, img_path.split('/')[-1])
             else:
                 st.warning("No official image found. Generating a standard vector SVG template:")
-                svg_front = generate_placeholder_svg(i_mfg, i_model, u_height=2, view="front")
+                svg_front = generate_placeholder_svg(effective_mfg, i_model, u_height=2, view="front")
                 st.image(svg_front, caption="Auto-Generated Front SVG", use_container_width=True)
-                st.download_button("📥 Download Vector (.svg)", svg_front, f"{i_mfg}_{i_model}.front.svg", "image/svg+xml")
+                st.download_button("📥 Download Vector (.svg)", svg_front, f"{effective_mfg}_{i_model}.front.svg", "image/svg+xml")
 
 # --- Tab 5: Universal Batch Excel Processing ---
 with t5:
     st.write("Upload an Excel file with `Category` (`device`, `module`, or `rack`), `Manufacturer`, and `Model`.")
     sample_df = pd.DataFrame([
-        {"Category": "device", "Manufacturer": "Cisco", "Model": "C9300-48P"},
+        {"Category": "device", "Manufacturer": "HP", "Model": "DL360 Gen10"},
         {"Category": "module", "Manufacturer": "Synology", "Model": "E10G21-F2"},
         {"Category": "rack", "Manufacturer": "APC", "Model": "NetShelter SX 42U"}
     ])
@@ -660,7 +677,7 @@ with t5:
                     else:
                         f_list, gen_fn, prefix = catalog["device_types"], generate_device_yaml, "device-types"
 
-                    matches = search_catalog_similar(f_list, mfg, model)
+                    matches = search_catalog_wildcard(f_list, mfg_raw, model)
                     if matches:
                         content = fetch_raw_content(matches[0], binary=False)
                         src = f"Official Repository ({matches[0]})"
