@@ -1,11 +1,17 @@
 import os
 import re
 import io
+import sys
+import logging
 import zipfile
 import requests
 import streamlit as st
 import pandas as pd
 from typing import Optional, Dict, List
+
+# --- Logging Configuration ---
+logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+logger = logging.getLogger("netbox-hub")
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -16,7 +22,13 @@ st.set_page_config(
 
 GITHUB_REPO = "netbox-community/devicetype-library"
 BRANCH = "master"
-API_KEY = os.getenv("GEMINI_API_KEY", "")
+API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+
+# Display warning banner if API key is not supplied
+if not API_KEY:
+    st.error("⚠️ **GEMINI_API_KEY is not configured!** Official GitHub searching works, but AI auto-generation for unlisted models is disabled. Add it to your `.env` file.")
+    logger.warning("Application initialized without GEMINI_API_KEY.")
 
 # --- 1. Global GitHub Asset Indexer ---
 @st.cache_data(ttl=3600, show_spinner="Indexing all repository asset types from GitHub...")
@@ -45,6 +57,7 @@ def get_repo_catalog() -> Dict[str, List[str]]:
                 elif path.startswith("module-images/") and path.lower().endswith((".png", ".svg", ".jpg")):
                     catalog["module_images"].append(path)
     except Exception as e:
+        logger.error(f"Error fetching catalog from GitHub: {e}")
         st.error(f"Error fetching catalog from GitHub: {e}")
     return catalog
 
@@ -52,7 +65,7 @@ def search_catalog(file_list: List[str], manufacturer: str, query: str) -> Optio
     c_query = re.sub(r"[^a-zA-Z0-9]", "", query).lower()
     c_mfg = re.sub(r"[^a-zA-Z0-9]", "", manufacturer).lower()
 
-    # Search in matching manufacturer directory
+    # Priority 1: Search in matching manufacturer directory
     for path in file_list:
         parts = path.split("/")
         if len(parts) >= 3:
@@ -61,7 +74,7 @@ def search_catalog(file_list: List[str], manufacturer: str, query: str) -> Optio
             if (c_mfg in r_mfg or r_mfg in c_mfg) and c_query in r_file:
                 return path
 
-    # Global search fallback
+    # Priority 2: Global search fallback
     for path in file_list:
         r_file = re.sub(r"[^a-zA-Z0-9]", "", path.split("/")[-1]).lower()
         if c_query in r_file:
@@ -78,12 +91,17 @@ def fetch_raw_content(path: str, binary: bool = False):
 # --- 2. AI Spec Research & Schema Generators ---
 def call_gemini(prompt: str) -> str:
     if not API_KEY:
-        return "# Error: GEMINI_API_KEY is not set."
+        error_msg = "GEMINI_API_KEY is not configured in the container environment."
+        logger.error(error_msg)
+        st.error(f"❌ {error_msg}")
+        st.stop()
+
     from google import genai
-    client = genai.Client(api_key=API_KEY)
     try:
+        logger.info(f"Querying Gemini API using model '{GEMINI_MODEL}'...")
+        client = genai.Client(api_key=API_KEY)
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model=GEMINI_MODEL,
             contents=prompt,
         )
         text = response.text.strip()
@@ -91,7 +109,9 @@ def call_gemini(prompt: str) -> str:
         text = re.sub(r"\n```$", "", text)
         return text.strip()
     except Exception as e:
-        return f"# AI Generation Error: {str(e)}"
+        logger.error(f"Gemini API error: {str(e)}")
+        st.error(f"❌ AI Generation Failed: {str(e)}")
+        st.stop()
 
 def generate_device_yaml(mfg: str, model: str) -> str:
     prompt = f"""
@@ -161,7 +181,7 @@ t1, t2, t3, t4, t5 = st.tabs([
 with t1:
     col1, col2 = st.columns([1, 1])
     with col1:
-        d_mfg = st.text_input("Manufacturer", placeholder="e.g., Cisco, Dell", key="d_mfg")
+        d_mfg = st.text_input("Manufacturer", placeholder="e.g., Cisco, Dell, Nutanix", key="d_mfg")
         d_model = st.text_input("Device Model", placeholder="e.g., Catalyst 9300-48P, PowerEdge R750", key="d_mod")
         d_search = st.button("Find / Generate Device Type", type="primary", key="btn_dev")
 
@@ -229,26 +249,22 @@ with t4:
     with col1:
         img_cat = st.selectbox("Image Target", ["Elevation Images (Rack Face)", "Module Images"])
         i_mfg = st.text_input("Manufacturer", placeholder="e.g., Cisco, Dell", key="i_mfg")
-        i_model = st.text_input("Model Name", placeholder="e.g., PowerEdge R740, C9300-24T", key="i_mod")
+        i_model = st.text_input("Model Name", placeholder="e.g., PowerEdge R740, c9300l-24p-4x", key="i_mod")
         i_search = st.button("Find / Render Image", type="primary", key="btn_img")
 
     with col2:
         if i_search and i_mfg and i_model:
             target_list = catalog["elevation_images"] if "Elevation" in img_cat else catalog["module_images"]
             
-            # Revised image search logic to be less aggressive and find files with hyphens
             clean_f = re.sub(r"[^a-zA-Z0-9]", "", i_mfg).lower()
             clean_m = re.sub(r"[^a-zA-Z0-9]", "", i_model).lower() 
 
             matched_images = []
             for path in target_list:
-                # Check for manufacturer first to narrow down
                 if clean_f in path.lower():
-                    # Inside manufacturer, check model name
-                    r_file_literal = path.split("/")[-1].lower() # Littéral pour C9300L-24P-4X
-                    r_file_clean = re.sub(r"[^a-zA-Z0-9]", "", path.split("/")[-1]).lower() # Fuzzy pour C9300L
+                    r_file_literal = path.split("/")[-1].lower()
+                    r_file_clean = re.sub(r"[^a-zA-Z0-9]", "", path.split("/")[-1]).lower()
 
-                    # Match litteral, or match fuzzy clean model with user input or clean user input
                     if i_model.lower() in r_file_literal or clean_m in r_file_clean:
                         matched_images.append(path)
 
@@ -257,7 +273,6 @@ with t4:
                 for img_path in matched_images:
                     raw_data = fetch_raw_content(img_path, binary=True)
                     st.write(f"**Path:** `{img_path}`")
-                    # Fixed: use_container_width instead of use_column_width
                     st.image(raw_data, caption=img_path.split("/")[-1], use_container_width=True)
                     st.download_button(
                         f"📥 Download {img_path.split('/')[-1]}", 
@@ -267,7 +282,6 @@ with t4:
             else:
                 st.warning("No official image found. Generating a standardized NetBox vector rack SVG template:")
                 svg_front = generate_placeholder_svg(i_mfg, i_model, u_height=2, view="front")
-                # Fixed: use_container_width instead of use_column_width
                 st.image(svg_front, caption="Auto-Generated Front SVG", use_container_width=True)
                 st.download_button("📥 Download Vector (.svg)", svg_front, f"{i_mfg}_{i_model}.front.svg", "image/svg+xml")
 
@@ -304,7 +318,7 @@ with t5:
                     if not mfg or not model or mfg == "nan":
                         continue
 
-                    # Select target list and fallback generator
+                    # Route category
                     if cat == "module":
                         f_list, gen_fn, prefix = catalog["module_types"], generate_module_yaml, "module-types"
                     elif cat == "rack":
