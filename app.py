@@ -97,12 +97,25 @@ def call_gemini(prompt: str) -> str:
         st.stop()
 
     from google import genai
+    from google.genai import types
+
     try:
-        logger.info(f"Querying Gemini API using model '{GEMINI_MODEL}'...")
+        logger.info(f"Querying Gemini API using model '{GEMINI_MODEL}' with Google Search Grounding...")
         client = genai.Client(api_key=API_KEY)
+        
         response = client.models.generate_content(
             model=GEMINI_MODEL,
             contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.1,  # Low temperature prevents creative hallucinations
+                tools=[{"google_search": {}}],  # Enables real-time web search for datasheets
+                system_instruction=(
+                    "You are a strict NetBox hardware specification extractor. "
+                    "You MUST verify technical specifications directly from official manufacturer datasheets, hardware manuals, or quickspecs. "
+                    "If the device model cannot be verified with official technical documentation, output: "
+                    "'# Error: Could not find verified manufacturer datasheet for this model.'"
+                )
+            )
         )
         text = response.text.strip()
         text = re.sub(r"^```[a-zA-Z]*\n", "", text)
@@ -115,40 +128,25 @@ def call_gemini(prompt: str) -> str:
 
 def generate_device_yaml(mfg: str, model: str) -> str:
     prompt = f"""
-Search specifications and generate an official standard NetBox Device-Type YAML.
-Manufacturer: {mfg}, Model: {model}
+Search the web for the official datasheet/technical manual of:
+Manufacturer: {mfg}
+Model: {model}
 
-CRITICAL SCHEMA RULES:
-1. First line MUST be '---'
-2. Top-level keys: manufacturer, model, slug, u_height, is_full_depth
-3. Interfaces:
-   - For switches/routers: list all physical network interfaces.
-   - For servers/appliances/chassis: list ONLY the out-of-band management port (e.g. IPMI/iLO/iDRAC) with `mgmt_only: true`.
-4. Power Ports:
-   - Include standard IEC plugs (e.g., PSU1, PSU2 with type: iec-60320-c14 or iec-60320-c20).
-5. Console Ports:
-   - Include Serial RJ-45 or DE-9 if present.
-6. Module Bays (MANDATORY - DO NOT OMIT):
-   - Every enterprise server/switch/appliance MUST have a `module-bays` block for its slots and PSUs.
-   - Exact matching convention for name and position (no spaces):
-     module-bays:
-       - name: PCIe1
-         position: 'PCIe1'
-       - name: PCIe2
-         position: 'PCIe2'
-       - name: PSU1
-         position: 'PSU1'
-       - name: PSU2
-         position: 'PSU2'
-     (Add additional bays like PCIe3, PCIe4, OCP1, OCP2, Node1, Node2 as appropriate for this hardware form factor).
+Verify and extract:
+1. Exact rack height (u_height) and depth (is_full_depth).
+2. Physical fixed ports (Ethernet, Fiber, Serial Console, IPMI/iDRAC/iLO).
+3. Exact module bays: Expansion slots (PCIe/OCP) and Power Supply bays (PSU).
+   - Naming convention: name and position must match (e.g. PCIe1 / position: 'PCIe1', PSU1 / position: 'PSU1').
+4. Power inlet types (e.g., iec-60320-c14, iec-60320-c20).
 
-Output ONLY raw YAML. No markdown backticks, no explanatory text.
+Generate valid NetBox Device-Type YAML starting with '---'.
+Output ONLY raw YAML.
 """
     return call_gemini(prompt)
 
 def generate_module_yaml(mfg: str, model: str, part_num: str = "") -> str:
     prompt = f"""
-Search specifications and generate a NetBox Module-Type YAML.
+Search the web for the official datasheet of:
 Manufacturer: {mfg}, Model: {model}, Part Number: {part_num}
 
 Schema Rules (Strict NetBox Module-Type Standard):
@@ -157,7 +155,7 @@ Schema Rules (Strict NetBox Module-Type Standard):
 - DO NOT include 'u_height' or 'is_full_depth' (these belong only to Device-Types).
 - Interfaces / Ports naming convention:
     - All interface names MUST start with '{{module}}/' without spaces.
-    - Example: name: '{{module}}/Port1', name: '{{module}}/Port2' (or '{{module}}/TenGigabitEthernet0/1/1' for network linecards).
+    - Example: name: '{{module}}/Port1', name: '{{module}}/Port2'
     - Provide accurate NetBox type (e.g., 10gbase-t, 10gbase-x-sfpp, 25gbase-x-sfp28, 100gbase-x-qsfp28).
 - Console ports / Power outlets (if any):
     - Must also use '{{module}}/' prefix (e.g., '{{module}}/Console').
@@ -168,7 +166,7 @@ Output ONLY raw YAML.
 
 def generate_rack_yaml(mfg: str, model: str) -> str:
     prompt = f"""
-Search specifications and generate a NetBox Rack-Type YAML.
+Search the web for the official specifications of:
 Manufacturer: {mfg}, Model: {model}
 
 Schema Rules:
@@ -219,7 +217,7 @@ with t1:
                 src = f"✅ Official Repository (`{matched}`)"
             else:
                 content = generate_device_yaml(d_mfg, d_model)
-                src = "🤖 AI Generated (Auto-Researched)"
+                src = "🤖 AI Generated (Datasheet Grounded)"
         with col2:
             st.markdown(f"**Source:** {src}")
             st.code(content, language="yaml", line_numbers=True)
@@ -241,7 +239,7 @@ with t2:
                 src = f"✅ Official Repository (`{matched}`)"
             else:
                 content = generate_module_yaml(m_mfg, m_model)
-                src = "🤖 AI Generated (Auto-Researched)"
+                src = "🤖 AI Generated (Datasheet Grounded)"
         with col2:
             st.markdown(f"**Source:** {src}")
             st.code(content, language="yaml", line_numbers=True)
@@ -263,7 +261,7 @@ with t3:
                 src = f"✅ Official Repository (`{matched}`)"
             else:
                 content = generate_rack_yaml(r_mfg, r_model)
-                src = "🤖 AI Generated (Auto-Researched)"
+                src = "🤖 AI Generated (Datasheet Grounded)"
         with col2:
             st.markdown(f"**Source:** {src}")
             st.code(content, language="yaml", line_numbers=True)
@@ -358,7 +356,7 @@ with t5:
                         src = "Official Repository"
                     else:
                         content = gen_fn(mfg, model)
-                        src = "AI Generated"
+                        src = "AI Generated (Grounded)"
 
                     clean_fname = f"{prefix}/{mfg}/{model}.yaml".replace(" ", "_")
                     zf.writestr(clean_fname, content)
