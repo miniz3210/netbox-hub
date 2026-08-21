@@ -100,7 +100,7 @@ def search_catalog_similar(file_list: List[str], manufacturer: str, query: str) 
         else:
             other_files.append(path)
 
-    # 1. Exact / Direct substring matches inside manufacturer
+    # 1. Exact / Substring matches inside manufacturer folder
     for path in mfg_files:
         r_file = re.sub(r"[^a-zA-Z0-9]", "", path.split("/")[-1]).lower()
         if c_query in r_file or r_file in c_query:
@@ -118,7 +118,7 @@ def search_catalog_similar(file_list: List[str], manufacturer: str, query: str) 
             if p.endswith(hit) and p not in exact_matches and p not in mfg_matches:
                 similar_matches.append(p)
 
-    # 3. Global search fallback if manufacturer folder is empty or yielded no hits
+    # 3. Global search fallback
     if not exact_matches and not mfg_matches and not similar_matches:
         for path in other_files:
             r_file = re.sub(r"[^a-zA-Z0-9]", "", path.split("/")[-1]).lower()
@@ -148,7 +148,7 @@ def clean_ai_yaml(text: str) -> str:
         lines = lines[:-1]
     cleaned = "\n".join(lines).strip()
     
-    # NetBox Interface Type Validation
+    # NetBox Interface Type Validation Map
     cleaned = re.sub(r"type:\s*10gbase-x-sfp\b", "type: 10gbase-x-sfpp", cleaned)
     cleaned = re.sub(r"type:\s*1gbase-t\b", "type: 1000base-t", cleaned)
     cleaned = re.sub(r"type:\s*1gbase-x-sfp\b", "type: 1000base-x-sfp", cleaned)
@@ -227,7 +227,7 @@ def call_ai(prompt: str, selected_provider: str) -> str:
 
 def generate_device_yaml(mfg: str, model: str, provider: str) -> str:
     prompt = f"""
-Search official datasheets and generate a complete, production-ready NetBox Device-Type YAML.
+Search official datasheets and generate a complete, production-ready NetBox Device-Type YAML following the official NetBox Library standard.
 Manufacturer: {mfg}
 Model: {model}
 
@@ -284,39 +284,34 @@ Output ONLY valid, raw YAML. Do not include markdown blocks or conversational te
 
 def generate_module_yaml(mfg: str, model: str, part_num: str, provider: str) -> str:
     prompt = f"""
-Search official datasheets and generate a NetBox Module-Type YAML.
+Search official manufacturer datasheets and generate a NetBox Module-Type YAML following the official NetBox Library standard.
 Manufacturer: {mfg}
 Model: {model}
 Part Number: {part_num}
 
-CRITICAL SCHEMA RULES (Strict NetBox Module-Type Standard):
+CRITICAL SCHEMA RULES (Official NetBox Module-Type Pattern):
 - First line MUST be '---'
-- Required Keys: manufacturer, model, part_number (if unknown, duplicate model into part_number)
+- Required Keys:
+    manufacturer: {mfg}
+    model: <exact model or part number>
+    part_number: <exact part number>
+    comments: '<Link or reference to official datasheet>'
+    description: '<Clear hardware overview, e.g. Dual-Port 10GBASE-T Ethernet PCI Express 3.0 x8 Network Interface Card>'
 - DO NOT include 'u_height' or 'is_full_depth'.
 - Valid NetBox Interface Types:
-    - 10gbase-t (for 10G RJ-45 Copper)
-    - 10gbase-x-sfpp (for 10G SFP+ optical/DAC -- MUST use 'sfpp', NOT 'sfp')
-    - 25gbase-x-sfp28 (for 25G SFP28)
-    - 1000base-t (for 1G RJ-45)
-    - 1000base-x-sfp (for 1G SFP)
-- Interfaces / Ports naming rule (STRICT LITERAL):
-    - You MUST use the literal string prefix '{{module}}/' on every port name.
-    - DO NOT replace '{{module}}' with the model name, slug, or manufacturer.
-    - Example:
-      interfaces:
-        - name: '{{module}}/Port1'
-          type: 10gbase-x-sfpp
-        - name: '{{module}}/Port2'
-          type: 10gbase-x-sfpp
-- Console ports / Power outlets (if any):
-    - Must also use literal '{{module}}/' prefix (e.g., '{{module}}/Console').
+    - 10gbase-t (10G RJ-45 Copper)
+    - 10gbase-x-sfpp (10G SFP+ optical/DAC -- MUST use 'sfpp', NOT 'sfp')
+    - 25gbase-x-sfp28 (25G SFP28)
+    - 1000base-t (1G RJ-45)
+    - 1000base-x-sfp (1G SFP)
+- Interfaces / Ports naming rules (STRICT OFFICIAL CONVENTION):
+    - For Network Interface Cards (NICs/PCIe/OCP): use `name: Ethernet/{{module}}/1`, `name: Ethernet/{{module}}/2`, etc.
+    - For switch modules / linecards: use `name: '{{module}}/Port1'`, `name: '{{module}}/Port2'`, etc.
+    - Always include the literal string `{{module}}` intact.
 
-Output ONLY raw YAML.
+Output ONLY valid, raw YAML.
 """
-    result = call_ai(prompt, provider)
-    result = re.sub(r"name:\s*['\"]?(?:[a-zA-Z0-9_\-]+/)?(Port\s*\d+|eth\d+|mgmt\d+|GigabitEthernet[0-9/]+|TenGigabitEthernet[0-9/]+)['\"]?", r"name: '{module}/\1'", result)
-    result = re.sub(r"name:\s*'{module}/\{module\}/", "name: '{module}/", result)
-    return result
+    return call_ai(prompt, provider)
 
 def generate_rack_yaml(mfg: str, model: str, provider: str) -> str:
     prompt = f"""
@@ -412,7 +407,7 @@ with t2:
     col1, col2 = st.columns([1, 1])
     with col1:
         m_mfg = st.text_input("Manufacturer", placeholder="e.g., Broadcom, Intel, Dell", key="m_mfg")
-        m_model = st.text_input("Module Name / Part #", placeholder="e.g., 57416 Dual Port, C9300-NM-8X", key="m_mod")
+        m_model = st.text_input("Module Name / Part #", placeholder="e.g., BCM57416, C9300-NM-8X", key="m_mod")
 
         selected_mod_choice = None
         if m_mfg and m_model:
