@@ -50,7 +50,7 @@ if OLLAMA_URL:
 # --- 1. Global GitHub Asset Indexer ---
 @st.cache_data(ttl=3600, show_spinner="Indexing all repository asset types from GitHub...")
 def get_repo_catalog() -> Dict[str, List[str]]:
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/git/trees/{BRANCH}?recursive=1"
+    url = f"[https://api.github.com/repos/](https://api.github.com/repos/){GITHUB_REPO}/git/trees/{BRANCH}?recursive=1"
     catalog = {
         "device_types": [],
         "module_types": [],
@@ -99,7 +99,7 @@ def search_catalog(file_list: List[str], manufacturer: str, query: str) -> Optio
     return None
 
 def fetch_raw_content(path: str, binary: bool = False):
-    raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{BRANCH}/{path}"
+    raw_url = f"[https://raw.githubusercontent.com/](https://raw.githubusercontent.com/){GITHUB_REPO}/{BRANCH}/{path}"
     res = requests.get(raw_url, timeout=10)
     if res.status_code == 200:
         return res.content if binary else res.text
@@ -107,6 +107,64 @@ def fetch_raw_content(path: str, binary: bool = False):
 
 # --- 2. AI Multi-Engine Core Router ---
 def clean_ai_yaml(text: str) -> str:
-    text = text.strip()
-    text = re.sub(r"^```(?:ya?ml)?\s*", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\s*
+    lines = text.strip().splitlines()
+    if lines and lines[0].strip().startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip().endswith("```"):
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+def call_ai(prompt: str, selected_provider: str) -> str:
+    system_msg = (
+        "You are a strict NetBox hardware YAML specification generator. "
+        "You MUST verify hardware specifications directly from official manufacturer datasheets. "
+        "Output ONLY valid, raw YAML starting with '---'. Use exact kebab-case hyphenated keys (never underscores)."
+    )
+
+    try:
+        # 1. Groq Engine
+        if selected_provider.startswith("Groq"):
+            from groq import Groq
+            client = Groq(api_key=GROQ_KEY)
+            resp = client.chat.completions.create(
+                model=GROQ_MODEL,
+                messages=[
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1
+            )
+            return clean_ai_yaml(resp.choices[0].message.content)
+
+        # 2. Google Gemini Engine (with Grounding)
+        elif selected_provider.startswith("Google Gemini"):
+            from google import genai
+            from google.genai import types
+            client = genai.Client(api_key=GEMINI_KEY)
+            resp = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.1,
+                    tools=[{"google_search": {}}],
+                    system_instruction=system_msg
+                )
+            )
+            return clean_ai_yaml(resp.text)
+
+        # 3. OpenRouter Engine
+        elif selected_provider.startswith("OpenRouter"):
+            from openai import OpenAI
+            client = OpenAI(base_url="[https://openrouter.ai/api/v1](https://openrouter.ai/api/v1)", api_key=OPENROUTER_KEY)
+            resp = client.chat.completions.create(
+                model=OPENROUTER_MODEL,
+                messages=[
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1
+            )
+            return clean_ai_yaml(resp.choices[0].message.content)
+
+        # 4. Local Ollama Engine
+        elif selected_provider.startswith("Local Ollama"):
