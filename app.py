@@ -115,26 +115,34 @@ def call_gemini(prompt: str) -> str:
 
 def generate_device_yaml(mfg: str, model: str) -> str:
     prompt = f"""
-Search specifications and generate a standard NetBox Device-Type YAML.
+Search specifications and generate an official standard NetBox Device-Type YAML.
 Manufacturer: {mfg}, Model: {model}
 
-Schema Rules:
-- First line MUST be '---'
-- Required Keys: manufacturer, model, slug, u_height, is_full_depth
-- Interfaces:
-    - If switch/router: define physical ports (e.g., 1G/10G/40G/100G).
-    - If server/chassis: define ONLY OOB management interface (e.g., IPMI/iDRAC/iLO) with mgmt_only: true.
-- Power Ports:
-    - Standard IEC plugs (e.g., iec-60320-c14 or iec-60320-c20).
-- Module Bays Naming Rules (Strict):
-    - Name and position MUST MATCH EXACTLY without spaces.
-    - PCIe bays: name: PCIe1 / position: 'PCIe1', name: PCIe2 / position: 'PCIe2'
-    - PSU bays: name: PSU1 / position: 'PSU1', name: PSU2 / position: 'PSU2'
-    - OCP/NIC bays: name: OCP1 / position: 'OCP1', etc.
-- Console Ports:
-    - Serial RJ-45 or DE-9 if applicable.
+CRITICAL SCHEMA RULES:
+1. First line MUST be '---'
+2. Top-level keys: manufacturer, model, slug, u_height, is_full_depth
+3. Interfaces:
+   - For switches/routers: list all physical network interfaces.
+   - For servers/appliances/chassis: list ONLY the out-of-band management port (e.g. IPMI/iLO/iDRAC) with `mgmt_only: true`.
+4. Power Ports:
+   - Include standard IEC plugs (e.g., PSU1, PSU2 with type: iec-60320-c14 or iec-60320-c20).
+5. Console Ports:
+   - Include Serial RJ-45 or DE-9 if present.
+6. Module Bays (MANDATORY - DO NOT OMIT):
+   - Every enterprise server/switch/appliance MUST have a `module-bays` block for its slots and PSUs.
+   - Exact matching convention for name and position (no spaces):
+     module-bays:
+       - name: PCIe1
+         position: 'PCIe1'
+       - name: PCIe2
+         position: 'PCIe2'
+       - name: PSU1
+         position: 'PSU1'
+       - name: PSU2
+         position: 'PSU2'
+     (Add additional bays like PCIe3, PCIe4, OCP1, OCP2, Node1, Node2 as appropriate for this hardware form factor).
 
-Output ONLY raw YAML.
+Output ONLY raw YAML. No markdown backticks, no explanatory text.
 """
     return call_gemini(prompt)
 
