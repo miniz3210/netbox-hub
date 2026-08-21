@@ -25,7 +25,7 @@ st.set_page_config(
 GITHUB_REPO = "netbox-community/devicetype-library"
 BRANCH = "master"
 
-# --- Dynamic Provider & Model Loading from .env ---
+# --- Provider Keys & Dynamic Model Loading ---
 GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
 
@@ -40,7 +40,6 @@ OPENROUTER_MODELS = [m.strip() for m in openrouter_models_env.split(",") if m.st
 OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "").strip()
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b").strip()
 
-# Dynamically populate UI options from .env
 AVAILABLE_PROVIDERS = []
 if GROQ_KEY:
     for model in GROQ_MODELS:
@@ -178,6 +177,14 @@ def extract_reference_interface_pattern(content: Optional[str]) -> Optional[str]
 
 # --- 2. AI Multi-Engine Core Router ---
 def clean_ai_yaml(text: str) -> str:
+    # 1. Strip reasoning/thinking tokens from models like Qwen/DeepSeek
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    
+    # 2. Slice directly to YAML start
+    if "---" in text:
+        text = text[text.find("---"):]
+    
+    # 3. Strip Markdown code fences
     lines = text.strip().splitlines()
     if lines and lines[0].strip().startswith("```"):
         lines = lines[1:]
@@ -185,6 +192,7 @@ def clean_ai_yaml(text: str) -> str:
         lines = lines[:-1]
     cleaned = "\n".join(lines).strip()
     
+    # 4. Strict NetBox type fixes
     cleaned = re.sub(r"type:\s*10gbase-x-sfp\b", "type: 10gbase-x-sfpp", cleaned)
     cleaned = re.sub(r"type:\s*1gbase-t\b", "type: 1000base-t", cleaned)
     cleaned = re.sub(r"type:\s*1gbase-x-sfp\b", "type: 1000base-x-sfp", cleaned)
@@ -199,11 +207,12 @@ def call_ai(prompt: str, selected_provider: str) -> str:
         "You are a strict NetBox hardware YAML specification generator. "
         "You MUST verify hardware specifications directly from official manufacturer datasheets. "
         "Output ONLY valid, raw YAML starting with '---'. Use exact kebab-case hyphenated keys (never underscores). "
+        "Do NOT output explanation, reasoning, or text outside the YAML block. "
         "Do NOT invent comments or URLs; omit 'comments' key entirely if no verified official datasheet URL is available."
     )
 
     try:
-        # 1. Groq Engine (Parses model directly from selected option string)
+        # 1. Groq Engine
         if selected_provider.startswith("Groq"):
             from groq import Groq
             client = Groq(api_key=GROQ_KEY)
@@ -328,7 +337,7 @@ CRITICAL SCHEMA RULES (Use exact kebab-case hyphenated keys, NEVER underscores):
        - If switch/router: list physical interfaces.
        - If server/appliance/chassis: list ONLY the out-of-band management interface (e.g. IPMI/iDRAC/iLO) with `mgmt_only: true` and `type: 1000base-t`.
 
-Output ONLY valid, raw YAML.
+Output ONLY valid, raw YAML starting with '---'. No conversational prelude or thinking text.
 """
     return call_ai(prompt, provider)
 
@@ -369,7 +378,7 @@ CRITICAL SCHEMA RULES:
     - 1000base-x-sfp (1G SFP)
 {pattern_instruction}
 
-Output ONLY valid, raw YAML.
+Output ONLY valid, raw YAML starting with '---'. No conversational prelude or thinking text.
 """
     result = call_ai(prompt, provider)
     
