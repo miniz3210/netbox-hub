@@ -115,15 +115,25 @@ def call_gemini(prompt: str) -> str:
 
 def generate_device_yaml(mfg: str, model: str) -> str:
     prompt = f"""
-Search specifications and generate a NetBox Device-Type YAML.
+Search specifications and generate a standard NetBox Device-Type YAML.
 Manufacturer: {mfg}, Model: {model}
+
 Schema Rules:
-- First line '---'
-- Keys: manufacturer, model, slug, u_height, is_full_depth
-- Interfaces: If switch, define physical ports (e.g. 1G/10G/40G). If server, define ONLY OOB management interface (mgmt_only: true).
-- Module bays: Include PSU bays and expansion slots (e.g., PCIe, OCP).
-- Power ports: IEC standard plugs (C14/C20).
-- Console ports: Serial RJ-45 or DE-9.
+- First line MUST be '---'
+- Required Keys: manufacturer, model, slug, u_height, is_full_depth
+- Interfaces:
+    - If switch/router: define physical ports (e.g., 1G/10G/40G/100G).
+    - If server/chassis: define ONLY OOB management interface (e.g., IPMI/iDRAC/iLO) with mgmt_only: true.
+- Power Ports:
+    - Standard IEC plugs (e.g., iec-60320-c14 or iec-60320-c20).
+- Module Bays Naming Rules (Strict):
+    - Name and position MUST MATCH EXACTLY without spaces.
+    - PCIe bays: name: PCIe1 / position: 'PCIe1', name: PCIe2 / position: 'PCIe2'
+    - PSU bays: name: PSU1 / position: 'PSU1', name: PSU2 / position: 'PSU2'
+    - OCP/NIC bays: name: OCP1 / position: 'OCP1', etc.
+- Console Ports:
+    - Serial RJ-45 or DE-9 if applicable.
+
 Output ONLY raw YAML.
 """
     return call_gemini(prompt)
@@ -131,12 +141,19 @@ Output ONLY raw YAML.
 def generate_module_yaml(mfg: str, model: str, part_num: str = "") -> str:
     prompt = f"""
 Search specifications and generate a NetBox Module-Type YAML.
-Manufacturer: {mfg}, Model/Part Number: {model} {part_num}
-Schema Rules:
-- First line '---'
-- Keys: manufacturer, model, part_number
-- Include card-specific interfaces (e.g., SFP28 ports), console ports, or power outputs.
-- Do NOT include u_height or is_full_depth.
+Manufacturer: {mfg}, Model: {model}, Part Number: {part_num}
+
+Schema Rules (Strict NetBox Module-Type Standard):
+- First line MUST be '---'
+- Required Keys: manufacturer, model, part_number (if unknown, duplicate model into part_number)
+- DO NOT include 'u_height' or 'is_full_depth' (these belong only to Device-Types).
+- Interfaces / Ports naming convention:
+    - All interface names MUST start with '{{module}}/' without spaces.
+    - Example: name: '{{module}}/Port1', name: '{{module}}/Port2' (or '{{module}}/TenGigabitEthernet0/1/1' for network linecards).
+    - Provide accurate NetBox type (e.g., 10gbase-t, 10gbase-x-sfpp, 25gbase-x-sfp28, 100gbase-x-qsfp28).
+- Console ports / Power outlets (if any):
+    - Must also use '{{module}}/' prefix (e.g., '{{module}}/Console').
+
 Output ONLY raw YAML.
 """
     return call_gemini(prompt)
@@ -145,8 +162,9 @@ def generate_rack_yaml(mfg: str, model: str) -> str:
     prompt = f"""
 Search specifications and generate a NetBox Rack-Type YAML.
 Manufacturer: {mfg}, Model: {model}
+
 Schema Rules:
-- First line '---'
+- First line MUST be '---'
 - Keys: manufacturer, model, slug, width (19 or 23), u_height (e.g. 42, 48), form_factor (4-post-cabinet/4-post-frame/2-post-frame), starting_unit (default 1)
 - Optional dimensions (if known): outer_width, outer_depth, outer_unit (mm/in), mounting_depth_min, mounting_depth_max
 Output ONLY raw YAML.
@@ -203,8 +221,8 @@ with t1:
 with t2:
     col1, col2 = st.columns([1, 1])
     with col1:
-        m_mfg = st.text_input("Manufacturer", placeholder="e.g., Dell, Intel, Cisco", key="m_mfg")
-        m_model = st.text_input("Module Name / Part #", placeholder="e.g., Broadcom 57414, C9300-NM-8X", key="m_mod")
+        m_mfg = st.text_input("Manufacturer", placeholder="e.g., Broadcom, Intel, Dell", key="m_mfg")
+        m_model = st.text_input("Module Name / Part #", placeholder="e.g., BCM57416, C9300-NM-8X", key="m_mod")
         m_search = st.button("Find / Generate Module Type", type="primary", key="btn_mod")
 
     if m_search and m_mfg and m_model:
