@@ -28,7 +28,7 @@ GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
 
 GROQ_KEY = os.getenv("GROQ_API_KEY", "").strip()
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b").strip()
 
 OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free").strip()
@@ -82,6 +82,7 @@ def search_catalog(file_list: List[str], manufacturer: str, query: str) -> Optio
     c_query = re.sub(r"[^a-zA-Z0-9]", "", query).lower()
     c_mfg = re.sub(r"[^a-zA-Z0-9]", "", manufacturer).lower()
 
+    # Priority 1: Search in matching manufacturer directory
     for path in file_list:
         parts = path.split("/")
         if len(parts) >= 3:
@@ -90,6 +91,7 @@ def search_catalog(file_list: List[str], manufacturer: str, query: str) -> Optio
             if (c_mfg in r_mfg or r_mfg in c_mfg) and c_query in r_file:
                 return path
 
+    # Priority 2: Global fallback
     for path in file_list:
         r_file = re.sub(r"[^a-zA-Z0-9]", "", path.split("/")[-1]).lower()
         if c_query in r_file:
