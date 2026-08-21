@@ -259,7 +259,6 @@ def call_ai(prompt: str, selected_provider: str) -> str:
         st.stop()
 
 def classify_hardware_category(mfg: str, model: str, provider: str) -> str:
-    """Classifies whether an item is a device chassis, plug-in module, or rack."""
     prompt = f"""
 Determine the physical hardware type of:
 Manufacturer: {mfg}
@@ -437,45 +436,47 @@ t1, t2, t3, t4, t5 = st.tabs([
 with t1:
     col1, col2 = st.columns([1, 1])
     with col1:
-        d_mfg_raw = st.text_input("Manufacturer", placeholder="e.g., Cisco, Dell, Nutanix", key="d_mfg")
+        d_mfg_raw = st.text_input("Manufacturer", placeholder="e.g., Cisco, Dell, Nutanix, Synology", key="d_mfg")
         d_model = st.text_input("Device Model", placeholder="e.g., NX-TDT-4NL3-G6, PowerEdge R750", key="d_mod")
         d_mfg = get_canonical_manufacturer(d_mfg_raw, catalog["manufacturers"]) if d_mfg_raw else ""
 
         selected_dev_choice = None
         if d_mfg and d_model:
-            # Check if user entered a module under Device Types
-            cross_mods = search_catalog_similar(catalog["module_types"], d_mfg, d_model)
-            if cross_mods:
-                st.warning(f"⚠️ **Form Factor Notice:** `{d_model}` appears to be a **Module/NIC card**, not a standalone Device Chassis! You may want to check the **🧩 Module Types** tab.")
-
+            # 1. Search device catalog
             similar_devs = search_catalog_similar(catalog["device_types"], d_mfg, d_model)
-            options = ["✨ Generate Fresh with AI (Auto-Researched)"] + similar_devs
-            
-            if len(similar_devs) > 0:
-                st.info(f"🔎 Found {len(similar_devs)} similar/matching device(s) in Official Library:")
+            # 2. Search cross-category in module-types
+            cross_mods = search_catalog_similar(catalog["module_types"], d_mfg, d_model)
+
+            all_official_matches = similar_devs + cross_mods
+
+            if cross_mods and not similar_devs:
+                st.info(f"💡 `{d_model}` was matched in official **Module Types** (`{cross_mods[0]}`). Available to load below:")
+
+            options = []
+            if all_official_matches:
+                options = all_official_matches + ["✨ Generate Fresh with AI (Auto-Researched)"]
                 selected_dev_choice = st.selectbox(
-                    "Choose an official device from the library, or select AI generation:",
+                    "Select library definition or generate with AI:",
                     options,
-                    index=1 if len(similar_devs) == 1 else 0,
+                    index=0,  # Default to official file
                     key="dev_select_box"
                 )
             else:
-                st.warning("No exact device match found in library. Click below to generate fresh with AI.")
+                st.warning("No match found in library. Click below to generate fresh with AI.")
                 selected_dev_choice = "✨ Generate Fresh with AI (Auto-Researched)"
 
         d_search = st.button("Load / Generate Device Type", type="primary", key="btn_dev")
 
     if d_search and d_mfg and d_model and selected_dev_choice:
-        with st.spinner("Classifying & Processing..."):
+        with st.spinner("Processing..."):
             if selected_dev_choice.startswith("✨"):
                 if not active_provider:
                     st.error("Configure an AI API key in `.env` to enable AI generation.")
                     st.stop()
                 
-                # Check hardware classification to prevent generating chassis specs on plug-in cards
                 detected_cat = classify_hardware_category(d_mfg, d_model, active_provider)
                 if detected_cat == "module":
-                    st.warning(f"ℹ️ AI detected that `{d_model}` is a plug-in **Module/Adapter Card**. Routing output to Module Type standard...")
+                    st.warning(f"ℹ️ AI classified `{d_model}` as a plug-in **Module/Adapter Card**. Routing output to Module Type standard...")
                     content = generate_module_yaml(d_mfg, d_model, d_model, active_provider, ref_pattern=None)
                     src = f"🤖 AI Generated (Auto-Classified as Module via {active_provider})"
                 else:
@@ -493,34 +494,36 @@ with t1:
 with t2:
     col1, col2 = st.columns([1, 1])
     with col1:
-        m_mfg_raw = st.text_input("Manufacturer", placeholder="e.g., Broadcom, Mellanox, Dell", key="m_mfg")
-        m_model = st.text_input("Module Name / Part #", placeholder="e.g., ConnectX-4, BCM57416", key="m_mod")
+        m_mfg_raw = st.text_input("Manufacturer", placeholder="e.g., Broadcom, Mellanox, Dell, Synology", key="m_mfg")
+        m_model = st.text_input("Module Name / Part #", placeholder="e.g., E10G21-F2, ConnectX-4, BCM57416", key="m_mod")
         m_mfg = get_canonical_manufacturer(m_mfg_raw, catalog["manufacturers"]) if m_mfg_raw else ""
 
         selected_mod_choice = None
         discovered_pattern = None
 
         if m_mfg and m_model:
-            # Check if user entered a full device under Module Types
-            cross_devs = search_catalog_similar(catalog["device_types"], m_mfg, m_model)
-            if cross_devs:
-                st.warning(f"⚠️ **Form Factor Notice:** `{m_model}` appears to be a standalone **Device Chassis/Switch**, not a plug-in module! Check the **🖥️ Device Types** tab.")
-
+            # 1. Search module catalog
             similar_mods = search_catalog_similar(catalog["module_types"], m_mfg, m_model)
-            options = ["✨ Generate Fresh with AI (Auto-Researched)"] + similar_mods
-            
-            if len(similar_mods) > 0:
-                st.info(f"🔎 Found {len(similar_mods)} similar/matching module(s) in Official Library:")
+            # 2. Search cross-category in device-types
+            cross_devs = search_catalog_similar(catalog["device_types"], m_mfg, m_model)
+
+            all_mod_matches = similar_mods + cross_devs
+
+            if cross_devs and not similar_mods:
+                st.info(f"💡 `{m_model}` was matched in official **Device Types** (`{cross_devs[0]}`). Available to load below:")
+
+            if all_mod_matches:
+                options = all_mod_matches + ["✨ Generate Fresh with AI (Auto-Researched)"]
                 selected_mod_choice = st.selectbox(
-                    "Choose an official module from the library, or select AI generation:",
+                    "Select library definition or generate with AI:",
                     options,
-                    index=1 if len(similar_mods) == 1 else 0,
+                    index=0,  # Default to official file
                     key="mod_select_box"
                 )
-                top_sample = fetch_raw_content(similar_mods[0], binary=False)
+                top_sample = fetch_raw_content(all_mod_matches[0], binary=False)
                 discovered_pattern = extract_reference_interface_pattern(top_sample)
             else:
-                st.warning("No exact match found in library. Interface naming will default to {module}/Port1, {module}/Port2.")
+                st.warning("No match found in library. Interface naming will default to {module}/Port1, {module}/Port2.")
                 selected_mod_choice = "✨ Generate Fresh with AI (Auto-Researched)"
                 discovered_pattern = None
 
@@ -553,14 +556,12 @@ with t3:
         selected_rack_choice = None
         if r_mfg and r_model:
             similar_racks = search_catalog_similar(catalog["rack_types"], r_mfg, r_model)
-            options = ["✨ Generate Fresh with AI (Auto-Researched)"] + similar_racks
-            
-            if len(similar_racks) > 0:
-                st.info(f"🔎 Found {len(similar_racks)} similar/matching rack(s) in Official Library:")
+            if similar_racks:
+                options = similar_racks + ["✨ Generate Fresh with AI (Auto-Researched)"]
                 selected_rack_choice = st.selectbox(
-                    "Choose an official rack from the library, or select AI generation:",
+                    "Select library definition or generate with AI:",
                     options,
-                    index=1 if len(similar_racks) == 1 else 0,
+                    index=0,  # Default to official file
                     key="rack_select_box"
                 )
             else:
@@ -618,7 +619,7 @@ with t5:
     st.write("Upload an Excel file with `Category` (`device`, `module`, or `rack`), `Manufacturer`, and `Model`.")
     sample_df = pd.DataFrame([
         {"Category": "device", "Manufacturer": "Cisco", "Model": "C9300-48P"},
-        {"Category": "module", "Manufacturer": "Mellanox", "Model": "ConnectX-4"},
+        {"Category": "module", "Manufacturer": "Synology", "Model": "E10G21-F2"},
         {"Category": "rack", "Manufacturer": "APC", "Model": "NetShelter SX 42U"}
     ])
     st.download_button("📄 Download Sample Template (Excel)", sample_df.to_csv(index=False).encode('utf-8'), "template.csv", "text/csv")
@@ -647,7 +648,6 @@ with t5:
 
                     mfg = get_canonical_manufacturer(mfg_raw, catalog["manufacturers"])
 
-                    # If category is 'auto' or missing, classify via AI
                     if cat_input not in ["device", "module", "rack"]:
                         cat = classify_hardware_category(mfg, model, active_provider)
                     else:
