@@ -40,13 +40,13 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b").strip()
 
 AVAILABLE_PROVIDERS = []
 if GROQ_KEY:
-    AVAILABLE_PROVIDERS.append("Groq (High Rate Limit)")
-if GEMINI_KEY:
-    AVAILABLE_PROVIDERS.append("Google Gemini (Search Grounded)")
+    AVAILABLE_PROVIDERS.append("Groq (High Rate Limit - 1000/day)")
 if OPENROUTER_KEY:
-    AVAILABLE_PROVIDERS.append("OpenRouter")
+    AVAILABLE_PROVIDERS.append("OpenRouter (Free Models)")
 if OLLAMA_URL:
-    AVAILABLE_PROVIDERS.append("Local Ollama")
+    AVAILABLE_PROVIDERS.append("Local Ollama (Unlimited)")
+if GEMINI_KEY:
+    AVAILABLE_PROVIDERS.append("Google Gemini (Search Grounded - 20/day)")
 
 # --- 1. Global GitHub Asset Indexer ---
 @st.cache_data(ttl=3600, show_spinner="Indexing all repository asset types from GitHub...")
@@ -93,18 +93,15 @@ def wildcard_match(pattern: str, target: str) -> bool:
     if not p:
         return True
 
-    # 1. Standard wildcard glob match
     glob_p = p if any(c in p for c in ["*", "?", "["]) else f"*{p}*"
     if fnmatch.fnmatch(t, glob_p):
         return True
 
-    # 2. Substring match
     clean_p = re.sub(r"[^a-zA-Z0-9]", "", p)
     clean_t = re.sub(r"[^a-zA-Z0-9]", "", t)
     if clean_p and clean_p in clean_t:
         return True
 
-    # 3. Word initials / acronym match (e.g. 'hp' -> 'Hewlett Packard', 'pan' -> 'Palo Alto Networks')
     words = re.findall(r"[a-zA-Z0-9]+", t)
     initials = "".join(w[0] for w in words).lower()
     if clean_p and (clean_p == initials or clean_p in initials):
@@ -117,12 +114,10 @@ def get_canonical_manufacturer(user_input: str, mfg_list: List[str]) -> str:
     if not cleaned:
         return user_input
 
-    # Match by wildcard/acronym logic against real catalog
     for mfg in mfg_list:
         if wildcard_match(cleaned, mfg):
             return mfg
 
-    # Fuzzy match fallback
     close = difflib.get_close_matches(user_input, mfg_list, n=1, cutoff=0.5)
     if close:
         return close[0]
@@ -130,7 +125,6 @@ def get_canonical_manufacturer(user_input: str, mfg_list: List[str]) -> str:
     return user_input
 
 def search_catalog_wildcard(file_list: List[str], manufacturer_query: str, model_query: str) -> List[str]:
-    """Pure dynamic wildcard matching across all repository file paths."""
     mfg_q = manufacturer_query.strip().lower()
     model_q = model_query.strip().lower()
 
@@ -143,10 +137,7 @@ def search_catalog_wildcard(file_list: List[str], manufacturer_query: str, model
         r_file = parts[-1].lower()
         r_file_noext = re.sub(r"\.(yaml|yml|png|svg|jpg)$", "", r_file)
 
-        # Check manufacturer criteria
         mfg_hit = wildcard_match(mfg_q, r_mfg) if mfg_q else True
-
-        # Check model criteria
         model_hit = wildcard_match(model_q, r_file_noext) if model_q else True
 
         if mfg_hit and model_hit:
@@ -154,7 +145,6 @@ def search_catalog_wildcard(file_list: List[str], manufacturer_query: str, model
         elif model_hit and len(model_q) >= 3:
             secondary_matches.append(path)
 
-    # Combine unique results prioritizing direct path matches
     combined = []
     for item in primary_matches + secondary_matches:
         if item not in combined:
@@ -264,26 +254,6 @@ def call_ai(prompt: str, selected_provider: str) -> str:
         logger.error(f"Error from {selected_provider}: {str(e)}")
         st.error(f"❌ Generation Failed ({selected_provider}): {str(e)}")
         st.stop()
-
-def classify_hardware_category(mfg: str, model: str, provider: str) -> str:
-    prompt = f"""
-Determine the physical hardware type of:
-Manufacturer: {mfg}
-Model: {model}
-
-Respond with ONLY ONE word:
-- 'module' (if it is a plug-in PCIe/OCP NIC card, SFP transceiver, power supply module, line card)
-- 'device' (if it is a standalone rackmount server chassis, switch, router, firewall)
-- 'rack' (if it is a server rack cabinet, frame)
-
-Output ONLY the word in lowercase.
-"""
-    res = call_ai(prompt, provider).strip().lower()
-    if "module" in res:
-        return "module"
-    elif "rack" in res:
-        return "rack"
-    return "device"
 
 def generate_device_yaml(mfg: str, model: str, provider: str) -> str:
     prompt = f"""
@@ -481,15 +451,8 @@ with t1:
                 if not active_provider:
                     st.error("Configure an AI API key in `.env` to enable AI generation.")
                     st.stop()
-                
-                detected_cat = classify_hardware_category(effective_mfg, d_model, active_provider)
-                if detected_cat == "module":
-                    st.warning(f"ℹ️ AI classified `{d_model}` as a plug-in **Module/Adapter Card**. Routing output to Module Type standard...")
-                    content = generate_module_yaml(effective_mfg, d_model, d_model, active_provider, ref_pattern=None)
-                    src = f"🤖 AI Generated (Auto-Classified as Module via {active_provider})"
-                else:
-                    content = generate_device_yaml(effective_mfg, d_model, active_provider)
-                    src = f"🤖 AI Generated ({active_provider})"
+                content = generate_device_yaml(effective_mfg, d_model, active_provider)
+                src = f"🤖 AI Generated ({active_provider})"
             else:
                 content = fetch_raw_content(selected_dev_choice, binary=False)
                 src = f"✅ Official Repository (`{selected_dev_choice}`)"
@@ -657,18 +620,13 @@ with t5:
 
             with zipfile.ZipFile(zip_buf, "w") as zf:
                 for idx, row in df.iterrows():
-                    cat_input = str(row.get("Category", "auto")).lower().strip()
+                    cat = str(row.get("Category", "device")).lower().strip()
                     mfg_raw = str(row.get("Manufacturer", "")).strip()
                     model = str(row.get("Model", "")).strip()
                     if not mfg_raw or not model or mfg_raw == "nan":
                         continue
 
                     mfg = get_canonical_manufacturer(mfg_raw, catalog["manufacturers"])
-
-                    if cat_input not in ["device", "module", "rack"]:
-                        cat = classify_hardware_category(mfg, model, active_provider)
-                    else:
-                        cat = cat_input
 
                     if cat == "module":
                         f_list, gen_fn, prefix = catalog["module_types"], generate_module_yaml, "module-types"
