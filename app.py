@@ -25,28 +25,36 @@ st.set_page_config(
 GITHUB_REPO = "netbox-community/devicetype-library"
 BRANCH = "master"
 
-# --- Provider Environment Keys & Models ---
+# --- Dynamic Provider & Model Loading from .env ---
 GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
 
 GROQ_KEY = os.getenv("GROQ_API_KEY", "").strip()
-GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b").strip()
+groq_models_env = os.getenv("GROQ_MODELS", os.getenv("GROQ_MODEL", "openai/gpt-oss-120b, qwen/qwen3.6-27b"))
+GROQ_MODELS = [m.strip() for m in groq_models_env.split(",") if m.strip()]
 
 OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free").strip()
+openrouter_models_env = os.getenv("OPENROUTER_MODELS", os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free"))
+OPENROUTER_MODELS = [m.strip() for m in openrouter_models_env.split(",") if m.strip()]
 
 OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "").strip()
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b").strip()
 
+# Dynamically populate UI options from .env
 AVAILABLE_PROVIDERS = []
 if GROQ_KEY:
-    AVAILABLE_PROVIDERS.append("Groq (High Rate Limit - 1000/day)")
+    for model in GROQ_MODELS:
+        AVAILABLE_PROVIDERS.append(f"Groq ({model})")
+
 if OPENROUTER_KEY:
-    AVAILABLE_PROVIDERS.append("OpenRouter (Free Models)")
+    for model in OPENROUTER_MODELS:
+        AVAILABLE_PROVIDERS.append(f"OpenRouter ({model})")
+
 if OLLAMA_URL:
-    AVAILABLE_PROVIDERS.append("Local Ollama (Unlimited)")
+    AVAILABLE_PROVIDERS.append(f"Local Ollama ({OLLAMA_MODEL})")
+
 if GEMINI_KEY:
-    AVAILABLE_PROVIDERS.append("Google Gemini (Search Grounded - 20/day)")
+    AVAILABLE_PROVIDERS.append(f"Google Gemini ({GEMINI_MODEL})")
 
 # --- 1. Global GitHub Asset Indexer ---
 @st.cache_data(ttl=3600, show_spinner="Indexing all repository asset types from GitHub...")
@@ -87,7 +95,6 @@ def get_repo_catalog() -> Dict[str, List[str]]:
     return catalog
 
 def wildcard_match(pattern: str, target: str) -> bool:
-    """Matches exact, wildcard (*, ?), substring, or word initials (e.g. hp -> Hewlett Packard)."""
     p = pattern.strip().lower()
     t = target.strip().lower()
     if not p:
@@ -183,6 +190,10 @@ def clean_ai_yaml(text: str) -> str:
     cleaned = re.sub(r"type:\s*1gbase-x-sfp\b", "type: 1000base-x-sfp", cleaned)
     return cleaned
 
+def extract_model_from_label(label: str) -> str:
+    match = re.search(r"\((.+)\)", label)
+    return match.group(1).strip() if match else label
+
 def call_ai(prompt: str, selected_provider: str) -> str:
     system_msg = (
         "You are a strict NetBox hardware YAML specification generator. "
@@ -192,11 +203,14 @@ def call_ai(prompt: str, selected_provider: str) -> str:
     )
 
     try:
+        # 1. Groq Engine (Parses model directly from selected option string)
         if selected_provider.startswith("Groq"):
             from groq import Groq
             client = Groq(api_key=GROQ_KEY)
+            target_model = extract_model_from_label(selected_provider)
+
             resp = client.chat.completions.create(
-                model=GROQ_MODEL,
+                model=target_model,
                 messages=[
                     {"role": "system", "content": system_msg},
                     {"role": "user", "content": prompt}
@@ -205,12 +219,14 @@ def call_ai(prompt: str, selected_provider: str) -> str:
             )
             return clean_ai_yaml(resp.choices[0].message.content)
 
+        # 2. Google Gemini
         elif selected_provider.startswith("Google Gemini"):
             from google import genai
             from google.genai import types
             client = genai.Client(api_key=GEMINI_KEY)
+            target_model = extract_model_from_label(selected_provider)
             resp = client.models.generate_content(
-                model=GEMINI_MODEL,
+                model=target_model,
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.1,
@@ -220,11 +236,13 @@ def call_ai(prompt: str, selected_provider: str) -> str:
             )
             return clean_ai_yaml(resp.text)
 
+        # 3. OpenRouter
         elif selected_provider.startswith("OpenRouter"):
             from openai import OpenAI
             client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=OPENROUTER_KEY)
+            target_model = extract_model_from_label(selected_provider)
             resp = client.chat.completions.create(
-                model=OPENROUTER_MODEL,
+                model=target_model,
                 messages=[
                     {"role": "system", "content": system_msg},
                     {"role": "user", "content": prompt}
@@ -233,11 +251,13 @@ def call_ai(prompt: str, selected_provider: str) -> str:
             )
             return clean_ai_yaml(resp.choices[0].message.content)
 
+        # 4. Local Ollama
         elif selected_provider.startswith("Local Ollama"):
             from openai import OpenAI
             client = OpenAI(base_url=OLLAMA_URL, api_key="ollama")
+            target_model = extract_model_from_label(selected_provider)
             resp = client.chat.completions.create(
-                model=OLLAMA_MODEL,
+                model=target_model,
                 messages=[
                     {"role": "system", "content": system_msg},
                     {"role": "user", "content": prompt}
@@ -393,10 +413,10 @@ st.caption("Device Types | Module Types | Rack Types | Elevation & Module Images
 catalog = get_repo_catalog()
 
 with st.sidebar:
-    st.header("⚙️ AI Engine Status")
+    st.header("⚙️ AI Engine Selection")
     if AVAILABLE_PROVIDERS:
-        active_provider = st.selectbox("Active AI Engine", AVAILABLE_PROVIDERS)
-        st.success(f"Connected: `{active_provider}`")
+        active_provider = st.selectbox("Active AI Model", AVAILABLE_PROVIDERS)
+        st.success(f"Selected: `{active_provider}`")
     else:
         active_provider = None
         st.warning("No AI API keys configured. Only official GitHub library lookups are enabled.")
@@ -413,7 +433,7 @@ t1, t2, t3, t4, t5 = st.tabs([
 with t1:
     col1, col2 = st.columns([1, 1])
     with col1:
-        d_mfg_raw = st.text_input("Manufacturer", placeholder="e.g., HP, Cisco, Dell, Nutanix (Wildcards supported: *hp*, *cis*)", key="d_mfg")
+        d_mfg_raw = st.text_input("Manufacturer", placeholder="e.g., HP, Cisco, Dell, Nutanix (Wildcards: *hp*, *cis*)", key="d_mfg")
         d_model = st.text_input("Device Model", placeholder="e.g., *dl360*, PowerEdge R750", key="d_mod")
         d_mfg = get_canonical_manufacturer(d_mfg_raw, catalog["manufacturers"]) if d_mfg_raw else ""
 
