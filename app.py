@@ -25,7 +25,7 @@ st.set_page_config(
 GITHUB_REPO = "netbox-community/devicetype-library"
 BRANCH = "master"
 
-# --- Provider Keys & Dynamic Model Loading ---
+# --- Provider Keys & Dynamic Model Loading from .env ---
 GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
 
@@ -177,26 +177,58 @@ def extract_reference_interface_pattern(content: Optional[str]) -> Optional[str]
 
 # --- 2. AI Multi-Engine Core Router ---
 def clean_ai_yaml(text: str) -> str:
-    # 1. Strip reasoning/thinking tokens from models like Qwen/DeepSeek
+    # 1. Strip reasoning blocks (<think>...</think>)
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
     
-    # 2. Slice directly to YAML start
-    if "---" in text:
-        text = text[text.find("---"):]
-    
-    # 3. Strip Markdown code fences
+    # 2. Extract content from Markdown code fences if present
+    code_blocks = re.findall(r"```(?:ya?ml)?\s*([\s\S]*?)```", text, flags=re.IGNORECASE)
+    if code_blocks:
+        for block in reversed(code_blocks):
+            if "manufacturer:" in block or "model:" in block or "interfaces:" in block:
+                text = block
+                break
+        else:
+            text = code_blocks[-1]
+            
+    # 3. Locate the primary root key 'manufacturer:'
     lines = text.strip().splitlines()
-    if lines and lines[0].strip().startswith("```"):
-        lines = lines[1:]
-    if lines and lines[-1].strip().endswith("```"):
-        lines = lines[:-1]
-    cleaned = "\n".join(lines).strip()
+    mfg_idx = -1
+    for idx, line in enumerate(lines):
+        if re.match(r"^\s*manufacturer\s*:", line, flags=re.IGNORECASE):
+            mfg_idx = idx
+            break
+            
+    if mfg_idx != -1:
+        if mfg_idx > 0 and lines[mfg_idx - 1].strip() == "---":
+            lines = lines[mfg_idx - 1:]
+        else:
+            lines = ["---"] + lines[mfg_idx:]
+        text = "\n".join(lines)
+    else:
+        if "---" in text:
+            parts = text.split("---")
+            for part in reversed(parts):
+                if "model:" in part or "interfaces:" in part:
+                    text = "---\n" + part.strip()
+                    break
+
+    # 4. Truncate trailing markdown explanation after YAML ends
+    cleaned_lines = []
+    for line in text.splitlines():
+        if re.match(r"^(Note:|Explanation:|Here is|Let me know|\*\*Note)", line.strip(), flags=re.IGNORECASE):
+            break
+        cleaned_lines.append(line)
+    text = "\n".join(cleaned_lines)
+
+    # 5. Remove residual markdown fences
+    text = re.sub(r"^```(?:ya?ml)?", "", text.strip(), flags=re.IGNORECASE)
+    text = re.sub(r"```$", "", text.strip())
     
-    # 4. Strict NetBox type fixes
-    cleaned = re.sub(r"type:\s*10gbase-x-sfp\b", "type: 10gbase-x-sfpp", cleaned)
-    cleaned = re.sub(r"type:\s*1gbase-t\b", "type: 1000base-t", cleaned)
-    cleaned = re.sub(r"type:\s*1gbase-x-sfp\b", "type: 1000base-x-sfp", cleaned)
-    return cleaned
+    # 6. Strict NetBox type fixes
+    text = re.sub(r"type:\s*10gbase-x-sfp\b", "type: 10gbase-x-sfpp", text)
+    text = re.sub(r"type:\s*1gbase-t\b", "type: 1000base-t", text)
+    text = re.sub(r"type:\s*1gbase-x-sfp\b", "type: 1000base-x-sfp", text)
+    return text.strip()
 
 def extract_model_from_label(label: str) -> str:
     match = re.search(r"\((.+)\)", label)
@@ -224,7 +256,7 @@ def call_ai(prompt: str, selected_provider: str) -> str:
                     {"role": "system", "content": system_msg},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.1
+                temperature=0.0
             )
             return clean_ai_yaml(resp.choices[0].message.content)
 
@@ -238,7 +270,7 @@ def call_ai(prompt: str, selected_provider: str) -> str:
                 model=target_model,
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    temperature=0.1,
+                    temperature=0.0,
                     tools=[{"google_search": {}}],
                     system_instruction=system_msg
                 )
@@ -256,7 +288,7 @@ def call_ai(prompt: str, selected_provider: str) -> str:
                     {"role": "system", "content": system_msg},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.1
+                temperature=0.0
             )
             return clean_ai_yaml(resp.choices[0].message.content)
 
@@ -271,7 +303,7 @@ def call_ai(prompt: str, selected_provider: str) -> str:
                     {"role": "system", "content": system_msg},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.1
+                temperature=0.0
             )
             return clean_ai_yaml(resp.choices[0].message.content)
 
@@ -442,8 +474,8 @@ t1, t2, t3, t4, t5 = st.tabs([
 with t1:
     col1, col2 = st.columns([1, 1])
     with col1:
-        d_mfg_raw = st.text_input("Manufacturer", placeholder="e.g., HP, Cisco, Dell, Nutanix (Wildcards: *hp*, *cis*)", key="d_mfg")
-        d_model = st.text_input("Device Model", placeholder="e.g., *dl360*, PowerEdge R750", key="d_mod")
+        d_mfg_raw = st.text_input("Manufacturer", placeholder="e.g., HP, Cisco, Dell, Intel (Wildcards: *intel*, *cis*)", key="d_mfg")
+        d_model = st.text_input("Device Model", placeholder="e.g., *x710*, PowerEdge R750", key="d_mod")
         d_mfg = get_canonical_manufacturer(d_mfg_raw, catalog["manufacturers"]) if d_mfg_raw else ""
 
         selected_dev_choice = None
@@ -473,8 +505,14 @@ with t1:
 
         d_search = st.button("Load / Generate Device Type", type="primary", key="btn_dev")
 
-    if d_search and (d_mfg or d_mfg_raw) and d_model and selected_dev_choice:
-        effective_mfg = d_mfg if d_mfg else d_mfg_raw
+    if d_search and (d_mfg or d_mfg_raw or selected_dev_choice) and d_model and selected_dev_choice:
+        # Resolve effective manufacturer even if input box was blank
+        if selected_dev_choice and not selected_dev_choice.startswith("✨"):
+            parts = selected_dev_choice.split("/")
+            effective_mfg = parts[1] if len(parts) >= 3 else (d_mfg if d_mfg else d_mfg_raw)
+        else:
+            effective_mfg = d_mfg if d_mfg else d_mfg_raw
+
         with st.spinner("Processing..."):
             if selected_dev_choice.startswith("✨"):
                 if not active_provider:
@@ -530,8 +568,13 @@ with t2:
 
         m_search = st.button("Load / Generate Module Type", type="primary", key="btn_mod")
 
-    if m_search and (m_mfg or m_mfg_raw) and m_model and selected_mod_choice:
-        effective_mfg = m_mfg if m_mfg else m_mfg_raw
+    if m_search and (m_mfg or m_mfg_raw or selected_mod_choice) and m_model and selected_mod_choice:
+        if selected_mod_choice and not selected_mod_choice.startswith("✨"):
+            parts = selected_mod_choice.split("/")
+            effective_mfg = parts[1] if len(parts) >= 3 else (m_mfg if m_mfg else m_mfg_raw)
+        else:
+            effective_mfg = m_mfg if m_mfg else m_mfg_raw
+
         with st.spinner("Processing..."):
             if selected_mod_choice.startswith("✨"):
                 if not active_provider:
@@ -577,8 +620,13 @@ with t3:
 
         r_search = st.button("Load / Generate Rack Type", type="primary", key="btn_rack")
 
-    if r_search and (r_mfg or r_mfg_raw) and r_model and selected_rack_choice:
-        effective_mfg = r_mfg if r_mfg else r_mfg_raw
+    if r_search and (r_mfg or r_mfg_raw or selected_rack_choice) and r_model and selected_rack_choice:
+        if selected_rack_choice and not selected_rack_choice.startswith("✨"):
+            parts = selected_rack_choice.split("/")
+            effective_mfg = parts[1] if len(parts) >= 3 else (r_mfg if r_mfg else r_mfg_raw)
+        else:
+            effective_mfg = r_mfg if r_mfg else r_mfg_raw
+
         with st.spinner("Processing..."):
             if selected_rack_choice.startswith("✨"):
                 if not active_provider:
@@ -649,7 +697,7 @@ with t5:
 
             with zipfile.ZipFile(zip_buf, "w") as zf:
                 for idx, row in df.iterrows():
-                    cat = str(row.get("Category", "device")).lower().strip()
+                    cat_input = str(row.get("Category", "device")).lower().strip()
                     mfg_raw = str(row.get("Manufacturer", "")).strip()
                     model = str(row.get("Model", "")).strip()
                     if not mfg_raw or not model or mfg_raw == "nan":
@@ -657,9 +705,9 @@ with t5:
 
                     mfg = get_canonical_manufacturer(mfg_raw, catalog["manufacturers"])
 
-                    if cat == "module":
+                    if cat_input == "module":
                         f_list, gen_fn, prefix = catalog["module_types"], generate_module_yaml, "module-types"
-                    elif cat == "rack":
+                    elif cat_input == "rack":
                         f_list, gen_fn, prefix = catalog["rack_types"], generate_rack_yaml, "rack-types"
                     else:
                         f_list, gen_fn, prefix = catalog["device_types"], generate_device_yaml, "device-types"
@@ -669,7 +717,7 @@ with t5:
                         content = fetch_raw_content(matches[0], binary=False)
                         src = f"Official Repository ({matches[0]})"
                     else:
-                        if cat == "module":
+                        if cat_input == "module":
                             content = gen_fn(mfg, model, model, active_provider, ref_pattern=None)
                         else:
                             content = gen_fn(mfg, model, active_provider)
@@ -677,7 +725,7 @@ with t5:
 
                     clean_fname = f"{prefix}/{mfg}/{model}.yaml".replace(" ", "_")
                     zf.writestr(clean_fname, content)
-                    results.append({"Category": cat, "Manufacturer": mfg, "Model": model, "Source": src})
+                    results.append({"Category": cat_input, "Manufacturer": mfg, "Model": model, "Source": src})
                     pbar.progress((idx + 1) / len(df))
 
             st.success("Batch processing completed!")
