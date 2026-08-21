@@ -6,7 +6,11 @@ services:
     ports:
       - "8501:8501"
     volumes:
+<<<<<<< Updated upstream
       - .:/app # <-- Mounts host directory directly into the container
+=======
+      - /opt/netbox-hub:/app # <-- Mounts host directory directly into the container
+>>>>>>> Stashed changes
     environment:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
     env_file:
