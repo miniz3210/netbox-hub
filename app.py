@@ -8,7 +8,7 @@ import zipfile
 import requests
 import streamlit as st
 import pandas as pd
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple
 
 # --- Logging Configuration ---
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -37,7 +37,6 @@ OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instr
 OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "").strip()
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b").strip()
 
-# Identify available engines
 AVAILABLE_PROVIDERS = []
 if GROQ_KEY:
     AVAILABLE_PROVIDERS.append("Groq (High Rate Limit)")
@@ -163,7 +162,6 @@ def fetch_raw_content(path: str, binary: bool = False):
     return None
 
 def extract_reference_interface_pattern(content: Optional[str]) -> Optional[str]:
-    """Extracts existing interface naming pattern from an official YAML snippet."""
     if not content:
         return None
     match = re.search(r"-\s+name:\s*['\"]?([^'\"\n\r]+)['\"]?", content)
@@ -259,6 +257,27 @@ def call_ai(prompt: str, selected_provider: str) -> str:
         logger.error(f"Error from {selected_provider}: {str(e)}")
         st.error(f"❌ Generation Failed ({selected_provider}): {str(e)}")
         st.stop()
+
+def classify_hardware_category(mfg: str, model: str, provider: str) -> str:
+    """Classifies whether an item is a device chassis, plug-in module, or rack."""
+    prompt = f"""
+Determine the physical hardware type of:
+Manufacturer: {mfg}
+Model: {model}
+
+Respond with ONLY ONE word from this list:
+- 'module' (if it is a plug-in PCIe/OCP NIC card, SFP/QSFP transceiver, power supply module, line card, or expansion board)
+- 'device' (if it is a standalone rackmount server chassis, network switch, router, firewall, or PDU)
+- 'rack' (if it is a server rack cabinet, frame, or enclosure)
+
+Output ONLY the category word in lowercase.
+"""
+    res = call_ai(prompt, provider).strip().lower()
+    if "module" in res:
+        return "module"
+    elif "rack" in res:
+        return "rack"
+    return "device"
 
 def generate_device_yaml(mfg: str, model: str, provider: str) -> str:
     prompt = f"""
@@ -358,7 +377,6 @@ Output ONLY valid, raw YAML.
 """
     result = call_ai(prompt, provider)
     
-    # If no custom reference pattern, guarantee {module}/PortX naming
     if not ref_pattern:
         result = re.sub(
             r"name:\s*['\"]?(?:[a-zA-Z0-9_\-]+/)?(?:Ethernet/\{module\}/|Port\s*|eth|mgmt|Ethernet)(\d+)['\"]?",
@@ -425,6 +443,11 @@ with t1:
 
         selected_dev_choice = None
         if d_mfg and d_model:
+            # Check if user entered a module under Device Types
+            cross_mods = search_catalog_similar(catalog["module_types"], d_mfg, d_model)
+            if cross_mods:
+                st.warning(f"⚠️ **Form Factor Notice:** `{d_model}` appears to be a **Module/NIC card**, not a standalone Device Chassis! You may want to check the **🧩 Module Types** tab.")
+
             similar_devs = search_catalog_similar(catalog["device_types"], d_mfg, d_model)
             options = ["✨ Generate Fresh with AI (Auto-Researched)"] + similar_devs
             
@@ -437,39 +460,52 @@ with t1:
                     key="dev_select_box"
                 )
             else:
-                st.warning("No exact match found in library. Click below to generate fresh with AI.")
+                st.warning("No exact device match found in library. Click below to generate fresh with AI.")
                 selected_dev_choice = "✨ Generate Fresh with AI (Auto-Researched)"
 
         d_search = st.button("Load / Generate Device Type", type="primary", key="btn_dev")
 
     if d_search and d_mfg and d_model and selected_dev_choice:
-        with st.spinner("Processing..."):
+        with st.spinner("Classifying & Processing..."):
             if selected_dev_choice.startswith("✨"):
                 if not active_provider:
                     st.error("Configure an AI API key in `.env` to enable AI generation.")
                     st.stop()
-                content = generate_device_yaml(d_mfg, d_model, active_provider)
-                src = f"🤖 AI Generated ({active_provider})"
+                
+                # Check hardware classification to prevent generating chassis specs on plug-in cards
+                detected_cat = classify_hardware_category(d_mfg, d_model, active_provider)
+                if detected_cat == "module":
+                    st.warning(f"ℹ️ AI detected that `{d_model}` is a plug-in **Module/Adapter Card**. Routing output to Module Type standard...")
+                    content = generate_module_yaml(d_mfg, d_model, d_model, active_provider, ref_pattern=None)
+                    src = f"🤖 AI Generated (Auto-Classified as Module via {active_provider})"
+                else:
+                    content = generate_device_yaml(d_mfg, d_model, active_provider)
+                    src = f"🤖 AI Generated ({active_provider})"
             else:
                 content = fetch_raw_content(selected_dev_choice, binary=False)
                 src = f"✅ Official Repository (`{selected_dev_choice}`)"
         with col2:
             st.markdown(f"**Source:** {src}")
             st.code(content, language="yaml", line_numbers=True)
-            st.download_button("📥 Download Device YAML", content, f"{d_mfg}_{d_model}.yaml", "text/yaml")
+            st.download_button("📥 Download YAML", content, f"{d_mfg}_{d_model}.yaml", "text/yaml")
 
 # --- Tab 2: Module Types ---
 with t2:
     col1, col2 = st.columns([1, 1])
     with col1:
         m_mfg_raw = st.text_input("Manufacturer", placeholder="e.g., Broadcom, Mellanox, Dell", key="m_mfg")
-        m_model = st.text_input("Module Name / Part #", placeholder="e.g., ConnectX-4 Lx dual-port, BCM57416", key="m_mod")
+        m_model = st.text_input("Module Name / Part #", placeholder="e.g., ConnectX-4, BCM57416", key="m_mod")
         m_mfg = get_canonical_manufacturer(m_mfg_raw, catalog["manufacturers"]) if m_mfg_raw else ""
 
         selected_mod_choice = None
         discovered_pattern = None
 
         if m_mfg and m_model:
+            # Check if user entered a full device under Module Types
+            cross_devs = search_catalog_similar(catalog["device_types"], m_mfg, m_model)
+            if cross_devs:
+                st.warning(f"⚠️ **Form Factor Notice:** `{m_model}` appears to be a standalone **Device Chassis/Switch**, not a plug-in module! Check the **🖥️ Device Types** tab.")
+
             similar_mods = search_catalog_similar(catalog["module_types"], m_mfg, m_model)
             options = ["✨ Generate Fresh with AI (Auto-Researched)"] + similar_mods
             
@@ -481,7 +517,6 @@ with t2:
                     index=1 if len(similar_mods) == 1 else 0,
                     key="mod_select_box"
                 )
-                # Sample pattern from the first match
                 top_sample = fetch_raw_content(similar_mods[0], binary=False)
                 discovered_pattern = extract_reference_interface_pattern(top_sample)
             else:
@@ -583,7 +618,7 @@ with t5:
     st.write("Upload an Excel file with `Category` (`device`, `module`, or `rack`), `Manufacturer`, and `Model`.")
     sample_df = pd.DataFrame([
         {"Category": "device", "Manufacturer": "Cisco", "Model": "C9300-48P"},
-        {"Category": "module", "Manufacturer": "Broadcom Corporation", "Model": "BCM57416"},
+        {"Category": "module", "Manufacturer": "Mellanox", "Model": "ConnectX-4"},
         {"Category": "rack", "Manufacturer": "APC", "Model": "NetShelter SX 42U"}
     ])
     st.download_button("📄 Download Sample Template (Excel)", sample_df.to_csv(index=False).encode('utf-8'), "template.csv", "text/csv")
@@ -604,13 +639,19 @@ with t5:
 
             with zipfile.ZipFile(zip_buf, "w") as zf:
                 for idx, row in df.iterrows():
-                    cat = str(row.get("Category", "device")).lower().strip()
+                    cat_input = str(row.get("Category", "auto")).lower().strip()
                     mfg_raw = str(row.get("Manufacturer", "")).strip()
                     model = str(row.get("Model", "")).strip()
                     if not mfg_raw or not model or mfg_raw == "nan":
                         continue
 
                     mfg = get_canonical_manufacturer(mfg_raw, catalog["manufacturers"])
+
+                    # If category is 'auto' or missing, classify via AI
+                    if cat_input not in ["device", "module", "rack"]:
+                        cat = classify_hardware_category(mfg, model, active_provider)
+                    else:
+                        cat = cat_input
 
                     if cat == "module":
                         f_list, gen_fn, prefix = catalog["module_types"], generate_module_yaml, "module-types"
