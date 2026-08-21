@@ -78,25 +78,28 @@ def get_repo_catalog() -> Dict[str, List[str]]:
         st.error(f"Error fetching catalog from GitHub: {e}")
     return catalog
 
-def search_catalog(file_list: List[str], manufacturer: str, query: str) -> Optional[str]:
+def search_catalog_all(file_list: List[str], manufacturer: str, query: str) -> List[str]:
     c_query = re.sub(r"[^a-zA-Z0-9]", "", query).lower()
     c_mfg = re.sub(r"[^a-zA-Z0-9]", "", manufacturer).lower()
+    results = []
 
-    # Priority 1: Search in matching manufacturer directory
+    # Priority 1: Match in manufacturer folder
     for path in file_list:
         parts = path.split("/")
         if len(parts) >= 3:
             r_mfg = re.sub(r"[^a-zA-Z0-9]", "", parts[1]).lower()
             r_file = re.sub(r"[^a-zA-Z0-9]", "", parts[-1]).lower()
             if (c_mfg in r_mfg or r_mfg in c_mfg) and c_query in r_file:
-                return path
+                results.append(path)
 
-    # Priority 2: Global fallback
+    # Priority 2: Global filename match
     for path in file_list:
-        r_file = re.sub(r"[^a-zA-Z0-9]", "", path.split("/")[-1]).lower()
-        if c_query in r_file:
-            return path
-    return None
+        if path not in results:
+            r_file = re.sub(r"[^a-zA-Z0-9]", "", path.split("/")[-1]).lower()
+            if c_query in r_file:
+                results.append(path)
+
+    return results
 
 def fetch_raw_content(path: str, binary: bool = False):
     raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{BRANCH}/{path}"
@@ -240,20 +243,29 @@ Manufacturer: {mfg}
 Model: {model}
 Part Number: {part_num}
 
-Schema Rules (Strict NetBox Module-Type Standard):
+CRITICAL SCHEMA RULES (Strict NetBox Module-Type Standard):
 - First line MUST be '---'
 - Required Keys: manufacturer, model, part_number (if unknown, duplicate model into part_number)
 - DO NOT include 'u_height' or 'is_full_depth' (these are device-type keys only).
-- Interfaces / Ports naming convention:
-    - All interface names MUST start with '{{module}}/' without spaces.
-    - Example: name: '{{module}}/Port1', name: '{{module}}/Port2'
-    - Use proper NetBox types (e.g., 10gbase-t, 10gbase-x-sfpp, 25gbase-x-sfp28, 100gbase-x-qsfp28).
+- Interfaces / Ports naming rule (STRICT LITERAL):
+    - You MUST use the literal string prefix '{{module}}/' on every port name.
+    - DO NOT replace '{{module}}' with the model name, slug, or manufacturer.
+    - Example:
+      interfaces:
+        - name: '{{module}}/Port1'
+          type: 10gbase-t
+        - name: '{{module}}/Port2'
+          type: 10gbase-t
 - Console ports / Power outlets (if any):
-    - Must also use '{{module}}/' prefix (e.g., '{{module}}/Console').
+    - Must also use literal '{{module}}/' prefix (e.g., '{{module}}/Console').
 
 Output ONLY raw YAML.
 """
-    return call_ai(prompt, provider)
+    result = call_ai(prompt, provider)
+    # Post-process safeguard to normalize any model-substituted interface names back to {module}/Port
+    result = re.sub(r"name:\s*['\"]?(?:[a-zA-Z0-9_\-]+/)?(Port\s*\d+|eth\d+|mgmt\d+|GigabitEthernet[0-9/]+|TenGigabitEthernet[0-9/]+)['\"]?", r"name: '{module}/\1'", result)
+    result = re.sub(r"name:\s*'{module}/\{module\}/", "name: '{module}/", result)
+    return result
 
 def generate_rack_yaml(mfg: str, model: str, provider: str) -> str:
     prompt = f"""
@@ -310,47 +322,73 @@ with t1:
         d_model = st.text_input("Device Model", placeholder="e.g., NX-TDT-4NL3-G6, PowerEdge R750", key="d_mod")
         d_search = st.button("Find / Generate Device Type", type="primary", key="btn_dev")
 
-    if d_search and d_mfg and d_model:
-        with st.spinner("Processing..."):
-            matched = search_catalog(catalog["device_types"], d_mfg, d_model)
-            if matched:
-                content = fetch_raw_content(matched, binary=False)
-                src = f"✅ Official Repository (`{matched}`)"
-            else:
-                if not active_provider:
-                    st.error("Model not in official repo. Add an API key (GROQ_API_KEY, GEMINI_API_KEY, etc.) to enable AI auto-generation.")
-                    st.stop()
-                content = generate_device_yaml(d_mfg, d_model, active_provider)
-                src = f"🤖 AI Generated ({active_provider})"
-        with col2:
-            st.markdown(f"**Source:** {src}")
-            st.code(content, language="yaml", line_numbers=True)
-            st.download_button("📥 Download Device YAML", content, f"{d_mfg}_{d_model}.yaml", "text/yaml")
+    if d_mfg and d_model:
+        matches = search_catalog_all(catalog["device_types"], d_mfg, d_model)
+        selected_file = None
+        
+        with col1:
+            if len(matches) > 1:
+                st.info(f"🔍 Found {len(matches)} matching definitions in Official Library:")
+                options = matches + ["✨ Generate Fresh with AI"]
+                chosen = st.selectbox("Select exact definition or generate with AI:", options, key="dev_select_box")
+                if chosen != "✨ Generate Fresh with AI":
+                    selected_file = chosen
+            elif len(matches) == 1:
+                selected_file = matches[0]
+
+        if d_search or selected_file:
+            with st.spinner("Processing..."):
+                if selected_file:
+                    content = fetch_raw_content(selected_file, binary=False)
+                    src = f"✅ Official Repository (`{selected_file}`)"
+                else:
+                    if not active_provider:
+                        st.error("Model not in official repo. Add an API key (GROQ_API_KEY, GEMINI_API_KEY, etc.) to enable AI auto-generation.")
+                        st.stop()
+                    content = generate_device_yaml(d_mfg, d_model, active_provider)
+                    src = f"🤖 AI Generated ({active_provider})"
+            with col2:
+                st.markdown(f"**Source:** {src}")
+                st.code(content, language="yaml", line_numbers=True)
+                st.download_button("📥 Download Device YAML", content, f"{d_mfg}_{d_model}.yaml", "text/yaml")
 
 # --- Tab 2: Module Types ---
 with t2:
     col1, col2 = st.columns([1, 1])
     with col1:
         m_mfg = st.text_input("Manufacturer", placeholder="e.g., Broadcom, Intel, Dell", key="m_mfg")
-        m_model = st.text_input("Module Name / Part #", placeholder="e.g., BCM57416, C9300-NM-8X", key="m_mod")
+        m_model = st.text_input("Module Name / Part #", placeholder="e.g., 57416 Dual Port, C9300-NM-8X", key="m_mod")
         m_search = st.button("Find / Generate Module Type", type="primary", key="btn_mod")
 
-    if m_search and m_mfg and m_model:
-        with st.spinner("Processing..."):
-            matched = search_catalog(catalog["module_types"], m_mfg, m_model)
-            if matched:
-                content = fetch_raw_content(matched, binary=False)
-                src = f"✅ Official Repository (`{matched}`)"
-            else:
-                if not active_provider:
-                    st.error("Module not in official repo. Configure an API key to enable AI generation.")
-                    st.stop()
-                content = generate_module_yaml(m_mfg, m_model, m_model, active_provider)
-                src = f"🤖 AI Generated ({active_provider})"
-        with col2:
-            st.markdown(f"**Source:** {src}")
-            st.code(content, language="yaml", line_numbers=True)
-            st.download_button("📥 Download Module YAML", content, f"module_{m_mfg}_{m_model}.yaml", "text/yaml")
+    if m_mfg and m_model:
+        matches_mod = search_catalog_all(catalog["module_types"], m_mfg, m_model)
+        selected_mod_file = None
+        
+        with col1:
+            if len(matches_mod) > 1:
+                st.info(f"🔍 Found {len(matches_mod)} matching modules in Official Library:")
+                options = matches_mod + ["✨ Generate Fresh with AI"]
+                chosen_mod = st.selectbox("Select exact module or generate with AI:", options, key="mod_select_box")
+                if chosen_mod != "✨ Generate Fresh with AI":
+                    selected_mod_file = chosen_mod
+            elif len(matches_mod) == 1:
+                selected_mod_file = matches_mod[0]
+
+        if m_search or selected_mod_file:
+            with st.spinner("Processing..."):
+                if selected_mod_file:
+                    content = fetch_raw_content(selected_mod_file, binary=False)
+                    src = f"✅ Official Repository (`{selected_mod_file}`)"
+                else:
+                    if not active_provider:
+                        st.error("Module not in official repo. Configure an API key to enable AI generation.")
+                        st.stop()
+                    content = generate_module_yaml(m_mfg, m_model, m_model, active_provider)
+                    src = f"🤖 AI Generated ({active_provider})"
+            with col2:
+                st.markdown(f"**Source:** {src}")
+                st.code(content, language="yaml", line_numbers=True)
+                st.download_button("📥 Download Module YAML", content, f"module_{m_mfg}_{m_model}.yaml", "text/yaml")
 
 # --- Tab 3: Rack Types ---
 with t3:
@@ -360,22 +398,35 @@ with t3:
         r_model = st.text_input("Rack Model", placeholder="e.g., NetShelter SX 42U", key="r_mod")
         r_search = st.button("Find / Generate Rack Type", type="primary", key="btn_rack")
 
-    if r_search and r_mfg and r_model:
-        with st.spinner("Processing..."):
-            matched = search_catalog(catalog["rack_types"], r_mfg, r_model)
-            if matched:
-                content = fetch_raw_content(matched, binary=False)
-                src = f"✅ Official Repository (`{matched}`)"
-            else:
-                if not active_provider:
-                    st.error("Rack not in official repo. Configure an API key to enable AI generation.")
-                    st.stop()
-                content = generate_rack_yaml(r_mfg, r_model, active_provider)
-                src = f"🤖 AI Generated ({active_provider})"
-        with col2:
-            st.markdown(f"**Source:** {src}")
-            st.code(content, language="yaml", line_numbers=True)
-            st.download_button("📥 Download Rack YAML", content, f"rack_{r_mfg}_{r_model}.yaml", "text/yaml")
+    if r_mfg and r_model:
+        matches_rack = search_catalog_all(catalog["rack_types"], r_mfg, r_model)
+        selected_rack_file = None
+        
+        with col1:
+            if len(matches_rack) > 1:
+                st.info(f"🔍 Found {len(matches_rack)} matching racks in Official Library:")
+                options = matches_rack + ["✨ Generate Fresh with AI"]
+                chosen_rack = st.selectbox("Select exact rack or generate with AI:", options, key="rack_select_box")
+                if chosen_rack != "✨ Generate Fresh with AI":
+                    selected_rack_file = chosen_rack
+            elif len(matches_rack) == 1:
+                selected_rack_file = matches_rack[0]
+
+        if r_search or selected_rack_file:
+            with st.spinner("Processing..."):
+                if selected_rack_file:
+                    content = fetch_raw_content(selected_rack_file, binary=False)
+                    src = f"✅ Official Repository (`{selected_rack_file}`)"
+                else:
+                    if not active_provider:
+                        st.error("Rack not in official repo. Configure an API key to enable AI generation.")
+                        st.stop()
+                    content = generate_rack_yaml(r_mfg, r_model, active_provider)
+                    src = f"🤖 AI Generated ({active_provider})"
+            with col2:
+                st.markdown(f"**Source:** {src}")
+                st.code(content, language="yaml", line_numbers=True)
+                st.download_button("📥 Download Rack YAML", content, f"rack_{r_mfg}_{r_model}.yaml", "text/yaml")
 
 # --- Tab 4: Visual Images (Elevation & Module) ---
 with t4:
@@ -452,9 +503,9 @@ with t5:
                     else:
                         f_list, gen_fn, prefix = catalog["device_types"], generate_device_yaml, "device-types"
 
-                    matched = search_catalog(f_list, mfg, model)
-                    if matched:
-                        content = fetch_raw_content(matched, binary=False)
+                    matches = search_catalog_all(f_list, mfg, model)
+                    if matches:
+                        content = fetch_raw_content(matches[0], binary=False)
                         src = "Official Repository"
                     else:
                         if cat == "module":
