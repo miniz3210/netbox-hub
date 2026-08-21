@@ -1,5 +1,5 @@
 services:
-  netbox-yaml-hub:
+  netbox-hub:
     build: .
     container_name: netbox-hub
     restart: unless-stopped
