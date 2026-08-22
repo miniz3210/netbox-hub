@@ -12,6 +12,8 @@ import streamlit as st
 import pandas as pd
 from typing import Optional, Dict, List, Tuple
 
+APP_VERSION = "v1.4.0"
+
 # --- Logging Configuration ---
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger("netbox-hub")
@@ -551,6 +553,32 @@ with st.sidebar:
     else:
         active_provider = None
         st.warning("No AI API keys configured. Only official GitHub library lookups are enabled.")
+
+    # Permanent Bottom-Left Corner Version Badge
+    st.markdown(
+        f"""
+        <style>
+            .version-footer {{
+                position: fixed;
+                bottom: 15px;
+                left: 15px;
+                background-color: rgba(30, 41, 59, 0.85);
+                color: #94a3b8;
+                padding: 4px 10px;
+                border-radius: 6px;
+                font-size: 0.80rem;
+                font-family: monospace;
+                border: 1px solid rgba(71, 85, 105, 0.4);
+                z-index: 999;
+                letter-spacing: 0.5px;
+            }}
+        </style>
+        <div class="version-footer">
+            ⚡ NetBox Hub {APP_VERSION}
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
 t1, t2, t3, t4, t5, t6, t7 = st.tabs([
     "🖥️ Device Types", 
