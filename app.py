@@ -114,24 +114,32 @@ def save_naming_rules(rules: Dict[str, str]):
     with open(RULES_FILE, "w", encoding="utf-8") as f:
         json.dump(rules, f, indent=2, ensure_ascii=False)
 
+def export_rules_as_prompt(rules: Dict[str, str]) -> str:
+    return f"""# INFRASTRUCTURE & NAMING CONVENTIONS STANDARD
+
+1. Network Devices:
+- Switch Hostname: {rules.get('branch_switch', '')}
+- Wireless AP Hostname: {rules.get('branch_ap', '')}
+- Firewall / Security Hostname: {rules.get('branch_security', '')}
+- Switch Uplink Description (Local): {rules.get('switch_uplink_desc_local', '')}
+- Switch Uplink Description (Remote): {rules.get('switch_uplink_desc_remote', '')}
+- Switch Access Port Description: {rules.get('switch_access_desc', '')}
+- Firewall Interface Description: {rules.get('firewall_interface', '')}
+
+2. Hypervisors & Virtual Machines:
+- ESXi Hostname: {rules.get('esxi_host', '')}
+- VM Hostname: {rules.get('vm_host', '')}
+- ESXi Physical Uplink Description: {rules.get('esxi_uplink', '')}
+- ESXi Port Group Description: {rules.get('esxi_portgroup', '')}
+- ESXi VMkernel Description: {rules.get('esxi_vmkernel', '')}
+
+3. NetBox Hardware YAML Schema:
+- {rules.get('netbox_server_yaml', '')}
+"""
+
 def get_active_naming_context() -> str:
     rules = load_naming_rules()
-    return f"""
-INFRASTRUCTURE & NAMING CONVENTIONS CONTEXT:
-- Switch Hostname Standard: {rules.get('branch_switch')}
-- Wireless AP Hostname: {rules.get('branch_ap')}
-- Firewall / Security Hostname: {rules.get('branch_security')}
-- Switch Port Uplink Description (Local): {rules.get('switch_uplink_desc_local')}
-- Switch Port Uplink Description (Remote): {rules.get('switch_uplink_desc_remote')}
-- Switch Port Access Description: {rules.get('switch_access_desc')}
-- Firewall Interface Description: {rules.get('firewall_interface')}
-- ESXi Hypervisor Hostname: {rules.get('esxi_host')}
-- Virtual Machine Hostname: {rules.get('vm_host')}
-- ESXi Physical Uplink Description: {rules.get('esxi_uplink')}
-- ESXi Port Group Description: {rules.get('esxi_portgroup')}
-- ESXi VMkernel Description: {rules.get('esxi_vmkernel')}
-- NetBox Server Schema: {rules.get('netbox_server_yaml')}
-"""
+    return export_rules_as_prompt(rules)
 
 # --- 1. Global GitHub Asset Indexer ---
 @st.cache_data(ttl=3600, show_spinner="Indexing all repository asset types from GitHub...")
@@ -384,6 +392,34 @@ def call_ai(prompt: str, selected_provider: str) -> str:
         logger.error(f"Error from {selected_provider}: {str(e)}")
         st.error(f"❌ Generation Failed ({selected_provider}): {str(e)}")
         st.stop()
+
+def parse_prompt_to_rules(prompt_text: str, provider: str) -> Dict[str, str]:
+    extract_prompt = f"""
+Analyze the following natural language infrastructure naming standards prompt and convert it into a JSON object matching this schema:
+{{
+  "branch_switch": "...",
+  "branch_ap": "...",
+  "branch_security": "...",
+  "switch_uplink_desc_local": "...",
+  "switch_uplink_desc_remote": "...",
+  "switch_access_desc": "...",
+  "firewall_interface": "...",
+  "esxi_host": "...",
+  "vm_host": "...",
+  "esxi_uplink": "...",
+  "esxi_portgroup": "...",
+  "esxi_vmkernel": "...",
+  "netbox_server_yaml": "..."
+}}
+
+Input Prompt:
+{prompt_text}
+
+Output ONLY the raw JSON block without markdown fences or conversational text.
+"""
+    raw_res = call_ai(extract_prompt, provider)
+    clean_json = re.sub(r"^```(?:json)?|```$", "", raw_res.strip(), flags=re.IGNORECASE).strip()
+    return json.loads(clean_json)
 
 def generate_device_yaml(mfg: str, model: str, provider: str) -> str:
     prompt = f"""
@@ -911,37 +947,74 @@ with t6:
             vsw_vmk = st.text_input("vSwitch Name", value="vSwitch0", key="vsw3")
             st.code(f"{vmk_purp} ({vsw_vmk})", language="text")
 
-# --- Tab 7: Naming Standards Context for AI ---
+# --- Tab 7: Naming Standards Context (Prompt-Driven) ---
 with t7:
-    st.subheader("📖 Infrastructure Naming Standards Context (AI Ingestion Engine)")
-    st.info("💡 All rules defined below are actively injected into the AI system prompt to guide schema and name generation.")
+    st.subheader("📖 Infrastructure Naming Standards (Natural Language Prompt Engine)")
+    st.info("💡 You can export, modify, or import complete infrastructure naming guidelines directly in human-readable prompt format.")
 
     current_rules = load_naming_rules()
-    
-    col_rule_1, col_rule_2 = st.columns(2)
-    with col_rule_1:
-        st.markdown("#### 🏢 Network Device Naming Standards")
-        r_sw = st.text_input("Switch Pattern", value=current_rules.get("branch_switch", ""))
-        r_ap = st.text_input("Wireless AP Pattern", value=current_rules.get("branch_ap", ""))
-        r_sec = st.text_input("Security / Firewall Pattern", value=current_rules.get("branch_security", ""))
-        r_up_loc = st.text_input("Switch Uplink (Local)", value=current_rules.get("switch_uplink_desc_local", ""))
-        r_up_rem = st.text_input("Switch Uplink (Remote)", value=current_rules.get("switch_uplink_desc_remote", ""))
-        r_acc = st.text_input("Switch Access Port Description", value=current_rules.get("switch_access_desc", ""))
-        r_fw_if = st.text_input("Firewall Interface Description", value=current_rules.get("firewall_interface", ""))
+    prompt_representation = export_rules_as_prompt(current_rules)
 
-    with col_rule_2:
-        st.markdown("#### 💻 Hypervisors & Virtual Machine Standards")
-        r_esx = st.text_input("ESXi Hostname Pattern", value=current_rules.get("esxi_host", ""))
-        r_vm = st.text_input("VM Hostname Pattern", value=current_rules.get("vm_host", ""))
-        r_esx_up = st.text_input("ESXi Physical Uplink Description", value=current_rules.get("esxi_uplink", ""))
-        r_esx_pg = st.text_input("ESXi Port Group Description", value=current_rules.get("esxi_portgroup", ""))
-        r_esx_vmk = st.text_input("ESXi VMkernel Description", value=current_rules.get("esxi_vmkernel", ""))
-        r_srv_yaml = st.text_area("NetBox Server YAML Requirements", value=current_rules.get("netbox_server_yaml", ""), height=100)
+    p_col1, p_col2 = st.columns([1, 1])
 
-    btn_col1, btn_col2 = st.columns([1, 4])
-    with btn_col1:
-        if st.button("💾 Save Naming Standards", type="primary", key="save_rules_btn"):
-            updated_rules = {
+    with p_col1:
+        st.markdown("#### 📝 Active Infrastructure Guidelines Prompt")
+        st.caption("This exact prompt text is actively injected into AI generation requests:")
+        st.text_area("Current System Prompt Context", value=prompt_representation, height=380, disabled=True)
+        
+        st.download_button(
+            "📥 Download Guidelines Prompt (.txt)",
+            prompt_representation,
+            "naming_standards_prompt.txt",
+            "text/plain"
+        )
+
+    with p_col2:
+        st.markdown("#### 📥 Import / Update from Prompt")
+        st.caption("Paste any updated natural language naming rules here. AI will extract and apply them:")
+        imported_prompt_text = st.text_area(
+            "Paste Updated Prompt Text", 
+            placeholder="e.g. Switch naming should be SW-<Site>-<Role><Seq>, VM naming is <site>vm<seq>...", 
+            height=260
+        )
+
+        if st.button("🔄 Parse & Apply Prompt to System Standards", type="primary"):
+            if not imported_prompt_text.strip():
+                st.warning("Please paste valid prompt text to parse.")
+            elif not active_provider:
+                st.error("Please configure an active AI provider to parse natural language prompts.")
+            else:
+                with st.spinner(f"Parsing prompt rules using {active_provider}..."):
+                    try:
+                        extracted_rules = parse_prompt_to_rules(imported_prompt_text, active_provider)
+                        save_naming_rules(extracted_rules)
+                        st.success("✅ Guidelines successfully parsed and saved into system memory!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to parse prompt: {str(e)}")
+
+    st.markdown("---")
+    with st.expander("🛠️ Advanced: Fine-Tune Individual Rule Fields Manually"):
+        col_rule_1, col_rule_2 = st.columns(2)
+        with col_rule_1:
+            r_sw = st.text_input("Switch Pattern", value=current_rules.get("branch_switch", ""))
+            r_ap = st.text_input("Wireless AP Pattern", value=current_rules.get("branch_ap", ""))
+            r_sec = st.text_input("Security / Firewall Pattern", value=current_rules.get("branch_security", ""))
+            r_up_loc = st.text_input("Switch Uplink (Local)", value=current_rules.get("switch_uplink_desc_local", ""))
+            r_up_rem = st.text_input("Switch Uplink (Remote)", value=current_rules.get("switch_uplink_desc_remote", ""))
+            r_acc = st.text_input("Switch Access Port Description", value=current_rules.get("switch_access_desc", ""))
+            r_fw_if = st.text_input("Firewall Interface Description", value=current_rules.get("firewall_interface", ""))
+
+        with col_rule_2:
+            r_esx = st.text_input("ESXi Hostname Pattern", value=current_rules.get("esxi_host", ""))
+            r_vm = st.text_input("VM Hostname Pattern", value=current_rules.get("vm_host", ""))
+            r_esx_up = st.text_input("ESXi Physical Uplink Description", value=current_rules.get("esxi_uplink", ""))
+            r_esx_pg = st.text_input("ESXi Port Group Description", value=current_rules.get("esxi_portgroup", ""))
+            r_esx_vmk = st.text_input("ESXi VMkernel Description", value=current_rules.get("esxi_vmkernel", ""))
+            r_srv_yaml = st.text_area("NetBox Server YAML Requirements", value=current_rules.get("netbox_server_yaml", ""), height=100)
+
+        if st.button("💾 Save Field Updates", key="save_manual_fields_btn"):
+            updated = {
                 "branch_switch": r_sw,
                 "branch_ap": r_ap,
                 "branch_security": r_sec,
@@ -956,12 +1029,6 @@ with t7:
                 "esxi_vmkernel": r_esx_vmk,
                 "netbox_server_yaml": r_srv_yaml
             }
-            save_naming_rules(updated_rules)
-            st.success("✅ Standards saved successfully to persistent memory (`naming_rules.json`)!")
-    with btn_col2:
-        st.download_button(
-            "📥 Export Context JSON",
-            json.dumps(current_rules, indent=2, ensure_ascii=False),
-            "naming_rules.json",
-            "application/json"
-        )
+            save_naming_rules(updated)
+            st.success("✅ Standards updated successfully!")
+            st.rerun()
