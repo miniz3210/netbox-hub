@@ -12,7 +12,7 @@ import streamlit as st
 import pandas as pd
 from typing import Optional, Dict, List, Tuple
 
-APP_VERSION = "v1.4.0"
+APP_VERSION = "v1.5.0"
 
 # --- Logging Configuration ---
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -59,6 +59,23 @@ if OLLAMA_URL:
 if GEMINI_KEY:
     AVAILABLE_PROVIDERS.append(f"Google Gemini ({GEMINI_MODEL})")
 
+# --- Smart Site Code Generator ---
+def compute_suggested_site_code(location_name: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z\s]", "", location_name).strip()
+    if not cleaned:
+        return "SITE"
+    words = cleaned.split()
+    if len(words) >= 2:
+        # e.g., Rowland Flat -> ROFL
+        part1 = words[0][:2]
+        part2 = words[1][:2]
+        return (part1 + part2).upper()
+    elif len(words) == 1:
+        # e.g., Bristol -> BRIS, Madrid -> MAD
+        w = words[0]
+        return w[:4].upper() if len(w) >= 4 else w.upper()
+    return "SITE"
+
 # --- Interface Name Normalizer ---
 def normalize_port_shortname(port_name: str) -> str:
     p = port_name.strip()
@@ -84,14 +101,14 @@ def normalize_port_shortname(port_name: str) -> str:
 
 # --- Persistent Naming Rules Store ---
 DEFAULT_RULES = {
-    "branch_switch": "SW<Country><Site><Seq>-<StackID> (e.g. SWUKBRIS01-0, SWUKWEY01-0)",
-    "branch_ap": "WAP<Country><Site><Seq> (e.g. WAPUKBRIS01, WAPUKWEY01)",
-    "branch_security": "ION<Country><Site><Seq> or <SiteCode>-FW<NodeID> (e.g. IONUKBRIS01, MAD-FW01)",
+    "branch_switch": "SW<Country><Site><Zone/Role><Seq>-<StackID> (e.g. SWAUROFLBOT01-0, SWUKBRIS01-0)",
+    "branch_ap": "WAP<Country><Site><Seq> (e.g. WAPUKBRIS01, WAPAUSARF01)",
+    "branch_security": "FW<Country><Site><Vendor/Role><Seq> / ION<Country><Site><Seq> (e.g. FWAUBERPA01, FWESMADPA01, IONUKBRIS01)",
     "switch_uplink_desc_local": "to <Remote_Device>:<Remote_Port_Short> (<Role>)",
     "switch_uplink_desc_remote": "to <Local_Device>:<Local_Port_Short> (<Role>)",
     "switch_access_desc": "<VLAN_Name> - <Host/Port>",
     "firewall_interface": "<Role/Zone>_<VLAN_ID>",
-    "esxi_host": "<site_prefix>esx<number>.<domain> (e.g. brisesx01.corp.local)",
+    "esxi_host": "<site_prefix>esx<number>.<domain> (e.g. roflesx01.corp.local, brisesx01.corp.local)",
     "vm_host": "<site_prefix><role><seq> (Roles: cvi=Core/Virt, afs=App/File, sani=Storage, vlab=Test)",
     "esxi_uplink": "<vmnicX> - <vSwitch> <Purpose> Active Uplink / Standby Uplink",
     "esxi_portgroup": "<vSwitch> (<vmnicX> Active / <vmnicY> Standby)",
@@ -554,7 +571,6 @@ with st.sidebar:
         active_provider = None
         st.warning("No AI API keys configured. Only official GitHub library lookups are enabled.")
 
-    # Permanent Bottom-Left Corner Version Badge
     st.markdown(
         f"""
         <style>
@@ -864,67 +880,87 @@ with t6:
 
     # 1. Network Devices
     if "1. Network" in naming_cat:
+        # Location Auto-Site Code Assistant
+        st.markdown("##### 📍 Location & Site Code Assistant")
+        loc_col1, loc_col2 = st.columns([2, 1])
+        with loc_col1:
+            input_location = st.text_input("Enter Location / City / Facility Name", value="Rowland Flat", key="loc_input_help")
+        with loc_col2:
+            auto_code = compute_suggested_site_code(input_location)
+            st.info(f"Suggested Site Code: **`{auto_code}`**")
+
+        st.markdown("---")
         col_a, col_b, col_c = st.columns(3)
         with col_a:
-            st.markdown("**Switch Hostname (Bristol & Standard)**")
-            mode = st.radio("Naming Format", ["Bristol Standard (SW<Country><Site><Seq>-<StackID>)", "Classic Standard (<Site>-<Role><Seq>)"], index=0)
+            st.markdown("**Switch Hostname Generator**")
+            dev_sw_type = st.selectbox("Switch Type", ["SW (Standalone Switch)", "VS (Virtual Chassis / Stack)"])
+            prefix_sw = "VS" if "VS" in dev_sw_type else "SW"
             
-            if "Bristol" in mode:
-                s_ctry = st.text_input("Country Code", value="UK", key="sw_c_b")
-                s_site = st.text_input("Site Code", value="BRIS", key="sw_s_b")
-                s_seq = st.text_input("Sequence", value="01", key="sw_sq_b")
-                s_stack = st.text_input("Stack Member", value="0", key="sw_st_b")
-                current_sw_name = f"SW{s_ctry.upper()}{s_site.upper()}{s_seq}-{s_stack}" if s_stack else f"SW{s_ctry.upper()}{s_site.upper()}{s_seq}"
-            else:
-                site_code = st.text_input("Site Code", value="MAD", key="sw_site")
-                sw_role = st.text_input("Switch Role", value="SW-CORE", key="sw_role")
-                sw_seq = st.text_input("Rack / Seq", value="01", key="sw_seq")
-                current_sw_name = f"{site_code}-{sw_role.strip().upper()}{sw_seq}" if sw_seq else f"{site_code}-{sw_role.strip().upper()}"
+            s_ctry = st.text_input("Country Code (2-letter)", value="AU", key="sw_ctry_g")
+            s_site = st.text_input("Site Code (Modify if needed)", value=auto_code, key="sw_site_g")
+            s_zone = st.text_input("Building / Zone / Role", value="BOT", help="e.g. CORE, LCCORE, WH1, BOT, DRYGOODS")
+            s_seq = st.text_input("Sequence Number", value="01", key="sw_seq_g")
+            s_stack = st.text_input("Stack / Member ID (Optional)", value="0", key="sw_stk_g")
             
+            clean_zone = s_zone.strip().upper()
+            base_sw = f"{prefix_sw}{s_ctry.upper()}{s_site.upper()}{clean_zone}{s_seq}"
+            current_sw_name = f"{base_sw}-{s_stack}" if s_stack else base_sw
             st.code(f"Switch Hostname: {current_sw_name}", language="text")
 
             st.markdown("---")
-            st.markdown("**Switch Port Description (Dual-End Generator)**")
+            st.markdown("**Switch Port Description Formatter**")
             p_type = st.radio("Port Type", ["Uplink (Inter-Switch)", "Access (Host/Endpoint)"], horizontal=True)
             
             if "Uplink" in p_type:
                 l_port_raw = st.text_input("Local Port (Raw)", value="GigabitEthernet1/0/1")
-                r_dev = st.text_input("Remote Device Hostname", value="SWUKBRIS01-0")
+                r_dev = st.text_input("Remote Device Hostname", value="SWAUROFLCORE01-0")
                 r_port_raw = st.text_input("Remote Port (Raw)", value="TenGigabitEthernet1/0/48")
                 link_role = st.text_input("Link Purpose / Role", value="Core Uplink")
 
                 l_port_short = normalize_port_shortname(l_port_raw)
                 r_port_short = normalize_port_shortname(r_port_raw)
 
-                st.caption(f"Configured on Local Device (`{current_sw_name}`):")
+                st.caption(f"On Local Device (`{current_sw_name}`):")
                 st.code(f"to {r_dev}:{r_port_short} ({link_role})", language="text")
 
-                st.caption(f"Configured on Remote Device (`{r_dev}`):")
+                st.caption(f"On Remote Device (`{r_dev}`):")
                 st.code(f"to {current_sw_name}:{l_port_short} ({link_role})", language="text")
             else:
                 vlan_name = st.text_input("VLAN Name / Purpose", value="VLAN10_Prod_App")
-                host_port = st.text_input("Connected Host / Port", value="brisesx01:vmnic0")
+                host_port = st.text_input("Connected Host / Port", value="roflesx01:vmnic0")
                 st.code(f"{vlan_name} - {host_port}", language="text")
 
         with col_b:
-            st.markdown("**Wireless AP Naming (Bristol Pattern)**")
-            ap_ctry = st.text_input("Country Code", value="UK", key="ap_c")
-            ap_site = st.text_input("Site Code", value="BRIS", key="ap_s")
+            st.markdown("**Wireless AP Naming**")
+            ap_ctry = st.text_input("Country Code", value="AU", key="ap_c")
+            ap_site = st.text_input("Site Code", value=auto_code, key="ap_s")
             ap_seq = st.text_input("Sequence (2 digits)", value="01", key="ap_seq")
             st.code(f"AP Hostname: WAP{ap_ctry.upper()}{ap_site.upper()}{ap_seq}", language="text")
 
         with col_c:
             st.markdown("**Firewall & Security Appliances**")
-            fw_mode = st.radio("Firewall Style", ["ION Appliance (ION<Country><Site><Seq>)", "Classic Gateway (<Site>-FW<NodeID>)"], index=0)
-            if "ION" in fw_mode:
-                fw_ctry = st.text_input("Country Code", value="UK", key="fw_c")
-                fw_site = st.text_input("Site Code", value="BRIS", key="fw_s")
-                fw_seq = st.text_input("Sequence Number", value="01", key="fw_seq_ion")
-                st.code(f"Security Hostname: ION{fw_ctry.upper()}{fw_site.upper()}{fw_seq}", language="text")
+            fw_archetype = st.selectbox("Firewall Category", [
+                "Palo Alto / Fortinet Firewall (FW<Country><Site><Role><Seq>)",
+                "Prisma SD-WAN (ION<Country><Site><Seq>)",
+                "Virtual Appliance Panorama (VA<Country><Site>PANORAMA<Seq>)"
+            ])
+            
+            fw_ctry = st.text_input("Country Code", value="AU", key="fw_c_gen")
+            fw_site = st.text_input("Site Code", value=auto_code, key="fw_s_gen")
+            
+            if "Palo Alto" in fw_archetype:
+                fw_vendor_role = st.text_input("Vendor / Role Identifier", value="PA", key="fw_vrole")
+                fw_seq = st.text_input("Sequence Number", value="01", key="fw_seq_pa")
+                st.code(f"Firewall Hostname: FW{fw_ctry.upper()}{fw_site.upper()}{fw_vendor_role.upper()}{fw_seq}", language="text")
+            elif "Prisma" in fw_archetype:
+                fw_zone = st.text_input("Zone / Building (Optional)", value="", key="fw_ion_zone")
+                fw_seq = st.text_input("Sequence Number", value="01", key="fw_seq_ion2")
+                clean_ion = f"ION{fw_ctry.upper()}{fw_site.upper()}{fw_zone.upper()}{fw_seq}"
+                st.code(f"Security Hostname: {clean_ion}", language="text")
             else:
-                fw_site_cls = st.text_input("Site Code", value="MAD", key="fw_site_cls")
-                fw_node = st.text_input("Node ID / Cluster Member", value="01", key="fw_node_cls")
-                st.code(f"Firewall Hostname: {fw_site_cls}-FW{fw_node}", language="text")
+                va_role = st.text_input("Virtual Appliance Role", value="PANORAMA", key="va_r")
+                va_seq = st.text_input("Sequence Number", value="01", key="va_sq")
+                st.code(f"Appliance Hostname: VA{fw_ctry.upper()}{fw_site.upper()}{va_role.upper()}{va_seq}", language="text")
 
             st.markdown("---")
             st.markdown("**Firewall Interface Description**")
@@ -937,14 +973,14 @@ with t6:
         col_a, col_b = st.columns(2)
         with col_a:
             st.markdown("**ESXi Hypervisor Hostname**")
-            h_site = st.text_input("Site Prefix", value="bris", key="esx_site")
+            h_site = st.text_input("Site Prefix", value="rofl", key="esx_site")
             h_num = st.text_input("Host Number", value="01", key="esx_num")
             h_dom = st.text_input("Domain Name", value="corp.local", key="esx_dom")
             st.code(f"{h_site.lower()}esx{h_num}.{h_dom.lower()}", language="text")
 
         with col_b:
             st.markdown("**Virtual Machine (VM) Hostname**")
-            vm_site = st.text_input("Site Prefix", value="bris", key="vm_site")
+            vm_site = st.text_input("Site Prefix", value="rofl", key="vm_site")
             vm_role = st.text_input("Role Code (Manual Input)", value="cvi", help="Standard codes: cvi=Core/Virt, afs=App/File, sani=Storage, vlab=Test")
             vm_seq = st.text_input("Sequence Number", value="01", key="vm_seq")
             st.code(f"VM Name: {vm_site.lower()}{vm_role.strip().lower()}{vm_seq}", language="text")
@@ -1002,7 +1038,7 @@ with t7:
         st.caption("Paste any updated natural language naming rules here. AI will extract and apply them:")
         imported_prompt_text = st.text_area(
             "Paste Updated Prompt Text", 
-            placeholder="e.g. Switch naming should be SW-<Site>-<Role><Seq>, VM naming is <site>vm<seq>...", 
+            placeholder="e.g. Switch naming should be SW<Country><Site><Zone><Seq>, Firewalls are FW<Country><Site><Vendor><Seq>...", 
             height=260
         )
 
