@@ -2,6 +2,7 @@ import os
 import re
 import io
 import sys
+import json
 import fnmatch
 import difflib
 import logging
@@ -24,6 +25,7 @@ st.set_page_config(
 
 GITHUB_REPO = "netbox-community/devicetype-library"
 BRANCH = "master"
+RULES_FILE = "naming_rules.json"
 
 # --- Provider Keys & Dynamic Model Loading from .env ---
 GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip()
@@ -54,6 +56,57 @@ if OLLAMA_URL:
 
 if GEMINI_KEY:
     AVAILABLE_PROVIDERS.append(f"Google Gemini ({GEMINI_MODEL})")
+
+# --- Naming Rules Store & Helper ---
+DEFAULT_RULES = {
+    "branch_switch": "SW<Country><Site><Seq>-<StackID> (e.g. SWUKBRIS01-0, SWUKWEY01-0)",
+    "branch_ap": "WAP<Country><Site><Seq> (e.g. WAPUKBRIS01, WAPUKWEY01)",
+    "branch_security": "ION<Country><Site><Seq> or <SiteCode>-FW<NodeID> (e.g. IONUKBRIS01, MAD-FW01)",
+    "switch_uplink_desc": "<Remote_Device>:<Remote_Port> (<Role>)",
+    "switch_access_desc": "<VLAN_Name> - <Host/Port>",
+    "firewall_interface": "<Role/Zone>_<VLAN_ID>",
+    "esxi_host": "<site_prefix>esx<number>.<domain> (e.g. madesx01.corp.local)",
+    "vm_host": "<site_prefix><role><seq> (Roles: cvi=Core/Virt, afs=App/File, sani=Storage, vlab=Test)",
+    "esxi_uplink": "<vmnicX> - <vSwitch> <Purpose> Active Uplink / Standby Uplink",
+    "esxi_portgroup": "<vSwitch> (<vmnicX> Active / <vmnicY> Standby)",
+    "esxi_vmkernel": "<Purpose/Service> (<vSwitch>)",
+    "netbox_server_yaml": (
+        "console-ports: Serial (de-9); "
+        "module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; "
+        "interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)"
+    )
+}
+
+def load_naming_rules() -> Dict[str, str]:
+    if os.path.exists(RULES_FILE):
+        try:
+            with open(RULES_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return DEFAULT_RULES.copy()
+
+def save_naming_rules(rules: Dict[str, str]):
+    with open(RULES_FILE, "w", encoding="utf-8") as f:
+        json.dump(rules, f, indent=2, ensure_ascii=False)
+
+def get_active_naming_context() -> str:
+    rules = load_naming_rules()
+    return f"""
+INFRASTRUCTURE & NAMING CONVENTIONS CONTEXT:
+- Switch Hostname Standard: {rules.get('branch_switch')}
+- Wireless AP Hostname: {rules.get('branch_ap')}
+- Firewall / Security Hostname: {rules.get('branch_security')}
+- Switch Port Uplink Description: {rules.get('switch_uplink_desc')}
+- Switch Port Access Description: {rules.get('switch_access_desc')}
+- Firewall Interface Description: {rules.get('firewall_interface')}
+- ESXi Hypervisor Hostname: {rules.get('esxi_host')}
+- Virtual Machine Hostname: {rules.get('vm_host')}
+- ESXi Physical Uplink Description: {rules.get('esxi_uplink')}
+- ESXi Port Group Description: {rules.get('esxi_portgroup')}
+- ESXi VMkernel Description: {rules.get('esxi_vmkernel')}
+- NetBox Server Schema: {rules.get('netbox_server_yaml')}
+"""
 
 # --- 1. Global GitHub Asset Indexer ---
 @st.cache_data(ttl=3600, show_spinner="Indexing all repository asset types from GitHub...")
@@ -229,9 +282,11 @@ def extract_model_from_label(label: str) -> str:
     return match.group(1).strip() if match else label
 
 def call_ai(prompt: str, selected_provider: str) -> str:
+    naming_context = get_active_naming_context()
     system_msg = (
-        "You are a strict NetBox hardware YAML specification generator. "
+        "You are a strict NetBox hardware YAML specification generator and infrastructure architect. "
         "You MUST verify hardware specifications directly from official manufacturer datasheets. "
+        f"Strictly align with these infrastructure conventions:\n{naming_context}\n"
         "Output ONLY valid, raw YAML starting with '---'. Use exact kebab-case hyphenated keys (never underscores). "
         "Do NOT output explanation, reasoning, or text outside the YAML block. "
         "Do NOT invent comments or URLs; omit 'comments' key entirely if no verified official datasheet URL is available."
@@ -307,7 +362,7 @@ def call_ai(prompt: str, selected_provider: str) -> str:
 
 def generate_device_yaml(mfg: str, model: str, provider: str) -> str:
     prompt = f"""
-Search official datasheets and generate a complete NetBox Device-Type YAML conforming to user infrastructure standards.
+Search official datasheets and generate a complete NetBox Device-Type YAML conforming to infrastructure rules.
 Manufacturer: {mfg}
 Model: {model}
 
@@ -423,7 +478,7 @@ def generate_placeholder_svg(mfg: str, model: str, u_height: int = 1, view: str 
 
 # --- 3. UI Layout ---
 st.title("⚡ NetBox Universal Library Hub")
-st.caption("Device Types | Module Types | Rack Types | Images | Excel Engine | Infrastructure Naming")
+st.caption("Device Types | Module Types | Rack Types | Images | Excel Engine | Naming Standards")
 
 catalog = get_repo_catalog()
 
@@ -436,13 +491,14 @@ with st.sidebar:
         active_provider = None
         st.warning("No AI API keys configured. Only official GitHub library lookups are enabled.")
 
-t1, t2, t3, t4, t5, t6 = st.tabs([
+t1, t2, t3, t4, t5, t6, t7 = st.tabs([
     "🖥️ Device Types", 
     "🧩 Module Types", 
     "🗄️ Rack Types", 
     "🖼️ Images (Elevation & Module)", 
     "📊 Batch Excel Engine",
-    "🏷️ Naming Generator"
+    "🏷️ Naming Generator",
+    "📖 Naming Standards Context"
 ])
 
 # --- Tab 1: Device Types ---
@@ -819,3 +875,56 @@ with t6:
             vmk_purp = st.text_input("Purpose / Service", value="Management Network")
             vsw_vmk = st.text_input("vSwitch Name", value="vSwitch0", key="vsw3")
             st.code(f"{vmk_purp} ({vsw_vmk})", language="text")
+
+# --- Tab 7: Naming Standards Context for AI ---
+with t7:
+    st.subheader("📖 Infrastructure Naming Standards Context (AI Ingestion Engine)")
+    st.info("💡 All rules defined below are actively injected into the AI system prompt to guide schema and name generation.")
+
+    current_rules = load_naming_rules()
+    
+    col_rule_1, col_rule_2 = st.columns(2)
+    with col_rule_1:
+        st.markdown("#### 🏢 Network Device Naming Standards")
+        r_sw = st.text_input("Switch Pattern", value=current_rules.get("branch_switch", ""))
+        r_ap = st.text_input("Wireless AP Pattern", value=current_rules.get("branch_ap", ""))
+        r_sec = st.text_input("Security / Firewall Pattern", value=current_rules.get("branch_security", ""))
+        r_up = st.text_input("Switch Uplink Port Description", value=current_rules.get("switch_uplink_desc", ""))
+        r_acc = st.text_input("Switch Access Port Description", value=current_rules.get("switch_access_desc", ""))
+        r_fw_if = st.text_input("Firewall Interface Description", value=current_rules.get("firewall_interface", ""))
+
+    with col_rule_2:
+        st.markdown("#### 💻 Hypervisors & Virtual Machine Standards")
+        r_esx = st.text_input("ESXi Hostname Pattern", value=current_rules.get("esxi_host", ""))
+        r_vm = st.text_input("VM Hostname Pattern", value=current_rules.get("vm_host", ""))
+        r_esx_up = st.text_input("ESXi Physical Uplink Description", value=current_rules.get("esxi_uplink", ""))
+        r_esx_pg = st.text_input("ESXi Port Group Description", value=current_rules.get("esxi_portgroup", ""))
+        r_esx_vmk = st.text_input("ESXi VMkernel Description", value=current_rules.get("esxi_vmkernel", ""))
+        r_srv_yaml = st.text_area("NetBox Server YAML Requirements", value=current_rules.get("netbox_server_yaml", ""), height=100)
+
+    btn_col1, btn_col2 = st.columns([1, 4])
+    with btn_col1:
+        if st.button("💾 Save Naming Standards", type="primary", key="save_rules_btn"):
+            updated_rules = {
+                "branch_switch": r_sw,
+                "branch_ap": r_ap,
+                "branch_security": r_sec,
+                "switch_uplink_desc": r_up,
+                "switch_access_desc": r_acc,
+                "firewall_interface": r_fw_if,
+                "esxi_host": r_esx,
+                "vm_host": r_vm,
+                "esxi_uplink": r_esx_up,
+                "esxi_portgroup": r_esx_pg,
+                "esxi_vmkernel": r_esx_vmk,
+                "netbox_server_yaml": r_srv_yaml
+            }
+            save_naming_rules(updated_rules)
+            st.success("✅ Standards saved successfully to persistent memory (`naming_rules.json`)!")
+    with btn_col2:
+        st.download_button(
+            "📥 Export Context JSON",
+            json.dumps(current_rules, indent=2, ensure_ascii=False),
+            "naming_rules.json",
+            "application/json"
+        )
