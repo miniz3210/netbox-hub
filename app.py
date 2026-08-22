@@ -307,11 +307,11 @@ def call_ai(prompt: str, selected_provider: str) -> str:
 
 def generate_device_yaml(mfg: str, model: str, provider: str) -> str:
     prompt = f"""
-Search official datasheets and generate a complete NetBox Device-Type YAML.
+Search official datasheets and generate a complete NetBox Device-Type YAML conforming to user infrastructure standards.
 Manufacturer: {mfg}
 Model: {model}
 
-CRITICAL SCHEMA RULES:
+CRITICAL INFRASTRUCTURE RULES:
 1. First line MUST be '---'
 2. Top-level metadata keys:
    manufacturer: {mfg}
@@ -324,7 +324,7 @@ CRITICAL SCHEMA RULES:
    weight: <number e.g. 35.0>
    weight_unit: kg
 
-3. Component Blocks (Strict Standard):
+3. Component Blocks (MANDATORY STANDARD):
    console-ports:
      - name: Serial
        type: de-9
@@ -349,7 +349,7 @@ CRITICAL SCHEMA RULES:
 
 4. Interfaces:
    - For standalone Server / Appliance Chassis: List ONLY the out-of-band management interface (e.g. iLO / IPMI / iDRAC) with `type: 1000base-t` and `mgmt_only: true`.
-   - For Network Switches / Routers: List all physical network interfaces.
+   - For Network Switches / Routers: List physical network interfaces.
 
 Output ONLY valid, raw YAML starting with '---'.
 """
@@ -710,7 +710,7 @@ with t5:
 with t6:
     st.subheader("🏷️ Standardized Infrastructure Naming Generator")
     naming_cat = st.radio("Select Asset Class", [
-        "1. Network Devices (Switches & Firewalls)",
+        "1. Network Devices (Switches, APs & Firewalls)",
         "2. Hosts & Virtual Machines (ESXi & VMs)",
         "3. ESXi Network Descriptions (vmnic, PortGroup, VMkernel)"
     ], horizontal=True)
@@ -719,61 +719,77 @@ with t6:
 
     # 1. Network Devices
     if "1. Network" in naming_cat:
-        col_a, col_b = st.columns(2)
+        col_a, col_b, col_c = st.columns(3)
         with col_a:
-            st.markdown("**Switch Naming & Descriptions**")
-            site_code = st.text_input("Site Code", value="MAD", key="sw_site")
-            sw_role = st.text_input("Switch Role (Manual Input)", value="SW-CORE", help="e.g. SW-CORE, SW-ACC, HOSTS, LEAF, SPINE")
-            sw_seq = st.text_input("Rack / Seq", value="01", key="sw_seq")
+            st.markdown("**Switch Naming (Standard & Bristol Pattern)**")
+            mode = st.radio("Standard Style", ["Bristol Standard (SW<Country><Site><Seq>-<StackID>)", "Classic Standard (<Site>-<Role><Seq>)"], index=0)
             
-            clean_role = sw_role.strip().upper()
-            gen_sw_name = f"{site_code}-{clean_role}{sw_seq}" if sw_seq else f"{site_code}-{clean_role}"
-            st.code(f"Switch Hostname: {gen_sw_name}", language="text")
+            if "Bristol" in mode:
+                s_ctry = st.text_input("Country Code", value="UK", key="sw_c_b")
+                s_site = st.text_input("Site Code", value="BRIS", key="sw_s_b")
+                s_seq = st.text_input("Sequence Number", value="01", key="sw_sq_b")
+                s_stack = st.text_input("Stack / Member ID", value="0", key="sw_st_b")
+                gen_sw = f"SW{s_ctry.upper()}{s_site.upper()}{s_seq}-{s_stack}" if s_stack else f"SW{s_ctry.upper()}{s_site.upper()}{s_seq}"
+                st.code(f"Switch Hostname: {gen_sw}", language="text")
+            else:
+                site_code = st.text_input("Site Code", value="MAD", key="sw_site")
+                sw_role = st.text_input("Switch Role", value="SW-CORE", key="sw_role")
+                sw_seq = st.text_input("Rack / Seq", value="01", key="sw_seq")
+                gen_sw = f"{site_code}-{sw_role.strip().upper()}{sw_seq}" if sw_seq else f"{site_code}-{sw_role.strip().upper()}"
+                st.code(f"Switch Hostname: {gen_sw}", language="text")
 
             st.markdown("---")
-            st.markdown("**Switch Port Description Formatter (Automation Standard)**")
+            st.markdown("**Switch Port Description Formatter**")
             p_type = st.radio("Port Type", ["Uplink", "Access"], horizontal=True)
-            
             if p_type == "Uplink":
-                r_dev = st.text_input("Remote Device", value="MAD-SW-CORE01")
-                r_port = st.text_input("Remote Port", value="TenGigabitEthernet1/0/1")
-                r_role = st.text_input("Link Role / Purpose", value="Core Uplink")
-                
-                # Automation-friendly formats
-                st.caption("Automation-Ready Standards:")
+                r_dev = st.text_input("Remote Device", value="SWUKBRIS01-0")
+                r_port = st.text_input("Remote Port", value="ge-0/0/47")
+                r_role = st.text_input("Link Role", value="Core Uplink")
                 st.code(f"{r_dev}:{r_port} ({r_role})", language="text")
-                st.code(f"to {r_dev}:{r_port} [{r_role}]", language="text")
             else:
                 vlan_name = st.text_input("VLAN / Segment Name", value="VLAN10_Prod_App")
-                host_port = st.text_input("Connected Host / Port", value="madesx01:vmnic0")
-                st.caption("Access Port Description Standard:")
+                host_port = st.text_input("Connected Host / Port", value="brisesx01:vmnic0")
                 st.code(f"{vlan_name} - {host_port}", language="text")
 
         with col_b:
-            st.markdown("**Firewall Naming & Interfaces**")
-            fw_site = st.text_input("Site Code", value="MAD", key="fw_site")
-            fw_node = st.text_input("Node ID / Cluster Member", value="01", key="fw_node")
-            st.code(f"Firewall Hostname: {fw_site}-FW{fw_node}", language="text")
+            st.markdown("**Wireless AP Naming (Bristol Pattern)**")
+            ap_ctry = st.text_input("Country Code", value="UK", key="ap_c")
+            ap_site = st.text_input("Site Code", value="BRIS", key="ap_s")
+            ap_seq = st.text_input("AP Sequence (2 digits)", value="01", key="ap_seq")
+            st.code(f"AP Hostname: WAP{ap_ctry.upper()}{ap_site.upper()}{ap_seq}", language="text")
+
+        with col_c:
+            st.markdown("**Firewall & Security Appliances**")
+            fw_mode = st.radio("Firewall Type", ["ION Appliance (ION<Country><Site><Seq>)", "Classic Gateway (<Site>-FW<NodeID>)"], index=0)
+            if "ION" in fw_mode:
+                fw_ctry = st.text_input("Country Code", value="UK", key="fw_c")
+                fw_site = st.text_input("Site Code", value="BRIS", key="fw_s")
+                fw_seq = st.text_input("Sequence Number", value="01", key="fw_seq_ion")
+                st.code(f"Security Hostname: ION{fw_ctry.upper()}{fw_site.upper()}{fw_seq}", language="text")
+            else:
+                fw_site_cls = st.text_input("Site Code", value="MAD", key="fw_site_cls")
+                fw_node = st.text_input("Node ID / Cluster Member", value="01", key="fw_node_cls")
+                st.code(f"Firewall Hostname: {fw_site_cls}-FW{fw_node}", language="text")
 
             st.markdown("---")
             st.markdown("**Firewall Interface Description**")
-            fw_role = st.text_input("Role / Security Zone (Manual Input)", value="DMZ")
+            fw_role = st.text_input("Role / Security Zone", value="DMZ")
             fw_vlan = st.text_input("VLAN ID", value="100")
-            st.code(f"Interface Name/Description: {fw_role}_{fw_vlan}", language="text")
+            st.code(f"Interface: {fw_role}_{fw_vlan}", language="text")
 
     # 2. Hosts & VMs
     elif "2. Hosts" in naming_cat:
         col_a, col_b = st.columns(2)
         with col_a:
             st.markdown("**ESXi Hypervisor Hostname**")
-            h_site = st.text_input("Site Prefix", value="mad", key="esx_site")
+            h_site = st.text_input("Site Prefix", value="bris", key="esx_site")
             h_num = st.text_input("Host Number", value="01", key="esx_num")
             h_dom = st.text_input("Domain Name", value="corp.local", key="esx_dom")
             st.code(f"{h_site.lower()}esx{h_num}.{h_dom.lower()}", language="text")
 
         with col_b:
             st.markdown("**Virtual Machine (VM) Hostname**")
-            vm_site = st.text_input("Site Prefix", value="mad", key="vm_site")
+            vm_site = st.text_input("Site Prefix", value="bris", key="vm_site")
             vm_role = st.text_input("Role Code (Manual Input)", value="cvi", help="Standard codes: cvi=Core/Virt, afs=App/File, sani=Storage, vlab=Test")
             vm_seq = st.text_input("Sequence Number", value="01", key="vm_seq")
             st.code(f"VM Name: {vm_site.lower()}{vm_role.strip().lower()}{vm_seq}", language="text")
