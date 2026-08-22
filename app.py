@@ -38,7 +38,7 @@ openrouter_models_env = os.getenv("OPENROUTER_MODELS", os.getenv("OPENROUTER_MOD
 OPENROUTER_MODELS = [m.strip() for m in openrouter_models_env.split(",") if m.strip()]
 
 OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "").strip()
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b").strip()
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b").strip()
 
 AVAILABLE_PROVIDERS = []
 if GROQ_KEY:
@@ -177,10 +177,8 @@ def extract_reference_interface_pattern(content: Optional[str]) -> Optional[str]
 
 # --- 2. AI Multi-Engine Core Router ---
 def clean_ai_yaml(text: str) -> str:
-    # 1. Strip reasoning blocks (<think>...</think>)
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
     
-    # 2. Extract content from Markdown code fences if present
     code_blocks = re.findall(r"```(?:ya?ml)?\s*([\s\S]*?)```", text, flags=re.IGNORECASE)
     if code_blocks:
         for block in reversed(code_blocks):
@@ -190,7 +188,6 @@ def clean_ai_yaml(text: str) -> str:
         else:
             text = code_blocks[-1]
             
-    # 3. Locate the primary root key 'manufacturer:'
     lines = text.strip().splitlines()
     mfg_idx = -1
     for idx, line in enumerate(lines):
@@ -212,7 +209,6 @@ def clean_ai_yaml(text: str) -> str:
                     text = "---\n" + part.strip()
                     break
 
-    # 4. Truncate trailing markdown explanation after YAML ends
     cleaned_lines = []
     for line in text.splitlines():
         if re.match(r"^(Note:|Explanation:|Here is|Let me know|\*\*Note)", line.strip(), flags=re.IGNORECASE):
@@ -220,11 +216,9 @@ def clean_ai_yaml(text: str) -> str:
         cleaned_lines.append(line)
     text = "\n".join(cleaned_lines)
 
-    # 5. Remove residual markdown fences
     text = re.sub(r"^```(?:ya?ml)?", "", text.strip(), flags=re.IGNORECASE)
     text = re.sub(r"```$", "", text.strip())
     
-    # 6. Strict NetBox type fixes
     text = re.sub(r"type:\s*10gbase-x-sfp\b", "type: 10gbase-x-sfpp", text)
     text = re.sub(r"type:\s*1gbase-t\b", "type: 1000base-t", text)
     text = re.sub(r"type:\s*1gbase-x-sfp\b", "type: 1000base-x-sfp", text)
@@ -244,12 +238,10 @@ def call_ai(prompt: str, selected_provider: str) -> str:
     )
 
     try:
-        # 1. Groq Engine
         if selected_provider.startswith("Groq"):
             from groq import Groq
             client = Groq(api_key=GROQ_KEY)
             target_model = extract_model_from_label(selected_provider)
-
             resp = client.chat.completions.create(
                 model=target_model,
                 messages=[
@@ -260,7 +252,6 @@ def call_ai(prompt: str, selected_provider: str) -> str:
             )
             return clean_ai_yaml(resp.choices[0].message.content)
 
-        # 2. Google Gemini
         elif selected_provider.startswith("Google Gemini"):
             from google import genai
             from google.genai import types
@@ -277,7 +268,6 @@ def call_ai(prompt: str, selected_provider: str) -> str:
             )
             return clean_ai_yaml(resp.text)
 
-        # 3. OpenRouter
         elif selected_provider.startswith("OpenRouter"):
             from openai import OpenAI
             client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=OPENROUTER_KEY)
@@ -292,7 +282,6 @@ def call_ai(prompt: str, selected_provider: str) -> str:
             )
             return clean_ai_yaml(resp.choices[0].message.content)
 
-        # 4. Local Ollama
         elif selected_provider.startswith("Local Ollama"):
             from openai import OpenAI
             client = OpenAI(base_url=OLLAMA_URL, api_key="ollama")
@@ -318,11 +307,11 @@ def call_ai(prompt: str, selected_provider: str) -> str:
 
 def generate_device_yaml(mfg: str, model: str, provider: str) -> str:
     prompt = f"""
-Search official datasheets and generate a complete, production-ready NetBox Device-Type YAML.
+Search official datasheets and generate a complete NetBox Device-Type YAML conforming STRICTLY to the user's infrastructure standard.
 Manufacturer: {mfg}
 Model: {model}
 
-CRITICAL SCHEMA RULES (Use exact kebab-case hyphenated keys, NEVER underscores):
+CRITICAL INFRASTRUCTURE RULES:
 1. First line MUST be '---'
 2. Top-level metadata keys:
    manufacturer: {mfg}
@@ -334,57 +323,50 @@ CRITICAL SCHEMA RULES (Use exact kebab-case hyphenated keys, NEVER underscores):
    airflow: <front-to-rear / rear-to-front / passive / side-to-rear>
    weight: <number e.g. 35.0>
    weight_unit: kg
-   comments: "<Brief hardware description or omit if unknown>"
 
-3. Valid NetBox Interface Types:
-   - 1000base-t (1GE Copper)
-   - 1000base-x-sfp (1GE SFP)
-   - 10gbase-t (10GE Copper)
-   - 10gbase-x-sfpp (10GE SFP+ -- MUST use 'sfpp', NOT 'sfp')
-   - 25gbase-x-sfp28 (25GE SFP28)
-   - 40gbase-x-qsfpp (40GE QSFP+)
-   - 100gbase-x-qsfp28 (100GE QSFP28)
+3. Component Blocks (MANDATORY STANDARD):
+   console-ports:
+     - name: Serial
+       type: de-9
+   power-ports:
+     - name: PSU1
+       type: iec-60320-c14
+     - name: PSU2
+       type: iec-60320-c14
+   module-bays:
+     - name: PSU1
+       position: 'PSU1'
+     - name: PSU2
+       position: 'PSU2'
+     - name: OCP3
+       position: 'OCP3'
+     - name: PCIe1
+       position: 'PCIe1'
+     - name: PCIe2
+       position: 'PCIe2'
+     - name: PCIe3
+       position: 'PCIe3'
 
-4. Component Blocks:
-   - console-ports:
-       - name: Serial
-         type: de-9
-   - power-ports:
-       - name: PSU1
-         type: iec-60320-c14
-       - name: PSU2
-         type: iec-60320-c14
-   - module-bays:
-       - name: PSU1
-         position: 'PSU1'
-       - name: PSU2
-         position: 'PSU2'
-       - name: PCIe1
-         position: 'PCIe1'
-       - name: PCIe2
-         position: 'PCIe2'
-       - name: PCIe3
-         position: 'PCIe3'
-   - interfaces:
-       - If switch/router: list physical interfaces.
-       - If server/appliance/chassis: list ONLY the out-of-band management interface (e.g. IPMI/iDRAC/iLO) with `mgmt_only: true` and `type: 1000base-t`.
+4. Interface Rules:
+   - For standalone Server / Appliance Chassis: List ONLY the out-of-band management interface (e.g. iLO / IPMI / iDRAC) with `type: 1000base-t` and `mgmt_only: true`.
+   - For Network Switches / Routers: List all physical network interfaces.
 
-Output ONLY valid, raw YAML starting with '---'. No conversational prelude or thinking text.
+Output ONLY valid, raw YAML starting with '---'.
 """
     return call_ai(prompt, provider)
 
 def generate_module_yaml(mfg: str, model: str, part_num: str, provider: str, ref_pattern: Optional[str] = None) -> str:
     if ref_pattern:
         pattern_instruction = f"""
-- Interface Naming Rule (Matched pattern from similar existing library items):
-    - MUST follow this exact style: `{ref_pattern}` (e.g. replacing index with 1, 2, etc.)
-    - Always include literal '{{module}}' intact without replacing it.
+- Interface Naming Rule:
+    - MUST follow this pattern: `{ref_pattern}`
+    - Always keep '{{module}}' intact.
 """
     else:
         pattern_instruction = """
-- Interface Naming Rule (Strict Default when no match found):
+- Interface Naming Rule (Strict Standard):
     - MUST strictly use: `name: '{module}/Port1'`, `name: '{module}/Port2'`, `name: '{module}/Port3'`, etc.
-    - DO NOT prepend 'Ethernet/' or manufacturer/model names.
+    - NEVER replace '{module}' with vendor or model names.
 """
 
     prompt = f"""
@@ -397,26 +379,19 @@ CRITICAL SCHEMA RULES:
 - First line MUST be '---'
 - Required Keys:
     manufacturer: {mfg}
-    model: <exact model or part number>
+    model: <exact clean SKU/model name>
     part_number: <exact part number>
     description: '<Clear hardware overview>'
-- Note on comments: DO NOT include 'comments' key unless verified official datasheet link is known.
-- DO NOT include 'u_height' or 'is_full_depth'.
-- Valid NetBox Interface Types:
-    - 10gbase-t (10G RJ-45 Copper)
-    - 10gbase-x-sfpp (10G SFP+ optical/DAC -- MUST use 'sfpp', NOT 'sfp')
-    - 25gbase-x-sfp28 (25G SFP28)
-    - 1000base-t (1G RJ-45)
-    - 1000base-x-sfp (1G SFP)
+- Do NOT include 'u_height' or 'is_full_depth'.
+- Valid NetBox Interface Types: 10gbase-t, 10gbase-x-sfpp, 25gbase-x-sfp28, 1000base-t, 1000base-x-sfp
 {pattern_instruction}
 
-Output ONLY valid, raw YAML starting with '---'. No conversational prelude or thinking text.
+Output ONLY valid, raw YAML starting with '---'.
 """
     result = call_ai(prompt, provider)
-    
     if not ref_pattern:
         result = re.sub(
-            r"name:\s*['\"]?(?:[a-zA-Z0-9_\-]+/)?(?:Ethernet/\{module\}/|Port\s*|eth|mgmt|Ethernet)(\d+)['\"]?",
+            r"name:\s*['\"]?(?:.+?[/_-])?(?:Port|eth|LAN|mgmt|Ethernet)?\s*(\d+)['\"]?",
             r"name: '{module}/Port\1'",
             result,
             flags=re.IGNORECASE
@@ -431,8 +406,7 @@ Model: {model}
 
 Schema Rules:
 - First line MUST be '---'
-- Keys: manufacturer, model, slug, width (19 or 23), u_height (e.g. 42, 48), form_factor (4-post-cabinet/4-post-frame/2-post-frame), starting_unit (default 1)
-- Optional dimensions (if known): outer_width, outer_depth, outer_unit (mm/in), mounting_depth_min, mounting_depth_max
+- Keys: manufacturer, model, slug, width (19 or 23), u_height, form_factor, starting_unit (default 1)
 Output ONLY raw YAML.
 """
     return call_ai(prompt, provider)
@@ -449,7 +423,7 @@ def generate_placeholder_svg(mfg: str, model: str, u_height: int = 1, view: str 
 
 # --- 3. UI Layout ---
 st.title("⚡ NetBox Universal Library Hub")
-st.caption("Device Types | Module Types | Rack Types | Elevation & Module Images")
+st.caption("Device Types | Module Types | Rack Types | Images | Excel Engine | Infrastructure Naming")
 
 catalog = get_repo_catalog()
 
@@ -462,12 +436,13 @@ with st.sidebar:
         active_provider = None
         st.warning("No AI API keys configured. Only official GitHub library lookups are enabled.")
 
-t1, t2, t3, t4, t5 = st.tabs([
+t1, t2, t3, t4, t5, t6 = st.tabs([
     "🖥️ Device Types", 
     "🧩 Module Types", 
     "🗄️ Rack Types", 
     "🖼️ Images (Elevation & Module)", 
-    "📊 Batch Excel Engine"
+    "📊 Batch Excel Engine",
+    "🏷️ Naming Generator"
 ])
 
 # --- Tab 1: Device Types ---
@@ -475,7 +450,7 @@ with t1:
     col1, col2 = st.columns([1, 1])
     with col1:
         d_mfg_raw = st.text_input("Manufacturer", placeholder="e.g., HP, Cisco, Dell, Intel (Wildcards: *intel*, *cis*)", key="d_mfg")
-        d_model = st.text_input("Device Model", placeholder="e.g., *x710*, PowerEdge R750", key="d_mod")
+        d_model = st.text_input("Device Model", placeholder="e.g., *dl360*, PowerEdge R750", key="d_mod")
         d_mfg = get_canonical_manufacturer(d_mfg_raw, catalog["manufacturers"]) if d_mfg_raw else ""
 
         selected_dev_choice = None
@@ -506,7 +481,6 @@ with t1:
         d_search = st.button("Load / Generate Device Type", type="primary", key="btn_dev")
 
     if d_search and (d_mfg or d_mfg_raw or selected_dev_choice) and d_model and selected_dev_choice:
-        # Resolve effective manufacturer even if input box was blank
         if selected_dev_choice and not selected_dev_choice.startswith("✨"):
             parts = selected_dev_choice.split("/")
             effective_mfg = parts[1] if len(parts) >= 3 else (d_mfg if d_mfg else d_mfg_raw)
@@ -731,3 +705,101 @@ with t5:
             st.success("Batch processing completed!")
             st.dataframe(pd.DataFrame(results), use_container_width=True)
             st.download_button("📦 Download All NetBox Assets (.zip)", zip_buf.getvalue(), "netbox_all_assets.zip", "application/zip")
+
+# --- Tab 6: Infrastructure & ESXi Naming Generator ---
+with t6:
+    st.subheader("🏷️ Standardized Infrastructure Naming Generator")
+    naming_cat = st.radio("Select Asset Class", [
+        "1. Network Devices (Switches & Firewalls)",
+        "2. Hosts & Virtual Machines (ESXi & VMs)",
+        "3. ESXi Network Descriptions (vmnic, PortGroup, VMkernel)"
+    ], horizontal=True)
+
+    st.markdown("---")
+
+    # 1. Network Devices
+    if "1. Network" in naming_cat:
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.markdown("**Switch Naming & Port Descriptions**")
+            site_code = st.text_input("Site Code", value="MAD", key="sw_site")
+            sw_role = st.selectbox("Switch Role", ["SW-CORE", "SW-ACC", "SW-DIST", "HOSTS"], key="sw_role")
+            sw_seq = st.text_input("Rack / Seq", value="01", key="sw_seq")
+            
+            gen_sw_name = f"{site_code}-{sw_role}{sw_seq}" if sw_role != "HOSTS" else f"{site_code}-{sw_role}"
+            st.code(f"Switch Hostname: {gen_sw_name}", language="text")
+
+            st.markdown("---")
+            st.markdown("**Switch Port Description Formatter**")
+            p_type = st.radio("Port Type", ["Uplink", "Access"], horizontal=True)
+            if p_type == "Uplink":
+                l_port = st.text_input("Local Port", value="TenGigabitEthernet1/0/48")
+                r_dev = st.text_input("Remote Device", value="MAD-SW-CORE01")
+                r_port = st.text_input("Remote Port", value="TenGigabitEthernet1/0/1")
+                r_role = st.text_input("Link Role", value="Core Uplink")
+                st.code(f"{l_port} -> {r_dev}:{r_port} ({r_role})", language="text")
+            else:
+                vlan_name = st.text_input("VLAN Name", value="VLAN10_Prod_App")
+                host_port = st.text_input("Connected Host / Port", value="madesx01:vmnic0")
+                st.code(f"{vlan_name} - {host_port}", language="text")
+
+        with col_b:
+            st.markdown("**Firewall Naming & Interfaces**")
+            fw_site = st.text_input("Site Code", value="MAD", key="fw_site")
+            fw_node = st.text_input("Node ID / Cluster Member", value="01", key="fw_node")
+            st.code(f"Firewall Hostname: {fw_site}-FW{fw_node}", language="text")
+
+            st.markdown("---")
+            st.markdown("**Firewall Interface Description**")
+            fw_role = st.text_input("Role / Security Zone", value="DMZ")
+            fw_vlan = st.text_input("VLAN ID", value="100")
+            st.code(f"Interface Name/Description: {fw_role}_{fw_vlan}", language="text")
+
+    # 2. Hosts & VMs
+    elif "2. Hosts" in naming_cat:
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.markdown("**ESXi Hypervisor Hostname**")
+            h_site = st.text_input("Site Prefix", value="mad", key="esx_site")
+            h_num = st.text_input("Host Number", value="01", key="esx_num")
+            h_dom = st.text_input("Domain Name", value="corp.local", key="esx_dom")
+            st.code(f"{h_site.lower()}esx{h_num}.{h_dom.lower()}", language="text")
+
+        with col_b:
+            st.markdown("**Virtual Machine (VM) Hostname**")
+            vm_site = st.text_input("Site Prefix", value="mad", key="vm_site")
+            vm_role = st.selectbox("Role Code", [
+                "cvi (Core / Virtualization Infrastructure)",
+                "afs (Application / File Service)",
+                "sani (Storage / SAN Service)",
+                "vlab (Testing / Validation Lab)"
+            ], key="vm_role")
+            role_code = vm_role.split(" ")[0]
+            vm_seq = st.text_input("Sequence Number", value="01", key="vm_seq")
+            st.code(f"VM Name: {vm_site.lower()}{role_code}{vm_seq}", language="text")
+
+    # 3. ESXi Network Descriptions
+    else:
+        st.markdown("**ESXi NetBox Interface Standard Descriptions**")
+        col_a, col_b, col_c = st.columns(3)
+
+        with col_a:
+            st.markdown("**1. Physical Uplink (`vmnic`)**")
+            vmnic = st.text_input("vmnic Identifier", value="vmnic0")
+            vsw = st.text_input("Target vSwitch", value="vSwitch0", key="vsw1")
+            purpose = st.text_input("Purpose", value="Management", key="vsw_purp")
+            st.code(f"{vmnic} - {vsw} {purpose} Active Uplink", language="text")
+            st.code(f"{vmnic} - {vsw} {purpose} Standby Uplink", language="text")
+
+        with col_b:
+            st.markdown("**2. Port Group**")
+            vsw_pg = st.text_input("vSwitch Name", value="vSwitch0", key="vsw2")
+            act_nic = st.text_input("Active vmnic", value="vmnic0")
+            stb_nic = st.text_input("Standby vmnic", value="vmnic1")
+            st.code(f"{vsw_pg} ({act_nic} Active / {stb_nic} Standby)", language="text")
+
+        with col_c:
+            st.markdown("**3. VMkernel Adapter**")
+            vmk_purp = st.text_input("Purpose / Service", value="Management Network")
+            vsw_vmk = st.text_input("vSwitch Name", value="vSwitch0", key="vsw3")
+            st.code(f"{vmk_purp} ({vsw_vmk})", language="text")
