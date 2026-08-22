@@ -307,11 +307,11 @@ def call_ai(prompt: str, selected_provider: str) -> str:
 
 def generate_device_yaml(mfg: str, model: str, provider: str) -> str:
     prompt = f"""
-Search official datasheets and generate a complete NetBox Device-Type YAML conforming STRICTLY to the user's infrastructure standard.
+Search official datasheets and generate a complete NetBox Device-Type YAML.
 Manufacturer: {mfg}
 Model: {model}
 
-CRITICAL INFRASTRUCTURE RULES:
+CRITICAL SCHEMA RULES:
 1. First line MUST be '---'
 2. Top-level metadata keys:
    manufacturer: {mfg}
@@ -324,7 +324,7 @@ CRITICAL INFRASTRUCTURE RULES:
    weight: <number e.g. 35.0>
    weight_unit: kg
 
-3. Component Blocks (MANDATORY STANDARD):
+3. Component Blocks (Strict Standard):
    console-ports:
      - name: Serial
        type: de-9
@@ -347,7 +347,7 @@ CRITICAL INFRASTRUCTURE RULES:
      - name: PCIe3
        position: 'PCIe3'
 
-4. Interface Rules:
+4. Interfaces:
    - For standalone Server / Appliance Chassis: List ONLY the out-of-band management interface (e.g. iLO / IPMI / iDRAC) with `type: 1000base-t` and `mgmt_only: true`.
    - For Network Switches / Routers: List all physical network interfaces.
 
@@ -721,26 +721,32 @@ with t6:
     if "1. Network" in naming_cat:
         col_a, col_b = st.columns(2)
         with col_a:
-            st.markdown("**Switch Naming & Port Descriptions**")
+            st.markdown("**Switch Naming & Descriptions**")
             site_code = st.text_input("Site Code", value="MAD", key="sw_site")
-            sw_role = st.selectbox("Switch Role", ["SW-CORE", "SW-ACC", "SW-DIST", "HOSTS"], key="sw_role")
+            sw_role = st.text_input("Switch Role (Manual Input)", value="SW-CORE", help="e.g. SW-CORE, SW-ACC, HOSTS, LEAF, SPINE")
             sw_seq = st.text_input("Rack / Seq", value="01", key="sw_seq")
             
-            gen_sw_name = f"{site_code}-{sw_role}{sw_seq}" if sw_role != "HOSTS" else f"{site_code}-{sw_role}"
+            clean_role = sw_role.strip().upper()
+            gen_sw_name = f"{site_code}-{clean_role}{sw_seq}" if sw_seq else f"{site_code}-{clean_role}"
             st.code(f"Switch Hostname: {gen_sw_name}", language="text")
 
             st.markdown("---")
-            st.markdown("**Switch Port Description Formatter**")
+            st.markdown("**Switch Port Description Formatter (Automation Standard)**")
             p_type = st.radio("Port Type", ["Uplink", "Access"], horizontal=True)
+            
             if p_type == "Uplink":
-                l_port = st.text_input("Local Port", value="TenGigabitEthernet1/0/48")
                 r_dev = st.text_input("Remote Device", value="MAD-SW-CORE01")
                 r_port = st.text_input("Remote Port", value="TenGigabitEthernet1/0/1")
-                r_role = st.text_input("Link Role", value="Core Uplink")
-                st.code(f"{l_port} -> {r_dev}:{r_port} ({r_role})", language="text")
+                r_role = st.text_input("Link Role / Purpose", value="Core Uplink")
+                
+                # Automation-friendly formats
+                st.caption("Automation-Ready Standards:")
+                st.code(f"{r_dev}:{r_port} ({r_role})", language="text")
+                st.code(f"to {r_dev}:{r_port} [{r_role}]", language="text")
             else:
-                vlan_name = st.text_input("VLAN Name", value="VLAN10_Prod_App")
+                vlan_name = st.text_input("VLAN / Segment Name", value="VLAN10_Prod_App")
                 host_port = st.text_input("Connected Host / Port", value="madesx01:vmnic0")
+                st.caption("Access Port Description Standard:")
                 st.code(f"{vlan_name} - {host_port}", language="text")
 
         with col_b:
@@ -751,7 +757,7 @@ with t6:
 
             st.markdown("---")
             st.markdown("**Firewall Interface Description**")
-            fw_role = st.text_input("Role / Security Zone", value="DMZ")
+            fw_role = st.text_input("Role / Security Zone (Manual Input)", value="DMZ")
             fw_vlan = st.text_input("VLAN ID", value="100")
             st.code(f"Interface Name/Description: {fw_role}_{fw_vlan}", language="text")
 
@@ -768,15 +774,9 @@ with t6:
         with col_b:
             st.markdown("**Virtual Machine (VM) Hostname**")
             vm_site = st.text_input("Site Prefix", value="mad", key="vm_site")
-            vm_role = st.selectbox("Role Code", [
-                "cvi (Core / Virtualization Infrastructure)",
-                "afs (Application / File Service)",
-                "sani (Storage / SAN Service)",
-                "vlab (Testing / Validation Lab)"
-            ], key="vm_role")
-            role_code = vm_role.split(" ")[0]
+            vm_role = st.text_input("Role Code (Manual Input)", value="cvi", help="Standard codes: cvi=Core/Virt, afs=App/File, sani=Storage, vlab=Test")
             vm_seq = st.text_input("Sequence Number", value="01", key="vm_seq")
-            st.code(f"VM Name: {vm_site.lower()}{role_code}{vm_seq}", language="text")
+            st.code(f"VM Name: {vm_site.lower()}{vm_role.strip().lower()}{vm_seq}", language="text")
 
     # 3. ESXi Network Descriptions
     else:
@@ -787,7 +787,7 @@ with t6:
             st.markdown("**1. Physical Uplink (`vmnic`)**")
             vmnic = st.text_input("vmnic Identifier", value="vmnic0")
             vsw = st.text_input("Target vSwitch", value="vSwitch0", key="vsw1")
-            purpose = st.text_input("Purpose", value="Management", key="vsw_purp")
+            purpose = st.text_input("Purpose / Service", value="Management", key="vsw_purp")
             st.code(f"{vmnic} - {vsw} {purpose} Active Uplink", language="text")
             st.code(f"{vmnic} - {vsw} {purpose} Standby Uplink", language="text")
 
