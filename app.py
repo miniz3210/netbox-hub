@@ -57,15 +57,39 @@ if OLLAMA_URL:
 if GEMINI_KEY:
     AVAILABLE_PROVIDERS.append(f"Google Gemini ({GEMINI_MODEL})")
 
-# --- Naming Rules Store & Helper ---
+# --- Interface Name Normalizer ---
+def normalize_port_shortname(port_name: str) -> str:
+    p = port_name.strip()
+    replacements = [
+        (r"^TenGigabitEthernet", "Te"),
+        (r"^TenGigE", "Te"),
+        (r"^TenG", "Te"),
+        (r"^GigabitEthernet", "Gi"),
+        (r"^GigE", "Gi"),
+        (r"^FastEthernet", "Fa"),
+        (r"^TwentyFiveGigE", "Twe"),
+        (r"^TwentyFiveGigabitEthernet", "Twe"),
+        (r"^FortyGigabitEthernet", "Fo"),
+        (r"^HundredGigE", "Hu"),
+        (r"^HundredGigabitEthernet", "Hu"),
+        (r"^Ethernet", "Eth"),
+        (r"^Management", "Mgmt"),
+    ]
+    for pattern, replacement in replacements:
+        if re.search(pattern, p, re.IGNORECASE):
+            return re.sub(pattern, replacement, p, flags=re.IGNORECASE)
+    return p
+
+# --- Persistent Naming Rules Store ---
 DEFAULT_RULES = {
     "branch_switch": "SW<Country><Site><Seq>-<StackID> (e.g. SWUKBRIS01-0, SWUKWEY01-0)",
     "branch_ap": "WAP<Country><Site><Seq> (e.g. WAPUKBRIS01, WAPUKWEY01)",
     "branch_security": "ION<Country><Site><Seq> or <SiteCode>-FW<NodeID> (e.g. IONUKBRIS01, MAD-FW01)",
-    "switch_uplink_desc": "<Remote_Device>:<Remote_Port> (<Role>)",
+    "switch_uplink_desc_local": "to <Remote_Device>:<Remote_Port_Short> (<Role>)",
+    "switch_uplink_desc_remote": "to <Local_Device>:<Local_Port_Short> (<Role>)",
     "switch_access_desc": "<VLAN_Name> - <Host/Port>",
     "firewall_interface": "<Role/Zone>_<VLAN_ID>",
-    "esxi_host": "<site_prefix>esx<number>.<domain> (e.g. madesx01.corp.local)",
+    "esxi_host": "<site_prefix>esx<number>.<domain> (e.g. brisesx01.corp.local)",
     "vm_host": "<site_prefix><role><seq> (Roles: cvi=Core/Virt, afs=App/File, sani=Storage, vlab=Test)",
     "esxi_uplink": "<vmnicX> - <vSwitch> <Purpose> Active Uplink / Standby Uplink",
     "esxi_portgroup": "<vSwitch> (<vmnicX> Active / <vmnicY> Standby)",
@@ -97,7 +121,8 @@ INFRASTRUCTURE & NAMING CONVENTIONS CONTEXT:
 - Switch Hostname Standard: {rules.get('branch_switch')}
 - Wireless AP Hostname: {rules.get('branch_ap')}
 - Firewall / Security Hostname: {rules.get('branch_security')}
-- Switch Port Uplink Description: {rules.get('switch_uplink_desc')}
+- Switch Port Uplink Description (Local): {rules.get('switch_uplink_desc_local')}
+- Switch Port Uplink Description (Remote): {rules.get('switch_uplink_desc_remote')}
 - Switch Port Access Description: {rules.get('switch_access_desc')}
 - Firewall Interface Description: {rules.get('firewall_interface')}
 - ESXi Hypervisor Hostname: {rules.get('esxi_host')}
@@ -362,7 +387,7 @@ def call_ai(prompt: str, selected_provider: str) -> str:
 
 def generate_device_yaml(mfg: str, model: str, provider: str) -> str:
     prompt = f"""
-Search official datasheets and generate a complete NetBox Device-Type YAML conforming to infrastructure rules.
+Search official datasheets and generate a complete NetBox Device-Type YAML conforming to user infrastructure standards.
 Manufacturer: {mfg}
 Model: {model}
 
@@ -777,33 +802,43 @@ with t6:
     if "1. Network" in naming_cat:
         col_a, col_b, col_c = st.columns(3)
         with col_a:
-            st.markdown("**Switch Naming (Standard & Bristol Pattern)**")
-            mode = st.radio("Standard Style", ["Bristol Standard (SW<Country><Site><Seq>-<StackID>)", "Classic Standard (<Site>-<Role><Seq>)"], index=0)
+            st.markdown("**Switch Hostname (Bristol & Standard)**")
+            mode = st.radio("Naming Format", ["Bristol Standard (SW<Country><Site><Seq>-<StackID>)", "Classic Standard (<Site>-<Role><Seq>)"], index=0)
             
             if "Bristol" in mode:
                 s_ctry = st.text_input("Country Code", value="UK", key="sw_c_b")
                 s_site = st.text_input("Site Code", value="BRIS", key="sw_s_b")
-                s_seq = st.text_input("Sequence Number", value="01", key="sw_sq_b")
-                s_stack = st.text_input("Stack / Member ID", value="0", key="sw_st_b")
-                gen_sw = f"SW{s_ctry.upper()}{s_site.upper()}{s_seq}-{s_stack}" if s_stack else f"SW{s_ctry.upper()}{s_site.upper()}{s_seq}"
-                st.code(f"Switch Hostname: {gen_sw}", language="text")
+                s_seq = st.text_input("Sequence", value="01", key="sw_sq_b")
+                s_stack = st.text_input("Stack Member", value="0", key="sw_st_b")
+                current_sw_name = f"SW{s_ctry.upper()}{s_site.upper()}{s_seq}-{s_stack}" if s_stack else f"SW{s_ctry.upper()}{s_site.upper()}{s_seq}"
             else:
                 site_code = st.text_input("Site Code", value="MAD", key="sw_site")
                 sw_role = st.text_input("Switch Role", value="SW-CORE", key="sw_role")
                 sw_seq = st.text_input("Rack / Seq", value="01", key="sw_seq")
-                gen_sw = f"{site_code}-{sw_role.strip().upper()}{sw_seq}" if sw_seq else f"{site_code}-{sw_role.strip().upper()}"
-                st.code(f"Switch Hostname: {gen_sw}", language="text")
+                current_sw_name = f"{site_code}-{sw_role.strip().upper()}{sw_seq}" if sw_seq else f"{site_code}-{sw_role.strip().upper()}"
+            
+            st.code(f"Switch Hostname: {current_sw_name}", language="text")
 
             st.markdown("---")
-            st.markdown("**Switch Port Description Formatter**")
-            p_type = st.radio("Port Type", ["Uplink", "Access"], horizontal=True)
-            if p_type == "Uplink":
-                r_dev = st.text_input("Remote Device", value="SWUKBRIS01-0")
-                r_port = st.text_input("Remote Port", value="ge-0/0/47")
-                r_role = st.text_input("Link Role", value="Core Uplink")
-                st.code(f"{r_dev}:{r_port} ({r_role})", language="text")
+            st.markdown("**Switch Port Description (Dual-End Generator)**")
+            p_type = st.radio("Port Type", ["Uplink (Inter-Switch)", "Access (Host/Endpoint)"], horizontal=True)
+            
+            if "Uplink" in p_type:
+                l_port_raw = st.text_input("Local Port (Raw)", value="GigabitEthernet1/0/1")
+                r_dev = st.text_input("Remote Device Hostname", value="SWUKBRIS01-0")
+                r_port_raw = st.text_input("Remote Port (Raw)", value="TenGigabitEthernet1/0/48")
+                link_role = st.text_input("Link Purpose / Role", value="Core Uplink")
+
+                l_port_short = normalize_port_shortname(l_port_raw)
+                r_port_short = normalize_port_shortname(r_port_raw)
+
+                st.caption(f"Configured on Local Device (`{current_sw_name}`):")
+                st.code(f"to {r_dev}:{r_port_short} ({link_role})", language="text")
+
+                st.caption(f"Configured on Remote Device (`{r_dev}`):")
+                st.code(f"to {current_sw_name}:{l_port_short} ({link_role})", language="text")
             else:
-                vlan_name = st.text_input("VLAN / Segment Name", value="VLAN10_Prod_App")
+                vlan_name = st.text_input("VLAN Name / Purpose", value="VLAN10_Prod_App")
                 host_port = st.text_input("Connected Host / Port", value="brisesx01:vmnic0")
                 st.code(f"{vlan_name} - {host_port}", language="text")
 
@@ -811,12 +846,12 @@ with t6:
             st.markdown("**Wireless AP Naming (Bristol Pattern)**")
             ap_ctry = st.text_input("Country Code", value="UK", key="ap_c")
             ap_site = st.text_input("Site Code", value="BRIS", key="ap_s")
-            ap_seq = st.text_input("AP Sequence (2 digits)", value="01", key="ap_seq")
+            ap_seq = st.text_input("Sequence (2 digits)", value="01", key="ap_seq")
             st.code(f"AP Hostname: WAP{ap_ctry.upper()}{ap_site.upper()}{ap_seq}", language="text")
 
         with col_c:
             st.markdown("**Firewall & Security Appliances**")
-            fw_mode = st.radio("Firewall Type", ["ION Appliance (ION<Country><Site><Seq>)", "Classic Gateway (<Site>-FW<NodeID>)"], index=0)
+            fw_mode = st.radio("Firewall Style", ["ION Appliance (ION<Country><Site><Seq>)", "Classic Gateway (<Site>-FW<NodeID>)"], index=0)
             if "ION" in fw_mode:
                 fw_ctry = st.text_input("Country Code", value="UK", key="fw_c")
                 fw_site = st.text_input("Site Code", value="BRIS", key="fw_s")
@@ -889,7 +924,8 @@ with t7:
         r_sw = st.text_input("Switch Pattern", value=current_rules.get("branch_switch", ""))
         r_ap = st.text_input("Wireless AP Pattern", value=current_rules.get("branch_ap", ""))
         r_sec = st.text_input("Security / Firewall Pattern", value=current_rules.get("branch_security", ""))
-        r_up = st.text_input("Switch Uplink Port Description", value=current_rules.get("switch_uplink_desc", ""))
+        r_up_loc = st.text_input("Switch Uplink (Local)", value=current_rules.get("switch_uplink_desc_local", ""))
+        r_up_rem = st.text_input("Switch Uplink (Remote)", value=current_rules.get("switch_uplink_desc_remote", ""))
         r_acc = st.text_input("Switch Access Port Description", value=current_rules.get("switch_access_desc", ""))
         r_fw_if = st.text_input("Firewall Interface Description", value=current_rules.get("firewall_interface", ""))
 
@@ -909,7 +945,8 @@ with t7:
                 "branch_switch": r_sw,
                 "branch_ap": r_ap,
                 "branch_security": r_sec,
-                "switch_uplink_desc": r_up,
+                "switch_uplink_desc_local": r_up_loc,
+                "switch_uplink_desc_remote": r_up_rem,
                 "switch_access_desc": r_acc,
                 "firewall_interface": r_fw_if,
                 "esxi_host": r_esx,
