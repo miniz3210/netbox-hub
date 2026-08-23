@@ -12,7 +12,7 @@ import streamlit as st
 import pandas as pd
 from typing import Optional, Dict, List, Tuple
 
-APP_VERSION = "v1.7.0"
+APP_VERSION = "v1.7.1"
 
 # --- Logging Configuration ---
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -106,7 +106,7 @@ DEFAULT_RULES = {
     "switch_uplink_desc_remote": "to <Local_Device>_<Local_Port_Short> [<Role>]",
     "switch_access_desc": "<VLAN_Name> - <Host/Device>_<Port>",
     "firewall_interface": "<Role/Zone>_<VLAN_ID>",
-    "esxi_host": "<site_prefix>esx<number>.<domain> (e.g. roflesx01.corp.local, pwsesx001.eswine.adds)",
+    "esxi_host": "<site_prefix>esx<number>.<domain> (e.g. pwsesx001.eswine.adds, ageotinfhost1.eswines.ot)",
     "vm_host": "<site_prefix><role><seq> (Roles: cvi=Core/Virt, afs=App/File, sani=Storage, vlab=Test)",
     "esxi_uplink": "<vmnicX> - <vSwitch> Active Uplink / Standby Uplink",
     "esxi_portgroup": "<vSwitch> (<vmnicX>, <vmnicY> Active [/ <vmnicZ> Standby])",
@@ -986,16 +986,40 @@ with t6:
         col_a, col_b = st.columns(2)
         with col_a:
             st.markdown("**ESXi Hypervisor Hostname**")
-            h_site = st.text_input("Site Prefix", value="rofl", key="esx_site")
-            h_num = st.text_input("Host Number", value="01", key="esx_num")
-            h_dom = st.text_input("Domain Name", value="corp.local", key="esx_dom")
+            h_env = st.radio("Environment Profile", ["IT / Corporate (.eswine.adds)", "OT / Industrial (.eswines.ot)", "Branch / Local (.corp.local)"], horizontal=True)
+            
+            if "Corporate" in h_env:
+                h_site = st.text_input("Site Prefix (3 letters)", value="pws", key="esx_site", help="e.g. pws (Campo Viejo), prw (San Sebastian), age (AGE)")
+                h_num = st.text_input("Host Number (3 digits)", value="001", key="esx_num")
+                h_dom = "eswine.adds"
+                gen_esx = f"{h_site.lower()}esx{h_num}.{h_dom}"
+            elif "Industrial" in h_env:
+                h_site = st.text_input("Site Prefix (3 letters)", value="age", key="esx_site", help="e.g. age, cam")
+                h_role = st.selectbox("OT Node Type", ["infhost (Infrastructure Host)", "infmgmt (OT Management Appliance)"])
+                h_role_code = h_role.split()[0]
+                h_num = st.text_input("Host Number (1 digit)", value="1", key="esx_num") if "infhost" in h_role_code else ""
+                h_dom = "eswines.ot"
+                gen_esx = f"{h_site.lower()}ot{h_role_code}{h_num}.{h_dom}"
+            else:
+                h_site = st.text_input("Site Prefix", value="rofl", key="esx_site")
+                h_num = st.text_input("Host Number", value="01", key="esx_num")
+                h_dom = st.text_input("Domain Name", value="corp.local", key="esx_dom")
+                gen_esx = f"{h_site.lower()}esx{h_num}.{h_dom.lower()}"
             
             st.caption("Generated ESXi Hostname:")
-            st.code(f"{h_site.lower()}esx{h_num}.{h_dom.lower()}", language="text")
+            st.code(gen_esx, language="text")
 
             st.markdown("---")
-            st.markdown("💡 **Live Reference Examples:**")
-            st.code("roflesx01.corp.local (Rowland Flat Primary Host)\npwsesx001.eswine.adds (Campo Viejo Primary Host)\nbrisesx01.corp.local (Bristol Host 01)", language="text")
+            st.markdown("💡 **Live NetBox Reference Examples:**")
+            st.code(
+                "pwsesx001.eswine.adds     (Campo Viejo IT ESXi Host 001)\n"
+                "prwesx002.eswine.adds     (San Sebastian IT ESXi Host 002)\n"
+                "esagex10.eswine.adds      (AGE IT Lenovo ThinkSystem SR650)\n"
+                "ageotinfhost1.eswines.ot  (AGE Industrial OT Cluster Node 1)\n"
+                "camotinfmgmt.eswines.ot   (Campo Viejo Industrial OT Mgmt)\n"
+                "ntnx01.eswine.adds        (Madrid Datacentre Nutanix Node 01)",
+                language="text"
+            )
 
         with col_b:
             st.markdown("**Virtual Machine (VM) Hostname**")
@@ -1008,7 +1032,13 @@ with t6:
 
             st.markdown("---")
             st.markdown("💡 **Live Reference Examples:**")
-            st.code("roflcvi01  (Rowland Flat Core Virtualization 01)\nroflafs01  (Rowland Flat App/File Server 01)\nroflsani01 (Rowland Flat SAN/Storage Service 01)\nroflvlab01 (Rowland Flat Test Validation Lab 01)", language="text")
+            st.code(
+                "roflcvi01  (Rowland Flat Core Virtualization 01)\n"
+                "roflafs01  (Rowland Flat App/File Server 01)\n"
+                "roflsani01 (Rowland Flat SAN/Storage Service 01)\n"
+                "roflvlab01 (Rowland Flat Test Validation Lab 01)",
+                language="text"
+            )
 
     # 3. ESXi Network Descriptions (Multi-Uplink & Multiple Examples)
     else:
