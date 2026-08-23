@@ -12,7 +12,7 @@ import streamlit as st
 import pandas as pd
 from typing import Optional, Dict, List, Tuple
 
-APP_VERSION = "v1.7.1"
+APP_VERSION = "v1.7.2"
 
 # --- Logging Configuration ---
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -908,6 +908,15 @@ with t6:
             st.caption("Generated Switch Hostname:")
             st.code(current_sw_name, language="text")
 
+            st.markdown("💡 **Live Switch Reference Examples:**")
+            st.code(
+                "SWAUSAROFLBOT010  (Rowland Flat Bottling Switch 01, Member 0)\n"
+                "VSAUSAROFLCOR010  (Rowland Flat Virtual Chassis Core 01)\n"
+                "OTSWAUSABERECP01  (Berri Estates OT Switch 01)\n"
+                "SWUKBRISCOR010    (Bristol Core Switch 01, Member 0)",
+                language="text"
+            )
+
             st.markdown("---")
             st.markdown("**Switch Port Description Formatter (Automation Standard)**")
             p_type = st.radio("Port Type", ["Uplink (Inter-Switch)", "Access (Host/Endpoint)"], horizontal=True)
@@ -943,8 +952,14 @@ with t6:
             st.code(f"WAP{ap_ctry.upper()}{ap_state.upper()}{ap_site.upper()}{ap_seq}", language="text")
 
             st.markdown("---")
-            st.markdown("💡 **Live Reference Examples:**")
-            st.code("WAPAUSAROFL01 (Rowland Flat AP 01)\nWAPUKBRIS01   (Bristol AP 01)\nWAPAUSAHUG02  (St. Hugo AP 02)", language="text")
+            st.markdown("💡 **Live AP Reference Examples:**")
+            st.code(
+                "WAPAUSAROFL01 (Rowland Flat Access Point 01)\n"
+                "WAPAUSAHUG02  (St. Hugo Access Point 02)\n"
+                "WAPUKBRIS01   (Bristol Access Point 01)\n"
+                "WAPAUSABER01  (Berri Estates Access Point 01)",
+                language="text"
+            )
 
         with col_c:
             st.markdown("**Firewall & Security Appliances**")
@@ -973,6 +988,16 @@ with t6:
                 va_seq = st.text_input("Sequence Number", value="01", key="va_sq")
                 st.caption("Generated Appliance Hostname:")
                 st.code(f"VA{fw_ctry.upper()}{fw_state.upper()}{fw_site.upper()}{va_role.upper()}{va_seq}", language="text")
+
+            st.markdown("💡 **Live Security Reference Examples:**")
+            st.code(
+                "IONAUSABRS01      (Banrock Station Prisma SD-WAN)\n"
+                "IONAUNSWSYD01     (Sydney Prisma SD-WAN 01)\n"
+                "IONAUVICMEL01     (Melbourne Prisma SD-WAN 01)\n"
+                "FWAUBERPA01       (Berri Estates Palo Alto FW 01)\n"
+                "VAAUDCPANORAMA01  (Australia DC Panorama Virtual App)",
+                language="text"
+            )
 
             st.markdown("---")
             st.markdown("**Firewall Interface Description**")
@@ -1040,7 +1065,7 @@ with t6:
                 language="text"
             )
 
-    # 3. ESXi Network Descriptions (Multi-Uplink & Multiple Examples)
+    # 3. ESXi Network Descriptions (Multi-Uplink & Comma Teaming Engine)
     else:
         st.markdown("**ESXi NetBox Interface Standard Descriptions**")
         col_a, col_b, col_c = st.columns(3)
@@ -1056,7 +1081,12 @@ with t6:
 
             st.markdown("---")
             st.markdown("💡 **Live Reference Examples:**")
-            st.code("vmnic0 - vSwitch0 Active Uplink\nvmnic1 - vSwitch0 Active Uplink\nvmnic2 - vSwitch0 Standby Uplink", language="text")
+            st.code(
+                "vmnic0 - vSwitch0 Active Uplink\n"
+                "vmnic1 - vSwitch0 Active Uplink\n"
+                "vmnic2 - vSwitch0 Standby Uplink",
+                language="text"
+            )
 
         with col_b:
             st.markdown("**2. Port Group Teaming (`PG`)**")
@@ -1080,7 +1110,12 @@ with t6:
 
             st.markdown("---")
             st.markdown("💡 **Live Reference Examples:**")
-            st.code("vSwitch0 (vmnic0, vmnic1 Active)\nvSwitch0 (vmnic0 Active / vmnic1 Standby)\nvSwitch0 (vmnic0, vmnic1 Active / vmnic2 Standby)", language="text")
+            st.code(
+                "vSwitch0 (vmnic0, vmnic1 Active)\n"
+                "vSwitch0 (vmnic0 Active / vmnic1 Standby)\n"
+                "vSwitch0 (vmnic0, vmnic1 Active / vmnic2 Standby)",
+                language="text"
+            )
 
         with col_c:
             st.markdown("**3. VMkernel Adapter (`vmk`)**")
@@ -1092,7 +1127,12 @@ with t6:
 
             st.markdown("---")
             st.markdown("💡 **Live Reference Examples:**")
-            st.code("Management Network (vSwitch0)\nvMotion (vSwitch1)\nvSAN Network (vSwitch0)", language="text")
+            st.code(
+                "Management Network (vSwitch0)\n"
+                "vMotion (vSwitch1)\n"
+                "vSAN Network (vSwitch0)",
+                language="text"
+            )
 
 # --- Tab 7: Naming Standards Context (Prompt-Driven) ---
 with t7:
