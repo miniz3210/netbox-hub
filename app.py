@@ -12,7 +12,7 @@ import streamlit as st
 import pandas as pd
 from typing import Optional, Dict, List, Tuple
 
-APP_VERSION = "v1.6.1"
+APP_VERSION = "v1.6.2"
 
 # --- Logging Configuration ---
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -109,7 +109,7 @@ DEFAULT_RULES = {
     "esxi_host": "<site_prefix>esx<number>.<domain> (e.g. roflesx01.corp.local, pwsesx001.eswine.adds)",
     "vm_host": "<site_prefix><role><seq> (Roles: cvi=Core/Virt, afs=App/File, sani=Storage, vlab=Test)",
     "esxi_uplink": "<vmnicX> - <vSwitch> Active Uplink / Standby Uplink",
-    "esxi_portgroup": "<vSwitch> (<vmnic0> Active / <vmnic1> Active)",
+    "esxi_portgroup": "<vSwitch> (<vmnicX>, <vmnicY> Active [/ <vmnicZ> Standby])",
     "esxi_vmkernel": "<Purpose/Service> (<vSwitch>)",
     "netbox_server_yaml": (
         "console-ports: Serial (de-9); "
@@ -985,7 +985,7 @@ with t6:
             vm_seq = st.text_input("Sequence Number", value="01", key="vm_seq")
             st.code(f"VM Name: {vm_site.lower()}{vm_role.strip().lower()}{vm_seq}", language="text")
 
-    # 3. ESXi Network Descriptions (Multi-Uplink & Multi-Team Engine)
+    # 3. ESXi Network Descriptions (Multi-Uplink & Comma Teaming Engine)
     else:
         st.markdown("**ESXi NetBox Interface Standard Descriptions**")
         col_a, col_b, col_c = st.columns(3)
@@ -998,22 +998,23 @@ with t6:
             st.code(f"{vmnic} - {vsw} {nic_status}", language="text")
 
         with col_b:
-            st.markdown("**2. Port Group Teaming (`PG-VM Network`)**")
+            st.markdown("**2. Port Group Teaming (`PG`)**")
             vsw_pg = st.text_input("vSwitch Name", value="vSwitch0", key="vsw2")
-            
-            t_mode = st.radio("Teaming Configuration", ["Active / Active", "Active / Standby", "Custom Multi-NIC"], horizontal=True)
-            
-            if t_mode == "Active / Active":
-                nic1 = st.text_input("NIC 1 (Active)", value="vmnic0", key="aa1")
-                nic2 = st.text_input("NIC 2 (Active)", value="vmnic1", key="aa2")
-                st.code(f"{vsw_pg} ({nic1} Active / {nic2} Active)", language="text")
-            elif t_mode == "Active / Standby":
-                nic_act = st.text_input("Active NIC", value="vmnic0", key="as1")
-                nic_stb = st.text_input("Standby NIC", value="vmnic1", key="as2")
-                st.code(f"{vsw_pg} ({nic_act} Active / {nic_stb} Standby)", language="text")
-            else:
-                cust_team = st.text_input("Custom Teaming String", value="vmnic0 Active / vmnic1 Active / vmnic2 Standby")
-                st.code(f"{vsw_pg} ({cust_team})", language="text")
+            act_nics = st.text_input("Active vmnics (comma separated)", value="vmnic0, vmnic1")
+            stb_nics = st.text_input("Standby vmnics (comma separated / optional)", value="")
+            uns_nics = st.text_input("Unused vmnics (optional)", value="")
+
+            # Comma grouping string builder
+            team_parts = []
+            if act_nics.strip():
+                team_parts.append(f"{act_nics.strip()} Active")
+            if stb_nics.strip():
+                team_parts.append(f"{stb_nics.strip()} Standby")
+            if uns_nics.strip():
+                team_parts.append(f"{uns_nics.strip()} Unused")
+
+            joined_team = " / ".join(team_parts)
+            st.code(f"{vsw_pg} ({joined_team})", language="text")
 
         with col_c:
             st.markdown("**3. VMkernel Adapter (`vmk`)**")
