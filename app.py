@@ -12,7 +12,7 @@ import streamlit as st
 import pandas as pd
 from typing import Optional, Dict, List, Tuple
 
-APP_VERSION = "v1.5.0"
+APP_VERSION = "v1.6.0"
 
 # --- Logging Configuration ---
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -66,12 +66,10 @@ def compute_suggested_site_code(location_name: str) -> str:
         return "SITE"
     words = cleaned.split()
     if len(words) >= 2:
-        # e.g., Rowland Flat -> ROFL
         part1 = words[0][:2]
         part2 = words[1][:2]
         return (part1 + part2).upper()
     elif len(words) == 1:
-        # e.g., Bristol -> BRIS, Madrid -> MAD
         w = words[0]
         return w[:4].upper() if len(w) >= 4 else w.upper()
     return "SITE"
@@ -101,17 +99,17 @@ def normalize_port_shortname(port_name: str) -> str:
 
 # --- Persistent Naming Rules Store ---
 DEFAULT_RULES = {
-    "branch_switch": "SW<Country><Site><Zone/Role><Seq>-<StackID> (e.g. SWAUROFLBOT01-0, SWUKBRIS01-0)",
-    "branch_ap": "WAP<Country><Site><Seq> (e.g. WAPUKBRIS01, WAPAUSARF01)",
-    "branch_security": "FW<Country><Site><Vendor/Role><Seq> / ION<Country><Site><Seq> (e.g. FWAUBERPA01, FWESMADPA01, IONUKBRIS01)",
-    "switch_uplink_desc_local": "to <Remote_Device>:<Remote_Port_Short> (<Role>)",
-    "switch_uplink_desc_remote": "to <Local_Device>:<Local_Port_Short> (<Role>)",
-    "switch_access_desc": "<VLAN_Name> - <Host/Port>",
+    "branch_switch": "SW<Country><State><Site><Zone><Seq>-<StackID> (e.g. SWAUSAROFBOT01-0, SWUKBRISCOR010)",
+    "branch_ap": "WAP<Country><State><Site><Seq> (e.g. WAPUKBRIS01, WAPAUSARF01)",
+    "branch_security": "FW<Country><State><Site><Vendor><Seq> / ION<Country><State><Site><Seq> (e.g. FWAUBERPA01, IONAUSABRS01)",
+    "switch_uplink_desc_local": "to <Remote_Device>_<Remote_Port_Short> [<Role>]",
+    "switch_uplink_desc_remote": "to <Local_Device>_<Local_Port_Short> [<Role>]",
+    "switch_access_desc": "<VLAN_Name> - <Host/Device>_<Port>",
     "firewall_interface": "<Role/Zone>_<VLAN_ID>",
     "esxi_host": "<site_prefix>esx<number>.<domain> (e.g. roflesx01.corp.local, brisesx01.corp.local)",
     "vm_host": "<site_prefix><role><seq> (Roles: cvi=Core/Virt, afs=App/File, sani=Storage, vlab=Test)",
-    "esxi_uplink": "<vmnicX> - <vSwitch> <Purpose> Active Uplink / Standby Uplink",
-    "esxi_portgroup": "<vSwitch> (<vmnicX> Active / <vmnicY> Standby)",
+    "esxi_uplink": "<vmnicX> - <vSwitch> <Purpose> <Active/Standby/Unused> Uplink",
+    "esxi_portgroup": "<vSwitch> (<Active_NICs> Active [/ <Standby_NICs> Standby] [/ <Unused_NICs> Unused])",
     "esxi_vmkernel": "<Purpose/Service> (<vSwitch>)",
     "netbox_server_yaml": (
         "console-ports: Serial (de-9); "
@@ -134,7 +132,7 @@ def save_naming_rules(rules: Dict[str, str]):
         json.dump(rules, f, indent=2, ensure_ascii=False)
 
 def export_rules_as_prompt(rules: Dict[str, str]) -> str:
-    return f"""# INFRASTRUCTURE & NAMING CONVENTIONS STANDARD
+    return f"""# INFRASTRUCTURE & NAMING CONVENTIONS STANDARD (AUTOMATION GRADE)
 
 1. Network Devices:
 - Switch Hostname: {rules.get('branch_switch', '')}
@@ -149,7 +147,7 @@ def export_rules_as_prompt(rules: Dict[str, str]) -> str:
 - ESXi Hostname: {rules.get('esxi_host', '')}
 - VM Hostname: {rules.get('vm_host', '')}
 - ESXi Physical Uplink Description: {rules.get('esxi_uplink', '')}
-- ESXi Port Group Description: {rules.get('esxi_portgroup', '')}
+- ESXi Port Group Teaming Description: {rules.get('esxi_portgroup', '')}
 - ESXi VMkernel Description: {rules.get('esxi_vmkernel', '')}
 
 3. NetBox Hardware YAML Schema:
@@ -880,7 +878,6 @@ with t6:
 
     # 1. Network Devices
     if "1. Network" in naming_cat:
-        # Location Auto-Site Code Assistant
         st.markdown("##### 📍 Location & Site Code Assistant")
         loc_col1, loc_col2 = st.columns([2, 1])
         with loc_col1:
@@ -893,74 +890,77 @@ with t6:
         col_a, col_b, col_c = st.columns(3)
         with col_a:
             st.markdown("**Switch Hostname Generator**")
-            dev_sw_type = st.selectbox("Switch Type", ["SW (Standalone Switch)", "VS (Virtual Chassis / Stack)"])
-            prefix_sw = "VS" if "VS" in dev_sw_type else "SW"
+            dev_sw_type = st.selectbox("Switch Type", ["SW (Standalone Switch)", "VS (Virtual Chassis / Stack)", "OTSW (OT Field Switch)"])
+            prefix_sw = dev_sw_type.split()[0]
             
             s_ctry = st.text_input("Country Code (2-letter)", value="AU", key="sw_ctry_g")
-            s_site = st.text_input("Site Code (Modify if needed)", value=auto_code, key="sw_site_g")
-            s_zone = st.text_input("Building / Zone / Role", value="BOT", help="e.g. CORE, LCCORE, WH1, BOT, DRYGOODS")
+            s_state = st.text_input("State / Region (e.g. SA, VIC, NSW or empty)", value="SA", key="sw_st_g")
+            s_site = st.text_input("Site Code", value=auto_code, key="sw_site_g")
+            s_zone = st.text_input("Building / Zone / Role", value="BOT", help="e.g. COR, ACC, BOT, WH1, VTI, ADM")
             s_seq = st.text_input("Sequence Number", value="01", key="sw_seq_g")
             s_stack = st.text_input("Stack / Member ID (Optional)", value="0", key="sw_stk_g")
             
             clean_zone = s_zone.strip().upper()
-            base_sw = f"{prefix_sw}{s_ctry.upper()}{s_site.upper()}{clean_zone}{s_seq}"
-            current_sw_name = f"{base_sw}-{s_stack}" if s_stack else base_sw
+            state_token = s_state.strip().upper()
+            base_sw = f"{prefix_sw}{s_ctry.upper()}{state_token}{s_site.upper()}{clean_zone}{s_seq}"
+            current_sw_name = f"{base_sw}{s_stack}" if s_stack else base_sw
             st.code(f"Switch Hostname: {current_sw_name}", language="text")
 
             st.markdown("---")
-            st.markdown("**Switch Port Description Formatter**")
+            st.markdown("**Switch Port Description Formatter (Automation Standard)**")
             p_type = st.radio("Port Type", ["Uplink (Inter-Switch)", "Access (Host/Endpoint)"], horizontal=True)
             
             if "Uplink" in p_type:
-                l_port_raw = st.text_input("Local Port (Raw)", value="GigabitEthernet1/0/1")
-                r_dev = st.text_input("Remote Device Hostname", value="SWAUROFLCORE01-0")
-                r_port_raw = st.text_input("Remote Port (Raw)", value="TenGigabitEthernet1/0/48")
+                l_port_raw = st.text_input("Local Port (Raw)", value="ge-0/0/47")
+                r_dev = st.text_input("Remote Device Hostname", value="VSAUSAROFLCOR010")
+                r_port_raw = st.text_input("Remote Port (Raw)", value="ge-0/0/1")
                 link_role = st.text_input("Link Purpose / Role", value="Core Uplink")
 
                 l_port_short = normalize_port_shortname(l_port_raw)
                 r_port_short = normalize_port_shortname(r_port_raw)
 
                 st.caption(f"On Local Device (`{current_sw_name}`):")
-                st.code(f"to {r_dev}:{r_port_short} ({link_role})", language="text")
+                st.code(f"to {r_dev}_{r_port_short} [{link_role}]", language="text")
 
                 st.caption(f"On Remote Device (`{r_dev}`):")
-                st.code(f"to {current_sw_name}:{l_port_short} ({link_role})", language="text")
+                st.code(f"to {current_sw_name}_{l_port_short} [{link_role}]", language="text")
             else:
-                vlan_name = st.text_input("VLAN Name / Purpose", value="VLAN10_Prod_App")
-                host_port = st.text_input("Connected Host / Port", value="roflesx01:vmnic0")
+                vlan_name = st.text_input("VLAN Name / Purpose", value="VLAN10_Management")
+                host_port = st.text_input("Connected Host / Port", value="roflesx01_vmnic0")
                 st.code(f"{vlan_name} - {host_port}", language="text")
 
         with col_b:
             st.markdown("**Wireless AP Naming**")
             ap_ctry = st.text_input("Country Code", value="AU", key="ap_c")
+            ap_state = st.text_input("State Code", value="SA", key="ap_st")
             ap_site = st.text_input("Site Code", value=auto_code, key="ap_s")
             ap_seq = st.text_input("Sequence (2 digits)", value="01", key="ap_seq")
-            st.code(f"AP Hostname: WAP{ap_ctry.upper()}{ap_site.upper()}{ap_seq}", language="text")
+            st.code(f"AP Hostname: WAP{ap_ctry.upper()}{ap_state.upper()}{ap_site.upper()}{ap_seq}", language="text")
 
         with col_c:
             st.markdown("**Firewall & Security Appliances**")
             fw_archetype = st.selectbox("Firewall Category", [
-                "Palo Alto / Fortinet Firewall (FW<Country><Site><Role><Seq>)",
-                "Prisma SD-WAN (ION<Country><Site><Seq>)",
-                "Virtual Appliance Panorama (VA<Country><Site>PANORAMA<Seq>)"
+                "Palo Alto / Fortinet Firewall (FW<Country><State><Site><Vendor><Seq>)",
+                "Prisma SD-WAN (ION<Country><State><Site><Seq>)",
+                "Virtual Appliance Panorama (VA<Country><State><Site>PANORAMA<Seq>)"
             ])
             
             fw_ctry = st.text_input("Country Code", value="AU", key="fw_c_gen")
+            fw_state = st.text_input("State Code", value="SA", key="fw_st_gen")
             fw_site = st.text_input("Site Code", value=auto_code, key="fw_s_gen")
             
             if "Palo Alto" in fw_archetype:
                 fw_vendor_role = st.text_input("Vendor / Role Identifier", value="PA", key="fw_vrole")
                 fw_seq = st.text_input("Sequence Number", value="01", key="fw_seq_pa")
-                st.code(f"Firewall Hostname: FW{fw_ctry.upper()}{fw_site.upper()}{fw_vendor_role.upper()}{fw_seq}", language="text")
+                st.code(f"Firewall Hostname: FW{fw_ctry.upper()}{fw_state.upper()}{fw_site.upper()}{fw_vendor_role.upper()}{fw_seq}", language="text")
             elif "Prisma" in fw_archetype:
-                fw_zone = st.text_input("Zone / Building (Optional)", value="", key="fw_ion_zone")
                 fw_seq = st.text_input("Sequence Number", value="01", key="fw_seq_ion2")
-                clean_ion = f"ION{fw_ctry.upper()}{fw_site.upper()}{fw_zone.upper()}{fw_seq}"
+                clean_ion = f"ION{fw_ctry.upper()}{fw_state.upper()}{fw_site.upper()}{fw_seq}"
                 st.code(f"Security Hostname: {clean_ion}", language="text")
             else:
                 va_role = st.text_input("Virtual Appliance Role", value="PANORAMA", key="va_r")
                 va_seq = st.text_input("Sequence Number", value="01", key="va_sq")
-                st.code(f"Appliance Hostname: VA{fw_ctry.upper()}{fw_site.upper()}{va_role.upper()}{va_seq}", language="text")
+                st.code(f"Appliance Hostname: VA{fw_ctry.upper()}{fw_state.upper()}{fw_site.upper()}{va_role.upper()}{va_seq}", language="text")
 
             st.markdown("---")
             st.markdown("**Firewall Interface Description**")
@@ -985,25 +985,38 @@ with t6:
             vm_seq = st.text_input("Sequence Number", value="01", key="vm_seq")
             st.code(f"VM Name: {vm_site.lower()}{vm_role.strip().lower()}{vm_seq}", language="text")
 
-    # 3. ESXi Network Descriptions
+    # 3. ESXi Network Descriptions (Multi-Uplink & Multi-Team Engine)
     else:
-        st.markdown("**ESXi NetBox Interface Standard Descriptions**")
+        st.markdown("**ESXi NetBox Interface Standard Descriptions (Multi-Interface Teaming)**")
         col_a, col_b, col_c = st.columns(3)
 
         with col_a:
             st.markdown("**1. Physical Uplink (`vmnic`)**")
             vmnic = st.text_input("vmnic Identifier", value="vmnic0")
             vsw = st.text_input("Target vSwitch", value="vSwitch0", key="vsw1")
-            purpose = st.text_input("Purpose / Service", value="Management", key="vsw_purp")
-            st.code(f"{vmnic} - {vsw} {purpose} Active Uplink", language="text")
-            st.code(f"{vmnic} - {vsw} {purpose} Standby Uplink", language="text")
+            purpose = st.text_input("Purpose / Traffic", value="Management", key="vsw_purp")
+            nic_role = st.selectbox("NIC Uplink Mode", ["Active Uplink", "Standby Uplink", "Unused Uplink"])
+            st.code(f"{vmnic} - {vsw} {purpose} {nic_role}", language="text")
 
         with col_b:
-            st.markdown("**2. Port Group**")
+            st.markdown("**2. Port Group Teaming (2–4+ Interfaces)**")
             vsw_pg = st.text_input("vSwitch Name", value="vSwitch0", key="vsw2")
-            act_nic = st.text_input("Active vmnic", value="vmnic0")
-            stb_nic = st.text_input("Standby vmnic", value="vmnic1")
-            st.code(f"{vsw_pg} ({act_nic} Active / {stb_nic} Standby)", language="text")
+            act_nics = st.text_input("Active vmnics (comma separated)", value="vmnic0, vmnic1")
+            stb_nics = st.text_input("Standby vmnics (comma separated / optional)", value="")
+            uns_nics = st.text_input("Unused vmnics (optional)", value="")
+
+            # Dynamic teaming string builder
+            team_parts = []
+            if act_nics.strip():
+                team_parts.append(f"{act_nics.strip()} Active")
+            if stb_nics.strip():
+                team_parts.append(f"{stb_nics.strip()} Standby")
+            if uns_nics.strip():
+                team_parts.append(f"{uns_nics.strip()} Unused")
+
+            joined_team = " / ".join(team_parts)
+            st.caption("Generated Port Group Teaming Description:")
+            st.code(f"{vsw_pg} ({joined_team})", language="text")
 
         with col_c:
             st.markdown("**3. VMkernel Adapter**")
@@ -1038,7 +1051,7 @@ with t7:
         st.caption("Paste any updated natural language naming rules here. AI will extract and apply them:")
         imported_prompt_text = st.text_area(
             "Paste Updated Prompt Text", 
-            placeholder="e.g. Switch naming should be SW<Country><Site><Zone><Seq>, Firewalls are FW<Country><Site><Vendor><Seq>...", 
+            placeholder="e.g. Switch naming should be SW<Country><State><Site><Zone><Seq>, Firewalls are FW<Country><State><Site><Vendor><Seq>...", 
             height=260
         )
 
