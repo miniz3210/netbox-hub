@@ -12,7 +12,7 @@ import streamlit as st
 import pandas as pd
 from typing import Optional, Dict, List, Tuple
 
-APP_VERSION = "v1.7.2"
+APP_VERSION = "v1.7.3"
 
 # --- Logging Configuration ---
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -99,7 +99,7 @@ def normalize_port_shortname(port_name: str) -> str:
 
 # --- Persistent Naming Rules Store ---
 DEFAULT_RULES = {
-    "branch_switch": "SW<Country><State><Site><Zone><Seq>-<StackID> (e.g. SWAUSAROFBOT01-0, SWUKBRISCOR010)",
+    "branch_switch": "SW<Country><State><Site><Zone><Seq>-<StackID> (e.g. SWUKBRIS01-0, SWAUSAROFLBOT01-0)",
     "branch_ap": "WAP<Country><State><Site><Seq> (e.g. WAPUKBRIS01, WAPAUSARF01)",
     "branch_security": "FW<Country><State><Site><Vendor><Seq> / ION<Country><State><Site><Seq> (e.g. FWAUBERPA01, IONAUSABRS01)",
     "switch_uplink_desc_local": "to <Remote_Device>_<Remote_Port_Short> [<Role>]",
@@ -881,7 +881,7 @@ with t6:
         st.markdown("##### 📍 Location & Site Code Assistant")
         loc_col1, loc_col2 = st.columns([2, 1])
         with loc_col1:
-            input_location = st.text_input("Enter Location / City / Facility Name", value="Rowland Flat", key="loc_input_help")
+            input_location = st.text_input("Enter Location / City / Facility Name", value="Bristol", key="loc_input_help")
         with loc_col2:
             auto_code = compute_suggested_site_code(input_location)
             st.info(f"Suggested Site Code: **`{auto_code}`**")
@@ -893,27 +893,29 @@ with t6:
             dev_sw_type = st.selectbox("Switch Type", ["SW (Standalone Switch)", "VS (Virtual Chassis / Stack)", "OTSW (OT Field Switch)"])
             prefix_sw = dev_sw_type.split()[0]
             
-            s_ctry = st.text_input("Country Code (2-letter)", value="AU", key="sw_ctry_g")
-            s_state = st.text_input("State / Region (e.g. SA, VIC, NSW or empty)", value="SA", key="sw_st_g")
+            s_ctry = st.text_input("Country Code (2-letter)", value="UK", key="sw_ctry_g")
+            s_state = st.text_input("State / Region (e.g. SA, VIC, NSW or empty)", value="", key="sw_st_g")
             s_site = st.text_input("Site Code", value=auto_code, key="sw_site_g")
-            s_zone = st.text_input("Building / Zone / Role", value="BOT", help="e.g. COR, ACC, BOT, WH1, VTI, ADM")
+            s_zone = st.text_input("Building / Zone / Role (Optional)", value="", help="e.g. COR, ACC, BOT, WH1, VTI, ADM")
             s_seq = st.text_input("Sequence Number", value="01", key="sw_seq_g")
             s_stack = st.text_input("Stack / Member ID (Optional)", value="0", key="sw_stk_g")
             
             clean_zone = s_zone.strip().upper()
             state_token = s_state.strip().upper()
             base_sw = f"{prefix_sw}{s_ctry.upper()}{state_token}{s_site.upper()}{clean_zone}{s_seq}"
-            current_sw_name = f"{base_sw}{s_stack}" if s_stack else base_sw
+            current_sw_name = f"{base_sw}-{s_stack.strip()}" if s_stack.strip() else base_sw
             
             st.caption("Generated Switch Hostname:")
             st.code(current_sw_name, language="text")
 
             st.markdown("💡 **Live Switch Reference Examples:**")
             st.code(
-                "SWAUSAROFLBOT010  (Rowland Flat Bottling Switch 01, Member 0)\n"
-                "VSAUSAROFLCOR010  (Rowland Flat Virtual Chassis Core 01)\n"
-                "OTSWAUSABERECP01  (Berri Estates OT Switch 01)\n"
-                "SWUKBRISCOR010    (Bristol Core Switch 01, Member 0)",
+                "SWUKBRIS01-0      (Bristol Stack Switch 01, Member 0)\n"
+                "SWUKBRIS01-1      (Bristol Stack Switch 01, Member 1)\n"
+                "SWUKWEYCORE-0     (Weybridge Core Switch, Member 0)\n"
+                "SWAUSAROFLWH1-0   (Rowland Flat WH1 Switch, Member 0)\n"
+                "VSAUSAROFLCCORE-0 (Rowland Flat Core Virtual Chassis)\n"
+                "SWAUSABRS01       (Banrock Station Standalone Switch)",
                 language="text"
             )
 
@@ -923,7 +925,7 @@ with t6:
             
             if "Uplink" in p_type:
                 l_port_raw = st.text_input("Local Port (Raw)", value="ge-0/0/47")
-                r_dev = st.text_input("Remote Device Hostname", value="VSAUSAROFLCOR010")
+                r_dev = st.text_input("Remote Device Hostname", value="SWUKBRIS01-0")
                 r_port_raw = st.text_input("Remote Port (Raw)", value="ge-0/0/1")
                 link_role = st.text_input("Link Purpose / Role", value="Core Uplink")
 
@@ -943,8 +945,8 @@ with t6:
 
         with col_b:
             st.markdown("**Wireless AP Naming**")
-            ap_ctry = st.text_input("Country Code", value="AU", key="ap_c")
-            ap_state = st.text_input("State Code", value="SA", key="ap_st")
+            ap_ctry = st.text_input("Country Code", value="UK", key="ap_c")
+            ap_state = st.text_input("State Code (e.g. SA, NSW or empty)", value="", key="ap_st")
             ap_site = st.text_input("Site Code", value=auto_code, key="ap_s")
             ap_seq = st.text_input("Sequence (2 digits)", value="01", key="ap_seq")
             
@@ -954,9 +956,9 @@ with t6:
             st.markdown("---")
             st.markdown("💡 **Live AP Reference Examples:**")
             st.code(
+                "WAPUKBRIS01   (Bristol Access Point 01)\n"
                 "WAPAUSAROFL01 (Rowland Flat Access Point 01)\n"
                 "WAPAUSAHUG02  (St. Hugo Access Point 02)\n"
-                "WAPUKBRIS01   (Bristol Access Point 01)\n"
                 "WAPAUSABER01  (Berri Estates Access Point 01)",
                 language="text"
             )
@@ -964,13 +966,13 @@ with t6:
         with col_c:
             st.markdown("**Firewall & Security Appliances**")
             fw_archetype = st.selectbox("Firewall Category", [
-                "Palo Alto / Fortinet Firewall (FW<Country><State><Site><Vendor><Seq>)",
                 "Prisma SD-WAN (ION<Country><State><Site><Seq>)",
+                "Palo Alto / Fortinet Firewall (FW<Country><State><Site><Vendor><Seq>)",
                 "Virtual Appliance Panorama (VA<Country><State><Site>PANORAMA<Seq>)"
             ])
             
-            fw_ctry = st.text_input("Country Code", value="AU", key="fw_c_gen")
-            fw_state = st.text_input("State Code", value="SA", key="fw_st_gen")
+            fw_ctry = st.text_input("Country Code", value="UK", key="fw_c_gen")
+            fw_state = st.text_input("State Code (e.g. SA, NSW or empty)", value="", key="fw_st_gen")
             fw_site = st.text_input("Site Code", value=auto_code, key="fw_s_gen")
             
             if "Palo Alto" in fw_archetype:
@@ -991,9 +993,9 @@ with t6:
 
             st.markdown("💡 **Live Security Reference Examples:**")
             st.code(
+                "IONUKBRIS01       (Bristol Prisma SD-WAN 01)\n"
                 "IONAUSABRS01      (Banrock Station Prisma SD-WAN)\n"
                 "IONAUNSWSYD01     (Sydney Prisma SD-WAN 01)\n"
-                "IONAUVICMEL01     (Melbourne Prisma SD-WAN 01)\n"
                 "FWAUBERPA01       (Berri Estates Palo Alto FW 01)\n"
                 "VAAUDCPANORAMA01  (Australia DC Panorama Virtual App)",
                 language="text"
@@ -1161,7 +1163,7 @@ with t7:
         st.caption("Paste any updated natural language naming rules here. AI will extract and apply them:")
         imported_prompt_text = st.text_area(
             "Paste Updated Prompt Text", 
-            placeholder="e.g. Switch naming should be SW<Country><State><Site><Zone><Seq>, Firewalls are FW<Country><State><Site><Vendor><Seq>...", 
+            placeholder="e.g. Switch naming should be SW<Country><State><Site><Zone><Seq>-<StackID>, Firewalls are FW<Country><State><Site><Vendor><Seq>...", 
             height=260
         )
 
