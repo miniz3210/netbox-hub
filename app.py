@@ -12,7 +12,7 @@ import streamlit as st
 import pandas as pd
 from typing import Optional, Dict, List, Tuple
 
-APP_VERSION = "v1.8.3"
+APP_VERSION = "v1.9.0"
 
 # --- Logging Configuration ---
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -29,39 +29,13 @@ GITHUB_REPO = "netbox-community/devicetype-library"
 BRANCH = "master"
 RULES_FILE = "naming_rules.json"
 
-# --- Provider Keys & Dynamic Model Loading from .env ---
-GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
-
-GROQ_KEY = os.getenv("GROQ_API_KEY", "").strip()
-groq_models_env = os.getenv("GROQ_MODELS", os.getenv("GROQ_MODEL", "groq/openai/gpt-oss-120b,cerebras/llama-3.3-70b"))
-GROQ_MODELS = [m.strip() for m in groq_models_env.split(",") if m.strip()]
-
-OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
+# --- Environment & OmniRoute Configuration ---
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "http://omniroute:20128/v1").rstrip("/")
-openrouter_models_env = os.getenv("OPENROUTER_MODELS", os.getenv("OPENROUTER_MODEL", "groq/openai/gpt-oss-120b,cerebras/llama-3.3-70b,gemini/gemini-2.5-flash"))
-OPENROUTER_MODELS = [m.strip() for m in openrouter_models_env.split(",") if m.strip()]
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "sk-omniroute-local").strip()
 
-OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "").strip()
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b").strip()
-
-AVAILABLE_PROVIDERS = []
-if OPENROUTER_MODELS:
-    for model in OPENROUTER_MODELS:
-        AVAILABLE_PROVIDERS.append(f"OpenRouter ({model})")
-
-if GROQ_KEY or GROQ_MODELS:
-    for model in GROQ_MODELS:
-        AVAILABLE_PROVIDERS.append(f"Groq ({model})")
-
-if OLLAMA_URL:
-    AVAILABLE_PROVIDERS.append(f"Local Ollama ({OLLAMA_MODEL})")
-
-if GEMINI_KEY:
-    AVAILABLE_PROVIDERS.append(f"Google Gemini ({GEMINI_MODEL})")
-
-if not AVAILABLE_PROVIDERS:
-    AVAILABLE_PROVIDERS.append("OpenRouter (groq/openai/gpt-oss-120b)")
+DEFAULT_MODELS_FALLBACK = "groq/openai/gpt-oss-120b,cerebras/llama-3.3-70b,gemini/gemini-2.5-flash,groq/llama-3.3-70b-versatile"
+models_env = os.getenv("OPENROUTER_MODELS", os.getenv("GROQ_MODELS", DEFAULT_MODELS_FALLBACK))
+AVAILABLE_MODELS = [m.strip() for m in models_env.split(",") if m.strip()]
 
 # --- Smart Site Code Generator ---
 def compute_suggested_site_code(location_name: str) -> str:
@@ -337,11 +311,7 @@ def clean_ai_yaml(text: str) -> str:
     text = re.sub(r"type:\s*1gbase-x-sfp\b", "type: 1000base-x-sfp", text)
     return text.strip()
 
-def extract_model_from_label(label: str) -> str:
-    match = re.search(r"\((.+)\)", label)
-    return match.group(1).strip() if match else label
-
-def call_ai(prompt: str, selected_provider: str, custom_system_msg: Optional[str] = None) -> str:
+def call_ai(prompt: str, selected_model: str, custom_system_msg: Optional[str] = None) -> str:
     naming_context = get_active_naming_context()
     system_msg = custom_system_msg or (
         "You are a strict NetBox hardware YAML specification generator and infrastructure architect. "
@@ -352,84 +322,47 @@ def call_ai(prompt: str, selected_provider: str, custom_system_msg: Optional[str
         "Do NOT invent comments or URLs; omit 'comments' key entirely if no verified official datasheet URL is available."
     )
 
-    override_key = st.session_state.get("key_override_input", "").strip()
+    clean_token = OPENROUTER_API_KEY.replace("Bearer ", "").strip()
+    headers = {
+        "Authorization": f"Bearer {clean_token}",
+        "HTTP-Referer": "http://localhost:8501",
+        "X-Title": "NetBox Hub",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": selected_model,
+        "temperature": 0.0,
+        "messages": [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": prompt}
+        ]
+    }
+    
+    base = OPENROUTER_BASE_URL.rstrip("/")
+    endpoint = f"{base}/chat/completions" if base.endswith("/v1") else f"{base}/v1/chat/completions"
 
     try:
-        if selected_provider.startswith("Groq"):
-            from groq import Groq
-            effective_key = override_key or GROQ_KEY or "gsk_local"
-            client = Groq(api_key=effective_key)
-            target_model = extract_model_from_label(selected_provider)
-            resp = client.chat.completions.create(
-                model=target_model,
-                messages=[
-                    {"role": "system", "content": system_msg},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.0
-            )
-            return resp.choices[0].message.content
-
-        elif selected_provider.startswith("Google Gemini"):
-            from google import genai
-            from google.genai import types
-            effective_key = override_key or GEMINI_KEY
-            client = genai.Client(api_key=effective_key)
-            target_model = extract_model_from_label(selected_provider)
-            resp = client.models.generate_content(
-                model=target_model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.0,
-                    tools=[{"google_search": {}}],
-                    system_instruction=system_msg
-                )
-            )
-            return resp.text
-
-        elif selected_provider.startswith("OpenRouter"):
-            from openai import OpenAI
-            effective_key = override_key or OPENROUTER_KEY or "sk-omniroute-local"
-            client = OpenAI(
-                base_url=OPENROUTER_BASE_URL, 
-                api_key=effective_key,
-                default_headers={"HTTP-Referer": "http://localhost:8501", "X-Title": "NetBox Hub"}
-            )
-            target_model = extract_model_from_label(selected_provider)
-            resp = client.chat.completions.create(
-                model=target_model,
-                messages=[
-                    {"role": "system", "content": system_msg},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.0
-            )
-            return resp.choices[0].message.content
-
-        elif selected_provider.startswith("Local Ollama"):
-            from openai import OpenAI
-            client = OpenAI(base_url=OLLAMA_URL, api_key="ollama")
-            target_model = extract_model_from_label(selected_provider)
-            resp = client.chat.completions.create(
-                model=target_model,
-                messages=[
-                    {"role": "system", "content": system_msg},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.0
-            )
-            return resp.choices[0].message.content
-
-        else:
-            st.error("No valid AI provider selected.")
+        response = requests.post(endpoint, headers=headers, json=payload, timeout=90)
+        if response.status_code != 200:
+            st.error(f"❌ Generation Failed (HTTP {response.status_code}):\n```\n{response.text}\n```")
             st.stop()
-
+            
+        data = response.json()
+        if "choices" in data and len(data["choices"]) > 0:
+            return data["choices"][0]["message"]["content"]
+        elif "error" in data:
+            st.error(f"❌ Gateway Error: {data['error']}")
+            st.stop()
+        else:
+            st.error(f"❌ Unexpected response format: {json.dumps(data)}")
+            st.stop()
+            
     except Exception as e:
-        logger.error(f"Error from {selected_provider}: {str(e)}")
-        st.error(f"❌ Generation Failed ({selected_provider}): {str(e)}")
+        logger.error(f"Error from OmniRoute Gateway: {str(e)}")
+        st.error(f"❌ Generation Failed: {str(e)}")
         st.stop()
 
-def verify_and_suggest_with_ai(user_input_text: str, provider: str) -> str:
+def verify_and_suggest_with_ai(user_input_text: str, model_name: str) -> str:
     naming_context = get_active_naming_context()
     system_msg = f"""You are a Principal Network Architect and NetBox Standard Auditor.
 Audit, verify, and standardize user inputs against the following official company naming conventions:
@@ -447,9 +380,9 @@ RULES FOR VERDICT & STRUCTURE:
 - **Audit Reason**: Concise explanation of what was verified or corrected.
 """
     prompt = f"Audit and suggest standard for:\n```\n{user_input_text}\n```"
-    return call_ai(prompt, provider, custom_system_msg=system_msg)
+    return call_ai(prompt, model_name, custom_system_msg=system_msg)
 
-def parse_prompt_to_rules(prompt_text: str, provider: str) -> Dict[str, str]:
+def parse_prompt_to_rules(prompt_text: str, model_name: str) -> Dict[str, str]:
     extract_prompt = f"""
 Analyze the following natural language infrastructure naming standards prompt and convert it into a JSON object matching this schema:
 {{
@@ -475,11 +408,11 @@ Input Prompt:
 
 Output ONLY the raw JSON block without markdown fences or conversational text.
 """
-    raw_res = call_ai(extract_prompt, provider)
+    raw_res = call_ai(extract_prompt, model_name)
     clean_json = re.sub(r"^```(?:json)?|```$", "", raw_res.strip(), flags=re.IGNORECASE).strip()
     return json.loads(clean_json)
 
-def generate_device_yaml(mfg: str, model: str, provider: str) -> str:
+def generate_device_yaml(mfg: str, model: str, model_name: str) -> str:
     prompt = f"""
 Search official datasheets and generate a complete NetBox Device-Type YAML conforming to user infrastructure standards.
 Manufacturer: {mfg}
@@ -527,52 +460,48 @@ CRITICAL INFRASTRUCTURE RULES:
 
 Output ONLY valid, raw YAML starting with '---'.
 """
-    return clean_ai_yaml(call_ai(prompt, provider))
+    return clean_ai_yaml(call_ai(prompt, model_name))
 
-def generate_module_yaml(mfg: str, model: str, part_num: str, provider: str, ref_pattern: Optional[str] = None) -> str:
-    if ref_pattern:
-        pattern_instruction = f"""
-- Interface Naming Rule:
-    - MUST follow this pattern: `{ref_pattern}`
-    - Always keep '{{module}}' intact.
-"""
-    else:
-        pattern_instruction = """
-- Interface Naming Rule (Strict Standard):
-    - MUST strictly use: `name: '{module}/Port1'`, `name: '{module}/Port2'`, `name: '{module}/Port3'`, etc.
-    - NEVER replace '{module}' with vendor or model names.
-"""
+def generate_module_yaml(mfg: str, model: str, part_num: str, model_name: str, ref_pattern: Optional[str] = None) -> str:
+    pattern_rule = f"MUST strictly use: `name: '{ref_pattern}'`" if ref_pattern else "MUST strictly use: `name: '{module}/Port1'`, `name: '{module}/Port2'`, etc. NEVER omit the literal '{module}' token."
 
     prompt = f"""
-Search official manufacturer datasheets and generate a NetBox Module-Type YAML.
+Search official manufacturer datasheets and generate a NetBox Module-Type YAML definition.
 Manufacturer: {mfg}
 Model: {model}
 Part Number: {part_num}
 
-CRITICAL SCHEMA RULES:
-- First line MUST be '---'
-- Required Keys:
-    manufacturer: {mfg}
-    model: <exact clean SKU/model name>
-    part_number: <exact part number>
-    description: '<Clear hardware overview>'
-- Do NOT include 'u_height' or 'is_full_depth'.
-- Valid NetBox Interface Types: 10gbase-t, 10gbase-x-sfpp, 25gbase-x-sfp28, 1000base-t, 1000base-x-sfp
-{pattern_instruction}
+CRITICAL RULES:
+1. First line MUST be '---'
+2. Metadata keys:
+   manufacturer: {mfg}
+   model: <exact clean SKU/model name>
+   part_number: <exact part number>
+   description: '<Accurate hardware overview>'
+3. Do NOT include 'u_height' or 'is_full_depth'.
+4. Exact NetBox Interface Types:
+   - RJ-45 10GbE (e.g. Intel X550-T2, Broadcom 57416) -> `10gbase-t`
+   - SFP+ 10GbE (e.g. Intel X520, X710-DA2) -> `10gbase-x-sfpp`
+   - SFP28 25GbE (e.g. Intel E810-XXVDA2, Mellanox ConnectX-4) -> `25gbase-x-sfp28`
+   - 1GbE RJ45 / SFP -> `1000base-t` / `1000base-x-sfp`
+5. Interface Naming Rule:
+   - {pattern_rule}
 
 Output ONLY valid, raw YAML starting with '---'.
 """
-    result = clean_ai_yaml(call_ai(prompt, provider))
-    if not ref_pattern:
+    result = clean_ai_yaml(call_ai(prompt, model_name))
+    
+    # Enforce {module} retention
+    if "{module}" not in result:
         result = re.sub(
-            r"name:\s*['\"]?(?:.+?[/_-])?(?:Port|eth|LAN|mgmt|Ethernet)?\s*(\d+)['\"]?",
+            r"name:\s*['\"]?(?:(?:Ethernet|Port|eth|GigabitEthernet|Te|Gi)[/_ -]*)?(?:\d+/)?(\d+)['\"]?",
             r"name: '{module}/Port\1'",
             result,
             flags=re.IGNORECASE
         )
     return result
 
-def generate_rack_yaml(mfg: str, model: str, provider: str) -> str:
+def generate_rack_yaml(mfg: str, model: str, model_name: str) -> str:
     prompt = f"""
 Search official specifications and generate a NetBox Rack-Type YAML.
 Manufacturer: {mfg}
@@ -583,7 +512,7 @@ Schema Rules:
 - Keys: manufacturer, model, slug, width (19 or 23), u_height, form_factor, starting_unit (default 1)
 Output ONLY raw YAML.
 """
-    return clean_ai_yaml(call_ai(prompt, provider))
+    return clean_ai_yaml(call_ai(prompt, model_name))
 
 def generate_placeholder_svg(mfg: str, model: str, u_height: int = 1, view: str = "front") -> str:
     height_px = max(40, u_height * 40)
@@ -597,21 +526,28 @@ def generate_placeholder_svg(mfg: str, model: str, u_height: int = 1, view: str 
 
 # --- 3. UI Layout ---
 st.title("⚡ NetBox Universal Library Hub")
-st.caption("Device Types | Module Types | Rack Types | Images | Excel Engine | Naming Standards")
+st.caption("Device Types | Module Types | Rack Types | Images | Excel Engine | Naming Standards | OmniRoute AI")
 
 catalog = get_repo_catalog()
 
 with st.sidebar:
     st.header("⚙️ AI Engine Selection")
     
-    st.text_input("OpenRouter API Key Override", type="password", key="key_override_input", help="Optional runtime key override.")
+    # Clean model dropdown driven entirely by .env
+    active_model = st.selectbox("Active AI Model", AVAILABLE_MODELS, index=0)
+    
+    # Custom CSS for clean wrapping in sidebar
+    st.markdown("""
+    <style>
+    div[data-testid="stSidebar"] code {
+        white-space: pre-wrap !important;
+        word-break: break-all !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-    if AVAILABLE_PROVIDERS:
-        active_provider = st.selectbox("Active AI Model", AVAILABLE_PROVIDERS)
-        st.info(f"Selected: `{active_provider}`")
-    else:
-        active_provider = None
-        st.warning("No AI API keys configured. Only official GitHub library lookups are enabled.")
+    st.info(f"**Selected:**\n`{active_model}`")
+    st.caption(f"🔌 Routed via **OmniRoute** (`{OPENROUTER_BASE_URL}`)")
 
     st.markdown(
         f"""
@@ -692,11 +628,8 @@ with t1:
 
         with st.spinner("Processing..."):
             if selected_dev_choice.startswith("✨"):
-                if not active_provider:
-                    st.error("Configure an AI API key in `.env` to enable AI generation.")
-                    st.stop()
-                content = generate_device_yaml(effective_mfg, d_model, active_provider)
-                src = f"🤖 AI Generated ({active_provider})"
+                content = generate_device_yaml(effective_mfg, d_model, active_model)
+                src = f"🤖 AI Generated ({active_model})"
             else:
                 content = fetch_raw_content(selected_dev_choice, binary=False)
                 src = f"✅ Official Repository (`{selected_dev_choice}`)"
@@ -754,11 +687,8 @@ with t2:
 
         with st.spinner("Processing..."):
             if selected_mod_choice.startswith("✨"):
-                if not active_provider:
-                    st.error("Configure an AI API key in `.env` to enable AI generation.")
-                    st.stop()
-                content = generate_module_yaml(effective_mfg, m_model, m_model, active_provider, ref_pattern=discovered_pattern)
-                src = f"🤖 AI Generated ({active_provider})"
+                content = generate_module_yaml(effective_mfg, m_model, m_model, active_model, ref_pattern=discovered_pattern)
+                src = f"🤖 AI Generated ({active_model})"
             else:
                 content = fetch_raw_content(selected_mod_choice, binary=False)
                 src = f"✅ Official Repository (`{selected_mod_choice}`)"
@@ -806,11 +736,8 @@ with t3:
 
         with st.spinner("Processing..."):
             if selected_rack_choice.startswith("✨"):
-                if not active_provider:
-                    st.error("Configure an AI API key in `.env` to enable AI generation.")
-                    st.stop()
-                content = generate_rack_yaml(effective_mfg, r_model, active_provider)
-                src = f"🤖 AI Generated ({active_provider})"
+                content = generate_rack_yaml(effective_mfg, r_model, active_model)
+                src = f"🤖 AI Generated ({active_model})"
             else:
                 content = fetch_raw_content(selected_rack_choice, binary=False)
                 src = f"✅ Official Repository (`{selected_rack_choice}`)"
@@ -864,10 +791,6 @@ with t5:
         st.dataframe(df.head(), use_container_width=True)
         
         if st.button("Start Universal Batch Processing", type="primary"):
-            if not active_provider:
-                st.error("Please configure at least one API key in `.env` to run batch generation.")
-                st.stop()
-
             pbar = st.progress(0)
             zip_buf = io.BytesIO()
             results = []
@@ -895,10 +818,10 @@ with t5:
                         src = f"Official Repository ({matches[0]})"
                     else:
                         if cat_input == "module":
-                            content = gen_fn(mfg, model, model, active_provider, ref_pattern=None)
+                            content = gen_fn(mfg, model, model, active_model, ref_pattern=None)
                         else:
-                            content = gen_fn(mfg, model, active_provider)
-                        src = f"AI Generated ({active_provider})"
+                            content = gen_fn(mfg, model, active_model)
+                        src = f"AI Generated ({active_model})"
 
                     clean_fname = f"{prefix}/{mfg}/{model}.yaml".replace(" ", "_")
                     zf.writestr(clean_fname, content)
@@ -952,14 +875,10 @@ with t6:
             st.caption("Generated Switch Hostname:")
             st.code(current_sw_name, language="text")
 
-            # Inline AI Check Button
             if st.button("🤖 AI Verify / Suggest Switch", key="ai_chk_sw"):
-                if not active_provider:
-                    st.error("Select an AI model in the sidebar to run verification.")
-                else:
-                    with st.spinner("Auditing..."):
-                        audit_out = verify_and_suggest_with_ai(current_sw_name, active_provider)
-                        st.info(audit_out)
+                with st.spinner("Auditing..."):
+                    audit_out = verify_and_suggest_with_ai(current_sw_name, active_model)
+                    st.info(audit_out)
 
             st.markdown("💡 **Live Switch Reference Examples:**")
             st.code(
@@ -1006,11 +925,8 @@ with t6:
                 st.code(remote_desc, language="text")
 
                 if st.button("🤖 AI Verify Uplink Descriptions", key="ai_chk_up"):
-                    if not active_provider:
-                        st.error("Select an AI model in sidebar.")
-                    else:
-                        with st.spinner("Auditing..."):
-                            st.info(verify_and_suggest_with_ai(local_desc, active_provider))
+                    with st.spinner("Auditing..."):
+                        st.info(verify_and_suggest_with_ai(local_desc, active_model))
 
             elif p_type == "LAG Member Port (LACP Uplink)":
                 l_port_raw = st.text_input("Local Port (Raw)", value="TenGigabitEthernet1/0/1", key="lagm_lp")
@@ -1035,11 +951,8 @@ with t6:
 !""", language="cisco")
 
                 if st.button("🤖 AI Verify LAG Member Description", key="ai_chk_lagm"):
-                    if not active_provider:
-                        st.error("Select an AI model in sidebar.")
-                    else:
-                        with st.spinner("Auditing..."):
-                            st.info(verify_and_suggest_with_ai(lag_member_desc, active_provider))
+                    with st.spinner("Auditing..."):
+                        st.info(verify_and_suggest_with_ai(lag_member_desc, active_model))
 
             elif p_type == "Port-Channel (Logical Aggregate)":
                 loc_po = st.text_input("Local Port-Channel ID", value="10", key="pchan_lpo")
@@ -1062,11 +975,8 @@ with t6:
 !""", language="cisco")
 
                 if st.button("🤖 AI Verify Port-Channel Description", key="ai_chk_pchan"):
-                    if not active_provider:
-                        st.error("Select an AI model in sidebar.")
-                    else:
-                        with st.spinner("Auditing..."):
-                            st.info(verify_and_suggest_with_ai(po_desc, active_provider))
+                    with st.spinner("Auditing..."):
+                        st.info(verify_and_suggest_with_ai(po_desc, active_model))
 
             else:
                 vlan_name = st.text_input("VLAN Name / Purpose", value="VLAN10_Management", key="acc_vln")
@@ -1076,11 +986,8 @@ with t6:
                 st.code(access_desc, language="text")
 
                 if st.button("🤖 AI Verify Access Description", key="ai_chk_acc"):
-                    if not active_provider:
-                        st.error("Select an AI model in sidebar.")
-                    else:
-                        with st.spinner("Auditing..."):
-                            st.info(verify_and_suggest_with_ai(access_desc, active_provider))
+                    with st.spinner("Auditing..."):
+                        st.info(verify_and_suggest_with_ai(access_desc, active_model))
 
         with col_b:
             st.markdown("**Wireless AP Naming**")
@@ -1094,12 +1001,9 @@ with t6:
             st.code(clean_ap_name, language="text")
 
             if st.button("🤖 AI Verify / Suggest AP", key="ai_chk_ap"):
-                if not active_provider:
-                    st.error("Select an AI model in the sidebar to run verification.")
-                else:
-                    with st.spinner("Auditing..."):
-                        audit_out = verify_and_suggest_with_ai(clean_ap_name, active_provider)
-                        st.info(audit_out)
+                with st.spinner("Auditing..."):
+                    audit_out = verify_and_suggest_with_ai(clean_ap_name, active_model)
+                    st.info(audit_out)
 
             st.markdown("---")
             st.markdown("💡 **Live AP Reference Examples:**")
@@ -1142,12 +1046,9 @@ with t6:
                 st.code(clean_sec_name, language="text")
 
             if st.button("🤖 AI Verify / Suggest Security", key="ai_chk_sec"):
-                if not active_provider:
-                    st.error("Select an AI model in the sidebar to run verification.")
-                else:
-                    with st.spinner("Auditing..."):
-                        audit_out = verify_and_suggest_with_ai(clean_sec_name, active_provider)
-                        st.info(audit_out)
+                with st.spinner("Auditing..."):
+                    audit_out = verify_and_suggest_with_ai(clean_sec_name, active_model)
+                    st.info(audit_out)
 
             st.markdown("💡 **Live Security Reference Examples:**")
             st.code(
@@ -1168,11 +1069,8 @@ with t6:
             st.code(clean_fw_if, language="text")
 
             if st.button("🤖 AI Verify Interface Name", key="ai_chk_fwif"):
-                if not active_provider:
-                    st.error("Select an AI model in sidebar.")
-                else:
-                    with st.spinner("Auditing..."):
-                        st.info(verify_and_suggest_with_ai(clean_fw_if, active_provider))
+                with st.spinner("Auditing..."):
+                    st.info(verify_and_suggest_with_ai(clean_fw_if, active_model))
 
     # 2. Hosts & VMs
     elif "2. Hosts" in naming_cat:
@@ -1203,11 +1101,8 @@ with t6:
             st.code(gen_esx, language="text")
 
             if st.button("🤖 AI Verify / Suggest ESXi Host", key="ai_chk_esx"):
-                if not active_provider:
-                    st.error("Select an AI model in sidebar.")
-                else:
-                    with st.spinner("Auditing..."):
-                        st.info(verify_and_suggest_with_ai(gen_esx, active_provider))
+                with st.spinner("Auditing..."):
+                    st.info(verify_and_suggest_with_ai(gen_esx, active_model))
 
             st.markdown("---")
             st.markdown("💡 **Live NetBox Reference Examples:**")
@@ -1232,11 +1127,8 @@ with t6:
             st.code(gen_vm, language="text")
 
             if st.button("🤖 AI Verify / Suggest VM Name", key="ai_chk_vm"):
-                if not active_provider:
-                    st.error("Select an AI model in sidebar.")
-                else:
-                    with st.spinner("Auditing..."):
-                        st.info(verify_and_suggest_with_ai(gen_vm, active_provider))
+                with st.spinner("Auditing..."):
+                    st.info(verify_and_suggest_with_ai(gen_vm, active_model))
 
             st.markdown("---")
             st.markdown("💡 **Live Reference Examples:**")
@@ -1263,11 +1155,8 @@ with t6:
             st.code(gen_vmnic, language="text")
 
             if st.button("🤖 AI Verify Uplink", key="ai_chk_vmnic"):
-                if not active_provider:
-                    st.error("Select an AI model in sidebar.")
-                else:
-                    with st.spinner("Auditing..."):
-                        st.info(verify_and_suggest_with_ai(gen_vmnic, active_provider))
+                with st.spinner("Auditing..."):
+                    st.info(verify_and_suggest_with_ai(gen_vmnic, active_model))
 
             st.markdown("---")
             st.markdown("💡 **Live Reference Examples:**")
@@ -1294,17 +1183,13 @@ with t6:
                 team_parts.append(f"{uns_nics.strip()} Unused")
 
             joined_team = " / ".join(team_parts)
-            # Automation-safe brackets replacing parenthesis
             gen_pg = f"{vsw_pg} [{joined_team}]"
             st.caption("Generated Port Group Teaming:")
             st.code(gen_pg, language="text")
 
             if st.button("🤖 AI Verify Port Group", key="ai_chk_pg"):
-                if not active_provider:
-                    st.error("Select an AI model in sidebar.")
-                else:
-                    with st.spinner("Auditing..."):
-                        st.info(verify_and_suggest_with_ai(gen_pg, active_provider))
+                with st.spinner("Auditing..."):
+                    st.info(verify_and_suggest_with_ai(gen_pg, active_model))
 
             st.markdown("---")
             st.markdown("💡 **Live Reference Examples:**")
@@ -1325,11 +1210,8 @@ with t6:
             st.code(gen_vmk, language="text")
 
             if st.button("🤖 AI Verify VMkernel", key="ai_chk_vmk"):
-                if not active_provider:
-                    st.error("Select an AI model in sidebar.")
-                else:
-                    with st.spinner("Auditing..."):
-                        st.info(verify_and_suggest_with_ai(gen_vmk, active_provider))
+                with st.spinner("Auditing..."):
+                    st.info(verify_and_suggest_with_ai(gen_vmk, active_model))
 
             st.markdown("---")
             st.markdown("💡 **Live Reference Examples:**")
@@ -1374,12 +1256,10 @@ with t7:
         if st.button("🔄 Parse & Apply Prompt to System Standards", type="primary"):
             if not imported_prompt_text.strip():
                 st.warning("Please paste valid prompt text to parse.")
-            elif not active_provider:
-                st.error("Please configure an active AI provider to parse natural language prompts.")
             else:
-                with st.spinner(f"Parsing prompt rules using {active_provider}..."):
+                with st.spinner(f"Parsing prompt rules using {active_model}..."):
                     try:
-                        extracted_rules = parse_prompt_to_rules(imported_prompt_text, active_provider)
+                        extracted_rules = parse_prompt_to_rules(imported_prompt_text, active_model)
                         save_naming_rules(extracted_rules)
                         st.success("✅ Guidelines successfully parsed and saved into system memory!")
                         st.rerun()
