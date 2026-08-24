@@ -20,7 +20,7 @@ st.set_page_config(
 )
 
 # ----------------------------------------------------------------------
-# Gateway & AI Engine Settings
+# Environment & Gateway Setup (v1.8.2 Standard)
 # ----------------------------------------------------------------------
 LLM_BASE_URL = (
     os.getenv("OPENROUTER_BASE_URL") 
@@ -38,7 +38,7 @@ DEFAULT_MODELS = "groq/openai/gpt-oss-120b,cerebras/llama-3.3-70b,gemini/gemini-
 AVAILABLE_MODELS = [m.strip() for m in os.getenv("OPENROUTER_MODELS", DEFAULT_MODELS).split(",") if m.strip()]
 
 # ----------------------------------------------------------------------
-# Sidebar Configuration
+# Sidebar Configuration (Clean v1.8.2 Layout - No Temperature Slider)
 # ----------------------------------------------------------------------
 st.sidebar.title("⚙️ AI Engine Selection")
 sidebar_key_override = st.sidebar.text_input(
@@ -49,9 +49,8 @@ sidebar_key_override = st.sidebar.text_input(
 )
 
 selected_model = st.sidebar.selectbox("Active AI Model", AVAILABLE_MODELS, index=0)
-temperature = st.sidebar.slider("Sampling Temperature", min_value=0.0, max_value=1.0, value=0.1, step=0.05)
 
-# Determine final active API key with non-empty fallback
+# Determine active API key
 raw_key = sidebar_key_override.strip() if sidebar_key_override.strip() else DEFAULT_ENV_KEY
 ACTIVE_KEY = raw_key if raw_key else "sk-omniroute-local"
 
@@ -66,11 +65,12 @@ div[data-testid="stSidebar"] code {
 """, unsafe_allow_html=True)
 
 st.sidebar.info(f"**Selected:**\n`{selected_model}`")
+
 st.sidebar.markdown("---")
-st.sidebar.caption("⚡ **NetBox Hub v1.9.0** | Standalone Generator Edition")
+st.sidebar.caption("⚡ **NetBox Hub v1.8.2** | Automation Standard Edition")
 
 # ----------------------------------------------------------------------
-# Robust LLM Gateway Client (401 Fix)
+# LLM Gateway Client
 # ----------------------------------------------------------------------
 def query_llm(prompt: str, system_prompt: str = "You are a senior network automation engineer producing valid NetBox YAML definitions.") -> str:
     clean_token = ACTIVE_KEY.replace("Bearer ", "").strip()
@@ -82,28 +82,46 @@ def query_llm(prompt: str, system_prompt: str = "You are a senior network automa
     }
     payload = {
         "model": selected_model,
-        "temperature": temperature,
+        "temperature": 0.1,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt}
         ]
     }
+    
+    base = LLM_BASE_URL.rstrip("/")
+    endpoint = f"{base}/chat/completions" if base.endswith("/v1") else f"{base}/v1/chat/completions"
+
     try:
-        url = f"{LLM_BASE_URL}/chat/completions"
-        response = requests.post(url, headers=headers, json=payload, timeout=60)
+        response = requests.post(endpoint, headers=headers, json=payload, timeout=90)
         if response.status_code != 200:
-            return f"❌ Generation Failed (HTTP {response.status_code}): {response.text}"
-        data = response.json()
+            return f"❌ Generation Failed (HTTP {response.status_code}):\n```\n{response.text}\n```"
+            
+        if not response.text.strip():
+            return "❌ Generation Failed: Upstream gateway returned an empty body."
+            
+        try:
+            data = response.json()
+        except Exception:
+            return f"❌ Generation Failed (Non-JSON Response):\n```\n{response.text}\n```"
+
         if "choices" in data and len(data["choices"]) > 0:
             return data["choices"][0]["message"]["content"]
+        elif "error" in data:
+            return f"❌ Gateway Error: {data['error']}"
         else:
-            return f"❌ Generation Failed: Invalid response payload structure from gateway: {data}"
+            return f"❌ Unexpected response structure: {json.dumps(data)}"
+            
+    except requests.exceptions.ConnectionError:
+        return f"❌ Connection Error: Unable to reach AI Gateway at `{endpoint}`."
+    except requests.exceptions.Timeout:
+        return "❌ Gateway Timeout: Model response exceeded 90 seconds."
     except Exception as e:
-        logger.error(f"LLM Error: {e}")
+        logger.error(f"LLM Exception: {e}")
         return f"❌ Generation Failed: {str(e)}"
 
 # ----------------------------------------------------------------------
-# Helper Functions: Interface Shortener & Catalog
+# Helper Functions: Interface Shortener & Catalog Lookup
 # ----------------------------------------------------------------------
 def shorten_int(name: str) -> str:
     mapping = {
@@ -123,9 +141,7 @@ def shorten_int(name: str) -> str:
 def wildcard_match(pattern: str, target: str) -> bool:
     p = pattern.strip().lower()
     t = target.strip().lower()
-    if not p:
-        return True
-    return p in t
+    return True if not p else p in t
 
 @st.cache_data(ttl=3600)
 def fetch_official_catalog():
@@ -201,7 +217,7 @@ with tabs[0]:
                 prompt = (
                     f"Generate a complete, standard NetBox YAML device-type definition for {d_mfg} {d_model}. "
                     "Include: manufacturer, model, slug, u_height, is_full_depth, weight, console-ports, power-ports, interfaces (with exact types and mgmt flag), and module-bays. "
-                    "Return only valid YAML syntax enclosed in a markdown code block."
+                    "Return only valid YAML syntax inside a markdown code block."
                 )
                 result = query_llm(prompt)
                 if result.startswith("❌"):
@@ -260,7 +276,7 @@ with tabs[1]:
             with st.spinner(f"Generating module definition for {m_mfg} {m_part}..."):
                 prompt = (
                     f"Generate a standard NetBox YAML module-type definition for manufacturer {m_mfg} and part/model {m_part}. "
-                    "Include manufacturer, model, part_number, and list all network interfaces with appropriate NetBox interface types (e.g. 10gbase-x-sfpp, 25gbase-x-sfp28). "
+                    "Include manufacturer, model, part_number, and list all network interfaces with appropriate NetBox interface types. "
                     "Return only valid YAML."
                 )
                 result = query_llm(prompt)
