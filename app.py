@@ -12,7 +12,7 @@ import streamlit as st
 import pandas as pd
 from typing import Optional, Dict, List, Tuple
 
-APP_VERSION = "v1.7.3"
+APP_VERSION = "v1.8.1"
 
 # --- Logging Configuration ---
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -99,14 +99,14 @@ def normalize_port_shortname(port_name: str) -> str:
 
 # --- Persistent Naming Rules Store ---
 DEFAULT_RULES = {
-    "branch_switch": "SW<Country><State><Site><Zone><Seq>-<StackID> (e.g. SWUKBRIS01-0, SWAUSAROFLBOT01-0)",
-    "branch_ap": "WAP<Country><State><Site><Seq> (e.g. WAPUKBRIS01, WAPAUSARF01)",
-    "branch_security": "FW<Country><State><Site><Vendor><Seq> / ION<Country><State><Site><Seq> (e.g. FWAUBERPA01, IONAUSABRS01)",
+    "branch_switch": "SW<Country><State><Site><Zone><Seq>-<StackID> (e.g. SWUKBRIS01-0, SWAUSAROFLBOT01-0, SWAUSABRS01)",
+    "branch_ap": "WAP<Country><State><Site><Seq> (e.g. WAPUKBRIS01, WAPAUSAROFL01, WAPAUSAHUG02)",
+    "branch_security": "FW<Country><State><Site><Vendor><Seq> / ION<Country><State><Site><Seq> (e.g. FWAUBERPA01, IONAUSABRS01, IONUKBRIS01)",
     "switch_uplink_desc_local": "to <Remote_Device>_<Remote_Port_Short> [<Role>]",
     "switch_uplink_desc_remote": "to <Local_Device>_<Local_Port_Short> [<Role>]",
     "switch_access_desc": "<VLAN_Name> - <Host/Device>_<Port>",
     "firewall_interface": "<Role/Zone>_<VLAN_ID>",
-    "esxi_host": "<site_prefix>esx<number>.<domain> (e.g. pwsesx001.eswine.adds, ageotinfhost1.eswines.ot)",
+    "esxi_host": "<site_prefix>esx<number>.<domain> (e.g. pwsesx001.eswine.adds, ageotinfhost1.eswines.ot, roflesx01.corp.local)",
     "vm_host": "<site_prefix><role><seq> (Roles: cvi=Core/Virt, afs=App/File, sani=Storage, vlab=Test)",
     "esxi_uplink": "<vmnicX> - <vSwitch> Active Uplink / Standby Uplink",
     "esxi_portgroup": "<vSwitch> (<vmnicX>, <vmnicY> Active [/ <vmnicZ> Standby])",
@@ -331,9 +331,9 @@ def extract_model_from_label(label: str) -> str:
     match = re.search(r"\((.+)\)", label)
     return match.group(1).strip() if match else label
 
-def call_ai(prompt: str, selected_provider: str) -> str:
+def call_ai(prompt: str, selected_provider: str, custom_system_msg: Optional[str] = None) -> str:
     naming_context = get_active_naming_context()
-    system_msg = (
+    system_msg = custom_system_msg or (
         "You are a strict NetBox hardware YAML specification generator and infrastructure architect. "
         "You MUST verify hardware specifications directly from official manufacturer datasheets. "
         f"Strictly align with these infrastructure conventions:\n{naming_context}\n"
@@ -355,7 +355,7 @@ def call_ai(prompt: str, selected_provider: str) -> str:
                 ],
                 temperature=0.0
             )
-            return clean_ai_yaml(resp.choices[0].message.content)
+            return resp.choices[0].message.content
 
         elif selected_provider.startswith("Google Gemini"):
             from google import genai
@@ -371,7 +371,7 @@ def call_ai(prompt: str, selected_provider: str) -> str:
                     system_instruction=system_msg
                 )
             )
-            return clean_ai_yaml(resp.text)
+            return resp.text
 
         elif selected_provider.startswith("OpenRouter"):
             from openai import OpenAI
@@ -385,7 +385,7 @@ def call_ai(prompt: str, selected_provider: str) -> str:
                 ],
                 temperature=0.0
             )
-            return clean_ai_yaml(resp.choices[0].message.content)
+            return resp.choices[0].message.content
 
         elif selected_provider.startswith("Local Ollama"):
             from openai import OpenAI
@@ -399,7 +399,7 @@ def call_ai(prompt: str, selected_provider: str) -> str:
                 ],
                 temperature=0.0
             )
-            return clean_ai_yaml(resp.choices[0].message.content)
+            return resp.choices[0].message.content
 
         else:
             st.error("No valid AI provider selected.")
@@ -409,6 +409,32 @@ def call_ai(prompt: str, selected_provider: str) -> str:
         logger.error(f"Error from {selected_provider}: {str(e)}")
         st.error(f"❌ Generation Failed ({selected_provider}): {str(e)}")
         st.stop()
+
+def verify_and_suggest_with_ai(user_input_text: str, provider: str) -> str:
+    naming_context = get_active_naming_context()
+    system_msg = f"""You are a Principal Network Architect and NetBox Standard Auditor.
+Audit, verify, and standardize user inputs against the following official company naming conventions:
+{naming_context}
+
+RULES FOR VERDICT & STRUCTURE:
+1. Verdict must be ONLY:
+   - '✅ Compliant' (if input exactly matches the official schema)
+   - '💡 Suggestion' (if input is non-standard, free-text, or needs formatting fixes)
+
+2. Output Format (Mandatory Structure):
+### Verification Summary
+- **Verdict**: [✅ Compliant | 💡 Suggestion]
+- **Target Category**: [Switch | Wireless AP | Firewall/Security | ESXi Host | VM | Interface Description]
+
+### Canonical Standard Pattern
+- **Standard Formula**: `<exact formula pattern, e.g. SW<Country><State><Site><Zone><Seq>-<StackID>>`
+- **Recommended Output**: `<standardized string>`
+
+### Audit Breakdown
+- Explain concisely what was aligned (e.g. Added stack member hyphen, removed redundant words, converted port to shortname, or formatted teaming).
+"""
+    prompt = f"Audit and suggest standard for:\n```\n{user_input_text}\n```"
+    return call_ai(prompt, provider, custom_system_msg=system_msg)
 
 def parse_prompt_to_rules(prompt_text: str, provider: str) -> Dict[str, str]:
     extract_prompt = f"""
@@ -486,7 +512,7 @@ CRITICAL INFRASTRUCTURE RULES:
 
 Output ONLY valid, raw YAML starting with '---'.
 """
-    return call_ai(prompt, provider)
+    return clean_ai_yaml(call_ai(prompt, provider))
 
 def generate_module_yaml(mfg: str, model: str, part_num: str, provider: str, ref_pattern: Optional[str] = None) -> str:
     if ref_pattern:
@@ -521,7 +547,7 @@ CRITICAL SCHEMA RULES:
 
 Output ONLY valid, raw YAML starting with '---'.
 """
-    result = call_ai(prompt, provider)
+    result = clean_ai_yaml(call_ai(prompt, provider))
     if not ref_pattern:
         result = re.sub(
             r"name:\s*['\"]?(?:.+?[/_-])?(?:Port|eth|LAN|mgmt|Ethernet)?\s*(\d+)['\"]?",
@@ -542,7 +568,7 @@ Schema Rules:
 - Keys: manufacturer, model, slug, width (19 or 23), u_height, form_factor, starting_unit (default 1)
 Output ONLY raw YAML.
 """
-    return call_ai(prompt, provider)
+    return clean_ai_yaml(call_ai(prompt, provider))
 
 def generate_placeholder_svg(mfg: str, model: str, u_height: int = 1, view: str = "front") -> str:
     height_px = max(40, u_height * 40)
@@ -871,7 +897,8 @@ with t6:
     naming_cat = st.radio("Select Asset Class", [
         "1. Network Devices (Switches, APs & Firewalls)",
         "2. Hosts & Virtual Machines (ESXi & VMs)",
-        "3. ESXi Network Descriptions (vmnic, PortGroup, VMkernel)"
+        "3. ESXi Network Descriptions (vmnic, PortGroup, VMkernel)",
+        "🤖 AI Standard Validator & Smart Suggester"
     ], horizontal=True)
 
     st.markdown("---")
@@ -1068,8 +1095,7 @@ with t6:
             )
 
     # 3. ESXi Network Descriptions (Multi-Uplink & Comma Teaming Engine)
-    else:
-        st.markdown("**ESXi NetBox Interface Standard Descriptions**")
+    elif "3. ESXi Network" in naming_cat:
         col_a, col_b, col_c = st.columns(3)
 
         with col_a:
@@ -1135,6 +1161,25 @@ with t6:
                 "vSAN Network (vSwitch0)",
                 language="text"
             )
+
+    # 4. AI Standard Validator & Smart Suggester
+    else:
+        st.markdown("#### 🤖 AI Standard Validator & Smart Suggester")
+        st.caption("Input any raw/legacy hostname, uplink description, or free-text device role. AI will inspect compliance against active naming conventions and output the correct canonical format.")
+
+        ai_input = st.text_area(
+            "Input Raw Hostname, Interface Description, or Device Request",
+            value="Rowland Flat Bottling switch stack member 0 on ge-0/0/47 linking to core ge-0/0/1",
+            height=120
+        )
+
+        if st.button("🔍 Audit & Standardize with AI", type="primary"):
+            if not active_provider:
+                st.error("Please select or configure an active AI provider in the sidebar.")
+            else:
+                with st.spinner(f"Auditing standard compliance with {active_provider}..."):
+                    audit_res = verify_and_suggest_with_ai(ai_input, active_provider)
+                    st.markdown(audit_res)
 
 # --- Tab 7: Naming Standards Context (Prompt-Driven) ---
 with t7:
