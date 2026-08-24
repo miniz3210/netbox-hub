@@ -54,7 +54,9 @@ def compute_suggested_site_code(location_name: str) -> str:
 
 # --- Interface Name Normalizer ---
 def normalize_port_shortname(port_name: str) -> str:
-    p = port_name.strip()
+    # 1. Strip edge whitespaces and collapse internal whitespace (e.g. 'Port 2' -> 'Port2')
+    p = re.sub(r"\s+", "", port_name.strip())
+    
     replacements = [
         (r"^TenGigabitEthernet", "Te"),
         (r"^TenGigE", "Te"),
@@ -76,6 +78,7 @@ def normalize_port_shortname(port_name: str) -> str:
         if re.search(pattern, p, re.IGNORECASE):
             return re.sub(pattern, replacement, p, flags=re.IGNORECASE)
     return p
+
 
 # --- Persistent Naming Rules Store (No Colons / No Parens) ---
 DEFAULT_RULES = {
@@ -878,7 +881,7 @@ with t6:
                 language="text"
             )
 
-            st.markdown("---")
+st.markdown("---")
             st.markdown("**Switch Port Description Formatter (Automation Standard)**")
             
             p_type = st.radio(
@@ -895,15 +898,16 @@ with t6:
             
             if p_type == "Uplink (Inter-Switch)":
                 l_port_raw = st.text_input("Local Port (Raw)", value="ge-0/0/47", key="up_lp")
-                r_dev = st.text_input("Remote Device Hostname", value="SWUKBRIS01-0", key="up_rd")
+                r_dev = st.text_input("Remote Device Hostname", value="SWUKBRIS01-0", key="up_rd").strip()
                 r_port_raw = st.text_input("Remote Port (Raw)", value="ge-0/0/1", key="up_rp")
-                link_role = st.text_input("Link Purpose / Role", value="Core Uplink", key="up_lr")
+                link_role = st.text_input("Link Purpose / Role", value="Core Uplink", key="up_lr").strip()
 
                 l_port_short = normalize_port_shortname(l_port_raw)
                 r_port_short = normalize_port_shortname(r_port_raw)
+                role_suffix = f" [{link_role}]" if link_role else ""
 
-                local_desc = f"to {r_dev}_{r_port_short} [{link_role}]"
-                remote_desc = f"to {current_sw_name}_{l_port_short} [{link_role}]"
+                local_desc = f"to {r_dev}_{r_port_short}{role_suffix}"
+                remote_desc = f"to {current_sw_name}_{l_port_short}{role_suffix}"
 
                 st.caption(f"On Local Device (`{current_sw_name}`):")
                 st.code(local_desc, language="text")
@@ -915,6 +919,72 @@ with t6:
                     with st.spinner("Auditing..."):
                         st.info(verify_and_suggest_with_ai(local_desc, active_model))
 
+            elif p_type == "LAG Member Port (LACP Uplink)":
+                l_port_raw = st.text_input("Local Port (Raw)", value="Port 2", key="lagm_lp")
+                loc_po = st.text_input("Local Port-Channel ID", value="1", key="lagm_lpo").strip()
+                r_dev = st.text_input("Remote Device Hostname", value="LACP-AGE-HOSTS", key="lagm_rd").strip()
+                r_port_raw = st.text_input("Remote Port (Raw)", value="Port 2", key="lagm_rp")
+                link_role = st.text_input("Link Purpose / Role", value="", key="lagm_lr").strip()
+
+                l_port_short = normalize_port_shortname(l_port_raw)
+                r_port_short = normalize_port_shortname(r_port_raw)
+                po_num = loc_po.replace('Po', '').replace('po', '').strip() or "1"
+                po_tag = f"Po{po_num}"
+                role_suffix = f" [{link_role}]" if link_role else ""
+
+                # Auto removes spaces and omits [] if role is empty
+                lag_member_desc = f"{l_port_short} [{po_tag}] -> {r_dev}_{r_port_short}{role_suffix}"
+
+                st.caption("LAG / LACP Member Port Description:")
+                st.code(lag_member_desc, language="text")
+
+                with st.expander("Show Switch Member CLI Config"):
+                    st.code(f"""interface {l_port_short}
+ description {lag_member_desc}
+ channel-group {po_num} mode active
+!""", language="cisco")
+
+                if st.button("🤖 AI Verify LAG Member Description", key="ai_chk_lagm"):
+                    with st.spinner("Auditing..."):
+                        st.info(verify_and_suggest_with_ai(lag_member_desc, active_model))
+
+            elif p_type == "Port-Channel (Logical Aggregate)":
+                loc_po = st.text_input("Local Port-Channel ID", value="1", key="pchan_lpo").strip()
+                r_dev = st.text_input("Remote Device Hostname", value="LACP-AGE-HOSTS", key="pchan_rd").strip()
+                rem_po = st.text_input("Remote Port-Channel ID", value="1", key="pchan_rpo").strip()
+                vlan_info = st.text_input("Trunk / Role Info", value="TRUNK CORE", key="pchan_vl").strip()
+
+                local_po_str = f"Po{loc_po.replace('Po', '').replace('po', '').strip() or '1'}"
+                rem_po_str = f"Po{rem_po.replace('Po', '').replace('po', '').strip() or '1'}"
+                vlan_suffix = f" [{vlan_info}]" if vlan_info else ""
+
+                po_desc = f"{local_po_str} -> {r_dev}_{rem_po_str}{vlan_suffix}"
+
+                st.caption("Logical Port-Channel Description:")
+                st.code(po_desc, language="text")
+
+                with st.expander("Show Port-Channel CLI Config"):
+                    po_num = loc_po.replace('Po', '').replace('po', '').strip() or "1"
+                    st.code(f"""interface Port-channel{po_num}
+ description {po_desc}
+ switchport mode trunk
+!""", language="cisco")
+
+                if st.button("🤖 AI Verify Port-Channel Description", key="ai_chk_pchan"):
+                    with st.spinner("Auditing..."):
+                        st.info(verify_and_suggest_with_ai(po_desc, active_model))
+
+            else:
+                vlan_name = st.text_input("VLAN Name / Purpose", value="VLAN10_Management", key="acc_vln").strip()
+                host_port_raw = st.text_input("Connected Host / Port", value="roflesx01_vmnic0", key="acc_hp").strip()
+                clean_host_port = re.sub(r"\s+", "", host_port_raw)
+                access_desc = f"{vlan_name} - {clean_host_port}"
+                st.caption("Access Port Description:")
+                st.code(access_desc, language="text")
+
+                if st.button("🤖 AI Verify Access Description", key="ai_chk_acc"):
+                    with st.spinner("Auditing..."):
+                        st.info(verify_and_suggest_with_ai(access_desc, active_model))
             elif p_type == "LAG Member Port (LACP Uplink)":
                 l_port_raw = st.text_input("Local Port (Raw)", value="TenGigabitEthernet1/0/1", key="lagm_lp")
                 loc_po = st.text_input("Local Port-Channel ID", value="10", key="lagm_lpo")
