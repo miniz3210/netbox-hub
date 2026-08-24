@@ -20,11 +20,8 @@ st.set_page_config(
 )
 
 # ----------------------------------------------------------------------
-# Environment & Gateway Normalization
+# Gateway & AI Engine Settings
 # ----------------------------------------------------------------------
-NETBOX_URL = os.getenv("NETBOX_URL", "http://localhost:8000").rstrip("/")
-NETBOX_TOKEN = os.getenv("NETBOX_TOKEN", "")
-
 LLM_BASE_URL = (
     os.getenv("OPENROUTER_BASE_URL") 
     or os.getenv("OPENAI_BASE_URL") 
@@ -41,7 +38,7 @@ DEFAULT_MODELS = "groq/openai/gpt-oss-120b,cerebras/llama-3.3-70b,gemini/gemini-
 AVAILABLE_MODELS = [m.strip() for m in os.getenv("OPENROUTER_MODELS", DEFAULT_MODELS).split(",") if m.strip()]
 
 # ----------------------------------------------------------------------
-# Sidebar Configuration (With Working Key Override)
+# Sidebar Configuration
 # ----------------------------------------------------------------------
 st.sidebar.title("⚙️ AI Engine Selection")
 sidebar_key_override = st.sidebar.text_input(
@@ -58,13 +55,19 @@ temperature = st.sidebar.slider("Sampling Temperature", min_value=0.0, max_value
 raw_key = sidebar_key_override.strip() if sidebar_key_override.strip() else DEFAULT_ENV_KEY
 ACTIVE_KEY = raw_key if raw_key else "sk-omniroute-local"
 
-st.sidebar.info(f"**Selected:** `{selected_model}`")
+# Custom CSS for clean wrapping in sidebar
+st.sidebar.markdown("""
+<style>
+div[data-testid="stSidebar"] code {
+    white-space: pre-wrap !important;
+    word-break: break-all !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+st.sidebar.info(f"**Selected:**\n`{selected_model}`")
 st.sidebar.markdown("---")
-st.sidebar.subheader("🔌 System Integrations")
-if NETBOX_URL and NETBOX_TOKEN:
-    st.sidebar.success(f"NetBox: `{NETBOX_URL}`")
-else:
-    st.sidebar.warning("NetBox Token not configured in .env")
+st.sidebar.caption("⚡ **NetBox Hub v1.9.0** | Standalone Generator Edition")
 
 # ----------------------------------------------------------------------
 # Robust LLM Gateway Client (401 Fix)
@@ -100,7 +103,7 @@ def query_llm(prompt: str, system_prompt: str = "You are a senior network automa
         return f"❌ Generation Failed: {str(e)}"
 
 # ----------------------------------------------------------------------
-# Helper Functions: Interface Shortener & GitHub Catalog
+# Helper Functions: Interface Shortener & Catalog
 # ----------------------------------------------------------------------
 def shorten_int(name: str) -> str:
     mapping = {
@@ -129,12 +132,8 @@ def fetch_official_catalog():
     catalog = {
         "device_types": [],
         "module_types": [],
-        "rack_types": [],
-        "elevation_images": [],
-        "module_images": [],
         "manufacturers": set()
     }
-    # Standard official netbox-community devicetype-library index fallback
     popular_devices = [
         "cisco/catalyst-9300-48p.yaml", "cisco/catalyst-2960x-48fps-l.yaml", "cisco/catalyst-3850-48p.yaml",
         "meraki/ms125-48lp.yaml", "meraki/ms350-48lp.yaml", "meraki/mr46.yaml",
@@ -330,8 +329,8 @@ with tabs[3]:
 # TAB 5: Batch Excel Engine
 # -------------------------------------------------------------
 with tabs[4]:
-    st.subheader("Batch Excel & CSV Device Importer")
-    st.markdown("Bulk import switches, hostnames, and IP assignments directly into NetBox format.")
+    st.subheader("Batch Excel & CSV Device Formatter")
+    st.markdown("Generate and format bulk device lists into standard NetBox CSV imports.")
     
     sample_df = pd.DataFrame({
         "device_name": ["SWUKBRIS01-0", "SWUKBRIS02-0", "MAD-SW-CORE01"],
@@ -346,7 +345,7 @@ with tabs[4]:
     with col_ex1:
         uploaded_file = st.file_uploader("Upload CSV or Excel Device Roster", type=["csv", "xlsx"], key="excel_uploader")
     with col_ex2:
-        st.markdown("**Download NetBox Batch Ingestion Template:**")
+        st.markdown("**Download CSV Template:**")
         csv_buffer = io.StringIO()
         sample_df.to_csv(csv_buffer, index=False)
         st.download_button("📥 Download Sample CSV", data=csv_buffer.getvalue(), file_name="netbox_device_template.csv", mime="text/csv")
@@ -360,12 +359,10 @@ with tabs[4]:
             st.success(f"Successfully loaded `{uploaded_file.name}` ({len(df)} rows)")
             st.dataframe(df, use_container_width=True)
             
-            if st.button("🚀 Push Batch Roster to NetBox REST API"):
-                if not NETBOX_URL or not NETBOX_TOKEN:
-                    st.error("NetBox URL and Token must be configured in environment.")
-                else:
-                    st.info(f"Simulating push of {len(df)} devices to `{NETBOX_URL}/api/dcim/devices/`...")
-                    st.success("✅ All 3 devices verified and scheduled for creation.")
+            st.markdown("**Export Formatted Roster:**")
+            export_buffer = io.StringIO()
+            df.to_csv(export_buffer, index=False)
+            st.download_button("📥 Export Cleaned CSV", data=export_buffer.getvalue(), file_name="formatted_netbox_roster.csv", mime="text/csv")
         except Exception as e:
             st.error(f"Error parsing file: {e}")
 
@@ -416,7 +413,6 @@ with tabs[5]:
         s_loc = shorten_int(loc_port)
         s_rem = shorten_int(rem_port)
         
-        # Strict Automation Safe (No Colons, No Parens, No Asterisks)
         desc_local = f"{s_loc} -> {rem_dev}_{s_rem} [{purpose}]"
         desc_remote = f"{s_rem} -> {generated_hostname}_{s_loc} [{purpose}]"
 
@@ -441,7 +437,6 @@ with tabs[5]:
         s_rem = shorten_int(rem_port)
         po_tag = f"Po{loc_po.replace('Po', '')}"
         
-        # Strict Automation Safe Standard (No ':' and No '()')
         lag_member_desc = f"{s_loc} [{po_tag}] -> {rem_dev}_{s_rem} [{purpose}]"
 
         st.markdown("**LAG / LACP Member Port Description:**")
@@ -475,7 +470,6 @@ set interfaces {loc_port} ether-options 802.3ad ae{loc_po.replace('Po', '')}"""
         local_po_str = f"Po{loc_po.replace('Po', '')}"
         rem_po_str = f"Po{rem_po.replace('Po', '')}"
         
-        # Strict Automation Safe Standard
         po_desc = f"{local_po_str} -> {rem_dev}_{rem_po_str} [{vlan_info}]"
 
         st.markdown("**Logical Port-Channel Description:**")
@@ -497,8 +491,6 @@ set interfaces {loc_port} ether-options 802.3ad ae{loc_po.replace('Po', '')}"""
             jack_id = st.text_input("Wall Jack / Patch ID", value="D-042", key="acc_jack")
 
         s_loc = shorten_int(loc_port)
-        
-        # Strict Automation Safe Standard
         acc_desc = f"{s_loc} -> {end_user} [Jack {jack_id}] [{vlan_id}]"
 
         st.markdown("**Access Port Description:**")
