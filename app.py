@@ -12,7 +12,7 @@ import streamlit as st
 import pandas as pd
 from typing import Optional, Dict, List, Tuple
 
-APP_VERSION = "v1.9.1"
+APP_VERSION = "v1.9.2"
 
 # --- Logging Configuration ---
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -33,7 +33,7 @@ RULES_FILE = "naming_rules.json"
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "http://omniroute:20128/v1").rstrip("/")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "sk-omniroute-local").strip()
 
-DEFAULT_MODELS_FALLBACK = "groq/openai/gpt-oss-120b,cerebras/llama-3.3-70b,gemini/gemini-2.5-flash,groq/llama-3.3-70b-versatile"
+DEFAULT_MODELS_FALLBACK = "groq/openai/gpt-oss-120b,groq/qwen/qwen3.6-27b,gemini/gemini-2.5-flash"
 models_env = os.getenv("OPENROUTER_MODELS", os.getenv("GROQ_MODELS", DEFAULT_MODELS_FALLBACK))
 AVAILABLE_MODELS = [m.strip() for m in models_env.split(",") if m.strip()]
 
@@ -343,20 +343,37 @@ def call_ai(prompt: str, selected_model: str, custom_system_msg: Optional[str] =
 
     try:
         response = requests.post(endpoint, headers=headers, json=payload, timeout=90)
+        
         if response.status_code != 200:
-            st.error(f"❌ Generation Failed (HTTP {response.status_code}):\n```\n{response.text}\n```")
+            st.error(f"❌ Gateway Error (HTTP {response.status_code}):\n```\n{response.text}\n```")
             st.stop()
             
-        data = response.json()
+        raw_text = response.text.strip()
+        if not raw_text:
+            st.error(f"❌ Gateway returned empty payload for `{selected_model}`. Account may be in cooldown.")
+            st.stop()
+            
+        try:
+            data = json.loads(raw_text)
+        except Exception:
+            st.error(f"❌ Gateway returned non-JSON data:\n```\n{raw_text}\n```")
+            st.stop()
+
         if "choices" in data and len(data["choices"]) > 0:
             return data["choices"][0]["message"]["content"]
         elif "error" in data:
-            st.error(f"❌ Gateway Error: {data['error']}")
+            st.error(f"❌ Model Error: {data['error']}")
             st.stop()
         else:
             st.error(f"❌ Unexpected response format: {json.dumps(data)}")
             st.stop()
             
+    except requests.exceptions.ConnectionError:
+        st.error(f"❌ Connection Error: Unable to reach gateway at `{endpoint}`.")
+        st.stop()
+    except requests.exceptions.Timeout:
+        st.error(f"❌ Gateway Timeout: Model `{selected_model}` took more than 90s to respond.")
+        st.stop()
     except Exception as e:
         logger.error(f"Error from OmniRoute Gateway: {str(e)}")
         st.error(f"❌ Generation Failed: {str(e)}")
