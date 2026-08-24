@@ -12,7 +12,7 @@ import streamlit as st
 import pandas as pd
 from typing import Optional, Dict, List, Tuple
 
-APP_VERSION = "v1.9.0"
+APP_VERSION = "v1.9.1"
 
 # --- Logging Configuration ---
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -52,11 +52,9 @@ def compute_suggested_site_code(location_name: str) -> str:
         return w[:4].upper() if len(w) >= 4 else w.upper()
     return "SITE"
 
-# --- Interface Name Normalizer ---
+# --- Interface Name Normalizer (Auto-Removes Spaces) ---
 def normalize_port_shortname(port_name: str) -> str:
-    # 1. Strip edge whitespaces and collapse internal whitespace (e.g. 'Port 2' -> 'Port2')
     p = re.sub(r"\s+", "", port_name.strip())
-    
     replacements = [
         (r"^TenGigabitEthernet", "Te"),
         (r"^TenGigE", "Te"),
@@ -79,8 +77,7 @@ def normalize_port_shortname(port_name: str) -> str:
             return re.sub(pattern, replacement, p, flags=re.IGNORECASE)
     return p
 
-
-# --- Persistent Naming Rules Store (No Colons / No Parens) ---
+# --- Persistent Naming Rules Store ---
 DEFAULT_RULES = {
     "branch_switch": "SW<Country><State><Site><Zone><Seq>-<StackID> (e.g. SWUKBRIS01-0, SWAUSAROFLBOT01-0, SWAUSABRS01)",
     "branch_ap": "WAP<Country><State><Site><Seq> (e.g. WAPUKBRIS01, WAPAUSAROFL01, WAPAUSAHUG02)",
@@ -325,32 +322,45 @@ def call_ai(prompt: str, selected_model: str, custom_system_msg: Optional[str] =
         "Do NOT invent comments or URLs; omit 'comments' key entirely if no verified official datasheet URL is available."
     )
 
-    try:
-        from openai import OpenAI
-        client = OpenAI(
-            base_url=OPENROUTER_BASE_URL,
-            api_key=OPENROUTER_API_KEY or "sk-omniroute-local",
-            default_headers={
-                "HTTP-Referer": "http://localhost:8501",
-                "X-Title": "NetBox Hub"
-            }
-        )
-        
-        resp = client.chat.completions.create(
-            model=selected_model,
-            messages=[
-                {"role": "system", "content": system_msg},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.0
-        )
-        return resp.choices[0].message.content
+    clean_token = OPENROUTER_API_KEY.replace("Bearer ", "").strip()
+    headers = {
+        "Authorization": f"Bearer {clean_token}",
+        "HTTP-Referer": "http://localhost:8501",
+        "X-Title": "NetBox Hub",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": selected_model,
+        "temperature": 0.0,
+        "messages": [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": prompt}
+        ]
+    }
+    
+    base = OPENROUTER_BASE_URL.rstrip("/")
+    endpoint = f"{base}/chat/completions" if base.endswith("/v1") else f"{base}/v1/chat/completions"
 
+    try:
+        response = requests.post(endpoint, headers=headers, json=payload, timeout=90)
+        if response.status_code != 200:
+            st.error(f"❌ Generation Failed (HTTP {response.status_code}):\n```\n{response.text}\n```")
+            st.stop()
+            
+        data = response.json()
+        if "choices" in data and len(data["choices"]) > 0:
+            return data["choices"][0]["message"]["content"]
+        elif "error" in data:
+            st.error(f"❌ Gateway Error: {data['error']}")
+            st.stop()
+        else:
+            st.error(f"❌ Unexpected response format: {json.dumps(data)}")
+            st.stop()
+            
     except Exception as e:
         logger.error(f"Error from OmniRoute Gateway: {str(e)}")
         st.error(f"❌ Generation Failed: {str(e)}")
         st.stop()
-
 
 def verify_and_suggest_with_ai(user_input_text: str, model_name: str) -> str:
     naming_context = get_active_naming_context()
@@ -522,11 +532,8 @@ catalog = get_repo_catalog()
 
 with st.sidebar:
     st.header("⚙️ AI Engine Selection")
-    
-    # Clean model dropdown driven entirely by .env
     active_model = st.selectbox("Active AI Model", AVAILABLE_MODELS, index=0)
     
-    # Custom CSS for clean wrapping in sidebar
     st.markdown("""
     <style>
     div[data-testid="stSidebar"] code {
@@ -881,7 +888,7 @@ with t6:
                 language="text"
             )
 
-st.markdown("---")
+            st.markdown("---")
             st.markdown("**Switch Port Description Formatter (Automation Standard)**")
             
             p_type = st.radio(
@@ -932,7 +939,6 @@ st.markdown("---")
                 po_tag = f"Po{po_num}"
                 role_suffix = f" [{link_role}]" if link_role else ""
 
-                # Auto removes spaces and omits [] if role is empty
                 lag_member_desc = f"{l_port_short} [{po_tag}] -> {r_dev}_{r_port_short}{role_suffix}"
 
                 st.caption("LAG / LACP Member Port Description:")
@@ -979,66 +985,6 @@ st.markdown("---")
                 host_port_raw = st.text_input("Connected Host / Port", value="roflesx01_vmnic0", key="acc_hp").strip()
                 clean_host_port = re.sub(r"\s+", "", host_port_raw)
                 access_desc = f"{vlan_name} - {clean_host_port}"
-                st.caption("Access Port Description:")
-                st.code(access_desc, language="text")
-
-                if st.button("🤖 AI Verify Access Description", key="ai_chk_acc"):
-                    with st.spinner("Auditing..."):
-                        st.info(verify_and_suggest_with_ai(access_desc, active_model))
-            elif p_type == "LAG Member Port (LACP Uplink)":
-                l_port_raw = st.text_input("Local Port (Raw)", value="TenGigabitEthernet1/0/1", key="lagm_lp")
-                loc_po = st.text_input("Local Port-Channel ID", value="10", key="lagm_lpo")
-                r_dev = st.text_input("Remote Device Hostname", value="MAD-SW-CORE01", key="lagm_rd")
-                r_port_raw = st.text_input("Remote Port (Raw)", value="Ethernet1/1", key="lagm_rp")
-                link_role = st.text_input("Link Purpose / Role", value="CORE", key="lagm_lr")
-
-                l_port_short = normalize_port_shortname(l_port_raw)
-                r_port_short = normalize_port_shortname(r_port_raw)
-                po_tag = f"Po{loc_po.replace('Po', '')}"
-
-                lag_member_desc = f"{l_port_short} [{po_tag}] -> {r_dev}_{r_port_short} [{link_role}]"
-
-                st.caption("LAG / LACP Member Port Description:")
-                st.code(lag_member_desc, language="text")
-
-                with st.expander("Show Switch Member CLI Config"):
-                    st.code(f"""interface {l_port_raw}
- description {lag_member_desc}
- channel-group {loc_po.replace('Po', '')} mode active
-!""", language="cisco")
-
-                if st.button("🤖 AI Verify LAG Member Description", key="ai_chk_lagm"):
-                    with st.spinner("Auditing..."):
-                        st.info(verify_and_suggest_with_ai(lag_member_desc, active_model))
-
-            elif p_type == "Port-Channel (Logical Aggregate)":
-                loc_po = st.text_input("Local Port-Channel ID", value="10", key="pchan_lpo")
-                r_dev = st.text_input("Remote Device Hostname", value="MAD-SW-CORE01", key="pchan_rd")
-                rem_po = st.text_input("Remote Port-Channel ID", value="10", key="pchan_rpo")
-                vlan_info = st.text_input("Trunk / Role Info", value="TRUNK CORE", key="pchan_vl")
-
-                local_po_str = f"Po{loc_po.replace('Po', '')}"
-                rem_po_str = f"Po{rem_po.replace('Po', '')}"
-
-                po_desc = f"{local_po_str} -> {r_dev}_{rem_po_str} [{vlan_info}]"
-
-                st.caption("Logical Port-Channel Description:")
-                st.code(po_desc, language="text")
-
-                with st.expander("Show Port-Channel CLI Config"):
-                    st.code(f"""interface Port-channel{loc_po.replace('Po', '')}
- description {po_desc}
- switchport mode trunk
-!""", language="cisco")
-
-                if st.button("🤖 AI Verify Port-Channel Description", key="ai_chk_pchan"):
-                    with st.spinner("Auditing..."):
-                        st.info(verify_and_suggest_with_ai(po_desc, active_model))
-
-            else:
-                vlan_name = st.text_input("VLAN Name / Purpose", value="VLAN10_Management", key="acc_vln")
-                host_port = st.text_input("Connected Host / Port", value="roflesx01_vmnic0", key="acc_hp")
-                access_desc = f"{vlan_name} - {host_port}"
                 st.caption("Access Port Description:")
                 st.code(access_desc, language="text")
 
