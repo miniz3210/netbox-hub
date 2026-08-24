@@ -12,7 +12,7 @@ import streamlit as st
 import pandas as pd
 from typing import Optional, Dict, List, Tuple
 
-APP_VERSION = "v1.9.2"
+APP_VERSION = "v1.9.3"
 
 # --- Logging Configuration ---
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -311,6 +311,49 @@ def clean_ai_yaml(text: str) -> str:
     text = re.sub(r"type:\s*1gbase-x-sfp\b", "type: 1000base-x-sfp", text)
     return text.strip()
 
+def parse_raw_gateway_payload(raw_text: str) -> str:
+    """Parses standard JSON payloads or raw SSE data: stream chunks."""
+    trimmed = raw_text.strip()
+    
+    # 1. Try standard JSON
+    if trimmed.startswith("{") and trimmed.endswith("}"):
+        try:
+            data = json.loads(trimmed)
+            if "choices" in data and len(data["choices"]) > 0:
+                msg = data["choices"][0].get("message", {})
+                return msg.get("content") or ""
+            if "error" in data:
+                return f"Error: {data['error']}"
+        except Exception:
+            pass
+
+    # 2. Parse Server-Sent Events (SSE) stream format
+    if "data:" in trimmed:
+        content_tokens = []
+        for line in trimmed.splitlines():
+            line = line.strip()
+            if not line or line.startswith(":"):
+                continue
+            if line.startswith("data:"):
+                payload_str = line[5:].strip()
+                if payload_str == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(payload_str)
+                    choices = chunk.get("choices", [])
+                    if choices:
+                        delta = choices[0].get("delta", {})
+                        if "content" in delta and delta["content"]:
+                            content_tokens.append(delta["content"])
+                        elif "message" in choices[0]:
+                            content_tokens.append(choices[0]["message"].get("content", ""))
+                except Exception:
+                    continue
+        if content_tokens:
+            return "".join(content_tokens)
+
+    return raw_text
+
 def call_ai(prompt: str, selected_model: str, custom_system_msg: Optional[str] = None) -> str:
     naming_context = get_active_naming_context()
     system_msg = custom_system_msg or (
@@ -332,6 +375,7 @@ def call_ai(prompt: str, selected_model: str, custom_system_msg: Optional[str] =
     payload = {
         "model": selected_model,
         "temperature": 0.0,
+        "stream": False,
         "messages": [
             {"role": "system", "content": system_msg},
             {"role": "user", "content": prompt}
@@ -350,23 +394,15 @@ def call_ai(prompt: str, selected_model: str, custom_system_msg: Optional[str] =
             
         raw_text = response.text.strip()
         if not raw_text:
-            st.error(f"❌ Gateway returned empty payload for `{selected_model}`. Account may be in cooldown.")
+            st.error(f"❌ Gateway returned an empty body for model `{selected_model}`.")
             st.stop()
             
-        try:
-            data = json.loads(raw_text)
-        except Exception:
-            st.error(f"❌ Gateway returned non-JSON data:\n```\n{raw_text}\n```")
+        parsed_content = parse_raw_gateway_payload(raw_text)
+        if not parsed_content:
+            st.error(f"❌ Failed to extract content tokens from gateway response:\n```\n{raw_text[:500]}\n```")
             st.stop()
-
-        if "choices" in data and len(data["choices"]) > 0:
-            return data["choices"][0]["message"]["content"]
-        elif "error" in data:
-            st.error(f"❌ Model Error: {data['error']}")
-            st.stop()
-        else:
-            st.error(f"❌ Unexpected response format: {json.dumps(data)}")
-            st.stop()
+            
+        return parsed_content
             
     except requests.exceptions.ConnectionError:
         st.error(f"❌ Connection Error: Unable to reach gateway at `{endpoint}`.")
