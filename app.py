@@ -12,7 +12,7 @@ import streamlit as st
 import pandas as pd
 from typing import Optional, Dict, List, Tuple
 
-APP_VERSION = "v1.9.3"
+APP_VERSION = "v1.9.4"
 
 # --- Logging Configuration ---
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -312,10 +312,8 @@ def clean_ai_yaml(text: str) -> str:
     return text.strip()
 
 def parse_raw_gateway_payload(raw_text: str) -> str:
-    """Parses standard JSON payloads or raw SSE data: stream chunks."""
     trimmed = raw_text.strip()
     
-    # 1. Try standard JSON
     if trimmed.startswith("{") and trimmed.endswith("}"):
         try:
             data = json.loads(trimmed)
@@ -327,7 +325,6 @@ def parse_raw_gateway_payload(raw_text: str) -> str:
         except Exception:
             pass
 
-    # 2. Parse Server-Sent Events (SSE) stream format
     if "data:" in trimmed:
         content_tokens = []
         for line in trimmed.splitlines():
@@ -544,7 +541,6 @@ Output ONLY valid, raw YAML starting with '---'.
 """
     result = clean_ai_yaml(call_ai(prompt, model_name))
     
-    # Enforce {module} retention
     if "{module}" not in result:
         result = re.sub(
             r"name:\s*['\"]?(?:(?:Ethernet|Port|eth|GigabitEthernet|Te|Gi)[/_ -]*)?(?:\d+/)?(\d+)['\"]?",
@@ -907,7 +903,6 @@ with t6:
         col_a, col_b, col_c = st.columns(3)
         with col_a:
             st.markdown("**Switch Hostname Generator**")
-            # Added blank option
             dev_sw_type = st.selectbox(
                 "Switch Type", 
                 ["SW (Standalone Switch)", "VS (Virtual Chassis / Stack)", "OTSW (OT Field Switch)", "(None / Blank)"],
@@ -962,7 +957,6 @@ with t6:
             )
             
             if p_type == "Uplink (Inter-Switch)":
-                # Dedicated Local Device field instead of appending generated switch hostname
                 l_dev = st.text_input("Local Device Hostname", value="SWUKBRIS01-0", key="up_ld").strip()
                 l_port_raw = st.text_input("Local Port (Raw)", value="Port 51", key="up_lp")
                 r_dev = st.text_input("Remote Device Hostname", value="AGE-ENVASADO", key="up_rd").strip()
@@ -1108,7 +1102,6 @@ with t6:
 
             st.caption("Generated Appliance Hostname:")
             st.code(clean_sec_name, language="text")
-
 
             if st.button("🤖 AI Verify / Suggest Security", key="ai_chk_sec"):
                 with st.spinner("Auditing..."):
@@ -1286,173 +1279,3 @@ with t6:
                 "vSAN Network [vSwitch0]",
                 language="text"
             )
-
-    # 3. ESXi Network Descriptions
-    else:
-        col_a, col_b, col_c = st.columns(3)
-
-        with col_a:
-            st.markdown("**1. Physical Uplink (`vmnic`)**")
-            vmnic = st.text_input("vmnic Identifier", value="vmnic0")
-            vsw = st.text_input("Target vSwitch", value="vSwitch0", key="vsw1")
-            nic_status = st.radio("Uplink Status", ["Active Uplink", "Standby Uplink"], horizontal=True)
-            
-            gen_vmnic = f"{vmnic} - {vsw} {nic_status}"
-            st.caption("Generated Physical Uplink:")
-            st.code(gen_vmnic, language="text")
-
-            if st.button("🤖 AI Verify Uplink", key="ai_chk_vmnic"):
-                with st.spinner("Auditing..."):
-                    st.info(verify_and_suggest_with_ai(gen_vmnic, active_model))
-
-            st.markdown("---")
-            st.markdown("💡 **Live Reference Examples:**")
-            st.code(
-                "vmnic0 - vSwitch0 Active Uplink\n"
-                "vmnic1 - vSwitch0 Active Uplink\n"
-                "vmnic2 - vSwitch0 Standby Uplink",
-                language="text"
-            )
-
-        with col_b:
-            st.markdown("**2. Port Group Teaming (`PG`)**")
-            vsw_pg = st.text_input("vSwitch Name", value="vSwitch0", key="vsw2")
-            act_nics = st.text_input("Active vmnics (comma separated)", value="vmnic0, vmnic1")
-            stb_nics = st.text_input("Standby vmnics (comma separated / optional)", value="")
-            uns_nics = st.text_input("Unused vmnics (optional)", value="")
-
-            team_parts = []
-            if act_nics.strip():
-                team_parts.append(f"{act_nics.strip()} Active")
-            if stb_nics.strip():
-                team_parts.append(f"{stb_nics.strip()} Standby")
-            if uns_nics.strip():
-                team_parts.append(f"{uns_nics.strip()} Unused")
-
-            joined_team = " / ".join(team_parts)
-            gen_pg = f"{vsw_pg} [{joined_team}]"
-            st.caption("Generated Port Group Teaming:")
-            st.code(gen_pg, language="text")
-
-            if st.button("🤖 AI Verify Port Group", key="ai_chk_pg"):
-                with st.spinner("Auditing..."):
-                    st.info(verify_and_suggest_with_ai(gen_pg, active_model))
-
-            st.markdown("---")
-            st.markdown("💡 **Live Reference Examples:**")
-            st.code(
-                "vSwitch0 [vmnic0, vmnic1 Active]\n"
-                "vSwitch0 [vmnic0 Active / vmnic1 Standby]\n"
-                "vSwitch0 [vmnic0, vmnic1 Active / vmnic2 Standby]",
-                language="text"
-            )
-
-        with col_c:
-            st.markdown("**3. VMkernel Adapter (`vmk`)**")
-            vmk_purp = st.text_input("Purpose / Service", value="Management Network")
-            vsw_vmk = st.text_input("vSwitch Name", value="vSwitch0", key="vsw3")
-            
-            gen_vmk = f"{vmk_purp} [{vsw_vmk}]"
-            st.caption("Generated VMkernel Adapter:")
-            st.code(gen_vmk, language="text")
-
-            if st.button("🤖 AI Verify VMkernel", key="ai_chk_vmk"):
-                with st.spinner("Auditing..."):
-                    st.info(verify_and_suggest_with_ai(gen_vmk, active_model))
-
-            st.markdown("---")
-            st.markdown("💡 **Live Reference Examples:**")
-            st.code(
-                "Management Network [vSwitch0]\n"
-                "vMotion [vSwitch1]\n"
-                "vSAN Network [vSwitch0]",
-                language="text"
-            )
-
-# --- Tab 7: Naming Standards Context (Prompt-Driven) ---
-with t7:
-    st.subheader("📖 Infrastructure Naming Standards (Natural Language Prompt Engine)")
-    st.info("💡 You can export, modify, or import complete infrastructure naming guidelines directly in human-readable prompt format.")
-
-    current_rules = load_naming_rules()
-    prompt_representation = export_rules_as_prompt(current_rules)
-
-    p_col1, p_col2 = st.columns([1, 1])
-
-    with p_col1:
-        st.markdown("#### 📝 Active Infrastructure Guidelines Prompt")
-        st.caption("This exact prompt text is actively injected into AI generation requests:")
-        st.text_area("Current System Prompt Context", value=prompt_representation, height=380, disabled=True)
-        
-        st.download_button(
-            "📥 Download Guidelines Prompt (.txt)",
-            prompt_representation,
-            "naming_standards_prompt.txt",
-            "text/plain"
-        )
-
-    with p_col2:
-        st.markdown("#### 📥 Import / Update from Prompt")
-        st.caption("Paste any updated natural language naming rules here. AI will extract and apply them:")
-        imported_prompt_text = st.text_area(
-            "Paste Updated Prompt Text", 
-            placeholder="e.g. Switch naming should be SW<Country><State><Site><Zone><Seq>-<StackID>, Firewalls are FW<Country><State><Site><Vendor><Seq>...", 
-            height=260
-        )
-
-        if st.button("🔄 Parse & Apply Prompt to System Standards", type="primary"):
-            if not imported_prompt_text.strip():
-                st.warning("Please paste valid prompt text to parse.")
-            else:
-                with st.spinner(f"Parsing prompt rules using {active_model}..."):
-                    try:
-                        extracted_rules = parse_prompt_to_rules(imported_prompt_text, active_model)
-                        save_naming_rules(extracted_rules)
-                        st.success("✅ Guidelines successfully parsed and saved into system memory!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Failed to parse prompt: {str(e)}")
-
-    st.markdown("---")
-    with st.expander("🛠️ Advanced: Fine-Tune Individual Rule Fields Manually"):
-        col_rule_1, col_rule_2 = st.columns(2)
-        with col_rule_1:
-            r_sw = st.text_input("Switch Pattern", value=current_rules.get("branch_switch", ""))
-            r_ap = st.text_input("Wireless AP Pattern", value=current_rules.get("branch_ap", ""))
-            r_sec = st.text_input("Security / Firewall Pattern", value=current_rules.get("branch_security", ""))
-            r_up_loc = st.text_input("Switch Uplink (Local)", value=current_rules.get("switch_uplink_desc_local", ""))
-            r_up_rem = st.text_input("Switch Uplink (Remote)", value=current_rules.get("switch_uplink_desc_remote", ""))
-            r_lagm = st.text_input("Switch LAG Member Pattern", value=current_rules.get("switch_lag_member", ""))
-            r_po = st.text_input("Switch Port Channel Pattern", value=current_rules.get("switch_port_channel", ""))
-            r_acc = st.text_input("Switch Access Port Description", value=current_rules.get("switch_access_desc", ""))
-            r_fw_if = st.text_input("Firewall Interface Description", value=current_rules.get("firewall_interface", ""))
-
-        with col_rule_2:
-            r_esx = st.text_input("ESXi Hostname Pattern", value=current_rules.get("esxi_host", ""))
-            r_vm = st.text_input("VM Hostname Pattern", value=current_rules.get("vm_host", ""))
-            r_esx_up = st.text_input("ESXi Physical Uplink Description", value=current_rules.get("esxi_uplink", ""))
-            r_esx_pg = st.text_input("ESXi Port Group Description", value=current_rules.get("esxi_portgroup", ""))
-            r_esx_vmk = st.text_input("ESXi VMkernel Description", value=current_rules.get("esxi_vmkernel", ""))
-            r_srv_yaml = st.text_area("NetBox Server YAML Requirements", value=current_rules.get("netbox_server_yaml", ""), height=100)
-
-        if st.button("💾 Save Field Updates", key="save_manual_fields_btn"):
-            updated = {
-                "branch_switch": r_sw,
-                "branch_ap": r_ap,
-                "branch_security": r_sec,
-                "switch_uplink_desc_local": r_up_loc,
-                "switch_uplink_desc_remote": r_up_rem,
-                "switch_lag_member": r_lagm,
-                "switch_port_channel": r_po,
-                "switch_access_desc": r_acc,
-                "firewall_interface": r_fw_if,
-                "esxi_host": r_esx,
-                "vm_host": r_vm,
-                "esxi_uplink": r_esx_up,
-                "esxi_portgroup": r_esx_pg,
-                "esxi_vmkernel": r_esx_vmk,
-                "netbox_server_yaml": r_srv_yaml
-            }
-            save_naming_rules(updated)
-            st.success("✅ Standards updated successfully!")
-            st.rerun()
