@@ -12,7 +12,7 @@ import streamlit as st
 import pandas as pd
 from typing import Optional, Dict, List, Tuple
 
-APP_VERSION = "v1.8.1"
+APP_VERSION = "v1.8.2"
 
 # --- Logging Configuration ---
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -422,16 +422,10 @@ RULES FOR VERDICT & STRUCTURE:
    - '💡 Suggestion' (if input is non-standard, free-text, or needs formatting fixes)
 
 2. Output Format (Mandatory Structure):
-### Verification Summary
 - **Verdict**: [✅ Compliant | 💡 Suggestion]
-- **Target Category**: [Switch | Wireless AP | Firewall/Security | ESXi Host | VM | Interface Description]
-
-### Canonical Standard Pattern
 - **Standard Formula**: `<exact formula pattern, e.g. SW<Country><State><Site><Zone><Seq>-<StackID>>`
 - **Recommended Output**: `<standardized string>`
-
-### Audit Breakdown
-- Explain concisely what was aligned (e.g. Added stack member hyphen, removed redundant words, converted port to shortname, or formatted teaming).
+- **Audit Reason**: Concise explanation of what was verified or corrected.
 """
     prompt = f"Audit and suggest standard for:\n```\n{user_input_text}\n```"
     return call_ai(prompt, provider, custom_system_msg=system_msg)
@@ -897,8 +891,7 @@ with t6:
     naming_cat = st.radio("Select Asset Class", [
         "1. Network Devices (Switches, APs & Firewalls)",
         "2. Hosts & Virtual Machines (ESXi & VMs)",
-        "3. ESXi Network Descriptions (vmnic, PortGroup, VMkernel)",
-        "🤖 AI Standard Validator & Smart Suggester"
+        "3. ESXi Network Descriptions (vmnic, PortGroup, VMkernel)"
     ], horizontal=True)
 
     st.markdown("---")
@@ -935,6 +928,15 @@ with t6:
             st.caption("Generated Switch Hostname:")
             st.code(current_sw_name, language="text")
 
+            # Inline AI Check Button
+            if st.button("🤖 AI Verify / Suggest Switch", key="ai_chk_sw"):
+                if not active_provider:
+                    st.error("Select an AI model in the sidebar to run verification.")
+                else:
+                    with st.spinner("Auditing..."):
+                        audit_out = verify_and_suggest_with_ai(current_sw_name, active_provider)
+                        st.info(audit_out)
+
             st.markdown("💡 **Live Switch Reference Examples:**")
             st.code(
                 "SWUKBRIS01-0      (Bristol Stack Switch 01, Member 0)\n"
@@ -959,16 +961,34 @@ with t6:
                 l_port_short = normalize_port_shortname(l_port_raw)
                 r_port_short = normalize_port_shortname(r_port_raw)
 
+                local_desc = f"to {r_dev}_{r_port_short} [{link_role}]"
+                remote_desc = f"to {current_sw_name}_{l_port_short} [{link_role}]"
+
                 st.caption(f"On Local Device (`{current_sw_name}`):")
-                st.code(f"to {r_dev}_{r_port_short} [{link_role}]", language="text")
+                st.code(local_desc, language="text")
 
                 st.caption(f"On Remote Device (`{r_dev}`):")
-                st.code(f"to {current_sw_name}_{l_port_short} [{link_role}]", language="text")
+                st.code(remote_desc, language="text")
+
+                if st.button("🤖 AI Verify Uplink Descriptions", key="ai_chk_up"):
+                    if not active_provider:
+                        st.error("Select an AI model in sidebar.")
+                    else:
+                        with st.spinner("Auditing..."):
+                            st.info(verify_and_suggest_with_ai(local_desc, active_provider))
             else:
                 vlan_name = st.text_input("VLAN Name / Purpose", value="VLAN10_Management")
                 host_port = st.text_input("Connected Host / Port", value="roflesx01_vmnic0")
+                access_desc = f"{vlan_name} - {host_port}"
                 st.caption("Access Port Description:")
-                st.code(f"{vlan_name} - {host_port}", language="text")
+                st.code(access_desc, language="text")
+
+                if st.button("🤖 AI Verify Access Description", key="ai_chk_acc"):
+                    if not active_provider:
+                        st.error("Select an AI model in sidebar.")
+                    else:
+                        with st.spinner("Auditing..."):
+                            st.info(verify_and_suggest_with_ai(access_desc, active_provider))
 
         with col_b:
             st.markdown("**Wireless AP Naming**")
@@ -977,8 +997,18 @@ with t6:
             ap_site = st.text_input("Site Code", value=auto_code, key="ap_s")
             ap_seq = st.text_input("Sequence (2 digits)", value="01", key="ap_seq")
             
+            clean_ap_name = f"WAP{ap_ctry.upper()}{ap_state.upper()}{ap_site.upper()}{ap_seq}"
             st.caption("Generated AP Hostname:")
-            st.code(f"WAP{ap_ctry.upper()}{ap_state.upper()}{ap_site.upper()}{ap_seq}", language="text")
+            st.code(clean_ap_name, language="text")
+
+            # Inline AI Check Button for AP
+            if st.button("🤖 AI Verify / Suggest AP", key="ai_chk_ap"):
+                if not active_provider:
+                    st.error("Select an AI model in the sidebar to run verification.")
+                else:
+                    with st.spinner("Auditing..."):
+                        audit_out = verify_and_suggest_with_ai(clean_ap_name, active_provider)
+                        st.info(audit_out)
 
             st.markdown("---")
             st.markdown("💡 **Live AP Reference Examples:**")
@@ -1005,18 +1035,29 @@ with t6:
             if "Palo Alto" in fw_archetype:
                 fw_vendor_role = st.text_input("Vendor / Role Identifier", value="PA", key="fw_vrole")
                 fw_seq = st.text_input("Sequence Number", value="01", key="fw_seq_pa")
+                clean_sec_name = f"FW{fw_ctry.upper()}{fw_state.upper()}{fw_site.upper()}{fw_vendor_role.upper()}{fw_seq}"
                 st.caption("Generated Firewall Hostname:")
-                st.code(f"FW{fw_ctry.upper()}{fw_state.upper()}{fw_site.upper()}{fw_vendor_role.upper()}{fw_seq}", language="text")
+                st.code(clean_sec_name, language="text")
             elif "Prisma" in fw_archetype:
                 fw_seq = st.text_input("Sequence Number", value="01", key="fw_seq_ion2")
-                clean_ion = f"ION{fw_ctry.upper()}{fw_state.upper()}{fw_site.upper()}{fw_seq}"
+                clean_sec_name = f"ION{fw_ctry.upper()}{fw_state.upper()}{fw_site.upper()}{fw_seq}"
                 st.caption("Generated Security Hostname:")
-                st.code(clean_ion, language="text")
+                st.code(clean_sec_name, language="text")
             else:
                 va_role = st.text_input("Virtual Appliance Role", value="PANORAMA", key="va_r")
                 va_seq = st.text_input("Sequence Number", value="01", key="va_sq")
+                clean_sec_name = f"VA{fw_ctry.upper()}{fw_state.upper()}{fw_site.upper()}{va_role.upper()}{va_seq}"
                 st.caption("Generated Appliance Hostname:")
-                st.code(f"VA{fw_ctry.upper()}{fw_state.upper()}{fw_site.upper()}{va_role.upper()}{va_seq}", language="text")
+                st.code(clean_sec_name, language="text")
+
+            # Inline AI Check Button for Security
+            if st.button("🤖 AI Verify / Suggest Security", key="ai_chk_sec"):
+                if not active_provider:
+                    st.error("Select an AI model in the sidebar to run verification.")
+                else:
+                    with st.spinner("Auditing..."):
+                        audit_out = verify_and_suggest_with_ai(clean_sec_name, active_provider)
+                        st.info(audit_out)
 
             st.markdown("💡 **Live Security Reference Examples:**")
             st.code(
@@ -1032,8 +1073,16 @@ with t6:
             st.markdown("**Firewall Interface Description**")
             fw_role = st.text_input("Role / Security Zone", value="DMZ")
             fw_vlan = st.text_input("VLAN ID", value="100")
+            clean_fw_if = f"{fw_role}_{fw_vlan}"
             st.caption("Generated Interface Name:")
-            st.code(f"{fw_role}_{fw_vlan}", language="text")
+            st.code(clean_fw_if, language="text")
+
+            if st.button("🤖 AI Verify Interface Name", key="ai_chk_fwif"):
+                if not active_provider:
+                    st.error("Select an AI model in sidebar.")
+                else:
+                    with st.spinner("Auditing..."):
+                        st.info(verify_and_suggest_with_ai(clean_fw_if, active_provider))
 
     # 2. Hosts & VMs
     elif "2. Hosts" in naming_cat:
@@ -1063,6 +1112,14 @@ with t6:
             st.caption("Generated ESXi Hostname:")
             st.code(gen_esx, language="text")
 
+            # Inline AI Check Button for ESXi Host
+            if st.button("🤖 AI Verify / Suggest ESXi Host", key="ai_chk_esx"):
+                if not active_provider:
+                    st.error("Select an AI model in sidebar.")
+                else:
+                    with st.spinner("Auditing..."):
+                        st.info(verify_and_suggest_with_ai(gen_esx, active_provider))
+
             st.markdown("---")
             st.markdown("💡 **Live NetBox Reference Examples:**")
             st.code(
@@ -1081,8 +1138,17 @@ with t6:
             vm_role = st.text_input("Role Code (Manual Input)", value="cvi", help="Standard codes: cvi=Core/Virt, afs=App/File, sani=Storage, vlab=Test")
             vm_seq = st.text_input("Sequence Number", value="01", key="vm_seq")
             
+            gen_vm = f"{vm_site.lower()}{vm_role.strip().lower()}{vm_seq}"
             st.caption("Generated VM Name:")
-            st.code(f"{vm_site.lower()}{vm_role.strip().lower()}{vm_seq}", language="text")
+            st.code(gen_vm, language="text")
+
+            # Inline AI Check Button for VM
+            if st.button("🤖 AI Verify / Suggest VM Name", key="ai_chk_vm"):
+                if not active_provider:
+                    st.error("Select an AI model in sidebar.")
+                else:
+                    with st.spinner("Auditing..."):
+                        st.info(verify_and_suggest_with_ai(gen_vm, active_provider))
 
             st.markdown("---")
             st.markdown("💡 **Live Reference Examples:**")
@@ -1095,7 +1161,7 @@ with t6:
             )
 
     # 3. ESXi Network Descriptions (Multi-Uplink & Comma Teaming Engine)
-    elif "3. ESXi Network" in naming_cat:
+    else:
         col_a, col_b, col_c = st.columns(3)
 
         with col_a:
@@ -1104,8 +1170,16 @@ with t6:
             vsw = st.text_input("Target vSwitch", value="vSwitch0", key="vsw1")
             nic_status = st.radio("Uplink Status", ["Active Uplink", "Standby Uplink"], horizontal=True)
             
+            gen_vmnic = f"{vmnic} - {vsw} {nic_status}"
             st.caption("Generated Physical Uplink:")
-            st.code(f"{vmnic} - {vsw} {nic_status}", language="text")
+            st.code(gen_vmnic, language="text")
+
+            if st.button("🤖 AI Verify Uplink", key="ai_chk_vmnic"):
+                if not active_provider:
+                    st.error("Select an AI model in sidebar.")
+                else:
+                    with st.spinner("Auditing..."):
+                        st.info(verify_and_suggest_with_ai(gen_vmnic, active_provider))
 
             st.markdown("---")
             st.markdown("💡 **Live Reference Examples:**")
@@ -1133,8 +1207,16 @@ with t6:
                 team_parts.append(f"{uns_nics.strip()} Unused")
 
             joined_team = " / ".join(team_parts)
+            gen_pg = f"{vsw_pg} ({joined_team})"
             st.caption("Generated Port Group Teaming:")
-            st.code(f"{vsw_pg} ({joined_team})", language="text")
+            st.code(gen_pg, language="text")
+
+            if st.button("🤖 AI Verify Port Group", key="ai_chk_pg"):
+                if not active_provider:
+                    st.error("Select an AI model in sidebar.")
+                else:
+                    with st.spinner("Auditing..."):
+                        st.info(verify_and_suggest_with_ai(gen_pg, active_provider))
 
             st.markdown("---")
             st.markdown("💡 **Live Reference Examples:**")
@@ -1150,8 +1232,16 @@ with t6:
             vmk_purp = st.text_input("Purpose / Service", value="Management Network")
             vsw_vmk = st.text_input("vSwitch Name", value="vSwitch0", key="vsw3")
             
+            gen_vmk = f"{vmk_purp} ({vsw_vmk})"
             st.caption("Generated VMkernel Adapter:")
-            st.code(f"{vmk_purp} ({vsw_vmk})", language="text")
+            st.code(gen_vmk, language="text")
+
+            if st.button("🤖 AI Verify VMkernel", key="ai_chk_vmk"):
+                if not active_provider:
+                    st.error("Select an AI model in sidebar.")
+                else:
+                    with st.spinner("Auditing..."):
+                        st.info(verify_and_suggest_with_ai(gen_vmk, active_provider))
 
             st.markdown("---")
             st.markdown("💡 **Live Reference Examples:**")
@@ -1161,25 +1251,6 @@ with t6:
                 "vSAN Network (vSwitch0)",
                 language="text"
             )
-
-    # 4. AI Standard Validator & Smart Suggester
-    else:
-        st.markdown("#### 🤖 AI Standard Validator & Smart Suggester")
-        st.caption("Input any raw/legacy hostname, uplink description, or free-text device role. AI will inspect compliance against active naming conventions and output the correct canonical format.")
-
-        ai_input = st.text_area(
-            "Input Raw Hostname, Interface Description, or Device Request",
-            value="Rowland Flat Bottling switch stack member 0 on ge-0/0/47 linking to core ge-0/0/1",
-            height=120
-        )
-
-        if st.button("🔍 Audit & Standardize with AI", type="primary"):
-            if not active_provider:
-                st.error("Please select or configure an active AI provider in the sidebar.")
-            else:
-                with st.spinner(f"Auditing standard compliance with {active_provider}..."):
-                    audit_res = verify_and_suggest_with_ai(ai_input, active_provider)
-                    st.markdown(audit_res)
 
 # --- Tab 7: Naming Standards Context (Prompt-Driven) ---
 with t7:
