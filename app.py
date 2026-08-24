@@ -322,45 +322,32 @@ def call_ai(prompt: str, selected_model: str, custom_system_msg: Optional[str] =
         "Do NOT invent comments or URLs; omit 'comments' key entirely if no verified official datasheet URL is available."
     )
 
-    clean_token = OPENROUTER_API_KEY.replace("Bearer ", "").strip()
-    headers = {
-        "Authorization": f"Bearer {clean_token}",
-        "HTTP-Referer": "http://localhost:8501",
-        "X-Title": "NetBox Hub",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": selected_model,
-        "temperature": 0.0,
-        "messages": [
-            {"role": "system", "content": system_msg},
-            {"role": "user", "content": prompt}
-        ]
-    }
-    
-    base = OPENROUTER_BASE_URL.rstrip("/")
-    endpoint = f"{base}/chat/completions" if base.endswith("/v1") else f"{base}/v1/chat/completions"
-
     try:
-        response = requests.post(endpoint, headers=headers, json=payload, timeout=90)
-        if response.status_code != 200:
-            st.error(f"❌ Generation Failed (HTTP {response.status_code}):\n```\n{response.text}\n```")
-            st.stop()
-            
-        data = response.json()
-        if "choices" in data and len(data["choices"]) > 0:
-            return data["choices"][0]["message"]["content"]
-        elif "error" in data:
-            st.error(f"❌ Gateway Error: {data['error']}")
-            st.stop()
-        else:
-            st.error(f"❌ Unexpected response format: {json.dumps(data)}")
-            st.stop()
-            
+        from openai import OpenAI
+        client = OpenAI(
+            base_url=OPENROUTER_BASE_URL,
+            api_key=OPENROUTER_API_KEY or "sk-omniroute-local",
+            default_headers={
+                "HTTP-Referer": "http://localhost:8501",
+                "X-Title": "NetBox Hub"
+            }
+        )
+        
+        resp = client.chat.completions.create(
+            model=selected_model,
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.0
+        )
+        return resp.choices[0].message.content
+
     except Exception as e:
         logger.error(f"Error from OmniRoute Gateway: {str(e)}")
         st.error(f"❌ Generation Failed: {str(e)}")
         st.stop()
+
 
 def verify_and_suggest_with_ai(user_input_text: str, model_name: str) -> str:
     naming_context = get_active_naming_context()
