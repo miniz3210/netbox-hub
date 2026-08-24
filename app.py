@@ -907,8 +907,13 @@ with t6:
         col_a, col_b, col_c = st.columns(3)
         with col_a:
             st.markdown("**Switch Hostname Generator**")
-            dev_sw_type = st.selectbox("Switch Type", ["SW (Standalone Switch)", "VS (Virtual Chassis / Stack)", "OTSW (OT Field Switch)"])
-            prefix_sw = dev_sw_type.split()[0]
+            # Added blank option
+            dev_sw_type = st.selectbox(
+                "Switch Type", 
+                ["SW (Standalone Switch)", "VS (Virtual Chassis / Stack)", "OTSW (OT Field Switch)", "(None / Blank)"],
+                index=0
+            )
+            prefix_sw = "" if "(None / Blank)" in dev_sw_type else dev_sw_type.split()[0]
             
             s_ctry = st.text_input("Country Code (2-letter)", value="UK", key="sw_ctry_g")
             s_state = st.text_input("State / Region (e.g. SA, VIC, NSW or empty)", value="", key="sw_st_g")
@@ -957,19 +962,21 @@ with t6:
             )
             
             if p_type == "Uplink (Inter-Switch)":
-                l_port_raw = st.text_input("Local Port (Raw)", value="ge-0/0/47", key="up_lp")
-                r_dev = st.text_input("Remote Device Hostname", value="SWUKBRIS01-0", key="up_rd").strip()
-                r_port_raw = st.text_input("Remote Port (Raw)", value="ge-0/0/1", key="up_rp")
-                link_role = st.text_input("Link Purpose / Role", value="Core Uplink", key="up_lr").strip()
+                # Dedicated Local Device field instead of appending generated switch hostname
+                l_dev = st.text_input("Local Device Hostname", value="SWUKBRIS01-0", key="up_ld").strip()
+                l_port_raw = st.text_input("Local Port (Raw)", value="Port 51", key="up_lp")
+                r_dev = st.text_input("Remote Device Hostname", value="AGE-ENVASADO", key="up_rd").strip()
+                r_port_raw = st.text_input("Remote Port (Raw)", value="Port 26", key="up_rp")
+                link_role = st.text_input("Link Purpose / Role", value="Uplink", key="up_lr").strip()
 
                 l_port_short = normalize_port_shortname(l_port_raw)
                 r_port_short = normalize_port_shortname(r_port_raw)
                 role_suffix = f" [{link_role}]" if link_role else ""
 
                 local_desc = f"to {r_dev}_{r_port_short}{role_suffix}"
-                remote_desc = f"to {current_sw_name}_{l_port_short}{role_suffix}"
+                remote_desc = f"to {l_dev}_{l_port_short}{role_suffix}"
 
-                st.caption(f"On Local Device (`{current_sw_name}`):")
+                st.caption(f"On Local Device (`{l_dev}`):")
                 st.code(local_desc, language="text")
 
                 st.caption(f"On Remote Device (`{r_dev}`):")
@@ -1073,10 +1080,12 @@ with t6:
 
         with col_c:
             st.markdown("**Firewall & Security Appliances**")
+            # Added blank option
             fw_archetype = st.selectbox("Firewall Category", [
                 "Prisma SD-WAN (ION<Country><State><Site><Seq>)",
                 "Palo Alto / Fortinet Firewall (FW<Country><State><Site><Vendor><Seq>)",
-                "Virtual Appliance Panorama (VA<Country><State><Site>PANORAMA<Seq>)"
+                "Virtual Appliance Panorama (VA<Country><State><Site>PANORAMA<Seq>)",
+                "(None / Blank)"
             ])
             
             fw_ctry = st.text_input("Country Code", value="UK", key="fw_c_gen")
@@ -1087,19 +1096,19 @@ with t6:
                 fw_vendor_role = st.text_input("Vendor / Role Identifier", value="PA", key="fw_vrole")
                 fw_seq = st.text_input("Sequence Number", value="01", key="fw_seq_pa")
                 clean_sec_name = f"FW{fw_ctry.upper()}{fw_state.upper()}{fw_site.upper()}{fw_vendor_role.upper()}{fw_seq}"
-                st.caption("Generated Firewall Hostname:")
-                st.code(clean_sec_name, language="text")
             elif "Prisma" in fw_archetype:
                 fw_seq = st.text_input("Sequence Number", value="01", key="fw_seq_ion2")
                 clean_sec_name = f"ION{fw_ctry.upper()}{fw_state.upper()}{fw_site.upper()}{fw_seq}"
-                st.caption("Generated Security Hostname:")
-                st.code(clean_sec_name, language="text")
-            else:
+            elif "Panorama" in fw_archetype:
                 va_role = st.text_input("Virtual Appliance Role", value="PANORAMA", key="va_r")
                 va_seq = st.text_input("Sequence Number", value="01", key="va_sq")
                 clean_sec_name = f"VA{fw_ctry.upper()}{fw_state.upper()}{fw_site.upper()}{va_role.upper()}{va_seq}"
-                st.caption("Generated Appliance Hostname:")
-                st.code(clean_sec_name, language="text")
+            else:
+                fw_seq = st.text_input("Sequence Number", value="01", key="fw_seq_blank")
+                clean_sec_name = f"{fw_ctry.upper()}{fw_state.upper()}{fw_site.upper()}{fw_seq}"
+
+            st.caption("Generated Appliance Hostname:")
+            st.code(clean_sec_name, language="text")
 
             if st.button("🤖 AI Verify / Suggest Security", key="ai_chk_sec"):
                 with st.spinner("Auditing..."):
@@ -1193,6 +1202,88 @@ with t6:
                 "roflafs01  (Rowland Flat App/File Server 01)\n"
                 "roflsani01 (Rowland Flat SAN/Storage Service 01)\n"
                 "roflvlab01 (Rowland Flat Test Validation Lab 01)",
+                language="text"
+            )
+
+    # 3. ESXi Network Descriptions
+    else:
+        col_a, col_b, col_c = st.columns(3)
+
+        with col_a:
+            st.markdown("**1. Physical Uplink (`vmnic`)**")
+            vmnic = st.text_input("vmnic Identifier", value="vmnic0")
+            vsw = st.text_input("Target vSwitch", value="vSwitch0", key="vsw1")
+            nic_status = st.radio("Uplink Status", ["Active Uplink", "Standby Uplink"], horizontal=True)
+            
+            gen_vmnic = f"{vmnic} - {vsw} {nic_status}"
+            st.caption("Generated Physical Uplink:")
+            st.code(gen_vmnic, language="text")
+
+            if st.button("🤖 AI Verify Uplink", key="ai_chk_vmnic"):
+                with st.spinner("Auditing..."):
+                    st.info(verify_and_suggest_with_ai(gen_vmnic, active_model))
+
+            st.markdown("---")
+            st.markdown("💡 **Live Reference Examples:**")
+            st.code(
+                "vmnic0 - vSwitch0 Active Uplink\n"
+                "vmnic1 - vSwitch0 Active Uplink\n"
+                "vmnic2 - vSwitch0 Standby Uplink",
+                language="text"
+            )
+
+        with col_b:
+            st.markdown("**2. Port Group Teaming (`PG`)**")
+            vsw_pg = st.text_input("vSwitch Name", value="vSwitch0", key="vsw2")
+            act_nics = st.text_input("Active vmnics (comma separated)", value="vmnic0, vmnic1")
+            stb_nics = st.text_input("Standby vmnics (comma separated / optional)", value="")
+            uns_nics = st.text_input("Unused vmnics (optional)", value="")
+
+            team_parts = []
+            if act_nics.strip():
+                team_parts.append(f"{act_nics.strip()} Active")
+            if stb_nics.strip():
+                team_parts.append(f"{stb_nics.strip()} Standby")
+            if uns_nics.strip():
+                team_parts.append(f"{uns_nics.strip()} Unused")
+
+            joined_team = " / ".join(team_parts)
+            gen_pg = f"{vsw_pg} [{joined_team}]"
+            st.caption("Generated Port Group Teaming:")
+            st.code(gen_pg, language="text")
+
+            if st.button("🤖 AI Verify Port Group", key="ai_chk_pg"):
+                with st.spinner("Auditing..."):
+                    st.info(verify_and_suggest_with_ai(gen_pg, active_model))
+
+            st.markdown("---")
+            st.markdown("💡 **Live Reference Examples:**")
+            st.code(
+                "vSwitch0 [vmnic0, vmnic1 Active]\n"
+                "vSwitch0 [vmnic0 Active / vmnic1 Standby]\n"
+                "vSwitch0 [vmnic0, vmnic1 Active / vmnic2 Standby]",
+                language="text"
+            )
+
+        with col_c:
+            st.markdown("**3. VMkernel Adapter (`vmk`)**")
+            vmk_purp = st.text_input("Purpose / Service", value="Management Network")
+            vsw_vmk = st.text_input("vSwitch Name", value="vSwitch0", key="vsw3")
+            
+            gen_vmk = f"{vmk_purp} [{vsw_vmk}]"
+            st.caption("Generated VMkernel Adapter:")
+            st.code(gen_vmk, language="text")
+
+            if st.button("🤖 AI Verify VMkernel", key="ai_chk_vmk"):
+                with st.spinner("Auditing..."):
+                    st.info(verify_and_suggest_with_ai(gen_vmk, active_model))
+
+            st.markdown("---")
+            st.markdown("💡 **Live Reference Examples:**")
+            st.code(
+                "Management Network [vSwitch0]\n"
+                "vMotion [vSwitch1]\n"
+                "vSAN Network [vSwitch0]",
                 language="text"
             )
 
