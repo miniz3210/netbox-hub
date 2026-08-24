@@ -12,7 +12,7 @@ import streamlit as st
 import pandas as pd
 from typing import Optional, Dict, List, Tuple
 
-APP_VERSION = "v1.8.2"
+APP_VERSION = "v1.8.3"
 
 # --- Logging Configuration ---
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -31,14 +31,14 @@ RULES_FILE = "naming_rules.json"
 
 # --- Provider Keys & Dynamic Model Loading from .env ---
 GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
 
 GROQ_KEY = os.getenv("GROQ_API_KEY", "").strip()
 groq_models_env = os.getenv("GROQ_MODELS", os.getenv("GROQ_MODEL", "openai/gpt-oss-120b, qwen/qwen3.6-27b"))
 GROQ_MODELS = [m.strip() for m in groq_models_env.split(",") if m.strip()]
 
 OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
-openrouter_models_env = os.getenv("OPENROUTER_MODELS", os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free"))
+openrouter_models_env = os.getenv("OPENROUTER_MODELS", os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct, openai/gpt-4o-mini"))
 OPENROUTER_MODELS = [m.strip() for m in openrouter_models_env.split(",") if m.strip()]
 
 OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "").strip()
@@ -89,6 +89,8 @@ def normalize_port_shortname(port_name: str) -> str:
         (r"^FortyGigabitEthernet", "Fo"),
         (r"^HundredGigE", "Hu"),
         (r"^HundredGigabitEthernet", "Hu"),
+        (r"^Port-channel", "Po"),
+        (r"^PortChannel", "Po"),
         (r"^Ethernet", "Eth"),
         (r"^Management", "Mgmt"),
     ]
@@ -104,6 +106,8 @@ DEFAULT_RULES = {
     "branch_security": "FW<Country><State><Site><Vendor><Seq> / ION<Country><State><Site><Seq> (e.g. FWAUBERPA01, IONAUSABRS01, IONUKBRIS01)",
     "switch_uplink_desc_local": "to <Remote_Device>_<Remote_Port_Short> [<Role>]",
     "switch_uplink_desc_remote": "to <Local_Device>_<Local_Port_Short> [<Role>]",
+    "switch_lag_member_desc": "<Local_Port> (Po<ID>) -> <Remote_Device>:<Remote_Port> (<Role>)",
+    "switch_po_desc": "Po<ID> -> <Remote_Device>:Po<Remote_ID> (<Role>)",
     "switch_access_desc": "<VLAN_Name> - <Host/Device>_<Port>",
     "firewall_interface": "<Role/Zone>_<VLAN_ID>",
     "esxi_host": "<site_prefix>esx<number>.<domain> (e.g. pwsesx001.eswine.adds, ageotinfhost1.eswines.ot, roflesx01.corp.local)",
@@ -140,6 +144,8 @@ def export_rules_as_prompt(rules: Dict[str, str]) -> str:
 - Firewall / Security Hostname: {rules.get('branch_security', '')}
 - Switch Uplink Description (Local): {rules.get('switch_uplink_desc_local', '')}
 - Switch Uplink Description (Remote): {rules.get('switch_uplink_desc_remote', '')}
+- Switch LAG Member Uplink: {rules.get('switch_lag_member_desc', '')}
+- Switch Port-Channel Interface: {rules.get('switch_po_desc', '')}
 - Switch Access Port Description: {rules.get('switch_access_desc', '')}
 - Firewall Interface Description: {rules.get('firewall_interface', '')}
 
@@ -375,7 +381,15 @@ def call_ai(prompt: str, selected_provider: str, custom_system_msg: Optional[str
 
         elif selected_provider.startswith("OpenRouter"):
             from openai import OpenAI
-            client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=OPENROUTER_KEY)
+            client = OpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=OPENROUTER_KEY,
+                default_headers={
+                    "Authorization": f"Bearer {OPENROUTER_KEY}",
+                    "HTTP-Referer": "http://localhost:8501",
+                    "X-Title": "NetBox Universal Library Hub",
+                }
+            )
             target_model = extract_model_from_label(selected_provider)
             resp = client.chat.completions.create(
                 model=target_model,
@@ -439,6 +453,8 @@ Analyze the following natural language infrastructure naming standards prompt an
   "branch_security": "...",
   "switch_uplink_desc_local": "...",
   "switch_uplink_desc_remote": "...",
+  "switch_lag_member_desc": "...",
+  "switch_po_desc": "...",
   "switch_access_desc": "...",
   "firewall_interface": "...",
   "esxi_host": "...",
@@ -582,6 +598,22 @@ catalog = get_repo_catalog()
 
 with st.sidebar:
     st.header("⚙️ AI Engine Selection")
+    
+    # Allow manual override / entry in UI sidebar if env is missing
+    api_key_override = st.text_input(
+        "OpenRouter API Key Override",
+        value=OPENROUTER_KEY,
+        type="password",
+        help="Paste your OpenRouter key here if missing in .env"
+    )
+    if api_key_override:
+        OPENROUTER_KEY = api_key_override
+        # Re-register OpenRouter if not already populated
+        for m in OPENROUTER_MODELS:
+            entry = f"OpenRouter ({m})"
+            if entry not in AVAILABLE_PROVIDERS:
+                AVAILABLE_PROVIDERS.append(entry)
+
     if AVAILABLE_PROVIDERS:
         active_provider = st.selectbox("Active AI Model", AVAILABLE_PROVIDERS)
         st.success(f"Selected: `{active_provider}`")
@@ -669,7 +701,7 @@ with t1:
         with st.spinner("Processing..."):
             if selected_dev_choice.startswith("✨"):
                 if not active_provider:
-                    st.error("Configure an AI API key in `.env` to enable AI generation.")
+                    st.error("Configure an AI API key in sidebar or `.env` to enable AI generation.")
                     st.stop()
                 content = generate_device_yaml(effective_mfg, d_model, active_provider)
                 src = f"🤖 AI Generated ({active_provider})"
@@ -731,7 +763,7 @@ with t2:
         with st.spinner("Processing..."):
             if selected_mod_choice.startswith("✨"):
                 if not active_provider:
-                    st.error("Configure an AI API key in `.env` to enable AI generation.")
+                    st.error("Configure an AI API key in sidebar or `.env` to enable AI generation.")
                     st.stop()
                 content = generate_module_yaml(effective_mfg, m_model, m_model, active_provider, ref_pattern=discovered_pattern)
                 src = f"🤖 AI Generated ({active_provider})"
@@ -783,7 +815,7 @@ with t3:
         with st.spinner("Processing..."):
             if selected_rack_choice.startswith("✨"):
                 if not active_provider:
-                    st.error("Configure an AI API key in `.env` to enable AI generation.")
+                    st.error("Configure an AI API key in sidebar or `.env` to enable AI generation.")
                     st.stop()
                 content = generate_rack_yaml(effective_mfg, r_model, active_provider)
                 src = f"🤖 AI Generated ({active_provider})"
@@ -841,7 +873,7 @@ with t5:
         
         if st.button("Start Universal Batch Processing", type="primary"):
             if not active_provider:
-                st.error("Please configure at least one API key in `.env` to run batch generation.")
+                st.error("Please configure at least one API key in the sidebar or `.env` to run batch generation.")
                 st.stop()
 
             pbar = st.progress(0)
@@ -950,12 +982,21 @@ with t6:
 
             st.markdown("---")
             st.markdown("**Switch Port Description Formatter (Automation Standard)**")
-            p_type = st.radio("Port Type", ["Uplink (Inter-Switch)", "Access (Host/Endpoint)"], horizontal=True)
+            p_type = st.radio(
+                "Port Configuration Type", 
+                [
+                    "Standard Uplink (Standalone)", 
+                    "LAG Member Port (LACP Uplink)",
+                    "Port-Channel (Logical Aggregate)",
+                    "Access (Host/Endpoint)"
+                ], 
+                horizontal=False
+            )
             
-            if "Uplink" in p_type:
-                l_port_raw = st.text_input("Local Port (Raw)", value="ge-0/0/47")
+            if p_type == "Standard Uplink (Standalone)":
+                l_port_raw = st.text_input("Local Port (Raw)", value="GigabitEthernet1/0/48")
                 r_dev = st.text_input("Remote Device Hostname", value="SWUKBRIS01-0")
-                r_port_raw = st.text_input("Remote Port (Raw)", value="ge-0/0/1")
+                r_port_raw = st.text_input("Remote Port (Raw)", value="GigabitEthernet1/0/1")
                 link_role = st.text_input("Link Purpose / Role", value="Core Uplink")
 
                 l_port_short = normalize_port_shortname(l_port_raw)
@@ -976,6 +1017,48 @@ with t6:
                     else:
                         with st.spinner("Auditing..."):
                             st.info(verify_and_suggest_with_ai(local_desc, active_provider))
+
+            elif p_type == "LAG Member Port (LACP Uplink)":
+                l_port_raw = st.text_input("Local Port (Raw)", value="TenGigabitEthernet1/0/1")
+                po_id = st.text_input("Local Port-Channel ID", value="10")
+                r_dev = st.text_input("Remote Device Hostname", value="MAD-SW-CORE01")
+                r_port_raw = st.text_input("Remote Port (Raw)", value="Ethernet1/1")
+                lag_role = st.text_input("Link Role / Purpose", value="CORE")
+
+                l_port_short = normalize_port_shortname(l_port_raw)
+                r_port_short = normalize_port_shortname(r_port_raw)
+
+                lag_member_desc = f"{l_port_short} (Po{po_id}) -> {r_dev}:{r_port_short} ({lag_role})"
+                
+                st.caption("LAG / LACP Member Port Description:")
+                st.code(lag_member_desc, language="text")
+
+                if st.button("🤖 AI Verify LAG Member Description", key="ai_chk_lag_mem"):
+                    if not active_provider:
+                        st.error("Select an AI model in sidebar.")
+                    else:
+                        with st.spinner("Auditing..."):
+                            st.info(verify_and_suggest_with_ai(lag_member_desc, active_provider))
+
+            elif p_type == "Port-Channel (Logical Aggregate)":
+                po_id = st.text_input("Local Port-Channel ID", value="10")
+                r_dev = st.text_input("Remote Device Hostname", value="MAD-SW-CORE01")
+                r_po_id = st.text_input("Remote Port-Channel ID (or Port)", value="10")
+                lag_role = st.text_input("Link Role / Purpose", value="CORE")
+
+                target_po = f"Po{r_po_id}" if r_po_id.isdigit() else normalize_port_shortname(r_po_id)
+                po_desc = f"Po{po_id} -> {r_dev}:{target_po} ({lag_role})"
+
+                st.caption("Port-Channel (Logical) Description:")
+                st.code(po_desc, language="text")
+
+                if st.button("🤖 AI Verify Port-Channel Description", key="ai_chk_po"):
+                    if not active_provider:
+                        st.error("Select an AI model in sidebar.")
+                    else:
+                        with st.spinner("Auditing..."):
+                            st.info(verify_and_suggest_with_ai(po_desc, active_provider))
+
             else:
                 vlan_name = st.text_input("VLAN Name / Purpose", value="VLAN10_Management")
                 host_port = st.text_input("Connected Host / Port", value="roflesx01_vmnic0")
@@ -1059,6 +1142,7 @@ with t6:
                         audit_out = verify_and_suggest_with_ai(clean_sec_name, active_provider)
                         st.info(audit_out)
 
+            st.markdown("---")
             st.markdown("💡 **Live Security Reference Examples:**")
             st.code(
                 "IONUKBRIS01       (Bristol Prisma SD-WAN 01)\n"
@@ -1307,6 +1391,8 @@ with t7:
             r_sec = st.text_input("Security / Firewall Pattern", value=current_rules.get("branch_security", ""))
             r_up_loc = st.text_input("Switch Uplink (Local)", value=current_rules.get("switch_uplink_desc_local", ""))
             r_up_rem = st.text_input("Switch Uplink (Remote)", value=current_rules.get("switch_uplink_desc_remote", ""))
+            r_lag_mem = st.text_input("LAG Member Port Description", value=current_rules.get("switch_lag_member_desc", ""))
+            r_po_desc = st.text_input("Port-Channel Aggregate Description", value=current_rules.get("switch_po_desc", ""))
             r_acc = st.text_input("Switch Access Port Description", value=current_rules.get("switch_access_desc", ""))
             r_fw_if = st.text_input("Firewall Interface Description", value=current_rules.get("firewall_interface", ""))
 
@@ -1325,6 +1411,8 @@ with t7:
                 "branch_security": r_sec,
                 "switch_uplink_desc_local": r_up_loc,
                 "switch_uplink_desc_remote": r_up_rem,
+                "switch_lag_member_desc": r_lag_mem,
+                "switch_po_desc": r_po_desc,
                 "switch_access_desc": r_acc,
                 "firewall_interface": r_fw_if,
                 "esxi_host": r_esx,
