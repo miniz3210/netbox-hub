@@ -1080,7 +1080,6 @@ with t6:
 
         with col_c:
             st.markdown("**Firewall & Security Appliances**")
-            # Added blank option
             fw_archetype = st.selectbox("Firewall Category", [
                 "Prisma SD-WAN (ION<Country><State><Site><Seq>)",
                 "Palo Alto / Fortinet Firewall (FW<Country><State><Site><Vendor><Seq>)",
@@ -1089,7 +1088,7 @@ with t6:
             ])
             
             fw_ctry = st.text_input("Country Code", value="UK", key="fw_c_gen")
-            fw_state = st.text_input("State Code (e.g. SA, NSW or empty)", value="", key="fw_st_gen")
+            fw_state = st.text_input("State Code (e.g. SA, VIC, NSW or empty)", value="", key="fw_st_gen")
             fw_site = st.text_input("Site Code", value=auto_code, key="fw_s_gen")
             
             if "Palo Alto" in fw_archetype:
@@ -1109,6 +1108,7 @@ with t6:
 
             st.caption("Generated Appliance Hostname:")
             st.code(clean_sec_name, language="text")
+
 
             if st.button("🤖 AI Verify / Suggest Security", key="ai_chk_sec"):
                 with st.spinner("Auditing..."):
