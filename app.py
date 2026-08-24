@@ -12,7 +12,7 @@ import streamlit as st
 import pandas as pd
 from typing import Optional, Dict, List, Tuple
 
-APP_VERSION = "v1.9.4"
+APP_VERSION = "v1.9.5"
 
 # --- Logging Configuration ---
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -1195,88 +1195,6 @@ with t6:
                 "roflafs01  (Rowland Flat App/File Server 01)\n"
                 "roflsani01 (Rowland Flat SAN/Storage Service 01)\n"
                 "roflvlab01 (Rowland Flat Test Validation Lab 01)",
-                language="text"
-            )
-
-    # 3. ESXi Network Descriptions
-    else:
-        col_a, col_b, col_c = st.columns(3)
-
-        with col_a:
-            st.markdown("**1. Physical Uplink (`vmnic`)**")
-            vmnic = st.text_input("vmnic Identifier", value="vmnic0")
-            vsw = st.text_input("Target vSwitch", value="vSwitch0", key="vsw1")
-            nic_status = st.radio("Uplink Status", ["Active Uplink", "Standby Uplink"], horizontal=True)
-            
-            gen_vmnic = f"{vmnic} - {vsw} {nic_status}"
-            st.caption("Generated Physical Uplink:")
-            st.code(gen_vmnic, language="text")
-
-            if st.button("🤖 AI Verify Uplink", key="ai_chk_vmnic"):
-                with st.spinner("Auditing..."):
-                    st.info(verify_and_suggest_with_ai(gen_vmnic, active_model))
-
-            st.markdown("---")
-            st.markdown("💡 **Live Reference Examples:**")
-            st.code(
-                "vmnic0 - vSwitch0 Active Uplink\n"
-                "vmnic1 - vSwitch0 Active Uplink\n"
-                "vmnic2 - vSwitch0 Standby Uplink",
-                language="text"
-            )
-
-        with col_b:
-            st.markdown("**2. Port Group Teaming (`PG`)**")
-            vsw_pg = st.text_input("vSwitch Name", value="vSwitch0", key="vsw2")
-            act_nics = st.text_input("Active vmnics (comma separated)", value="vmnic0, vmnic1")
-            stb_nics = st.text_input("Standby vmnics (comma separated / optional)", value="")
-            uns_nics = st.text_input("Unused vmnics (optional)", value="")
-
-            team_parts = []
-            if act_nics.strip():
-                team_parts.append(f"{act_nics.strip()} Active")
-            if stb_nics.strip():
-                team_parts.append(f"{stb_nics.strip()} Standby")
-            if uns_nics.strip():
-                team_parts.append(f"{uns_nics.strip()} Unused")
-
-            joined_team = " / ".join(team_parts)
-            gen_pg = f"{vsw_pg} [{joined_team}]"
-            st.caption("Generated Port Group Teaming:")
-            st.code(gen_pg, language="text")
-
-            if st.button("🤖 AI Verify Port Group", key="ai_chk_pg"):
-                with st.spinner("Auditing..."):
-                    st.info(verify_and_suggest_with_ai(gen_pg, active_model))
-
-            st.markdown("---")
-            st.markdown("💡 **Live Reference Examples:**")
-            st.code(
-                "vSwitch0 [vmnic0, vmnic1 Active]\n"
-                "vSwitch0 [vmnic0 Active / vmnic1 Standby]\n"
-                "vSwitch0 [vmnic0, vmnic1 Active / vmnic2 Standby]",
-                language="text"
-            )
-
-        with col_c:
-            st.markdown("**3. VMkernel Adapter (`vmk`)**")
-            vmk_purp = st.text_input("Purpose / Service", value="Management Network")
-            vsw_vmk = st.text_input("vSwitch Name", value="vSwitch0", key="vsw3")
-            
-            gen_vmk = f"{vmk_purp} [{vsw_vmk}]"
-            st.caption("Generated VMkernel Adapter:")
-            st.code(gen_vmk, language="text")
-
-            if st.button("🤖 AI Verify VMkernel", key="ai_chk_vmk"):
-                with st.spinner("Auditing..."):
-                    st.info(verify_and_suggest_with_ai(gen_vmk, active_model))
-
-            st.markdown("---")
-            st.markdown("💡 **Live Reference Examples:**")
-            st.code(
-                "Management Network [vSwitch0]\n"
-                "vMotion [vSwitch1]\n"
-                "vSAN Network [vSwitch0]",
                 language="text"
             )
 
