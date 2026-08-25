@@ -360,9 +360,22 @@ def render_naming_tab(active_model):
             vsw_vmk_raw = st.text_input("vSwitch Name", value="vSwitch", placeholder="e.g. vswitch0, dvswitch01", help="Target virtual switch (auto-corrected).", key="vsw3")
             
             clean_vsw_vmk = normalize_vswitch(vsw_vmk_raw) if auto_correct else vsw_vmk_raw.strip()
-            gen_vmk = f"{vmk_purp} [{clean_vsw_vmk}]" if vmk_purp and clean_vsw_vmk else ""
+            
+            if vmk_purp and clean_vsw_vmk:
+                gen_vmk = f"{vmk_purp} [{clean_vsw_vmk}]"
+                fallback_disp = gen_vmk
+            elif vmk_purp:
+                gen_vmk = vmk_purp
+                fallback_disp = vmk_purp
+            elif clean_vsw_vmk:
+                gen_vmk = f"[{clean_vsw_vmk}]"
+                fallback_disp = f"[{clean_vsw_vmk}]"
+            else:
+                gen_vmk = ""
+                fallback_disp = "[vSwitch]"
+
             st.caption("Generated VMkernel Description:")
-            st.code(gen_vmk or "Management [vSwitch]", language="text")
+            st.code(fallback_disp, language="text")
 
             if st.button("🤖 AI Verify VMkernel", key="ai_chk_vmk"):
                 with st.spinner("Auditing..."):

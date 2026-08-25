@@ -53,3 +53,10 @@
 * **VMkernel vSwitch Normalization**: Extended VMware vSwitch auto-correction to the VMkernel Adapter vSwitch input field.
 * **Port Group Default Prefix (`PG-`)**: Pre-populated Port Group vSwitch input fields with `PG-` by default.
 * **Default vmnic Placeholders**: Pre-populated physical uplink and teaming interface inputs with `vmnicX` standards.
+
+## Release v2.1.3 — VMkernel Cleanup & NetBox CSV DB Writeback
+
+### 🛠️ Improvements & Refinements
+* **VMkernel Description Fallback Fix**: Removed hardcoded "Management" default text when Purpose / Service is left blank.
+* **NetBox CSV GUI Importer**: Added file upload capability for NetBox device export spreadsheets with SQLite database writeback and persistence.
+* **Dynamic Inventory Fallback**: Automatically switches between real database records and fallback mock examples depending on upload state.

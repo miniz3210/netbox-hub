@@ -1,46 +1,34 @@
 import streamlit as st
-from core.catalog import get_canonical_manufacturer, search_catalog_wildcard, fetch_raw_content
-from core.yaml_generator import generate_device_yaml
-from core.exceptions import AIProviderError
+import pandas as pd
+from core.db_manager import save_devices_from_csv, get_imported_devices
 
-def render_device_tab(catalog, active_model):
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        d_mfg_raw = st.text_input("Manufacturer", placeholder="e.g., HP, Cisco, Dell", key="d_mfg")
-        d_model = st.text_input("Device Model", placeholder="e.g., dl360, PowerEdge R750", key="d_mod")
-        d_mfg = get_canonical_manufacturer(d_mfg_raw, catalog["manufacturers"]) if d_mfg_raw else ""
+def render_device_tab(active_model):
+    st.subheader("🖥️ NetBox Device Library Hub & CSV Importer")
+    
+    with st.expander("📤 Upload NetBox Device Export CSV (Database Writeback)", expanded=True):
+        st.markdown("Upload a standard NetBox device export CSV to persist inventory records into the local database.")
+        uploaded_file = st.file_uploader("Choose NetBox CSV Export", type=["csv"], key="netbox_csv_upload")
+        
+        if uploaded_file is not None:
+            if st.button("📥 Import & Write to Database"):
+                try:
+                    count = save_devices_from_csv(uploaded_file)
+                    st.success(f"Successfully imported and saved **{count}** devices to the database!")
+                except Exception as ex:
+                    st.error(f"Import Error: {ex}")
 
-        selected_dev_choice = None
-        if d_mfg_raw or d_model:
-            similar_devs = search_catalog_wildcard(catalog["device_types"], d_mfg_raw, d_model)
-            cross_mods = search_catalog_wildcard(catalog["module_types"], d_mfg_raw, d_model)
-            all_matches = similar_devs + cross_mods
-
-            if d_mfg and d_mfg != d_mfg_raw.strip():
-                st.caption(f"ℹ️ Matched manufacturer: `{d_mfg_raw}` ➔ **`{d_mfg}`**")
-
-            if all_matches:
-                st.success(f"🔍 Found {len(all_matches)} matching definition(s) in Official Library:")
-                selected_dev_choice = st.selectbox("Select library definition or generate with AI:", all_matches + ["✨ Generate Fresh with AI"], key="dev_sel")
-            else:
-                st.warning("No match found in library. Click below to generate fresh with AI.")
-                selected_dev_choice = "✨ Generate Fresh with AI"
-
-        d_search = st.button("Load / Generate Device Type", type="primary", key="btn_dev")
-
-    if d_search and (d_mfg or d_mfg_raw or selected_dev_choice) and d_model and selected_dev_choice:
-        effective_mfg = d_mfg if d_mfg else d_mfg_raw
-        with st.spinner("Processing..."):
-            try:
-                if selected_dev_choice.startswith("✨"):
-                    content = generate_device_yaml(effective_mfg, d_model, active_model)
-                    src = f"🤖 AI Generated ({active_model})"
-                else:
-                    content = fetch_raw_content(selected_dev_choice, binary=False)
-                    src = f"✅ Official Repository (`{selected_dev_choice}`)"
-                with col2:
-                    st.markdown(f"**Source:** {src}")
-                    st.code(content, language="yaml", line_numbers=True)
-                    st.download_button("📥 Download YAML", content, f"{effective_mfg}_{d_model}.yaml", "text/yaml")
-            except AIProviderError as e:
-                st.error(f"❌ Generation Failed: {str(e)}")
+    st.markdown("---")
+    st.markdown("### 📊 Database Inventory View (Real Data / Fallback Mock)")
+    
+    devices = get_imported_devices()
+    if devices:
+        st.info(f"Loaded **{len(devices)}** real records from database storage.")
+        df_dev = pd.DataFrame(devices)
+        st.dataframe(df_dev[["name", "manufacturer", "device_type", "role", "site", "status"]], use_container_width=True)
+    else:
+        st.warning("No database records found. Showing fallback mock device example below:")
+        mock_data = [
+            {"name": "SW-NYC-CORE01", "manufacturer": "Cisco", "device_type": "Catalyst 9300", "role": "Core Switch", "site": "NYC", "status": "Active"},
+            {"name": "FW-LDN-PA01", "manufacturer": "Palo Alto Networks", "device_type": "PA-3220", "role": "Firewall", "site": "London", "status": "Active"}
+        ]
+        st.dataframe(pd.DataFrame(mock_data), use_container_width=True)
