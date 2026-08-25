@@ -29,7 +29,6 @@ def save_devices_from_csv(file_bytes) -> int:
     init_db()
     try:
         df = pd.read_csv(file_bytes)
-        # Normalize NetBox column names if available
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         

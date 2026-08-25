@@ -60,3 +60,9 @@
 * **VMkernel Description Fallback Fix**: Removed hardcoded "Management" default text when Purpose / Service is left blank.
 * **NetBox CSV GUI Importer**: Added file upload capability for NetBox device export spreadsheets with SQLite database writeback and persistence.
 * **Dynamic Inventory Fallback**: Automatically switches between real database records and fallback mock examples depending on upload state.
+
+## Release v2.1.6 — Revert Device Types Tab & Isolate NetBox CSV to Naming Generator
+
+### 🛠️ Improvements & Refinements
+* **Device Types Tab Reverted**: Restored the original manufacturer and device model catalog search interface.
+* **Isolated NetBox CSV Reference Integration**: Moved NetBox CSV upload capability exclusively into the Naming Generator's reference example expander to dynamically swap dummy examples with real database records.

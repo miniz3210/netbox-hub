@@ -1,5 +1,4 @@
 import streamlit as st
-import yaml
 from core.catalog import search_device_type, get_device_yaml_from_github
 from core.yaml_generator import generate_device_yaml
 from utils.formatters import normalize_manufacturer_name
@@ -11,7 +10,7 @@ def render_device_tab(catalog, active_model):
     with col1:
         manufacturer = st.text_input("Manufacturer", value="hp", placeholder="e.g. hp, cisco, dell", key="dev_mfg_input")
     with col2:
-        device_model = st.text_input("Device Model", value="ProLiant MicroServer Gen8", placeholder="e.g. Catalyst 9300, ProLiant MicroServer Gen8", key="dev_model_input")
+        device_model = st.text_input("Device Model", value="ProLiant MicroServer Gen8", placeholder="e.g. Catalyst 9300", key="dev_model_input")
 
     normalized_mfg = normalize_manufacturer_name(manufacturer)
     if normalized_mfg.lower() != manufacturer.strip().lower():
@@ -19,7 +18,6 @@ def render_device_tab(catalog, active_model):
 
     st.markdown("---")
 
-    # Search GitHub official library
     match_path = search_device_type(catalog, normalized_mfg, device_model)
 
     col_left, col_right = st.columns([1, 1.2])
