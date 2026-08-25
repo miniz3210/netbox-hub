@@ -1,52 +1,46 @@
 import streamlit as st
-from core.catalog import search_device_type, get_device_yaml_from_github
+from core.catalog import get_canonical_manufacturer, search_catalog_wildcard, fetch_raw_content
 from core.yaml_generator import generate_device_yaml
-from utils.formatters import normalize_manufacturer_name
+from core.exceptions import AIProviderError
 
 def render_device_tab(catalog, active_model):
-    st.subheader("NetBox Device Library Hub")
-    
     col1, col2 = st.columns([1, 1])
     with col1:
-        manufacturer = st.text_input("Manufacturer", value="hp", placeholder="e.g. hp, cisco, dell", key="dev_mfg_input")
-    with col2:
-        device_model = st.text_input("Device Model", value="ProLiant MicroServer Gen8", placeholder="e.g. Catalyst 9300", key="dev_model_input")
+        d_mfg_raw = st.text_input("Manufacturer", placeholder="e.g., HP, Cisco, Dell", key="d_mfg")
+        d_model = st.text_input("Device Model", placeholder="e.g., dl360, PowerEdge R750", key="d_mod")
+        d_mfg = get_canonical_manufacturer(d_mfg_raw, catalog["manufacturers"]) if d_mfg_raw else ""
 
-    normalized_mfg = normalize_manufacturer_name(manufacturer)
-    if normalized_mfg.lower() != manufacturer.strip().lower():
-        st.markdown(f"ℹ️ Matched manufacturer: `{manufacturer}` $\\rightarrow$ **`{normalized_mfg}`**")
+        selected_dev_choice = None
+        if d_mfg_raw or d_model:
+            similar_devs = search_catalog_wildcard(catalog["device_types"], d_mfg_raw, d_model)
+            cross_mods = search_catalog_wildcard(catalog["module_types"], d_mfg_raw, d_model)
+            all_matches = similar_devs + cross_mods
 
-    st.markdown("---")
+            if d_mfg and d_mfg != d_mfg_raw.strip():
+                st.caption(f"ℹ️ Matched manufacturer: `{d_mfg_raw}` ➔ **`{d_mfg}`**")
 
-    match_path = search_device_type(catalog, normalized_mfg, device_model)
+            if all_matches:
+                st.success(f"🔍 Found {len(all_matches)} matching definition(s) in Official Library:")
+                selected_dev_choice = st.selectbox("Select library definition or generate with AI:", all_matches + ["✨ Generate Fresh with AI"], key="dev_sel")
+            else:
+                st.warning("No match found in library. Click below to generate fresh with AI.")
+                selected_dev_choice = "✨ Generate Fresh with AI"
 
-    col_left, col_right = st.columns([1, 1.2])
+        d_search = st.button("Load / Generate Device Type", type="primary", key="btn_dev")
 
-    with col_left:
-        if match_path:
-            st.success(f"Found in official library:\n`{match_path}`")
-            load_action = st.button("Load Official Device Type", type="primary", key="load_official_btn")
-            if load_action:
-                yaml_content = get_device_yaml_from_github(match_path)
-                st.session_state['current_device_yaml'] = yaml_content
-                st.session_state['source_label'] = f"Official Library ({match_path})"
-        else:
-            st.warning("No match found in library. Click below to generate fresh with AI.")
-            gen_action = st.button("Load / Generate Device Type", type="primary", key="gen_ai_dev_btn")
-            if gen_action:
-                with st.spinner(f"Generating YAML specification using {active_model}..."):
-                    yaml_content = generate_device_yaml(normalized_mfg, device_model, active_model)
-                    st.session_state['current_device_yaml'] = yaml_content
-                    st.session_state['source_label'] = f"AI Generated ({active_model})"
-
-    with col_right:
-        if 'current_device_yaml' in st.session_state:
-            st.markdown(f"**Source:** 🌐 {st.session_state.get('source_label', 'Loaded Spec')}")
-            st.code(st.session_state['current_device_yaml'], language="yaml")
-            st.download_button(
-                "📥 Download YAML",
-                st.session_state['current_device_yaml'],
-                file_name=f"{normalized_mfg}_{device_model}.yaml".lower().replace(" ", "_"),
-                mime="text/yaml",
-                key="dl_dev_yaml"
-            )
+    if d_search and (d_mfg or d_mfg_raw or selected_dev_choice) and d_model and selected_dev_choice:
+        effective_mfg = d_mfg if d_mfg else d_mfg_raw
+        with st.spinner("Processing..."):
+            try:
+                if selected_dev_choice.startswith("✨"):
+                    content = generate_device_yaml(effective_mfg, d_model, active_model)
+                    src = f"🤖 AI Generated ({active_model})"
+                else:
+                    content = fetch_raw_content(selected_dev_choice, binary=False)
+                    src = f"✅ Official Repository (`{selected_dev_choice}`)"
+                with col2:
+                    st.markdown(f"**Source:** {src}")
+                    st.code(content, language="yaml", line_numbers=True)
+                    st.download_button("📥 Download YAML", content, f"{effective_mfg}_{d_model}.yaml", "text/yaml")
+            except AIProviderError as e:
+                st.error(f"❌ Generation Failed: {str(e)}")
