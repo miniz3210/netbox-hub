@@ -4,6 +4,7 @@ from core.ai_client import call_ai
 
 def clean_ai_yaml(text: str) -> str:
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    
     code_blocks = re.findall(r"```(?:ya?ml)?\s*([\s\S]*?)```", text, flags=re.IGNORECASE)
     if code_blocks:
         for block in reversed(code_blocks):
@@ -25,11 +26,20 @@ def clean_ai_yaml(text: str) -> str:
                 text = "---\n" + part.strip()
                 break
 
-    cleaned_lines = [l for l in text.splitlines() if not re.match(r"^(Note:|Explanation:|Here is|\*\*Note)", l.strip(), re.I)]
+    # Strip hallucinated comment URLs, reasoning artifacts, and conversational text
+    cleaned_lines = []
+    for line in text.splitlines():
+        if re.match(r"^\s*comments\s*:", line, re.I) or "http://" in line or "https://" in line:
+            continue
+        if re.match(r"^(Note:|Explanation:|Here is|\*\*Note)", line.strip(), re.I):
+            break
+        cleaned_lines.append(line)
+        
     text = "\n".join(cleaned_lines)
     text = re.sub(r"^```(?:ya?ml)?", "", text.strip(), flags=re.IGNORECASE)
     text = re.sub(r"```$", "", text.strip())
     
+    # NetBox interface type standardization
     text = re.sub(r"type:\s*10gbase-x-sfp\b", "type: 10gbase-x-sfpp", text)
     text = re.sub(r"type:\s*1gbase-t\b", "type: 1000base-t", text)
     text = re.sub(r"type:\s*1gbase-x-sfp\b", "type: 1000base-x-sfp", text)
@@ -37,16 +47,30 @@ def clean_ai_yaml(text: str) -> str:
 
 def generate_device_yaml(mfg: str, model: str, model_name: str) -> str:
     prompt = f"""
-Search official datasheets and generate a complete NetBox Device-Type YAML conforming to standards.
+Search official manufacturer specifications and generate an accurate NetBox Device-Type YAML definition.
 Manufacturer: {mfg}
 Model: {model}
 
 CRITICAL RULES:
-1. First line MUST be '---'
-2. Keys: manufacturer, model, slug, part_number, u_height, is_full_depth, airflow, weight, weight_unit: kg
-3. Components: console-ports (Serial/de-9), power-ports (PSU1, PSU2), module-bays (PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3)
-4. Interfaces: OOB management ONLY (1000base-t, mgmt_only: true) for servers; physical interfaces for switches.
-Output ONLY raw YAML.
+1. First line MUST be '---'.
+2. Top-level metadata keys:
+   manufacturer: {mfg}
+   model: <exact model name>
+   slug: <lowercase-slug>
+   part_number: <hardware part number if known, otherwise duplicate model>
+   u_height: <rack units e.g. 0 for microserver/tower, 1, 2, 4>
+   is_full_depth: <true for full-depth rack servers, false for microserver/tower/half-depth appliances>
+   airflow: <front-to-rear / passive / rear-to-front>
+   weight: <accurate numeric weight in kg>
+   weight_unit: kg
+3. Components:
+   - power-ports: Reflect ACTUAL physical power supply count (e.g. 1 PSU for MicroServer/Desktop vs redundant 2 PSUs for Enterprise Rack servers).
+   - console-ports: Include if present (Serial de-9 / RJ-45).
+   - module-bays / PCIe slots: Include actual physical expansion slots on the hardware.
+4. Interfaces:
+   - For Servers/Chassis: Include physical onboard NIC ports (e.g. 1000base-t) AND dedicated out-of-band management port (e.g. name: 'iLO' / 'iDRAC', type: 1000base-t, mgmt_only: true).
+   - For Switches/Routers: Include physical network interfaces.
+5. DO NOT invent URLs. DO NOT output a 'comments' key. Output ONLY raw valid YAML starting with '---'.
 """
     return clean_ai_yaml(call_ai(prompt, model_name))
 
@@ -66,13 +90,18 @@ CRITICAL RULES:
    - RJ-45 10GbE -> `10gbase-t`
    - SFP+ 10GbE -> `10gbase-x-sfpp`
    - SFP28 25GbE -> `25gbase-x-sfp28`
-   - 1GbE -> `1000base-t` / `1000base-x-sfp`
+   - 1GbE RJ-45 / SFP -> `1000base-t` / `1000base-x-sfp`
 5. Interface Naming: {pattern_rule}
-Output ONLY raw YAML.
+6. DO NOT invent URLs. DO NOT output 'comments'. Output ONLY raw valid YAML.
 """
     result = clean_ai_yaml(call_ai(prompt, model_name))
     if "{module}" not in result:
-        result = re.sub(r"name:\s*['\"]?(?:(?:Ethernet|Port|eth|GigabitEthernet|Te|Gi)[/_ -]*)?(?:\d+/)?(\d+)['\"]?", r"name: '{module}/Port\1'", result, flags=re.IGNORECASE)
+        result = re.sub(
+            r"name:\s*['\"]?(?:(?:Ethernet|Port|eth|GigabitEthernet|Te|Gi)[/_ -]*)?(?:\d+/)?(\d+)['\"]?",
+            r"name: '{module}/Port\1'",
+            result,
+            flags=re.IGNORECASE
+        )
     return result
 
 def generate_rack_yaml(mfg: str, model: str, model_name: str) -> str:
@@ -80,8 +109,11 @@ def generate_rack_yaml(mfg: str, model: str, model_name: str) -> str:
 Search official specifications and generate a NetBox Rack-Type YAML.
 Manufacturer: {mfg}
 Model: {model}
-Keys: manufacturer, model, slug, width (19 or 23), u_height, form_factor, starting_unit (default 1).
-Output ONLY raw YAML.
+
+CRITICAL RULES:
+1. First line MUST be '---'
+2. Keys: manufacturer, model, slug, width (19 or 23), u_height, form_factor, starting_unit (default 1)
+3. DO NOT invent URLs. DO NOT output 'comments'. Output ONLY raw valid YAML.
 """
     return clean_ai_yaml(call_ai(prompt, model_name))
 

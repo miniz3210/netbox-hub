@@ -46,6 +46,17 @@ def render_naming_tab(active_model):
                 with st.spinner("Auditing..."):
                     st.info(verify_and_suggest_with_ai(current_sw_name, active_model))
 
+            st.markdown("💡 **Live Switch Reference Examples:**")
+            st.code(
+                "SWUKBRIS01-0      (Bristol Stack Switch 01, Member 0)\n"
+                "SWUKBRIS01-1      (Bristol Stack Switch 01, Member 1)\n"
+                "SWUKWEYCORE-0     (Weybridge Core Switch, Member 0)\n"
+                "SWAUSAROFLWH1-0   (Rowland Flat WH1 Switch, Member 0)\n"
+                "VSAUSAROFLCCORE-0 (Rowland Flat Core Virtual Chassis)\n"
+                "SWAUSABRS01       (Banrock Station Standalone Switch)",
+                language="text"
+            )
+
             st.markdown("---")
             st.markdown("**Switch Port Description Formatter**")
             p_type = st.radio("Port Type", ["Uplink (Inter-Switch)", "LAG Member Port (LACP Uplink)", "Port-Channel (Logical Aggregate)", "Access (Host/Endpoint)"], key="p_sel")
@@ -97,8 +108,9 @@ def render_naming_tab(active_model):
             else:
                 vlan_name = st.text_input("VLAN Name", value="VLAN10_Management", key="acc_vln").strip()
                 host_port_raw = st.text_input("Connected Host/Port", value="roflesx01_vmnic0", key="acc_hp").strip()
+                clean_host_port = re.sub(r"\s+", "", host_port_raw)
                 st.caption("Access Port Description:")
-                st.code(f"{vlan_name} - {re.sub(r'\s+', '', host_port_raw)}", language="text")
+                st.code(f"{vlan_name} - {clean_host_port}", language="text")
 
         with col_b:
             st.markdown("**Wireless AP Naming**")
@@ -183,8 +195,9 @@ def render_naming_tab(active_model):
             parts = [f"{act_nics.strip()} Active"] if act_nics.strip() else []
             if stb_nics.strip():
                 parts.append(f"{stb_nics.strip()} Standby")
+            joined_parts = " / ".join(parts)
             st.caption("Generated Port Group:")
-            st.code(f"{vsw_pg} [{' / '.join(parts)}]", language="text")
+            st.code(f"{vsw_pg} [{joined_parts}]", language="text")
 
         with col_c:
             vmk_purp = st.text_input("Purpose", value="Management Network")
