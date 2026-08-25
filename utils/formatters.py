@@ -37,7 +37,6 @@ def normalize_port_shortname(port_name: str) -> str:
     return p
 
 def normalize_vswitch(name: str) -> str:
-    """Auto-corrects vswitch naming to VMware standard (vSwitchX or dvSwitchX)."""
     val = name.strip()
     if not val:
         return ""
@@ -48,7 +47,6 @@ def normalize_vswitch(name: str) -> str:
     return val
 
 def normalize_vmnic(name: str) -> str:
-    """Auto-corrects physical hypervisor interface naming (e.g. VMNIC0 -> vmnic0)."""
     val = name.strip()
     if not val:
         return ""
@@ -56,7 +54,6 @@ def normalize_vmnic(name: str) -> str:
     return val
 
 def normalize_vmnic_list(names: str) -> str:
-    """Normalizes a comma-separated list of vmnic identifiers."""
     if not names.strip():
         return ""
     parts = [normalize_vmnic(p.strip()) for p in names.split(",") if p.strip()]
