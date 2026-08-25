@@ -40,17 +40,19 @@ def render_naming_tab(active_model):
                     "ION (Prisma SD-WAN)",
                     "VA (Virtual Appliance)",
                     "RTR (Router)",
-                    "(None / Blank)",
                     "✏️ Custom Prefix..."
                 ],
                 index=0,
                 key="dev_prefix_sel"
             )
 
-            if dev_type_preset == "✏️ Custom Prefix...":
-                dev_prefix = st.text_input("Enter Custom Prefix", value="", placeholder="e.g. SVR, GW, AGG", key="dev_custom_pre").strip().upper()
-            elif "(None / Blank)" in dev_type_preset:
-                dev_prefix = ""
+            if "Custom Prefix" in dev_type_preset:
+                dev_prefix = st.text_input(
+                    "Enter Custom Prefix (e.g. leave empty for none)", 
+                    value="", 
+                    placeholder="e.g. SVR, GW, AGG (or leave empty)", 
+                    key="dev_custom_pre"
+                ).strip().upper()
             else:
                 dev_prefix = dev_type_preset.split()[0].strip()
 
@@ -192,7 +194,6 @@ def render_naming_tab(active_model):
     else:
         col_a, col_b, col_c = st.columns(3)
         with col_a:
-            st.markdown("**1. Physical Uplink (`vmnic`)**")
             vmnic = st.text_input("vmnic ID", value="vmnic0")
             vsw = st.text_input("Target vSwitch", value="vSwitch0", key="vsw1")
             status = st.radio("Status", ["Active Uplink", "Standby Uplink"], horizontal=True)
@@ -200,7 +201,6 @@ def render_naming_tab(active_model):
             st.code(f"{vmnic} - {vsw} {status}", language="text")
 
         with col_b:
-            st.markdown("**2. Port Group Teaming (`PG`)**")
             vsw_pg = st.text_input("vSwitch Name", value="vSwitch0", key="vsw2")
             act_nics = st.text_input("Active vmnics", value="vmnic0, vmnic1")
             stb_nics = st.text_input("Standby vmnics", value="")
@@ -211,7 +211,6 @@ def render_naming_tab(active_model):
             st.code(f"{vsw_pg} [{' / '.join(parts)}]", language="text")
 
         with col_c:
-            st.markdown("**3. VMkernel Adapter (`vmk`)**")
             vmk_purp = st.text_input("Purpose / Role", value="Management Network")
             vsw_vmk = st.text_input("vSwitch", value="vSwitch0", key="vsw3")
             st.caption("Generated VMkernel:")
