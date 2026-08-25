@@ -1,3 +1,4 @@
+import re
 import requests
 from typing import List, Optional, Set
 from config.constants import GITHUB_REPO, BRANCH
@@ -28,7 +29,7 @@ def fetch_raw_content(file_path: str) -> str:
         pass
     return f"# Error fetching {file_path} from GitHub repository."
 
-# Aliases for all tab import variants
+# Aliases for tab import variants
 get_raw_yaml_from_github = fetch_raw_content
 get_device_yaml_from_github = fetch_raw_content
 get_module_yaml_from_github = fetch_raw_content
@@ -101,3 +102,21 @@ def search_device_type(catalog: List[str], manufacturer: str, model: str) -> Opt
     """Finds single exact or best matching device-type path."""
     matches = search_catalog_wildcard(catalog, manufacturer, model, item_type="device-types")
     return matches[0] if matches else None
+
+def extract_reference_interface_pattern(yaml_raw: str) -> str:
+    """Extracts sample interface schema from reference YAML for prompt templating."""
+    if not yaml_raw:
+        return ""
+    lines = yaml_raw.splitlines()
+    sample_interfaces = []
+    in_interfaces = False
+    for line in lines:
+        if re.match(r"^interfaces:", line):
+            in_interfaces = True
+            continue
+        if in_interfaces:
+            if line.startswith("  - name:") or line.startswith("    name:"):
+                sample_interfaces.append(line.strip())
+            elif re.match(r"^[a-zA-Z_-]+:", line) and not line.startswith(" "):
+                break
+    return "\n".join(sample_interfaces[:10]) if sample_interfaces else ""
