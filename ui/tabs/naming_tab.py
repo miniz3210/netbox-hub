@@ -1,4 +1,3 @@
-import re
 import streamlit as st
 from utils.formatters import (
     compute_suggested_site_code, 
@@ -8,10 +7,42 @@ from utils.formatters import (
     normalize_vmnic_list
 )
 from core.naming_engine import verify_and_suggest_with_ai
-from core.db_manager import save_devices_from_csv, get_imported_devices
+from core.db_manager import save_csv_records, get_records_by_category, clear_records_by_category
 
 def apply_case(text: str, mode: str) -> str:
     return text.upper() if mode == "UPPERCASE" else text.lower()
+
+def render_reference_uploader(category_key: str, default_lines: str, label: str):
+    with st.expander(f"💡 Click to view reference {label} examples"):
+        c_up, c_reset = st.columns([3, 1])
+        with c_up:
+            up_file = st.file_uploader(f"Upload NetBox {label} CSV Export", type=["csv"], key=f"csv_up_{category_key}")
+        with c_reset:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🗑️ Reset Data", key=f"btn_reset_{category_key}"):
+                clear_records_by_category(category_key)
+                st.success("Reset to defaults!")
+                st.rerun()
+
+        if up_file is not None:
+            try:
+                cnt = save_csv_records(up_file, category=category_key)
+                st.success(f"Loaded {cnt} real {label} records!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error parsing CSV: {e}")
+
+        real_items = get_records_by_category(category_key)
+        if real_items:
+            st.markdown(f"##### 🟢 Real Data Examples ({len(real_items)} records):")
+            formatted = []
+            for r in real_items[:10]:
+                meta = f" - {r['description']}" if r['description'] else f" ({r['model_or_role'] or r['site']})"
+                formatted.append(f"{r['name']}{meta}")
+            st.code("\n".join(formatted), language="text")
+        else:
+            st.markdown("##### 🟡 Default Examples:")
+            st.code(default_lines, language="text")
 
 def render_naming_tab(active_model):
     st.subheader("🏷️ Standardized Infrastructure Naming Generator")
@@ -28,26 +59,14 @@ def render_naming_tab(active_model):
 
     st.markdown("---")
 
-    # 1. Unified Network & Security Devices
+    # 1. Network & Security
     if "1. Network" in naming_cat:
-        case_mode = st.radio(
-            "Letter Casing Mode",
-            ["UPPERCASE", "lowercase"],
-            index=0,
-            horizontal=True,
-            help="Choose whether generated hostnames are rendered in all UPPERCASE (recommended) or lowercase."
-        )
+        case_mode = st.radio("Letter Casing Mode", ["UPPERCASE", "lowercase"], index=0, horizontal=True)
 
         st.markdown("##### 📍 Location & Site Code Assistant")
         loc_col1, loc_col2 = st.columns([2, 1])
         with loc_col1:
-            input_location = st.text_input(
-                "Location / City Name",
-                value="",
-                placeholder="e.g. Sydney, London, Dallas, Rowland Flat",
-                help="Type a city or facility name to automatically calculate a standard 4-letter site code.",
-                key="loc_input_help"
-            )
+            input_location = st.text_input("Location / City Name", value="", placeholder="e.g. Sydney, London, Dallas, Rowland Flat", key="loc_input_help")
         with loc_col2:
             auto_code = compute_suggested_site_code(input_location) if input_location else ""
             st.info(f"Suggested Site Code: **`{auto_code or '----'}`**")
@@ -57,42 +76,27 @@ def render_naming_tab(active_model):
         
         with col_a:
             st.markdown("#### 🛠️ Universal Device Hostname Generator")
-            
             dev_type_preset = st.selectbox(
                 "Device Type / Prefix",
                 [
-                    "SW (Switch)",
-                    "VS (Virtual Chassis / Stack)",
-                    "OTSW (OT Switch)",
-                    "WAP (Wireless Access Point)",
-                    "FW (Firewall / Security Appliance)",
-                    "ION (Prisma SD-WAN)",
-                    "VA (Virtual Appliance)",
-                    "RTR (Router)",
-                    "✏️ Custom Prefix..."
+                    "SW (Switch)", "VS (Virtual Chassis / Stack)", "OTSW (OT Switch)",
+                    "WAP (Wireless Access Point)", "FW (Firewall / Security Appliance)",
+                    "ION (Prisma SD-WAN)", "VA (Virtual Appliance)", "RTR (Router)", "✏️ Custom Prefix..."
                 ],
-                index=0,
-                key="dev_prefix_sel",
-                help="Select standard device classification or choose Custom Prefix to type your own / leave blank."
+                index=0, key="dev_prefix_sel"
             )
 
             if "Custom Prefix" in dev_type_preset:
-                dev_prefix = st.text_input(
-                    "Enter Custom Prefix (e.g. leave empty for none)", 
-                    value="", 
-                    placeholder="e.g. SVR, GW, AGG (or leave empty)", 
-                    help="Custom hardware abbreviation. Leave completely blank if your hostname formula has no leading prefix.",
-                    key="dev_custom_pre"
-                ).strip()
+                dev_prefix = st.text_input("Enter Custom Prefix", value="", placeholder="e.g. SVR, GW, AGG", key="dev_custom_pre").strip()
             else:
                 dev_prefix = dev_type_preset.split()[0].strip()
 
-            c_ctry = st.text_input("Country Code (2-letter)", value="", placeholder="e.g. AU, UK, US, ES, NZ", help="ISO 2-letter country code.", key="u_ctry").strip()
-            c_state = st.text_input("State / Region (Optional)", value="", placeholder="e.g. SA, NSW, VIC, TX", help="State, province, or regional code.", key="u_state").strip()
-            c_site = st.text_input("Site Code", value=auto_code, placeholder="e.g. BRIS, ROFL, SYD", help="3-4 character site/facility identifier.", key="u_site").strip()
-            c_zone = st.text_input("Zone / Role / Vendor (Optional)", value="", placeholder="e.g. CORE, DIST, PA", help="Specific architectural role or vendor identifier.", key="u_zone").strip()
-            c_seq = st.text_input("Sequence Number", value="01", placeholder="e.g. 01, 02", help="Two-digit numerical sequence.", key="u_seq").strip()
-            c_stack = st.text_input("Stack / Member ID (Optional)", value="", placeholder="e.g. 0, 1 (Leave empty if standalone)", help="Stack member number.", key="u_stk").strip()
+            c_ctry = st.text_input("Country Code (2-letter)", value="", placeholder="e.g. AU, UK, US, ES, NZ", key="u_ctry").strip()
+            c_state = st.text_input("State / Region (Optional)", value="", placeholder="e.g. SA, NSW, VIC, TX", key="u_state").strip()
+            c_site = st.text_input("Site Code", value=auto_code, placeholder="e.g. BRIS, ROFL, SYD", key="u_site").strip()
+            c_zone = st.text_input("Zone / Role / Vendor (Optional)", value="", placeholder="e.g. CORE, DIST, PA", key="u_zone").strip()
+            c_seq = st.text_input("Sequence Number", value="01", placeholder="e.g. 01, 02", key="u_seq").strip()
+            c_stack = st.text_input("Stack / Member ID (Optional)", value="", placeholder="e.g. 0, 1", key="u_stk").strip()
 
             raw_base = f"{dev_prefix}{c_ctry}{c_state}{c_site}{c_zone}{c_seq}"
             final_device_name = apply_case(f"{raw_base}-{c_stack}" if c_stack else raw_base, case_mode)
@@ -104,39 +108,17 @@ def render_naming_tab(active_model):
                 with st.spinner("Auditing against standards..."):
                     st.info(verify_and_suggest_with_ai(final_device_name, active_model, asset_type=f"Network/Security Device ({dev_type_preset})"))
 
-            with st.expander("💡 Click to view reference hostname examples (Upload NetBox CSV for Real Data)"):
-                uploaded_csv = st.file_uploader("Upload NetBox Device Export CSV", type=["csv"], key="netbox_naming_csv_upload")
-                real_devices = []
-                if uploaded_csv is not None:
-                    try:
-                        save_devices_from_csv(uploaded_csv)
-                        real_devices = get_imported_devices()
-                        st.success(f"Loaded {len(real_devices)} real records from CSV!")
-                    except Exception as e:
-                        st.error(f"Error parsing CSV: {e}")
-                else:
-                    real_devices = get_imported_devices()
-
-                if real_devices:
-                    st.markdown("##### 🟢 Real Data Examples:")
-                    real_lines = [f"{d['name']} ({d['manufacturer']} - {d['device_type']})" for d in real_devices[:8]]
-                    st.code("\n".join(real_lines), language="text")
-                else:
-                    st.code(
-                        "SWUKBRIS01-0      (Switch Stack, Member 0)\n"
-                        "WAPUKBRIS01       (Access Point 01)\n"
-                        "FWUKBRISPA01      (Palo Alto Firewall 01)",
-                        language="text"
-                    )
+            render_reference_uploader(
+                category_key="device",
+                default_lines="SWUKBRIS01-0      (Switch Stack, Member 0)\nWAPUKBRIS01       (Access Point 01)\nFWUKBRISPA01      (Palo Alto Firewall 01)",
+                label="Device"
+            )
 
         with col_b:
             st.markdown("#### 🔌 Switch & Firewall Interface Formatter")
             p_cat = st.radio("Interface Type", [
-                "Switch Uplink (Inter-Switch)", 
-                "Switch LAG Member Port (LACP)", 
-                "Switch Port-Channel (Logical)", 
-                "Switch Access Port (Endpoint)",
-                "Firewall Security Zone Interface"
+                "Switch Uplink (Inter-Switch)", "Switch LAG Member Port (LACP)", 
+                "Switch Port-Channel (Logical)", "Switch Access Port (Endpoint)", "Firewall Security Zone Interface"
             ], key="p_cat_sel")
             
             if p_cat == "Switch Uplink (Inter-Switch)":
@@ -154,9 +136,8 @@ def render_naming_tab(active_model):
                 st.code(f"to {r_dev}_{r_port_short}{role_suffix}", language="text")
                 st.caption(f"On Remote Device (`{r_dev}`):")
                 st.code(f"to {l_dev}_{l_port_short}{role_suffix}", language="text")
-            # (Other interface categories preserved cleanly...)
 
-    # 2. Hosts & Virtual Machines
+    # 2. ESXi Hosts & VMs
     elif "2. Hosts" in naming_cat:
         case_mode = st.radio("Letter Casing Mode", ["UPPERCASE", "lowercase"], index=0, horizontal=True)
 
@@ -179,18 +160,16 @@ def render_naming_tab(active_model):
                 with st.spinner("Auditing..."):
                     st.info(verify_and_suggest_with_ai(gen_esx, active_model, asset_type="ESXi Hypervisor Hostname"))
 
-            with st.expander("💡 Click to view reference hypervisor examples"):
-                st.code(
-                    "NYCESX001.corp.local  (Standard Enterprise ESXi Node 001)\n"
-                    "SYDOTINFHOST1.ot.net  (Industrial OT Cluster Node 1)\n"
-                    "PWSESX001.eswine.adds (IT ESXi Host)",
-                    language="text"
-                )
+            render_reference_uploader(
+                category_key="hypervisor",
+                default_lines="NYCESX001.corp.local  (Standard Enterprise ESXi Node 001)\nSYDOTINFHOST1.ot.net  (Industrial OT Cluster Node 1)\nPWSESX001.eswine.adds (Campo Viejo IT ESXi Host)\nLONESX01              (Branch Hypervisor Standalone)",
+                label="Hypervisor"
+            )
 
         with col_b:
             st.markdown("#### 🖲️ Virtual Machine (VM) Hostname")
-            v_site = st.text_input("Site Prefix / Country & Site", value="", placeholder="e.g. aurfl, nyc, syd", key="vm_site").strip()
-            v_role = st.text_input("Role Code / Workload", value="", placeholder="e.g. wotapp, sfs, cvi", key="vm_role").strip()
+            v_site = st.text_input("Site Prefix / Country & Site", value="", placeholder="e.g. aurfl, nyc, syd, rofl, mel", key="vm_site").strip()
+            v_role = st.text_input("Role Code / Workload", value="", placeholder="e.g. wotapp, wscingp, sfs, cvi, afs, sani, app, db", key="vm_role").strip()
             v_seq = st.text_input("Sequence Number", value="01", placeholder="e.g. 01, 02", key="vm_seq").strip()
 
             raw_vm = f"{v_site}{v_role}{v_seq}"
@@ -203,13 +182,11 @@ def render_naming_tab(active_model):
                 with st.spinner("Auditing..."):
                     st.info(verify_and_suggest_with_ai(gen_vm, active_model, asset_type="Virtual Machine (VM) Hostname"))
 
-            with st.expander("💡 Click to view reference VM examples"):
-                st.code(
-                    "AURFLWOTAPP01 (Rowland Flat OT App Server 01)\n"
-                    "AUGLOSFS01    (Berri Estates File Server 01)\n"
-                    "NYCCVI01      (NYC Core Virtualization VM 01)",
-                    language="text"
-                )
+            render_reference_uploader(
+                category_key="vm",
+                default_lines="AURFLWOTAPP01 (Rowland Flat OT App Server 01)\nAUGLOSFS01    (Berri Estates File Server 01)\nNYCCVI01      (NYC Core Virtualization VM 01)\nROFLAFS01     (Rowland Flat App/File Server 01)",
+                label="Virtual Machine"
+            )
 
     # 3. ESXi Network Descriptions
     else:
