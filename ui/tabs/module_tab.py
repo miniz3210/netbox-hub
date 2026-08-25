@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 from core.catalog import get_canonical_manufacturer, search_catalog_wildcard, fetch_raw_content, extract_reference_interface_pattern
 from core.yaml_generator import generate_module_yaml
@@ -25,19 +26,36 @@ def render_module_tab(catalog, active_model):
 
         m_search = st.button("Load / Generate Module Type", type="primary", key="btn_mod")
 
-    if m_search and (m_mfg or m_mfg_raw or selected_mod_choice) and m_model and selected_mod_choice:
-        effective_mfg = d_mfg = m_mfg if m_mfg else m_mfg_raw
-        with st.spinner("Processing..."):
-            try:
-                if selected_mod_choice.startswith("✨"):
-                    content = generate_module_yaml(effective_mfg, m_model, m_model, active_model, ref_pattern=discovered_pattern)
-                    src = f"🤖 AI Generated ({active_model})"
-                else:
-                    content = fetch_raw_content(selected_mod_choice, binary=False)
-                    src = f"✅ Official Repository (`{selected_mod_choice}`)"
-                with col2:
-                    st.markdown(f"**Source:** {src}")
-                    st.code(content, language="yaml", line_numbers=True)
-                    st.download_button("📥 Download Module YAML", content, f"module_{effective_mfg}_{m_model}.yaml", "text/yaml")
-            except AIProviderError as e:
-                st.error(f"❌ Generation Failed: {str(e)}")
+    # Allow loading if an official library file is selected OR if generating with AI and model is given
+    if m_search and selected_mod_choice:
+        effective_mfg = m_mfg if m_mfg else m_mfg_raw
+        
+        # Derive module/part name from selected library path if user left text input blank
+        if not m_model and not selected_mod_choice.startswith("✨"):
+            file_name = os.path.splitext(os.path.basename(selected_mod_choice))[0]
+            effective_model = file_name
+        else:
+            effective_model = m_model
+
+        if selected_mod_choice.startswith("✨") and not effective_model:
+            st.error("⚠️ Please specify a Module Name / Part # to generate fresh YAML with AI.")
+        else:
+            with st.spinner("Processing..."):
+                try:
+                    if selected_mod_choice.startswith("✨"):
+                        content = generate_module_yaml(effective_mfg, effective_model, effective_model, active_model, ref_pattern=discovered_pattern)
+                        src = f"🤖 AI Generated ({active_model})"
+                    else:
+                        content = fetch_raw_content(selected_mod_choice, binary=False)
+                        src = f"✅ Official Repository (`{selected_mod_choice}`)"
+                    with col2:
+                        st.markdown(f"**Source:** {src}")
+                        st.code(content, language="yaml", line_numbers=True)
+                        st.download_button(
+                            "📥 Download Module YAML", 
+                            content, 
+                            f"module_{effective_mfg or 'module'}_{effective_model}.yaml".lower().replace(" ", "_"), 
+                            "text/yaml"
+                        )
+                except AIProviderError as e:
+                    st.error(f"❌ Generation Failed: {str(e)}")

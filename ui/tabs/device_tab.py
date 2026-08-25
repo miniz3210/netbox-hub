@@ -1,3 +1,5 @@
+import os
+import re
 import streamlit as st
 from core.catalog import get_canonical_manufacturer, search_catalog_wildcard, fetch_raw_content
 from core.yaml_generator import generate_device_yaml
@@ -28,19 +30,36 @@ def render_device_tab(catalog, active_model):
 
         d_search = st.button("Load / Generate Device Type", type="primary", key="btn_dev")
 
-    if d_search and (d_mfg or d_mfg_raw or selected_dev_choice) and d_model and selected_dev_choice:
+    # Allow loading if an official library file is selected OR if generating with AI and model is given
+    if d_search and selected_dev_choice:
         effective_mfg = d_mfg if d_mfg else d_mfg_raw
-        with st.spinner("Processing..."):
-            try:
-                if selected_dev_choice.startswith("✨"):
-                    content = generate_device_yaml(effective_mfg, d_model, active_model)
-                    src = f"🤖 AI Generated ({active_model})"
-                else:
-                    content = fetch_raw_content(selected_dev_choice, binary=False)
-                    src = f"✅ Official Repository (`{selected_dev_choice}`)"
-                with col2:
-                    st.markdown(f"**Source:** {src}")
-                    st.code(content, language="yaml", line_numbers=True)
-                    st.download_button("📥 Download YAML", content, f"{effective_mfg}_{d_model}.yaml", "text/yaml")
-            except AIProviderError as e:
-                st.error(f"❌ Generation Failed: {str(e)}")
+        
+        # Derive model name from selected library path if user left text input blank
+        if not d_model and not selected_dev_choice.startswith("✨"):
+            file_name = os.path.splitext(os.path.basename(selected_dev_choice))[0]
+            effective_model = file_name
+        else:
+            effective_model = d_model
+
+        if selected_dev_choice.startswith("✨") and not effective_model:
+            st.error("⚠️ Please specify a Device Model name to generate fresh YAML with AI.")
+        else:
+            with st.spinner("Processing..."):
+                try:
+                    if selected_dev_choice.startswith("✨"):
+                        content = generate_device_yaml(effective_mfg, effective_model, active_model)
+                        src = f"🤖 AI Generated ({active_model})"
+                    else:
+                        content = fetch_raw_content(selected_dev_choice, binary=False)
+                        src = f"✅ Official Repository (`{selected_dev_choice}`)"
+                    with col2:
+                        st.markdown(f"**Source:** {src}")
+                        st.code(content, language="yaml", line_numbers=True)
+                        st.download_button(
+                            "📥 Download YAML", 
+                            content, 
+                            f"{effective_mfg or 'device'}_{effective_model}.yaml".lower().replace(" ", "_"), 
+                            "text/yaml"
+                        )
+                except AIProviderError as e:
+                    st.error(f"❌ Generation Failed: {str(e)}")

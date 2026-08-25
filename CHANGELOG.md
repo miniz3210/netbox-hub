@@ -92,3 +92,9 @@
 ### 🛠️ Improvements & Refinements
 * **Section-Specific Display**: Removed Casing and CSV tools completely from Section 3 (ESXi Network Descriptions).
 * **Collapsible Compact Ingest**: Encapsulated the NetBox CSV file uploader into an unobtrusive dropdown toolbar in Sections 1 and 2.
+
+## Release v2.2.2 — Device & Module Library Selection Fix
+
+### 🛠️ Bug Fixes & Improvements
+* **Blank Input Library Loading**: Fixed an issue where selecting an item from the library dropdown with a blank model input field resulted in no response. Model names are now derived from the selected library definition path.
+
