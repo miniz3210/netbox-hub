@@ -80,3 +80,15 @@
 * **Global CSV Ingest Bar**: Moved the CSV uploader to the top control bar next to Letter Casing Mode.
 * **Unified Categorization**: Single CSV ingestion automatically classifies and populates Network Devices, ESXi Hypervisors, and Virtual Machines across all sub-views.
 * **Auto-Refresh Trigger**: Uploading or clearing CSV records triggers instant re-rendering of reference examples and AI context.
+
+## Release v2.2.0 — Ultra-Compact Top Bar & Persistent Storage Mount
+
+### 🛠️ Improvements & Refinements
+* **Ultra-Compact Ingest Bar**: Reduced uploader height and combined casing selector and reset into a streamlined single-line banner.
+* **Database Persistence Across Reboots**: Ensured database volume mapping guarantees data persistence until explicitly cleared.
+
+## Release v2.2.1 — Refined Compact Toolbar & Section Scoping
+
+### 🛠️ Improvements & Refinements
+* **Section-Specific Display**: Removed Casing and CSV tools completely from Section 3 (ESXi Network Descriptions).
+* **Collapsible Compact Ingest**: Encapsulated the NetBox CSV file uploader into an unobtrusive dropdown toolbar in Sections 1 and 2.
