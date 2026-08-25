@@ -45,3 +45,11 @@
 
 ### 🛠️ Bug Fixes & Improvements
 * **Missing Formatter Fix**: Added `normalize_vswitch`, `normalize_vmnic`, and `normalize_vmnic_list` to `utils/formatters.py` to resolve import errors.
+
+
+## Release v2.1.1 — ESXi Network Descriptions Enhancements
+
+### 🛠️ Improvements & Refinements
+* **VMkernel vSwitch Normalization**: Extended VMware vSwitch auto-correction to the VMkernel Adapter vSwitch input field.
+* **Port Group Default Prefix (`PG-`)**: Pre-populated Port Group vSwitch input fields with `PG-` by default.
+* **Default vmnic Placeholders**: Pre-populated physical uplink and teaming interface inputs with `vmnicX` standards.
