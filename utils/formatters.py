@@ -1,5 +1,40 @@
 import re
 
+def normalize_manufacturer_name(name: str) -> str:
+    """Normalizes common manufacturer abbreviations to their canonical vendor names."""
+    if not name:
+        return ""
+    m_clean = name.strip()
+    mapping = {
+        "hp": "HPE",
+        "hpe": "HPE",
+        "hewlett packard": "HPE",
+        "hewlett packard enterprise": "HPE",
+        "cisco": "Cisco",
+        "cisco systems": "Cisco",
+        "dell": "Dell",
+        "dell emc": "Dell",
+        "palo alto": "Palo Alto Networks",
+        "paloalto": "Palo Alto Networks",
+        "pan": "Palo Alto Networks",
+        "palo alto networks": "Palo Alto Networks",
+        "fortinet": "Fortinet",
+        "juniper": "Juniper",
+        "juniper networks": "Juniper",
+        "arista": "Arista",
+        "arista networks": "Arista",
+        "checkpoint": "Check Point",
+        "check point": "Check Point",
+        "ubiquiti": "Ubiquiti",
+        "unifi": "Ubiquiti",
+        "aruba": "Aruba",
+        "mikrotik": "MikroTik",
+        "paloalto networks": "Palo Alto Networks",
+        "f5": "F5",
+        "f5 networks": "F5",
+    }
+    return mapping.get(m_clean.lower(), m_clean.title() if len(m_clean) > 3 else m_clean.upper())
+
 def compute_suggested_site_code(location_name: str) -> str:
     cleaned = re.sub(r"[^a-zA-Z\s]", "", location_name).strip()
     if not cleaned:
@@ -37,6 +72,7 @@ def normalize_port_shortname(port_name: str) -> str:
     return p
 
 def normalize_vswitch(name: str) -> str:
+    """Auto-corrects vswitch naming to VMware standard (vSwitchX or dvSwitchX)."""
     val = name.strip()
     if not val:
         return ""
@@ -47,6 +83,7 @@ def normalize_vswitch(name: str) -> str:
     return val
 
 def normalize_vmnic(name: str) -> str:
+    """Auto-corrects physical hypervisor interface naming (e.g. VMNIC0 -> vmnic0)."""
     val = name.strip()
     if not val:
         return ""
@@ -54,6 +91,7 @@ def normalize_vmnic(name: str) -> str:
     return val
 
 def normalize_vmnic_list(names: str) -> str:
+    """Normalizes a comma-separated list of vmnic identifiers."""
     if not names.strip():
         return ""
     parts = [normalize_vmnic(p.strip()) for p in names.split(",") if p.strip()]
