@@ -9,7 +9,6 @@ def apply_case(text: str, mode: str) -> str:
 def render_naming_tab(active_model):
     st.subheader("🏷️ Standardized Infrastructure Naming Generator")
     
-    # Global casing selector
     case_mode = st.radio(
         "Letter Casing Mode",
         ["UPPERCASE", "lowercase"],
@@ -137,7 +136,7 @@ def render_naming_tab(active_model):
 
             if st.button("🤖 AI Verify / Suggest Device Hostname", key="ai_chk_dev"):
                 with st.spinner("Auditing against standards..."):
-                    st.info(verify_and_suggest_with_ai(final_device_name, active_model))
+                    st.info(verify_and_suggest_with_ai(final_device_name, active_model, asset_type=f"Network/Security Device ({dev_type_preset})"))
 
             with st.expander("💡 Click to view reference hostname examples"):
                 st.code(
@@ -161,45 +160,11 @@ def render_naming_tab(active_model):
             ], key="p_cat_sel")
             
             if p_cat == "Switch Uplink (Inter-Switch)":
-                l_dev = st.text_input(
-                    "Local Device Hostname",
-                    value=final_device_name,
-                    placeholder="e.g. SWUSNYC01-0",
-                    help="Hostname of the source/local network switch.",
-                    key="up_ld"
-                ).strip()
-
-                l_port_raw = st.text_input(
-                    "Local Port",
-                    value="",
-                    placeholder="e.g. GigabitEthernet1/0/48, Port 51, Te1/1",
-                    help="Physical port name on the local switch.",
-                    key="up_lp"
-                )
-
-                r_dev = st.text_input(
-                    "Remote Device Hostname",
-                    value="",
-                    placeholder="e.g. SWUSNYC02-0, CORE-AGG01",
-                    help="Hostname of the destination/remote connected device.",
-                    key="up_rd"
-                ).strip()
-
-                r_port_raw = st.text_input(
-                    "Remote Port",
-                    value="",
-                    placeholder="e.g. GigabitEthernet1/0/48, Port 26, Te1/2",
-                    help="Physical port on the destination/remote connected device.",
-                    key="up_rp"
-                )
-
-                link_role = st.text_input(
-                    "Role / Purpose",
-                    value="Uplink",
-                    placeholder="e.g. Uplink, Downlink, MLAG",
-                    help="Optional description tag appended in brackets.",
-                    key="up_lr"
-                ).strip()
+                l_dev = st.text_input("Local Device Hostname", value=final_device_name, placeholder="e.g. SWUSNYC01-0", help="Hostname of local switch.", key="up_ld").strip()
+                l_port_raw = st.text_input("Local Port", value="", placeholder="e.g. Gi1/0/48, Port 51", help="Local physical port.", key="up_lp")
+                r_dev = st.text_input("Remote Device Hostname", value="", placeholder="e.g. SWUSNYC02-0", help="Remote device hostname.", key="up_rd").strip()
+                r_port_raw = st.text_input("Remote Port", value="", placeholder="e.g. Gi1/0/48, Port 26", help="Remote physical port.", key="up_rp")
+                link_role = st.text_input("Role / Purpose", value="Uplink", placeholder="e.g. Uplink, MLAG", help="Optional description tag.", key="up_lr").strip()
 
                 l_port_short = normalize_port_shortname(l_port_raw)
                 r_port_short = normalize_port_shortname(r_port_raw)
@@ -211,11 +176,11 @@ def render_naming_tab(active_model):
                 st.code(f"to {l_dev}_{l_port_short}{role_suffix}", language="text")
 
             elif p_cat == "Switch LAG Member Port (LACP)":
-                l_port_raw = st.text_input("Local Port", value="", placeholder="e.g. Te1/0/1, Port 2", help="Member physical interface on the local switch.", key="lagm_lp")
-                loc_po = st.text_input("Port-Channel ID", value="", placeholder="e.g. 1, 10, 20", help="Numerical Port-Channel / LAG identifier.", key="lagm_lpo").strip()
-                r_dev = st.text_input("Remote Hostname", value="", placeholder="e.g. LACP-HOST-CLUSTER01", help="Target remote host, switch, or SAN.", key="lagm_rd").strip()
-                r_port_raw = st.text_input("Remote Port", value="", placeholder="e.g. Eth1/1, Port 2", help="Connected port on the target remote system.", key="lagm_rp")
-                link_role = st.text_input("Link Purpose", value="", placeholder="e.g. ESXi Uplink (optional)", help="Optional purpose annotation.", key="lagm_lr").strip()
+                l_port_raw = st.text_input("Local Port", value="", placeholder="e.g. Te1/0/1, Port 2", help="Member physical interface.", key="lagm_lp")
+                loc_po = st.text_input("Port-Channel ID", value="", placeholder="e.g. 1, 10", help="LAG channel ID.", key="lagm_lpo").strip()
+                r_dev = st.text_input("Remote Hostname", value="", placeholder="e.g. LACP-HOST-CLUSTER01", help="Connected remote host.", key="lagm_rd").strip()
+                r_port_raw = st.text_input("Remote Port", value="", placeholder="e.g. Eth1/1, Port 2", help="Connected remote port.", key="lagm_rp")
+                link_role = st.text_input("Link Purpose", value="", placeholder="e.g. ESXi Uplink (optional)", key="lagm_lr").strip()
 
                 l_port_short = normalize_port_shortname(l_port_raw)
                 r_port_short = normalize_port_shortname(r_port_raw)
@@ -227,10 +192,10 @@ def render_naming_tab(active_model):
                 st.code(lag_desc, language="text")
 
             elif p_cat == "Switch Port-Channel (Logical)":
-                loc_po = st.text_input("Local Port-Channel ID", value="", placeholder="e.g. 1, 10, 20", help="Local logical LAG channel ID.", key="pchan_lpo").strip()
-                r_dev = st.text_input("Remote Device Hostname", value="", placeholder="e.g. CORE-AGG01", help="Target aggregation or peer switch hostname.", key="pchan_rd").strip()
-                rem_po = st.text_input("Remote Port-Channel ID", value="", placeholder="e.g. 1, 10, 20", help="Port-Channel ID configured on the peer device.", key="pchan_rpo").strip()
-                vlan_info = st.text_input("Trunk Info", value="", placeholder="e.g. TRUNK CORE, VLAN10,20,30", help="VLAN trunk or role designation tag.", key="pchan_vl").strip()
+                loc_po = st.text_input("Local Port-Channel ID", value="", placeholder="e.g. 1, 10", help="Local logical LAG channel ID.", key="pchan_lpo").strip()
+                r_dev = st.text_input("Remote Device Hostname", value="", placeholder="e.g. CORE-AGG01", help="Target aggregation switch.", key="pchan_rd").strip()
+                rem_po = st.text_input("Remote Port-Channel ID", value="", placeholder="e.g. 1, 10", help="Peer Port-Channel ID.", key="pchan_rpo").strip()
+                vlan_info = st.text_input("Trunk Info", value="", placeholder="e.g. TRUNK CORE", help="VLAN trunk tag.", key="pchan_vl").strip()
 
                 l_po = f"Po{loc_po.replace('Po', '').replace('po', '').strip() or '1'}"
                 r_po = f"Po{rem_po.replace('Po', '').replace('po', '').strip() or '1'}"
@@ -239,15 +204,15 @@ def render_naming_tab(active_model):
                 st.code(f"{l_po} -> {r_dev}_{r_po}{vlan_suffix}", language="text")
 
             elif p_cat == "Switch Access Port (Endpoint)":
-                vlan_name = st.text_input("VLAN Name", value="", placeholder="e.g. VLAN10_Management, VLAN50_Printers", help="Name or functional tag of the untagged access VLAN.", key="acc_vln").strip()
-                host_port_raw = st.text_input("Connected Host/Port", value="", placeholder="e.g. ESXHOST01_vmnic0, PRINTER-FL1", help="Connected host and specific interface.", key="acc_hp").strip()
+                vlan_name = st.text_input("VLAN Name", value="", placeholder="e.g. VLAN10_Management", help="Name of untagged access VLAN.", key="acc_vln").strip()
+                host_port_raw = st.text_input("Connected Host/Port", value="", placeholder="e.g. ESXHOST01_vmnic0", help="Connected host and interface.", key="acc_hp").strip()
                 clean_host = re.sub(r"\s+", "", host_port_raw)
                 st.caption("Access Port Description:")
                 st.code(f"{vlan_name} - {clean_host}", language="text")
 
             else:
-                fw_zone = st.text_input("Security Zone / Role", value="", placeholder="e.g. DMZ, TRUST, UNTRUST, INSIDE, OUTSIDE", help="Security zone assignment for the firewall interface.", key="fw_z_in").strip()
-                fw_vlan = st.text_input("VLAN ID", value="", placeholder="e.g. 100, 200, 999", help="Associated 802.1Q VLAN sub-interface ID.", key="fw_v_in").strip()
+                fw_zone = st.text_input("Security Zone / Role", value="", placeholder="e.g. DMZ, TRUST, INSIDE", help="Security zone.", key="fw_z_in").strip()
+                fw_vlan = st.text_input("VLAN ID", value="", placeholder="e.g. 100, 200", help="802.1Q sub-interface ID.", key="fw_v_in").strip()
                 clean_fw_if = f"{fw_zone}_{fw_vlan}" if fw_vlan else fw_zone
                 st.caption("Firewall Interface Description:")
                 st.code(clean_fw_if, language="text")
@@ -257,37 +222,10 @@ def render_naming_tab(active_model):
         col_a, col_b = st.columns(2)
         with col_a:
             st.markdown("#### 🖥️ ESXi Hypervisor Hostname")
-            h_site = st.text_input(
-                "Site Prefix",
-                value="",
-                placeholder="e.g. nyc, syd, lon, pws, age",
-                help="3-4 character site abbreviation.",
-                key="esx_site"
-            ).strip()
-
-            h_role = st.text_input(
-                "Host Role (Optional)",
-                value="",
-                placeholder="e.g. esx, otinfhost, infmgmt, node",
-                help="Hypervisor role identifier (e.g. 'esx' for standard cluster, 'otinfhost' for OT cluster).",
-                key="esx_role"
-            ).strip()
-
-            h_num = st.text_input(
-                "Host Sequence Number",
-                value="001",
-                placeholder="e.g. 001, 01, 1",
-                help="Sequential node number.",
-                key="esx_num"
-            ).strip()
-
-            h_dom = st.text_input(
-                "Domain Name (FQDN Suffix)",
-                value="",
-                placeholder="e.g. corp.local, adds.net, ot.local (leave blank for shortname)",
-                help="Full domain suffix. You can type any domain manually or leave it blank.",
-                key="esx_dom"
-            ).strip()
+            h_site = st.text_input("Site Prefix", value="", placeholder="e.g. nyc, syd, pws, age", help="3-4 character site abbreviation.", key="esx_site").strip()
+            h_role = st.text_input("Host Role (Optional)", value="", placeholder="e.g. esx, otinfhost, infmgmt", help="Hypervisor role identifier.", key="esx_role").strip()
+            h_num = st.text_input("Host Sequence Number", value="001", placeholder="e.g. 001, 01, 1", help="Sequential node number.", key="esx_num").strip()
+            h_dom = st.text_input("Domain Name (FQDN Suffix)", value="", placeholder="e.g. corp.local, adds.net (leave blank for shortname)", help="Full domain suffix.", key="esx_dom").strip()
 
             raw_host = f"{h_site}{h_role or 'esx'}{h_num}"
             host_formatted = apply_case(raw_host, case_mode)
@@ -298,7 +236,7 @@ def render_naming_tab(active_model):
 
             if st.button("🤖 AI Verify ESXi Host", key="ai_chk_esx"):
                 with st.spinner("Auditing..."):
-                    st.info(verify_and_suggest_with_ai(gen_esx, active_model))
+                    st.info(verify_and_suggest_with_ai(gen_esx, active_model, asset_type="ESXi Hypervisor Hostname"))
 
             with st.expander("💡 Click to view reference hypervisor examples"):
                 st.code(
@@ -311,18 +249,18 @@ def render_naming_tab(active_model):
         with col_b:
             st.markdown("#### 🖲️ Virtual Machine (VM) Hostname")
             v_site = st.text_input(
-                "Site Prefix",
+                "Site Prefix / Country & Site",
                 value="",
-                placeholder="e.g. nyc, syd, rofl, mel, lon",
-                help="3-4 letter site or location code.",
+                placeholder="e.g. aurfl, auglo, nyc, syd, rofl, mel",
+                help="Site code or combined Country+Site (e.g. 'aurfl' for Australia Rowland Flat).",
                 key="vm_site"
             ).strip()
 
             v_role = st.text_input(
-                "Role Code",
+                "Role Code / Workload",
                 value="",
-                placeholder="e.g. cvi, afs, sani, vlab, app, db, dc",
-                help="Functional workload code (e.g. cvi=Core Virt, afs=App/File, sani=Storage, dc=Domain Controller).",
+                placeholder="e.g. wotapp, wscingp, sfs, cvi, afs, sani, app, db",
+                help="Functional workload code (e.g. wotapp=OT Application, sfs=File Server, cvi=Core Virt).",
                 key="vm_role"
             ).strip()
 
@@ -342,14 +280,14 @@ def render_naming_tab(active_model):
 
             if st.button("🤖 AI Verify VM Hostname", key="ai_chk_vm"):
                 with st.spinner("Auditing..."):
-                    st.info(verify_and_suggest_with_ai(gen_vm, active_model))
+                    st.info(verify_and_suggest_with_ai(gen_vm, active_model, asset_type="Virtual Machine (VM) Hostname"))
 
             with st.expander("💡 Click to view reference VM examples"):
                 st.code(
-                    "NYCCVI01  (NYC Core Virtualization VM 01)\n"
-                    "NYCAFS01  (NYC Application / File Server 01)\n"
-                    "NYCSANI01 (NYC SAN / Storage Management 01)\n"
-                    "NYCVLAB01 (NYC Test & Validation Lab 01)",
+                    "AURFLWOTAPP01 (Rowland Flat OT App Server 01)\n"
+                    "AUGLOSFS01    (Berri Estates File Server 01)\n"
+                    "NYCCVI01      (NYC Core Virtualization VM 01)\n"
+                    "ROFLAFS01     (Rowland Flat App/File Server 01)",
                     language="text"
                 )
 
@@ -369,8 +307,8 @@ def render_naming_tab(active_model):
         with col_b:
             st.markdown("#### 2. Port Group Teaming (`PG`)")
             vsw_pg = st.text_input("vSwitch Name", value="", placeholder="e.g. vSwitch0, dvSwitch01", help="Target virtual switch.", key="vsw2")
-            act_nics = st.text_input("Active vmnics", value="", placeholder="e.g. vmnic0, vmnic1", help="Comma-separated list of active physical uplinks.", key="act_nics_in")
-            stb_nics = st.text_input("Standby vmnics", value="", placeholder="e.g. vmnic2 (optional)", help="Comma-separated standby physical uplinks.", key="stb_nics_in")
+            act_nics = st.text_input("Active vmnics", value="", placeholder="e.g. vmnic0, vmnic1", help="Comma-separated active uplinks.", key="act_nics_in")
+            stb_nics = st.text_input("Standby vmnics", value="", placeholder="e.g. vmnic2 (optional)", help="Comma-separated standby uplinks.", key="stb_nics_in")
             
             parts = [f"{act_nics.strip()} Active"] if act_nics.strip() else []
             if stb_nics.strip():
@@ -382,8 +320,8 @@ def render_naming_tab(active_model):
 
         with col_c:
             st.markdown("#### 3. VMkernel Adapter (`vmk`)")
-            vmk_purp = st.text_input("Purpose / Service", value="", placeholder="e.g. Management Network, vMotion, vSAN", help="Designated role for the VMkernel adapter.", key="vmk_p_in")
-            vsw_vmk = st.text_input("vSwitch Name", value="", placeholder="e.g. vSwitch0, dvSwitch01", help="Target virtual switch for the VMkernel adapter.", key="vsw3")
+            vmk_purp = st.text_input("Purpose / Service", value="", placeholder="e.g. Management Network, vMotion, vSAN", help="Designated role for VMkernel adapter.", key="vmk_p_in")
+            vsw_vmk = st.text_input("vSwitch Name", value="", placeholder="e.g. vSwitch0, dvSwitch01", help="Target virtual switch.", key="vsw3")
             
             gen_vmk = f"{vmk_purp} [{vsw_vmk}]" if vmk_purp and vsw_vmk else ""
             st.caption("Generated VMkernel Description:")

@@ -14,7 +14,7 @@ DEFAULT_RULES = {
     "switch_access_desc": "<VLAN_Name> - <Host/Device>_<Port>",
     "firewall_interface": "<Role/Zone>_<VLAN_ID>",
     "esxi_host": "<site_prefix>esx<number>.<domain>",
-    "vm_host": "<site_prefix><role><seq>",
+    "vm_host": "<Country><Site><Role><Seq> or <Site_Prefix><Role><Seq> (e.g. AURFLWOTAPP01, AUGLOSFS01, NYCCVI01, ROFLAFS01)",
     "esxi_uplink": "<vmnicX> - <vSwitch> Active Uplink / Standby Uplink",
     "esxi_portgroup": "<vSwitch> [<vmnicX>, <vmnicY> Active / <vmnicZ> Standby]",
     "esxi_vmkernel": "<Purpose/Service> [<vSwitch>]",
@@ -41,7 +41,7 @@ def save_naming_rules(rules: Dict[str, str]):
 def export_rules_as_prompt(rules: Dict[str, str]) -> str:
     return f"""# INFRASTRUCTURE & NAMING CONVENTIONS STANDARD (AUTOMATION GRADE)
 
-1. Network Devices:
+1. Network & Security Devices:
 - Switch Hostname: {rules.get('branch_switch', '')}
 - Wireless AP Hostname: {rules.get('branch_ap', '')}
 - Firewall / Security Hostname: {rules.get('branch_security', '')}
@@ -54,7 +54,7 @@ def export_rules_as_prompt(rules: Dict[str, str]) -> str:
 
 2. Hypervisors & Virtual Machines:
 - ESXi Hostname: {rules.get('esxi_host', '')}
-- VM Hostname: {rules.get('vm_host', '')}
+- Virtual Machine (VM) Hostname: {rules.get('vm_host', '')}
 - ESXi Physical Uplink Description: {rules.get('esxi_uplink', '')}
 - ESXi Port Group Teaming Description: {rules.get('esxi_portgroup', '')}
 - ESXi VMkernel Description: {rules.get('esxi_vmkernel', '')}
