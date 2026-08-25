@@ -40,3 +40,8 @@
 ### 🛠️ Improvements & Refinements
 * **Auto-Correction Toggle Switch**: Added a user toggle (`⚡ Auto-Correct VMware Syntax`) to optionally disable automatic formatting and allow raw, unformatted manual inputs.
 * **Preserved Raw Input**: When auto-correction is disabled, fields accept exact custom casing and naming without modification.
+
+## Release v2.1.0 — VMware Normalization Bugfix
+
+### 🛠️ Bug Fixes & Improvements
+* **Missing Formatter Fix**: Added `normalize_vswitch`, `normalize_vmnic`, and `normalize_vmnic_list` to `utils/formatters.py` to resolve import errors.
