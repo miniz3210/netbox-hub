@@ -4,7 +4,7 @@ from typing import Dict
 from config.constants import RULES_FILE
 
 DEFAULT_RULES = {
-    "branch_switch": "SW<Country><State><Site><Zone><Seq>-<StackID>",
+    "branch_switch": "SW<Country><State><Site><Zone><Seq>-<StackID> / VS<Country><State><Site><Seq>-<StackID>",
     "branch_ap": "WAP<Country><State><Site><Seq>",
     "branch_security": "FW<Country><State><Site><Vendor><Seq> / ION<Country><State><Site><Seq>",
     "switch_uplink_desc_local": "to <Remote_Device>_<Remote_Port_Short> [<Role>]",
@@ -13,8 +13,8 @@ DEFAULT_RULES = {
     "switch_port_channel": "<Local_Po> -> <Remote_Device>_<Remote_Po> [<Trunk_Info>]",
     "switch_access_desc": "<VLAN_Name> - <Host/Device>_<Port>",
     "firewall_interface": "<Role/Zone>_<VLAN_ID>",
-    "esxi_host": "<site_prefix>esx<number>.<domain>",
-    "vm_host": "<Country><Site><Role><Seq> or <Site_Prefix><Role><Seq> (e.g. AURFLWOTAPP01, AUGLOSFS01, NYCCVI01, ROFLAFS01)",
+    "esxi_host": "<site><role/esx><seq>.<domain> (Valid domains: .eswine.adds for IT/Corp, .eswines.ot or .eswine.ot for OT/Industrial, .corp.local for Branch/Local, or shortname without domain)",
+    "vm_host": "<Country><Site><Role><Seq> (e.g. AURFLWOTAPP01, AUGLOSFS01) or <Site><Role><Seq> (e.g. PWSAFS001, ESCPDC01, NYCCVI01)",
     "esxi_uplink": "<vmnicX> - <vSwitch> Active Uplink / Standby Uplink",
     "esxi_portgroup": "<vSwitch> [<vmnicX>, <vmnicY> Active / <vmnicZ> Standby]",
     "esxi_vmkernel": "<Purpose/Service> [<vSwitch>]",
@@ -53,7 +53,10 @@ def export_rules_as_prompt(rules: Dict[str, str]) -> str:
 - Firewall Interface Description: {rules.get('firewall_interface', '')}
 
 2. Hypervisors & Virtual Machines:
-- ESXi Hostname: {rules.get('esxi_host', '')}
+- ESXi Hypervisor Hostname: {rules.get('esxi_host', '')}
+  * IT / Corporate ESXi Domain: .eswine.adds (e.g. pwsesx001.eswine.adds, ageesx01.eswine.adds, esagex10.eswine.adds)
+  * OT / Industrial Cluster Domain: .eswines.ot / .eswine.ot (e.g. ageotinfhost1.eswines.ot, camotinfmgmt.eswines.ot)
+  * Branch / Standalone: .corp.local or shortname (no FQDN)
 - Virtual Machine (VM) Hostname: {rules.get('vm_host', '')}
 - ESXi Physical Uplink Description: {rules.get('esxi_uplink', '')}
 - ESXi Port Group Teaming Description: {rules.get('esxi_portgroup', '')}
