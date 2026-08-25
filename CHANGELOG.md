@@ -18,3 +18,12 @@
 
 ### 🛠️ Improvements & Refinements
 * **Prefix Selector**: Retained `✏️ Custom Prefix...` as the label and updated input guidance to indicate leaving the field empty produces a blank prefix.
+
+## Release v2.0.5 — Universal Casing Toggle, Blank Defaults & Input Tooltips
+
+### 🛠️ Improvements & Refinements
+* **Letter Casing Toggle**: Added UPPERCASE (default) vs. lowercase radio switch applied dynamically across all generated hostnames.
+* **Blank Default States**: Removed hardcoded location defaults; all input fields now start clean.
+* **Hover Tooltips (`help=...`)**: Added contextual guidance and format examples across every input box.
+* **Flexible Domain Input**: Replaced rigid domain radio presets with a free-text FQDN input supporting any custom domain or shortname.
+* **Collapsible Reference Examples**: All live lookup reference tables moved into collapsible `st.expander` containers.
