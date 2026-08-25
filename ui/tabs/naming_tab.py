@@ -22,13 +22,13 @@ def handle_csv_upload():
     if uploaded_file is not None:
         try:
             counts = save_universal_csv(uploaded_file)
-            st.toast(f"✅ Ingested {sum(counts.values())} records: {counts['device']} Devices, {counts['hypervisor']} Hypervisors, {counts['vm']} VMs!", icon="🚀")
+            st.toast(f"✅ Ingested: {counts['device']} Devices, {counts['hypervisor']} Hypervisors, {counts['vm']} VMs!", icon="🚀")
         except Exception as e:
             st.error(f"Error parsing CSV: {e}")
 
 def handle_csv_reset():
     clear_all_records()
-    st.toast("🗑️ Inventory records cleared! Reverted to defaults.", icon="🧹")
+    st.toast("🗑️ Real inventory records cleared. Showing default examples.", icon="🧹")
 
 def display_reference_box(category_key: str, default_lines: str, label: str):
     real_items = get_records_by_category(category_key)
@@ -54,6 +54,38 @@ def display_reference_box(category_key: str, default_lines: str, label: str):
             st.markdown("##### 🟡 Default Examples:")
             st.code(default_lines, language="text")
 
+def render_compact_toolbar():
+    """Renders a sleek, minimal toolbar for Sections 1 & 2 only."""
+    top_c1, top_c2 = st.columns([1.2, 2.8])
+    with top_c1:
+        case_mode = st.radio(
+            "Casing",
+            ["UPPERCASE", "lowercase"],
+            index=0,
+            horizontal=True,
+            help="Render output in UPPERCASE or lowercase."
+        )
+    with top_c2:
+        total_recs = get_total_record_count()
+        status_tag = f"🟢 ({total_recs} records active)" if total_recs > 0 else "⚪ (Default Examples)"
+        
+        with st.expander(f"📁 NetBox CSV Data Ingest {status_tag}", expanded=False):
+            up_col, reset_col = st.columns([3, 1])
+            with up_col:
+                st.file_uploader(
+                    "Upload NetBox CSV Export",
+                    type=["csv"],
+                    key="global_netbox_csv",
+                    on_change=handle_csv_upload,
+                    label_visibility="collapsed"
+                )
+            with reset_col:
+                if total_recs > 0:
+                    st.button("🗑️ Reset to Default", on_click=handle_csv_reset, use_container_width=True)
+                else:
+                    st.caption("No custom CSV loaded.")
+    return case_mode
+
 def render_naming_tab(active_model):
     st.subheader("🏷️ Standardized Infrastructure Naming Generator")
     
@@ -69,36 +101,10 @@ def render_naming_tab(active_model):
 
     st.markdown("---")
 
-    # Global Top Control Bar: Casing Mode + Universal NetBox CSV Uploader + Reset
-    top_c1, top_c2, top_c3 = st.columns([1.2, 2, 0.8])
-    with top_c1:
-        case_mode = st.radio(
-            "Letter Casing Mode",
-            ["UPPERCASE", "lowercase"],
-            index=0,
-            horizontal=True,
-            help="Choose whether generated hostnames are rendered in UPPERCASE or lowercase."
-        )
-    with top_c2:
-        st.file_uploader(
-            "📥 Upload NetBox Inventory CSV (Auto-feeds Devices, ESXi & VMs)",
-            type=["csv"],
-            key="global_netbox_csv",
-            on_change=handle_csv_upload,
-            help="Upload one NetBox device or VM export CSV to automatically populate reference data across all sections."
-        )
-    with top_c3:
-        st.markdown("<br>", unsafe_allow_html=True)
-        total_recs = get_total_record_count()
-        if total_recs > 0:
-            st.button(f"🗑️ Clear ({total_recs})", on_click=handle_csv_reset, help="Wipe imported records and revert back to default examples.")
-        else:
-            st.caption("ℹ️ Using default reference examples")
-
-    st.markdown("---")
-
-    # 1. Network & Security
+    # 1. Network & Security Devices
     if "1. Network" in naming_cat:
+        case_mode = render_compact_toolbar()
+
         st.markdown("##### 📍 Location & Site Code Assistant")
         loc_col1, loc_col2 = st.columns([2, 1])
         with loc_col1:
@@ -175,6 +181,8 @@ def render_naming_tab(active_model):
 
     # 2. ESXi Hosts & VMs
     elif "2. Hosts" in naming_cat:
+        case_mode = render_compact_toolbar()
+
         col_a, col_b = st.columns(2)
         with col_a:
             st.markdown("#### 🖥️ ESXi Hypervisor Hostname")
@@ -222,7 +230,7 @@ def render_naming_tab(active_model):
                 label="Virtual Machine"
             )
 
-    # 3. ESXi Network Descriptions
+    # 3. ESXi Network Descriptions (No Casing or CSV Bar)
     else:
         auto_correct = st.checkbox(
             "⚡ Auto-Correct VMware Syntax (e.g. vswitch1 -> vSwitch1, nic0 -> vmnic0)",
