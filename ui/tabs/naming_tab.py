@@ -317,8 +317,8 @@ def render_naming_tab(active_model):
         col_a, col_b, col_c = st.columns(3)
         with col_a:
             st.markdown("#### 1. Physical Uplink (`vmnic`)")
-            vmnic_raw = st.text_input("vmnic ID", value="vmnic0", placeholder="e.g. vmnic0, nic1, VMNIC2", help="Physical hypervisor NIC identifier.", key="vmnic_in")
-            vsw1_raw = st.text_input("Target vSwitch", value="vSwitch0", placeholder="e.g. vSwitch0, vswitch1, dvswitch01", help="Virtual switch name.", key="vsw1")
+            vmnic_raw = st.text_input("vmnic ID", value="vmnic", placeholder="e.g. vmnic0, nic1, VMNIC2", help="Physical hypervisor NIC identifier.", key="vmnic_in")
+            vsw1_raw = st.text_input("Target vSwitch", value="vSwitch", placeholder="e.g. vSwitch0, vswitch1, dvswitch01", help="Virtual switch name.", key="vsw1")
             status = st.radio("Status", ["Active Uplink", "Standby Uplink"], horizontal=True)
             
             clean_vmnic = normalize_vmnic(vmnic_raw) if auto_correct else vmnic_raw.strip()
@@ -326,17 +326,17 @@ def render_naming_tab(active_model):
             gen_vmnic = f"{clean_vmnic} - {clean_vsw1} {status}" if clean_vmnic and clean_vsw1 else ""
             
             st.caption("Generated Physical Uplink:")
-            st.code(gen_vmnic or "vmnic0 - vSwitch0 Active Uplink", language="text")
+            st.code(gen_vmnic or "vmnic - vSwitch Active Uplink", language="text")
 
             if st.button("🤖 AI Verify Uplink", key="ai_chk_vmnic"):
                 with st.spinner("Auditing..."):
-                    st.info(verify_and_suggest_with_ai(gen_vmnic or "vmnic0 - vSwitch0 Active Uplink", active_model, asset_type="ESXi Physical Uplink Description"))
+                    st.info(verify_and_suggest_with_ai(gen_vmnic or "vmnic - vSwitch Active Uplink", active_model, asset_type="ESXi Physical Uplink Description"))
 
         with col_b:
-            st.markdown("#### 2. Port Group Teaming (`PG`)")
-            vsw_pg_raw = st.text_input("vSwitch Name", value="PG-iscsi", placeholder="e.g. PG-iscsi, PG-mgmt", help="Port Group name (defaults to PG- prefix).", key="vsw2")
-            act_nics_raw = st.text_input("Active vmnics", value="vmnic0", placeholder="e.g. vmnic0, vmnic1, nic2", help="Active uplinks.", key="act_nics_in")
-            stb_nics_raw = st.text_input("Standby vmnics", value="vmnic1", placeholder="e.g. vmnic2, nic3 (optional)", help="Standby uplinks.", key="stb_nics_in")
+            st.markdown("#### 2. Port Group Teaming (`PG-`)")
+            vsw_pg_raw = st.text_input("vSwitch Name", value="PG-", placeholder="e.g. PG-iscsi, PG-mgmt", help="Port Group name (defaults to PG- prefix).", key="vsw2")
+            act_nics_raw = st.text_input("Active vmnics", value="vmnic", placeholder="e.g. vmnic0, vmnic1, nic2", help="Active uplinks.", key="act_nics_in")
+            stb_nics_raw = st.text_input("Standby vmnics", value="", placeholder="e.g. vmnic2, nic3 (optional)", help="Standby uplinks.", key="stb_nics_in")
             
             clean_vsw_pg = vsw_pg_raw.strip()
             clean_act = normalize_vmnic_list(act_nics_raw) if auto_correct else act_nics_raw.strip()
@@ -348,22 +348,22 @@ def render_naming_tab(active_model):
             
             gen_pg = f"{clean_vsw_pg} [{' / '.join(parts)}]" if clean_vsw_pg and parts else ""
             st.caption("Generated Port Group Teaming:")
-            st.code(gen_pg or "PG-iscsi [vmnic0 Active / vmnic1 Standby]", language="text")
+            st.code(gen_pg or "PG- [vmnic Active]", language="text")
 
             if st.button("🤖 AI Verify Port Group", key="ai_chk_pg"):
                 with st.spinner("Auditing..."):
-                    st.info(verify_and_suggest_with_ai(gen_pg or "PG-iscsi [vmnic0 Active / vmnic1 Standby]", active_model, asset_type="ESXi Port Group Description"))
+                    st.info(verify_and_suggest_with_ai(gen_pg or "PG- [vmnic Active]", active_model, asset_type="ESXi Port Group Description"))
 
         with col_c:
             st.markdown("#### 3. VMkernel Adapter (`vmk`)")
-            vmk_purp = st.text_input("Purpose / Service", value="iSCSI01", placeholder="e.g. Management Network, vMotion, vSAN", help="Designated role for VMkernel adapter.", key="vmk_p_in").strip()
-            vsw_vmk_raw = st.text_input("vSwitch Name", value="vSwitch0", placeholder="e.g. vswitch0, dvswitch01", help="Target virtual switch (auto-corrected).", key="vsw3")
+            vmk_purp = st.text_input("Purpose / Service", value="", placeholder="e.g. iSCSI01, Management, vMotion", help="Designated role for VMkernel adapter.", key="vmk_p_in").strip()
+            vsw_vmk_raw = st.text_input("vSwitch Name", value="vSwitch", placeholder="e.g. vswitch0, dvswitch01", help="Target virtual switch (auto-corrected).", key="vsw3")
             
             clean_vsw_vmk = normalize_vswitch(vsw_vmk_raw) if auto_correct else vsw_vmk_raw.strip()
             gen_vmk = f"{vmk_purp} [{clean_vsw_vmk}]" if vmk_purp and clean_vsw_vmk else ""
             st.caption("Generated VMkernel Description:")
-            st.code(gen_vmk or "iSCSI01 [vSwitch0]", language="text")
+            st.code(gen_vmk or "Management [vSwitch]", language="text")
 
             if st.button("🤖 AI Verify VMkernel", key="ai_chk_vmk"):
                 with st.spinner("Auditing..."):
-                    st.info(verify_and_suggest_with_ai(gen_vmk or "iSCSI01 [vSwitch0]", active_model, asset_type="ESXi VMkernel Description"))
+                    st.info(verify_and_suggest_with_ai(gen_vmk or "Management [vSwitch]", active_model, asset_type="ESXi VMkernel Description"))
