@@ -27,3 +27,10 @@
 * **Hover Tooltips (`help=...`)**: Added contextual guidance and format examples across every input box.
 * **Flexible Domain Input**: Replaced rigid domain radio presets with a free-text FQDN input supporting any custom domain or shortname.
 * **Collapsible Reference Examples**: All live lookup reference tables moved into collapsible `st.expander` containers.
+
+## Release v2.0.6 — Context-Aware AI Naming Auditor
+
+### 🛠️ Bug Fixes & Improvements
+* **Asset-Type Context Scoping**: The AI Standards Auditor now receives the explicit asset category (`Virtual Machine`, `ESXi Host`, `Network Switch`, or `Firewall`).
+* **Fixed VM Misclassification**: Prevented VM hostnames containing substrings like `FW` (e.g. `AURFWOTAPP01`) from being falsely audited as Firewalls.
+* **VM Naming Rules Expansion**: Updated rules context to recognize regional enterprise formats `<Country><Site><Role><Seq>` and `<SitePrefix><Role><Seq>`.

@@ -1,22 +1,27 @@
 import re
 import json
-from typing import Dict
+from typing import Dict, Optional
 from core.ai_client import call_ai
 from config.naming_rules import load_naming_rules, export_rules_as_prompt
 
-def verify_and_suggest_with_ai(user_input_text: str, model_name: str) -> str:
+def verify_and_suggest_with_ai(user_input_text: str, model_name: str, asset_type: str = "General Asset") -> str:
     naming_context = export_rules_as_prompt(load_naming_rules())
-    system_msg = f"""You are a Principal Network Architect and NetBox Standard Auditor.
-Audit user inputs against these conventions:
+    system_msg = f"""You are a Principal Infrastructure Architect and NetBox Standard Auditor.
+You are evaluating an asset of type: **{asset_type}**.
+DO NOT confuse this asset type with other categories (e.g., do NOT evaluate a Virtual Machine as a Firewall even if the name contains 'FW').
+
+Audit the input strictly against the following company standards:
 {naming_context}
 
 Output Format:
 - **Verdict**: [✅ Compliant | 💡 Suggestion]
-- **Standard Formula**: `<exact formula pattern>`
-- **Recommended Output**: `<standardized string without colons or parentheses>`
-- **Audit Reason**: Concise explanation.
+- **Target Asset Class**: {asset_type}
+- **Standard Formula**: `<exact formula pattern for {asset_type}>`
+- **Recommended Output**: `<standardized string>`
+- **Audit Reason**: Concise explanation of the evaluation.
 """
-    return call_ai(f"Audit:\n```\n{user_input_text}\n```", model_name, custom_system_msg=system_msg)
+    prompt = f"Audit this {asset_type}:\n```\n{user_input_text}\n```"
+    return call_ai(prompt, model_name, custom_system_msg=system_msg)
 
 def parse_prompt_to_rules(prompt_text: str, model_name: str) -> Dict[str, str]:
     extract_prompt = f"""
