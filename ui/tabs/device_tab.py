@@ -1,48 +1,54 @@
 import streamlit as st
-import pandas as pd
-from core.db_manager import save_devices_from_csv, get_imported_devices
+import yaml
+from core.catalog import search_device_type, get_device_yaml_from_github
+from core.yaml_generator import generate_device_yaml
+from utils.formatters import normalize_manufacturer_name
 
 def render_device_tab(catalog, active_model):
-    st.subheader("🖥️ NetBox Device Library Hub")
+    st.subheader("NetBox Device Library Hub")
     
-    # Standard Catalog Search UI (Restored)
-    st.markdown("Search or select device models from the official NetBox Community Device-Type Library.")
-    
-    col1, col2 = st.columns([2, 1])
+    col1, col2 = st.columns([1, 1])
     with col1:
-        selected_model = st.selectbox("Select Device Model", options=["Select or search..."] + list(catalog), key="dev_cat_select")
+        manufacturer = st.text_input("Manufacturer", value="hp", placeholder="e.g. hp, cisco, dell", key="dev_mfg_input")
     with col2:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("Load / Generate Device Type", type="primary"):
-            st.success(f"Loading specification for: {selected_model}")
+        device_model = st.text_input("Device Model", value="ProLiant MicroServer Gen8", placeholder="e.g. Catalyst 9300, ProLiant MicroServer Gen8", key="dev_model_input")
+
+    normalized_mfg = normalize_manufacturer_name(manufacturer)
+    if normalized_mfg.lower() != manufacturer.strip().lower():
+        st.markdown(f"ℹ️ Matched manufacturer: `{manufacturer}` $\\rightarrow$ **`{normalized_mfg}`**")
 
     st.markdown("---")
-    
-    # Dynamic Reference Examples with NetBox CSV Upload Integration
-    with st.expander("💡 Click to view reference examples (Upload NetBox CSV for Real Data)", expanded=False):
-        st.markdown("Upload a NetBox device export CSV below to populate these examples with your real inventory data. If no file is uploaded, fallback dummy examples are displayed.")
-        
-        uploaded_csv = st.file_uploader("Upload NetBox Device Export CSV", type=["csv"], key="netbox_ref_csv_upload")
-        
-        real_devices = []
-        if uploaded_csv is not None:
-            try:
-                count = save_devices_from_csv(uploaded_csv)
-                real_devices = get_imported_devices()
-                st.success(f"Successfully loaded **{len(real_devices)}** real records from uploaded CSV!")
-            except Exception as e:
-                st.error(f"Error parsing CSV: {e}")
-        else:
-            real_devices = get_imported_devices()
 
-        if real_devices:
-            st.markdown("##### 🟢 Real Data Examples (from Database / Uploaded CSV):")
-            real_lines = [f"{d['name']} ({d['manufacturer']} - {d['device_type']}, Site: {d['site']})" for d in real_devices[:10]]
-            st.code("\n".join(real_lines), language="text")
+    # Search GitHub official library
+    match_path = search_device_type(catalog, normalized_mfg, device_model)
+
+    col_left, col_right = st.columns([1, 1.2])
+
+    with col_left:
+        if match_path:
+            st.success(f"Found in official library:\n`{match_path}`")
+            load_action = st.button("Load Official Device Type", type="primary", key="load_official_btn")
+            if load_action:
+                yaml_content = get_device_yaml_from_github(match_path)
+                st.session_state['current_device_yaml'] = yaml_content
+                st.session_state['source_label'] = f"Official Library ({match_path})"
         else:
-            st.markdown("##### 🟡 Fallback Dummy Examples:")
-            st.code(
-                "SW-NYC-CORE01 (Cisco Catalyst 9300, Site: NYC)\n"
-                "FW-LDN-PA01   (Palo Alto Networks PA-3220, Site: London)",
-                language="text"
+            st.warning("No match found in library. Click below to generate fresh with AI.")
+            gen_action = st.button("Load / Generate Device Type", type="primary", key="gen_ai_dev_btn")
+            if gen_action:
+                with st.spinner(f"Generating YAML specification using {active_model}..."):
+                    yaml_content = generate_device_yaml(normalized_mfg, device_model, active_model)
+                    st.session_state['current_device_yaml'] = yaml_content
+                    st.session_state['source_label'] = f"AI Generated ({active_model})"
+
+    with col_right:
+        if 'current_device_yaml' in st.session_state:
+            st.markdown(f"**Source:** 🌐 {st.session_state.get('source_label', 'Loaded Spec')}")
+            st.code(st.session_state['current_device_yaml'], language="yaml")
+            st.download_button(
+                "📥 Download YAML",
+                st.session_state['current_device_yaml'],
+                file_name=f"{normalized_mfg}_{device_model}.yaml".lower().replace(" ", "_"),
+                mime="text/yaml",
+                key="dl_dev_yaml"
             )
