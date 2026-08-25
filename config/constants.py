@@ -1,4 +1,4 @@
-APP_VERSION = "v2.0.4"
+APP_VERSION = "v2.0.5"
 GITHUB_REPO = "netbox-community/devicetype-library"
 BRANCH = "master"
 RULES_FILE = "naming_rules.json"
