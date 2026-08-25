@@ -13,3 +13,8 @@
 * **Custom Prefix Support**: Added direct manual text input support for arbitrary prefixes (`✏️ Custom Prefix...`).
 * **Role Alignment**: Normalized Panorama, Firewall vendor tags, and switch roles into the unified `Zone / Role` field.
 * **Streamlined UI**: Reorganized Section 1 into a clean, 2-column layout (Device Hostname Generator + Interface Formatter).
+
+## Release v2.0.4 — Custom Prefix Label Alignment
+
+### 🛠️ Improvements & Refinements
+* **Prefix Selector**: Retained `✏️ Custom Prefix...` as the label and updated input guidance to indicate leaving the field empty produces a blank prefix.
