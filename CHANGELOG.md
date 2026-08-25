@@ -66,3 +66,10 @@
 ### 🛠️ Improvements & Refinements
 * **Device Types Tab Reverted**: Restored the original manufacturer and device model catalog search interface.
 * **Isolated NetBox CSV Reference Integration**: Moved NetBox CSV upload capability exclusively into the Naming Generator's reference example expander to dynamically swap dummy examples with real database records.
+
+## Release v2.1.7 — Multi-Category CSV Upload & Database Reset
+
+### 🛠️ Improvements & Refinements
+* **Multi-Category CSV Support**: Added distinct NetBox CSV upload support for Network Devices, ESXi Hypervisors, and Virtual Machines.
+* **Database Reset Control**: Added a GUI reset button to clear uploaded reference data and revert to default examples.
+* **Clean Tab Isolation**: Kept all database modifications isolated within the Naming Generator.

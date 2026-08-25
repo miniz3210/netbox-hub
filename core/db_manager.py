@@ -10,56 +10,71 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS imported_devices (
+        CREATE TABLE IF NOT EXISTS inventory_records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            category TEXT,
             name TEXT,
+            description TEXT,
             manufacturer TEXT,
-            device_type TEXT,
-            role TEXT,
+            model_or_role TEXT,
             site TEXT,
-            status TEXT,
-            serial TEXT,
+            cluster TEXT,
             imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
     conn.commit()
     conn.close()
 
-def save_devices_from_csv(file_bytes) -> int:
+def save_csv_records(file_bytes, category: str) -> int:
     init_db()
-    try:
-        df = pd.read_csv(file_bytes)
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
+    df = pd.read_csv(file_bytes)
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute("DELETE FROM inventory_records WHERE category = ?", (category,))
+    
+    count = 0
+    for _, row in df.iterrows():
+        name = str(row.get("name", row.get("Name", ""))).strip()
+        if not name or name.lower() == "nan":
+            continue
+        desc = str(row.get("description", row.get("Description", ""))).strip()
+        if desc.lower() == "nan": desc = ""
+        mfg = str(row.get("manufacturer", row.get("Manufacturer", ""))).strip()
+        if mfg.lower() == "nan": mfg = ""
+        model = str(row.get("device_type", row.get("Device Type", row.get("role", row.get("Role", ""))))).strip()
+        if model.lower() == "nan": model = ""
+        site = str(row.get("site", row.get("Site", ""))).strip()
+        if site.lower() == "nan": site = ""
+        cluster = str(row.get("cluster", row.get("Cluster", ""))).strip()
+        if cluster.lower() == "nan": cluster = ""
+
+        cursor.execute("""
+            INSERT INTO inventory_records (category, name, description, manufacturer, model_or_role, site, cluster)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (category, name, desc, mfg, model, site, cluster))
+        count += 1
         
-        count = 0
-        for _, row in df.iterrows():
-            name = str(row.get("Name", row.get("name", "Unknown")))
-            mfg = str(row.get("Manufacturer", row.get("manufacturer", "Unknown")))
-            dtype = str(row.get("Device Type", row.get("type", "Unknown")))
-            role = str(row.get("Role", row.get("role", "Unknown")))
-            site = str(row.get("Site", row.get("site", "Unknown")))
-            status = str(row.get("Status", row.get("status", "Active")))
-            serial = str(row.get("Serial number", row.get("serial", "")))
+    conn.commit()
+    conn.close()
+    return count
 
-            cursor.execute("""
-                INSERT INTO imported_devices (name, manufacturer, device_type, role, site, status, serial)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (name, mfg, dtype, role, site, status, serial))
-            count += 1
-            
-        conn.commit()
-        conn.close()
-        return count
-    except Exception as e:
-        raise ValueError(f"Failed to parse NetBox CSV: {str(e)}")
-
-def get_imported_devices() -> List[Dict[str, Any]]:
+def get_records_by_category(category: str) -> List[Dict[str, Any]]:
     init_db()
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM imported_devices ORDER BY id DESC")
+    cursor.execute("SELECT * FROM inventory_records WHERE category = ? ORDER BY id ASC", (category,))
     rows = cursor.fetchall()
     conn.close()
-    return [dict(row) for row in rows]
+    return [dict(r) for r in rows]
+
+def clear_records_by_category(category: str) -> int:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM inventory_records WHERE category = ?", (category,))
+    deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
