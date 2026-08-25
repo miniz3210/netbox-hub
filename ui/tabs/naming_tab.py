@@ -1,6 +1,12 @@
 import re
 import streamlit as st
-from utils.formatters import compute_suggested_site_code, normalize_port_shortname
+from utils.formatters import (
+    compute_suggested_site_code, 
+    normalize_port_shortname,
+    normalize_vswitch,
+    normalize_vmnic,
+    normalize_vmnic_list
+)
 from core.naming_engine import verify_and_suggest_with_ai
 
 def apply_case(text: str, mode: str) -> str:
@@ -9,14 +15,6 @@ def apply_case(text: str, mode: str) -> str:
 def render_naming_tab(active_model):
     st.subheader("🏷️ Standardized Infrastructure Naming Generator")
     
-    case_mode = st.radio(
-        "Letter Casing Mode",
-        ["UPPERCASE", "lowercase"],
-        index=0,
-        horizontal=True,
-        help="Choose whether generated hostnames are rendered in all UPPERCASE (recommended) or lowercase."
-    )
-
     naming_cat = st.radio(
         "Select Asset Class",
         [
@@ -31,6 +29,14 @@ def render_naming_tab(active_model):
 
     # 1. Unified Network & Security Devices
     if "1. Network" in naming_cat:
+        case_mode = st.radio(
+            "Letter Casing Mode",
+            ["UPPERCASE", "lowercase"],
+            index=0,
+            horizontal=True,
+            help="Choose whether generated hostnames are rendered in all UPPERCASE (recommended) or lowercase."
+        )
+
         st.markdown("##### 📍 Location & Site Code Assistant")
         loc_col1, loc_col2 = st.columns([2, 1])
         with loc_col1:
@@ -219,13 +225,21 @@ def render_naming_tab(active_model):
 
     # 2. Hosts & Virtual Machines
     elif "2. Hosts" in naming_cat:
+        case_mode = st.radio(
+            "Letter Casing Mode",
+            ["UPPERCASE", "lowercase"],
+            index=0,
+            horizontal=True,
+            help="Choose whether generated hostnames are rendered in all UPPERCASE (recommended) or lowercase."
+        )
+
         col_a, col_b = st.columns(2)
         with col_a:
             st.markdown("#### 🖥️ ESXi Hypervisor Hostname")
             h_site = st.text_input("Site Prefix", value="", placeholder="e.g. nyc, syd, pws, age", help="3-4 character site abbreviation.", key="esx_site").strip()
             h_role = st.text_input("Host Role (Optional)", value="", placeholder="e.g. esx, otinfhost, infmgmt", help="Hypervisor role identifier.", key="esx_role").strip()
             h_num = st.text_input("Host Sequence Number", value="001", placeholder="e.g. 001, 01, 1", help="Sequential node number.", key="esx_num").strip()
-            h_dom = st.text_input("Domain Name (FQDN Suffix)", value="", placeholder="e.g. corp.local, adds.net (leave blank for shortname)", help="Full domain suffix.", key="esx_dom").strip()
+            h_dom = st.text_input("Domain Name (FQDN Suffix)", value="", placeholder="e.g. corp.local, eswine.adds (leave blank for shortname)", help="Full domain suffix.", key="esx_dom").strip()
 
             raw_host = f"{h_site}{h_role or 'esx'}{h_num}"
             host_formatted = apply_case(raw_host, case_mode)
@@ -242,6 +256,7 @@ def render_naming_tab(active_model):
                 st.code(
                     "NYCESX001.corp.local  (Standard Enterprise ESXi Node 001)\n"
                     "SYDOTINFHOST1.ot.net  (Industrial OT Cluster Node 1)\n"
+                    "PWSESX001.eswine.adds (Campo Viejo IT ESXi Host)\n"
                     "LONESX01              (Branch Hypervisor Standalone)",
                     language="text"
                 )
@@ -291,38 +306,64 @@ def render_naming_tab(active_model):
                     language="text"
                 )
 
-    # 3. ESXi Network Descriptions
+    # 3. ESXi Network Descriptions (With optional Auto-Correction)
     else:
+        auto_correct = st.checkbox(
+            "⚡ Auto-Correct VMware Syntax (e.g. vswitch1 -> vSwitch1, nic0 -> vmnic0)",
+            value=True,
+            help="When checked, automatically normalizes vSwitch and vmnic naming. Uncheck to allow raw custom/manual input verbatim."
+        )
+
         col_a, col_b, col_c = st.columns(3)
         with col_a:
             st.markdown("#### 1. Physical Uplink (`vmnic`)")
-            vmnic = st.text_input("vmnic ID", value="", placeholder="e.g. vmnic0, vmnic1", help="Physical hypervisor NIC identifier.", key="vmnic_in")
-            vsw = st.text_input("Target vSwitch", value="", placeholder="e.g. vSwitch0, dvSwitch01", help="Virtual switch or Distributed Switch name.", key="vsw1")
+            vmnic_raw = st.text_input("vmnic ID", value="", placeholder="e.g. vmnic0, nic1, VMNIC2", help="Physical hypervisor NIC identifier.", key="vmnic_in")
+            vsw1_raw = st.text_input("Target vSwitch", value="", placeholder="e.g. vSwitch0, vswitch1, dvswitch01", help="Virtual switch name.", key="vsw1")
             status = st.radio("Status", ["Active Uplink", "Standby Uplink"], horizontal=True)
             
-            gen_vmnic = f"{vmnic} - {vsw} {status}" if vmnic and vsw else ""
+            clean_vmnic = normalize_vmnic(vmnic_raw) if auto_correct else vmnic_raw.strip()
+            clean_vsw1 = normalize_vswitch(vsw1_raw) if auto_correct else vsw1_raw.strip()
+            gen_vmnic = f"{clean_vmnic} - {clean_vsw1} {status}" if clean_vmnic and clean_vsw1 else ""
+            
             st.caption("Generated Physical Uplink:")
             st.code(gen_vmnic or "vmnic0 - vSwitch0 Active Uplink", language="text")
 
+            if st.button("🤖 AI Verify Uplink", key="ai_chk_vmnic"):
+                with st.spinner("Auditing..."):
+                    st.info(verify_and_suggest_with_ai(gen_vmnic or "vmnic0 - vSwitch0 Active Uplink", active_model, asset_type="ESXi Physical Uplink Description"))
+
         with col_b:
             st.markdown("#### 2. Port Group Teaming (`PG`)")
-            vsw_pg = st.text_input("vSwitch Name", value="", placeholder="e.g. vSwitch0, dvSwitch01", help="Target virtual switch.", key="vsw2")
-            act_nics = st.text_input("Active vmnics", value="", placeholder="e.g. vmnic0, vmnic1", help="Comma-separated active uplinks.", key="act_nics_in")
-            stb_nics = st.text_input("Standby vmnics", value="", placeholder="e.g. vmnic2 (optional)", help="Comma-separated standby uplinks.", key="stb_nics_in")
+            vsw_pg_raw = st.text_input("vSwitch Name", value="", placeholder="e.g. vswitch0, dvswitch01", help="Virtual switch name.", key="vsw2")
+            act_nics_raw = st.text_input("Active vmnics", value="", placeholder="e.g. vmnic0, vmnic1, nic2", help="Active uplinks.", key="act_nics_in")
+            stb_nics_raw = st.text_input("Standby vmnics", value="", placeholder="e.g. vmnic2, nic3 (optional)", help="Standby uplinks.", key="stb_nics_in")
             
-            parts = [f"{act_nics.strip()} Active"] if act_nics.strip() else []
-            if stb_nics.strip():
-                parts.append(f"{stb_nics.strip()} Standby")
+            clean_vsw_pg = normalize_vswitch(vsw_pg_raw) if auto_correct else vsw_pg_raw.strip()
+            clean_act = normalize_vmnic_list(act_nics_raw) if auto_correct else act_nics_raw.strip()
+            clean_stb = normalize_vmnic_list(stb_nics_raw) if auto_correct else stb_nics_raw.strip()
+
+            parts = [f"{clean_act} Active"] if clean_act else []
+            if clean_stb:
+                parts.append(f"{clean_stb} Standby")
             
-            gen_pg = f"{vsw_pg} [{' / '.join(parts)}]" if vsw_pg and parts else ""
+            gen_pg = f"{clean_vsw_pg} [{' / '.join(parts)}]" if clean_vsw_pg and parts else ""
             st.caption("Generated Port Group Teaming:")
             st.code(gen_pg or "vSwitch0 [vmnic0, vmnic1 Active]", language="text")
 
+            if st.button("🤖 AI Verify Port Group", key="ai_chk_pg"):
+                with st.spinner("Auditing..."):
+                    st.info(verify_and_suggest_with_ai(gen_pg or "vSwitch0 [vmnic0, vmnic1 Active]", active_model, asset_type="ESXi Port Group Description"))
+
         with col_c:
             st.markdown("#### 3. VMkernel Adapter (`vmk`)")
-            vmk_purp = st.text_input("Purpose / Service", value="", placeholder="e.g. Management Network, vMotion, vSAN", help="Designated role for VMkernel adapter.", key="vmk_p_in")
-            vsw_vmk = st.text_input("vSwitch Name", value="", placeholder="e.g. vSwitch0, dvSwitch01", help="Target virtual switch.", key="vsw3")
+            vmk_purp = st.text_input("Purpose / Service", value="", placeholder="e.g. Management Network, vMotion, vSAN", help="Designated role for VMkernel adapter.", key="vmk_p_in").strip()
+            vsw_vmk_raw = st.text_input("vSwitch Name", value="", placeholder="e.g. vswitch0, dvswitch01", help="Target virtual switch.", key="vsw3")
             
-            gen_vmk = f"{vmk_purp} [{vsw_vmk}]" if vmk_purp and vsw_vmk else ""
+            clean_vsw_vmk = normalize_vswitch(vsw_vmk_raw) if auto_correct else vsw_vmk_raw.strip()
+            gen_vmk = f"{vmk_purp} [{clean_vsw_vmk}]" if vmk_purp and clean_vsw_vmk else ""
             st.caption("Generated VMkernel Description:")
             st.code(gen_vmk or "Management Network [vSwitch0]", language="text")
+
+            if st.button("🤖 AI Verify VMkernel", key="ai_chk_vmk"):
+                with st.spinner("Auditing..."):
+                    st.info(verify_and_suggest_with_ai(gen_vmk or "Management Network [vSwitch0]", active_model, asset_type="ESXi VMkernel Description"))
