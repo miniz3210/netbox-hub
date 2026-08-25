@@ -73,3 +73,10 @@
 * **Multi-Category CSV Support**: Added distinct NetBox CSV upload support for Network Devices, ESXi Hypervisors, and Virtual Machines.
 * **Database Reset Control**: Added a GUI reset button to clear uploaded reference data and revert to default examples.
 * **Clean Tab Isolation**: Kept all database modifications isolated within the Naming Generator.
+
+## Release v2.1.9 — Global Auto-Refreshing CSV Ingest & Unified Categorization
+
+### 🛠️ Improvements & Refinements
+* **Global CSV Ingest Bar**: Moved the CSV uploader to the top control bar next to Letter Casing Mode.
+* **Unified Categorization**: Single CSV ingestion automatically classifies and populates Network Devices, ESXi Hypervisors, and Virtual Machines across all sub-views.
+* **Auto-Refresh Trigger**: Uploading or clearing CSV records triggers instant re-rendering of reference examples and AI context.

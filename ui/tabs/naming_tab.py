@@ -7,38 +7,48 @@ from utils.formatters import (
     normalize_vmnic_list
 )
 from core.naming_engine import verify_and_suggest_with_ai
-from core.db_manager import save_csv_records, get_records_by_category, clear_records_by_category
+from core.db_manager import (
+    save_universal_csv, 
+    get_records_by_category, 
+    clear_all_records,
+    get_total_record_count
+)
 
 def apply_case(text: str, mode: str) -> str:
     return text.upper() if mode == "UPPERCASE" else text.lower()
 
-def render_reference_uploader(category_key: str, default_lines: str, label: str):
-    with st.expander(f"💡 Click to view reference {label} examples"):
-        c_up, c_reset = st.columns([3, 1])
-        with c_up:
-            up_file = st.file_uploader(f"Upload NetBox {label} CSV Export", type=["csv"], key=f"csv_up_{category_key}")
-        with c_reset:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("🗑️ Reset Data", key=f"btn_reset_{category_key}"):
-                clear_records_by_category(category_key)
-                st.success("Reset to defaults!")
-                st.rerun()
+def handle_csv_upload():
+    uploaded_file = st.session_state.get("global_netbox_csv")
+    if uploaded_file is not None:
+        try:
+            counts = save_universal_csv(uploaded_file)
+            st.toast(f"✅ Ingested {sum(counts.values())} records: {counts['device']} Devices, {counts['hypervisor']} Hypervisors, {counts['vm']} VMs!", icon="🚀")
+        except Exception as e:
+            st.error(f"Error parsing CSV: {e}")
 
-        if up_file is not None:
-            try:
-                cnt = save_csv_records(up_file, category=category_key)
-                st.success(f"Loaded {cnt} real {label} records!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error parsing CSV: {e}")
+def handle_csv_reset():
+    clear_all_records()
+    st.toast("🗑️ Inventory records cleared! Reverted to defaults.", icon="🧹")
 
-        real_items = get_records_by_category(category_key)
+def display_reference_box(category_key: str, default_lines: str, label: str):
+    real_items = get_records_by_category(category_key)
+    with st.expander(f"💡 Click to view reference {label} examples ({len(real_items) if real_items else 'Default'} records)"):
         if real_items:
-            st.markdown(f"##### 🟢 Real Data Examples ({len(real_items)} records from NetBox CSV):")
+            st.markdown(f"##### 🟢 Real NetBox Data ({len(real_items)} records):")
             formatted = []
-            for r in real_items[:10]:
-                meta = f" - {r['description']}" if r['description'] else f" ({r['model_or_role'] or r['site']})"
-                formatted.append(f"{r['name']}{meta}")
+            for r in real_items[:12]:
+                meta_parts = []
+                if r.get('manufacturer') and r.get('model_or_role'):
+                    meta_parts.append(f"{r['manufacturer']} - {r['model_or_role']}")
+                elif r.get('model_or_role'):
+                    meta_parts.append(r['model_or_role'])
+                if r.get('site'):
+                    meta_parts.append(f"Site: {r['site']}")
+                if r.get('description'):
+                    meta_parts.append(r['description'])
+                
+                meta_str = f"  ({', '.join(meta_parts)})" if meta_parts else ""
+                formatted.append(f"{r['name']}{meta_str}")
             st.code("\n".join(formatted), language="text")
         else:
             st.markdown("##### 🟡 Default Examples:")
@@ -59,10 +69,36 @@ def render_naming_tab(active_model):
 
     st.markdown("---")
 
+    # Global Top Control Bar: Casing Mode + Universal NetBox CSV Uploader + Reset
+    top_c1, top_c2, top_c3 = st.columns([1.2, 2, 0.8])
+    with top_c1:
+        case_mode = st.radio(
+            "Letter Casing Mode",
+            ["UPPERCASE", "lowercase"],
+            index=0,
+            horizontal=True,
+            help="Choose whether generated hostnames are rendered in UPPERCASE or lowercase."
+        )
+    with top_c2:
+        st.file_uploader(
+            "📥 Upload NetBox Inventory CSV (Auto-feeds Devices, ESXi & VMs)",
+            type=["csv"],
+            key="global_netbox_csv",
+            on_change=handle_csv_upload,
+            help="Upload one NetBox device or VM export CSV to automatically populate reference data across all sections."
+        )
+    with top_c3:
+        st.markdown("<br>", unsafe_allow_html=True)
+        total_recs = get_total_record_count()
+        if total_recs > 0:
+            st.button(f"🗑️ Clear ({total_recs})", on_click=handle_csv_reset, help="Wipe imported records and revert back to default examples.")
+        else:
+            st.caption("ℹ️ Using default reference examples")
+
+    st.markdown("---")
+
     # 1. Network & Security
     if "1. Network" in naming_cat:
-        case_mode = st.radio("Letter Casing Mode", ["UPPERCASE", "lowercase"], index=0, horizontal=True)
-
         st.markdown("##### 📍 Location & Site Code Assistant")
         loc_col1, loc_col2 = st.columns([2, 1])
         with loc_col1:
@@ -108,7 +144,7 @@ def render_naming_tab(active_model):
                 with st.spinner("Auditing against standards & real inventory..."):
                     st.info(verify_and_suggest_with_ai(final_device_name, active_model, asset_type=f"Network/Security Device ({dev_type_preset})", category_key="device"))
 
-            render_reference_uploader(
+            display_reference_box(
                 category_key="device",
                 default_lines="SWUSNYC01-0       (Switch Stack, Member 0)\nWAPUSNYC01        (Access Point 01)\nFWUSNYCPA01       (Firewall 01)",
                 label="Device"
@@ -139,8 +175,6 @@ def render_naming_tab(active_model):
 
     # 2. ESXi Hosts & VMs
     elif "2. Hosts" in naming_cat:
-        case_mode = st.radio("Letter Casing Mode", ["UPPERCASE", "lowercase"], index=0, horizontal=True)
-
         col_a, col_b = st.columns(2)
         with col_a:
             st.markdown("#### 🖥️ ESXi Hypervisor Hostname")
@@ -160,7 +194,7 @@ def render_naming_tab(active_model):
                 with st.spinner("Auditing against standards & real inventory..."):
                     st.info(verify_and_suggest_with_ai(gen_esx, active_model, asset_type="ESXi Hypervisor Hostname", category_key="hypervisor"))
 
-            render_reference_uploader(
+            display_reference_box(
                 category_key="hypervisor",
                 default_lines="NYCESX001.corp.internal  (Enterprise ESXi Node 001)\nLONESX001.corp.internal  (Enterprise ESXi Node 001)\nSYDESX01.corp.local      (Branch Hypervisor Standalone)",
                 label="Hypervisor"
@@ -182,7 +216,7 @@ def render_naming_tab(active_model):
                 with st.spinner("Auditing against standards & real inventory..."):
                     st.info(verify_and_suggest_with_ai(gen_vm, active_model, asset_type="Virtual Machine (VM) Hostname", category_key="vm"))
 
-            render_reference_uploader(
+            display_reference_box(
                 category_key="vm",
                 default_lines="USNYCAPP01     (NYC Application Server 01)\nUKLONDB01      (London Database Server 01)\nAUSYDFS01      (Sydney File Server 01)",
                 label="Virtual Machine"
