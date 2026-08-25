@@ -34,3 +34,9 @@
 * **Asset-Type Context Scoping**: The AI Standards Auditor now receives the explicit asset category (`Virtual Machine`, `ESXi Host`, `Network Switch`, or `Firewall`).
 * **Fixed VM Misclassification**: Prevented VM hostnames containing substrings like `FW` (e.g. `AURFWOTAPP01`) from being falsely audited as Firewalls.
 * **VM Naming Rules Expansion**: Updated rules context to recognize regional enterprise formats `<Country><Site><Role><Seq>` and `<SitePrefix><Role><Seq>`.
+
+## Release v2.0.9 — Optional VMware Auto-Correction Toggle
+
+### 🛠️ Improvements & Refinements
+* **Auto-Correction Toggle Switch**: Added a user toggle (`⚡ Auto-Correct VMware Syntax`) to optionally disable automatic formatting and allow raw, unformatted manual inputs.
+* **Preserved Raw Input**: When auto-correction is disabled, fields accept exact custom casing and naming without modification.
