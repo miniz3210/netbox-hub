@@ -1,122 +1,163 @@
 import re
+import fnmatch
+import difflib
 import requests
-from typing import List, Optional, Set
+import streamlit as st
+from typing import Dict, List, Optional
 from config.constants import GITHUB_REPO, BRANCH
+from core.exceptions import GitHubCatalogError
 
-def get_repo_catalog() -> List[str]:
-    """Fetches the repository catalog tree from GitHub."""
+# Common enterprise hardware aliases mapping
+MANUFACTURER_ALIASES = {
+    "hp": "hpe",
+    "hewlett packard": "hpe",
+    "hewlett-packard": "hpe",
+    "hewlett packard enterprise": "hpe",
+    "cisco systems": "cisco",
+    "palo alto": "paloaltonetworks",
+    "palo alto networks": "paloaltonetworks",
+    "paloalto": "paloaltonetworks",
+    "forti": "fortinet",
+    "juniper networks": "juniper",
+    "arista networks": "arista",
+    "dell emc": "dell",
+    "dell technologies": "dell",
+    "supermicro": "supermicro",
+    "extreme networks": "extremenetworks"
+}
+
+@st.cache_data(ttl=3600, show_spinner="Indexing NetBox devicetype-library from GitHub...")
+def get_repo_catalog() -> Dict[str, List[str]]:
     url = f"https://api.github.com/repos/{GITHUB_REPO}/git/trees/{BRANCH}?recursive=1"
-    try:
-        resp = requests.get(url, timeout=10)
-        if resp.status_code == 200:
-            tree = resp.json().get("tree", [])
-            return [item["path"] for item in tree if item["path"].endswith((".yaml", ".yml"))]
-    except Exception:
-        pass
-    return []
-
-# Alias for backward compatibility
-fetch_device_catalog = get_repo_catalog
-
-def fetch_raw_content(file_path: str) -> str:
-    """Fetches raw YAML/text content directly from the GitHub repository."""
-    url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{BRANCH}/{file_path}"
-    try:
-        resp = requests.get(url, timeout=10)
-        if resp.status_code == 200:
-            return resp.text
-    except Exception:
-        pass
-    return f"# Error fetching {file_path} from GitHub repository."
-
-# Aliases for tab import variants
-get_raw_yaml_from_github = fetch_raw_content
-get_device_yaml_from_github = fetch_raw_content
-get_module_yaml_from_github = fetch_raw_content
-
-def get_canonical_manufacturer(name: str, catalog: Optional[List[str]] = None) -> str:
-    """Finds canonical manufacturer name matching catalog folders or normalizes common aliases."""
-    if not name:
-        return ""
-    m_clean = name.strip().lower()
-    
-    if catalog:
-        mfg_folders: Set[str] = set()
-        for p in catalog:
-            parts = p.split("/")
-            if len(parts) >= 2:
-                mfg_folders.add(parts[1])
-        for folder in mfg_folders:
-            if folder.lower() == m_clean:
-                return folder
-
-    mapping = {
-        "hp": "HPE",
-        "hpe": "HPE",
-        "hewlett packard": "HPE",
-        "hewlett packard enterprise": "HPE",
-        "cisco": "Cisco",
-        "cisco systems": "Cisco",
-        "dell": "Dell",
-        "dell emc": "Dell",
-        "palo alto": "Palo Alto Networks",
-        "paloalto": "Palo Alto Networks",
-        "pan": "Palo Alto Networks",
-        "palo alto networks": "Palo Alto Networks",
-        "fortinet": "Fortinet",
-        "juniper": "Juniper",
-        "juniper networks": "Juniper",
-        "arista": "Arista",
-        "arista networks": "Arista",
-        "checkpoint": "Check Point",
-        "check point": "Check Point",
-        "ubiquiti": "Ubiquiti",
-        "unifi": "Ubiquiti",
-        "aruba": "Aruba",
-        "mikrotik": "MikroTik",
-        "f5": "F5",
-        "f5 networks": "F5",
+    catalog = {
+        "device_types": [],
+        "module_types": [],
+        "rack_types": [],
+        "elevation_images": [],
+        "module_images": [],
+        "manufacturers": set()
     }
-    return mapping.get(m_clean, name.strip())
+    try:
+        res = requests.get(url, timeout=15)
+        if res.status_code == 200:
+            for item in res.json().get("tree", []):
+                path = item["path"]
+                parts = path.split("/")
+                if len(parts) >= 3 and parts[0] in ["device-types", "module-types", "rack-types"]:
+                    catalog["manufacturers"].add(parts[1])
 
-def search_catalog_wildcard(catalog: List[str], manufacturer: str, query: str, item_type: str = "device-types") -> List[str]:
-    """Search catalog items matching manufacturer and query."""
-    m_clean = manufacturer.lower().strip()
-    q_clean = query.lower().strip().replace(" ", "").replace("-", "")
+                if path.startswith("device-types/") and path.endswith((".yaml", ".yml")):
+                    catalog["device_types"].append(path)
+                elif path.startswith("module-types/") and path.endswith((".yaml", ".yml")):
+                    catalog["module_types"].append(path)
+                elif path.startswith("rack-types/") and path.endswith((".yaml", ".yml")):
+                    catalog["rack_types"].append(path)
+                elif path.startswith("elevation-images/") and path.lower().endswith((".png", ".svg", ".jpg")):
+                    catalog["elevation_images"].append(path)
+                elif path.startswith("module-images/") and path.lower().endswith((".png", ".svg", ".jpg")):
+                    catalog["module_images"].append(path)
+        else:
+            raise GitHubCatalogError(f"GitHub API Error: HTTP {res.status_code}")
+    except Exception as e:
+        raise GitHubCatalogError(str(e))
     
-    results = []
-    for path in catalog:
-        if item_type and item_type not in path:
-            continue
-        path_lower = path.lower()
-        norm_path = path_lower.replace(" ", "").replace("-", "")
-        if m_clean and m_clean in path_lower:
-            if not q_clean or q_clean in norm_path:
-                results.append(path)
-        elif not m_clean and q_clean:
-            if q_clean in norm_path:
-                results.append(path)
-    return results
+    catalog["manufacturers"] = sorted(list(catalog["manufacturers"]))
+    return catalog
 
-def search_device_type(catalog: List[str], manufacturer: str, model: str) -> Optional[str]:
-    """Finds single exact or best matching device-type path."""
-    matches = search_catalog_wildcard(catalog, manufacturer, model, item_type="device-types")
-    return matches[0] if matches else None
+def wildcard_match(pattern: str, target: str) -> bool:
+    p = pattern.strip().lower()
+    t = target.strip().lower()
+    if not p:
+        return True
 
-def extract_reference_interface_pattern(yaml_raw: str) -> str:
-    """Extracts sample interface schema from reference YAML for prompt templating."""
-    if not yaml_raw:
-        return ""
-    lines = yaml_raw.splitlines()
-    sample_interfaces = []
-    in_interfaces = False
-    for line in lines:
-        if re.match(r"^interfaces:", line):
-            in_interfaces = True
-            continue
-        if in_interfaces:
-            if line.startswith("  - name:") or line.startswith("    name:"):
-                sample_interfaces.append(line.strip())
-            elif re.match(r"^[a-zA-Z_-]+:", line) and not line.startswith(" "):
-                break
-    return "\n".join(sample_interfaces[:10]) if sample_interfaces else ""
+    glob_p = p if any(c in p for c in ["*", "?", "["]) else f"*{p}*"
+    if fnmatch.fnmatch(t, glob_p):
+        return True
+
+    clean_p = re.sub(r"[^a-zA-Z0-9]", "", p)
+    clean_t = re.sub(r"[^a-zA-Z0-9]", "", t)
+    
+    # Require at least 3 characters for substring containment to avoid false matches like 'hp' in 'chatsworthproducts'
+    if len(clean_p) >= 3 and clean_p in clean_t:
+        return True
+
+    words = re.findall(r"[a-zA-Z0-9]+", t)
+    initials = "".join(w[0] for w in words).lower()
+    return bool(clean_p and (clean_p == initials or clean_p in initials))
+
+def get_canonical_manufacturer(user_input: str, mfg_list: List[str]) -> str:
+    cleaned = user_input.strip().lower()
+    if not cleaned:
+        return user_input
+
+    # 1. Explicit Alias Lookup
+    if cleaned in MANUFACTURER_ALIASES:
+        target_alias = MANUFACTURER_ALIASES[cleaned]
+        for mfg in mfg_list:
+            if mfg.lower() == target_alias:
+                return mfg
+
+    # 2. Exact Case-Insensitive Match
+    for mfg in mfg_list:
+        if cleaned == mfg.lower():
+            return mfg
+
+    # 3. Prefix Match (e.g. 'cis' -> 'Cisco', 'dell' -> 'Dell')
+    for mfg in mfg_list:
+        if mfg.lower().startswith(cleaned):
+            return mfg
+
+    # 4. Wildcard Match
+    for mfg in mfg_list:
+        if wildcard_match(cleaned, mfg):
+            return mfg
+
+    # 5. Fuzzy Match Fallback
+    close = difflib.get_close_matches(cleaned, [m.lower() for m in mfg_list], n=1, cutoff=0.6)
+    if close:
+        for mfg in mfg_list:
+            if mfg.lower() == close[0]:
+                return mfg
+
+    return user_input
+
+def search_catalog_wildcard(file_list: List[str], manufacturer_query: str, model_query: str) -> List[str]:
+    mfg_q = manufacturer_query.strip().lower()
+    model_q = model_query.strip().lower()
+
+    # Normalize manufacturer alias if present
+    if mfg_q in MANUFACTURER_ALIASES:
+        mfg_q = MANUFACTURER_ALIASES[mfg_q]
+
+    primary, secondary = [], []
+
+    for path in file_list:
+        parts = path.split("/")
+        r_mfg = parts[1].lower() if len(parts) >= 3 else ""
+        r_file = re.sub(r"\.(yaml|yml|png|svg|jpg)$", "", parts[-1].lower())
+        
+        mfg_hit = wildcard_match(mfg_q, r_mfg) if mfg_q else True
+        model_hit = wildcard_match(model_q, r_file) if model_q else True
+
+        if mfg_hit and model_hit:
+            primary.append(path)
+        elif model_hit and len(model_q) >= 3:
+            secondary.append(path)
+
+    seen = set()
+    return [x for x in primary + secondary if not (x in seen or seen.add(x))]
+
+def fetch_raw_content(path: str, binary: bool = False):
+    raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{BRANCH}/{path}"
+    res = requests.get(raw_url, timeout=10)
+    if res.status_code == 200:
+        return res.content if binary else res.text
+    return None
+
+def extract_reference_interface_pattern(content: Optional[str]) -> Optional[str]:
+    if not content:
+        return None
+    match = re.search(r"-\s+name:\s*['\"]?([^'\"\n\r]+)['\"]?", content)
+    if match and "{module}" in match.group(1):
+        return match.group(1).strip()
+    return None
