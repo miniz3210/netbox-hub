@@ -7,6 +7,25 @@ from typing import Dict, List, Optional
 from config.constants import GITHUB_REPO, BRANCH
 from core.exceptions import GitHubCatalogError
 
+# Common enterprise hardware aliases mapping
+MANUFACTURER_ALIASES = {
+    "hp": "hpe",
+    "hewlett packard": "hpe",
+    "hewlett-packard": "hpe",
+    "hewlett packard enterprise": "hpe",
+    "cisco systems": "cisco",
+    "palo alto": "paloaltonetworks",
+    "palo alto networks": "paloaltonetworks",
+    "paloalto": "paloaltonetworks",
+    "forti": "fortinet",
+    "juniper networks": "juniper",
+    "arista networks": "arista",
+    "dell emc": "dell",
+    "dell technologies": "dell",
+    "supermicro": "supermicro",
+    "extreme networks": "extremenetworks"
+}
+
 @st.cache_data(ttl=3600, show_spinner="Indexing NetBox devicetype-library from GitHub...")
 def get_repo_catalog() -> Dict[str, List[str]]:
     url = f"https://api.github.com/repos/{GITHUB_REPO}/git/trees/{BRANCH}?recursive=1"
@@ -50,36 +69,73 @@ def wildcard_match(pattern: str, target: str) -> bool:
     t = target.strip().lower()
     if not p:
         return True
+
     glob_p = p if any(c in p for c in ["*", "?", "["]) else f"*{p}*"
     if fnmatch.fnmatch(t, glob_p):
         return True
+
     clean_p = re.sub(r"[^a-zA-Z0-9]", "", p)
     clean_t = re.sub(r"[^a-zA-Z0-9]", "", t)
-    if clean_p and clean_p in clean_t:
+    
+    # Require at least 3 characters for substring containment to avoid false matches like 'hp' in 'chatsworthproducts'
+    if len(clean_p) >= 3 and clean_p in clean_t:
         return True
+
     words = re.findall(r"[a-zA-Z0-9]+", t)
     initials = "".join(w[0] for w in words).lower()
     return bool(clean_p and (clean_p == initials or clean_p in initials))
 
 def get_canonical_manufacturer(user_input: str, mfg_list: List[str]) -> str:
-    cleaned = user_input.strip()
+    cleaned = user_input.strip().lower()
     if not cleaned:
         return user_input
+
+    # 1. Explicit Alias Lookup
+    if cleaned in MANUFACTURER_ALIASES:
+        target_alias = MANUFACTURER_ALIASES[cleaned]
+        for mfg in mfg_list:
+            if mfg.lower() == target_alias:
+                return mfg
+
+    # 2. Exact Case-Insensitive Match
+    for mfg in mfg_list:
+        if cleaned == mfg.lower():
+            return mfg
+
+    # 3. Prefix Match (e.g. 'cis' -> 'Cisco', 'dell' -> 'Dell')
+    for mfg in mfg_list:
+        if mfg.lower().startswith(cleaned):
+            return mfg
+
+    # 4. Wildcard Match
     for mfg in mfg_list:
         if wildcard_match(cleaned, mfg):
             return mfg
-    close = difflib.get_close_matches(user_input, mfg_list, n=1, cutoff=0.5)
-    return close[0] if close else user_input
+
+    # 5. Fuzzy Match Fallback
+    close = difflib.get_close_matches(cleaned, [m.lower() for m in mfg_list], n=1, cutoff=0.6)
+    if close:
+        for mfg in mfg_list:
+            if mfg.lower() == close[0]:
+                return mfg
+
+    return user_input
 
 def search_catalog_wildcard(file_list: List[str], manufacturer_query: str, model_query: str) -> List[str]:
     mfg_q = manufacturer_query.strip().lower()
     model_q = model_query.strip().lower()
+
+    # Normalize manufacturer alias if present
+    if mfg_q in MANUFACTURER_ALIASES:
+        mfg_q = MANUFACTURER_ALIASES[mfg_q]
+
     primary, secondary = [], []
 
     for path in file_list:
         parts = path.split("/")
         r_mfg = parts[1].lower() if len(parts) >= 3 else ""
         r_file = re.sub(r"\.(yaml|yml|png|svg|jpg)$", "", parts[-1].lower())
+        
         mfg_hit = wildcard_match(mfg_q, r_mfg) if mfg_q else True
         model_hit = wildcard_match(model_q, r_file) if model_q else True
 
