@@ -26,7 +26,7 @@ def clean_ai_yaml(text: str) -> str:
                 text = "---\n" + part.strip()
                 break
 
-    # Strip hallucinated comment URLs, reasoning artifacts, and conversational text
+    # Strip hallucinated comment URLs, reasoning artifacts, and non-YAML lines
     cleaned_lines = []
     for line in text.splitlines():
         if re.match(r"^\s*comments\s*:", line, re.I) or "http://" in line or "https://" in line:
@@ -47,30 +47,38 @@ def clean_ai_yaml(text: str) -> str:
 
 def generate_device_yaml(mfg: str, model: str, model_name: str) -> str:
     prompt = f"""
-Search official manufacturer specifications and generate an accurate NetBox Device-Type YAML definition.
+Search official manufacturer specifications and generate a NetBox Device-Type YAML definition.
 Manufacturer: {mfg}
 Model: {model}
 
-CRITICAL RULES:
+STRICT SPECIFICATION RULES:
 1. First line MUST be '---'.
-2. Top-level metadata keys:
+2. Metadata keys:
    manufacturer: {mfg}
    model: <exact model name>
-   slug: <lowercase-slug>
-   part_number: <hardware part number if known, otherwise duplicate model>
-   u_height: <rack units e.g. 0 for microserver/tower, 1, 2, 4>
-   is_full_depth: <true for full-depth rack servers, false for microserver/tower/half-depth appliances>
+   slug: <mandatory lowercase slug with manufacturer prefix, e.g. {mfg.lower()}-<model-slug>>
+   part_number: <hardware part number or clean model SKU>
+   u_height: <rack units: 0 for MicroServer/tower/desktop; 1, 2, 4 for standard rack servers>
+   is_full_depth: <false for MicroServer/tower/desktop/compact; true only for deep 19" rack chassis>
    airflow: <front-to-rear / passive / rear-to-front>
    weight: <accurate numeric weight in kg>
    weight_unit: kg
-3. Components:
-   - power-ports: Reflect ACTUAL physical power supply count (e.g. 1 PSU for MicroServer/Desktop vs redundant 2 PSUs for Enterprise Rack servers).
-   - console-ports: Include if present (Serial de-9 / RJ-45).
-   - module-bays / PCIe slots: Include actual physical expansion slots on the hardware.
-4. Interfaces:
-   - For Servers/Chassis: Include physical onboard NIC ports (e.g. 1000base-t) AND dedicated out-of-band management port (e.g. name: 'iLO' / 'iDRAC', type: 1000base-t, mgmt_only: true).
-   - For Switches/Routers: Include physical network interfaces.
-5. DO NOT invent URLs. DO NOT output a 'comments' key. Output ONLY raw valid YAML starting with '---'.
+
+3. Hardware Component Accuracy:
+   - power-ports:
+     * Compact/MicroServer/Tower: Single PSU (e.g. 150W or 200W). Name: 'PSU1' or 'Power Port 1', type: 'iec-60320-c14'.
+     * Enterprise Rack Servers (1U/2U): Dual redundant PSUs (e.g. PSU1, PSU2).
+   - console-ports:
+     * Include ONLY if the physical chassis has a dedicated external Serial/RS-232 (de-9 or RJ-45) management port. Do NOT include for towers/microservers that only have VGA/USB/iLO.
+   - interfaces:
+     * Count onboard physical NICs accurately from datasheet (e.g. MicroServer Gen8 has EXACTLY 2 physical NICs: GigabitEthernet1, GigabitEthernet2 or NIC1, NIC2 — DO NOT add 4 NICs).
+     * Include dedicated Out-Of-Band Management (e.g. name: 'iLO' / 'iDRAC', type: 1000base-t, mgmt_only: true).
+   - module-bays:
+     * Include only real expansion slots present (e.g. PCIe1 for low-profile slots).
+
+4. Output Restrictions:
+   - DO NOT invent URLs or include a 'comments' block.
+   - Output ONLY raw valid YAML starting with '---'.
 """
     return clean_ai_yaml(call_ai(prompt, model_name))
 
