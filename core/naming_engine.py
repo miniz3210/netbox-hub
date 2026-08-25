@@ -1,24 +1,42 @@
 import re
 import json
-from typing import Dict
+from typing import Dict, List, Any
 from core.ai_client import call_ai
 from config.naming_rules import load_naming_rules, export_rules_as_prompt
+from core.db_manager import get_records_by_category
 
-def verify_and_suggest_with_ai(user_input_text: str, model_name: str, asset_type: str = "General Asset") -> str:
+def build_inventory_context_for_ai(category: str) -> str:
+    """Builds a contextual summary of actual uploaded NetBox inventory records."""
+    records = get_records_by_category(category)
+    if not records:
+        return "No uploaded NetBox inventory records present. Evaluate strictly against standard enterprise guidelines."
+    
+    samples = []
+    for r in records[:15]:
+        desc_info = f" - {r['description']}" if r.get('description') else ""
+        type_info = f" [{r.get('model_or_role') or r.get('site')}]"
+        samples.append(f"• {r['name']}{type_info}{desc_info}")
+    
+    return "ACTUAL PRODUCTION INVENTORY CONTEXT (Uploaded NetBox Records):\n" + "\n".join(samples)
+
+def verify_and_suggest_with_ai(user_input_text: str, model_name: str, asset_type: str = "General Asset", category_key: str = "device") -> str:
     naming_context = export_rules_as_prompt(load_naming_rules())
+    inventory_context = build_inventory_context_for_ai(category_key)
+
     system_msg = f"""You are a Principal Infrastructure Architect and NetBox Standards Auditor.
-Evaluate the following asset of type: **{asset_type}**.
+Evaluate the following asset: **{asset_type}**.
+
+{inventory_context}
 
 STRICT AUDIT INSTRUCTIONS:
-1. Active Directory suffixes like `.eswine.adds`, `.adds`, `.aw.ads`, and `.eswines.ot` are 100% VALID official enterprise internal domains. DO NOT flag `.adds` or `.ot` as invalid or non-standard TLDs.
-2. Recognize both standard site codes (e.g., `pws`, `age`, `cam`, `rofl`, `syd`, `bris`) and OT role prefixes (e.g., `otinfhost`, `otinfesx`, `esx`, `infmgmt`).
-3. For ESXi hosts with `.eswine.adds`, evaluate it as an official Corporate/IT Hypervisor node.
-4. Output Format:
+1. If uploaded production inventory records are provided above, align your audit and recommendations to match the proven site codes, role conventions, and patterns observed in those records.
+2. Accept enterprise internal domain suffixes (e.g. `.internal`, `.corp`, `.adds`, `.local`, `.lan`) as valid private directory structures.
+3. Output Format:
 - **Verdict**: [✅ Compliant | 💡 Suggestion]
 - **Target Asset Class**: {asset_type}
-- **Standard Formula**: `<exact formula matching company pattern>`
-- **Recommended Output**: `<clean recommended hostname>`
-- **Audit Reason**: Clear explanation acknowledging the company domain and site structure.
+- **Observed Production Pattern**: <Explain pattern based on uploaded NetBox records if present>
+- **Recommended Output**: `<clean recommended hostname or syntax>`
+- **Audit Reason**: Clear concise architectural explanation.
 
 COMPANY NAMING STANDARDS:
 {naming_context}

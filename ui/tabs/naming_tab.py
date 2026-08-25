@@ -34,7 +34,7 @@ def render_reference_uploader(category_key: str, default_lines: str, label: str)
 
         real_items = get_records_by_category(category_key)
         if real_items:
-            st.markdown(f"##### 🟢 Real Data Examples ({len(real_items)} records):")
+            st.markdown(f"##### 🟢 Real Data Examples ({len(real_items)} records from NetBox CSV):")
             formatted = []
             for r in real_items[:10]:
                 meta = f" - {r['description']}" if r['description'] else f" ({r['model_or_role'] or r['site']})"
@@ -66,7 +66,7 @@ def render_naming_tab(active_model):
         st.markdown("##### 📍 Location & Site Code Assistant")
         loc_col1, loc_col2 = st.columns([2, 1])
         with loc_col1:
-            input_location = st.text_input("Location / City Name", value="", placeholder="e.g. Sydney, London, Dallas, Rowland Flat", key="loc_input_help")
+            input_location = st.text_input("Location / City Name", value="", placeholder="e.g. Sydney, London, Dallas, New York", key="loc_input_help")
         with loc_col2:
             auto_code = compute_suggested_site_code(input_location) if input_location else ""
             st.info(f"Suggested Site Code: **`{auto_code or '----'}`**")
@@ -91,10 +91,10 @@ def render_naming_tab(active_model):
             else:
                 dev_prefix = dev_type_preset.split()[0].strip()
 
-            c_ctry = st.text_input("Country Code (2-letter)", value="", placeholder="e.g. AU, UK, US, ES, NZ", key="u_ctry").strip()
-            c_state = st.text_input("State / Region (Optional)", value="", placeholder="e.g. SA, NSW, VIC, TX", key="u_state").strip()
-            c_site = st.text_input("Site Code", value=auto_code, placeholder="e.g. BRIS, ROFL, SYD", key="u_site").strip()
-            c_zone = st.text_input("Zone / Role / Vendor (Optional)", value="", placeholder="e.g. CORE, DIST, PA", key="u_zone").strip()
+            c_ctry = st.text_input("Country Code (2-letter)", value="", placeholder="e.g. US, UK, AU, DE, JP", key="u_ctry").strip()
+            c_state = st.text_input("State / Region (Optional)", value="", placeholder="e.g. NY, CA, TX, NSW", key="u_state").strip()
+            c_site = st.text_input("Site Code", value=auto_code, placeholder="e.g. NYC, LON, SYD, DAL", key="u_site").strip()
+            c_zone = st.text_input("Zone / Role / Vendor (Optional)", value="", placeholder="e.g. CORE, DIST, EDGE, PA", key="u_zone").strip()
             c_seq = st.text_input("Sequence Number", value="01", placeholder="e.g. 01, 02", key="u_seq").strip()
             c_stack = st.text_input("Stack / Member ID (Optional)", value="", placeholder="e.g. 0, 1", key="u_stk").strip()
 
@@ -105,12 +105,12 @@ def render_naming_tab(active_model):
             st.code(final_device_name, language="text")
 
             if st.button("🤖 AI Verify / Suggest Device Hostname", key="ai_chk_dev"):
-                with st.spinner("Auditing against standards..."):
-                    st.info(verify_and_suggest_with_ai(final_device_name, active_model, asset_type=f"Network/Security Device ({dev_type_preset})"))
+                with st.spinner("Auditing against standards & real inventory..."):
+                    st.info(verify_and_suggest_with_ai(final_device_name, active_model, asset_type=f"Network/Security Device ({dev_type_preset})", category_key="device"))
 
             render_reference_uploader(
                 category_key="device",
-                default_lines="SWUKBRIS01-0      (Switch Stack, Member 0)\nWAPUKBRIS01       (Access Point 01)\nFWUKBRISPA01      (Palo Alto Firewall 01)",
+                default_lines="SWUSNYC01-0       (Switch Stack, Member 0)\nWAPUSNYC01        (Access Point 01)\nFWUSNYCPA01       (Firewall 01)",
                 label="Device"
             )
 
@@ -123,9 +123,9 @@ def render_naming_tab(active_model):
             
             if p_cat == "Switch Uplink (Inter-Switch)":
                 l_dev = st.text_input("Local Device Hostname", value=final_device_name, placeholder="e.g. SWUSNYC01-0", key="up_ld").strip()
-                l_port_raw = st.text_input("Local Port", value="", placeholder="e.g. Gi1/0/48, Port 51", key="up_lp")
+                l_port_raw = st.text_input("Local Port", value="", placeholder="e.g. Gi1/0/48, Te1/0/1", key="up_lp")
                 r_dev = st.text_input("Remote Device Hostname", value="", placeholder="e.g. SWUSNYC02-0", key="up_rd").strip()
-                r_port_raw = st.text_input("Remote Port", value="", placeholder="e.g. Gi1/0/48, Port 26", key="up_rp")
+                r_port_raw = st.text_input("Remote Port", value="", placeholder="e.g. Gi1/0/48, Te1/0/1", key="up_rp")
                 link_role = st.text_input("Role / Purpose", value="Uplink", placeholder="e.g. Uplink", key="up_lr").strip()
 
                 l_port_short = normalize_port_shortname(l_port_raw)
@@ -144,10 +144,10 @@ def render_naming_tab(active_model):
         col_a, col_b = st.columns(2)
         with col_a:
             st.markdown("#### 🖥️ ESXi Hypervisor Hostname")
-            h_site = st.text_input("Site Prefix", value="", placeholder="e.g. nyc, syd, pws, age", key="esx_site").strip()
-            h_role = st.text_input("Host Role (Optional)", value="", placeholder="e.g. esx, otinfhost", key="esx_role").strip()
+            h_site = st.text_input("Site Prefix", value="", placeholder="e.g. nyc, lon, syd, dal", key="esx_site").strip()
+            h_role = st.text_input("Host Role (Optional)", value="", placeholder="e.g. esx, infhost", key="esx_role").strip()
             h_num = st.text_input("Host Sequence Number", value="001", placeholder="e.g. 001, 01", key="esx_num").strip()
-            h_dom = st.text_input("Domain Name (FQDN Suffix)", value="", placeholder="e.g. corp.local, eswine.adds", key="esx_dom").strip()
+            h_dom = st.text_input("Domain Name (FQDN Suffix)", value="", placeholder="e.g. corp.internal, corp.local, enterprise.net", key="esx_dom").strip()
 
             raw_host = f"{h_site}{h_role or 'esx'}{h_num}"
             host_formatted = apply_case(raw_host, case_mode)
@@ -157,19 +157,19 @@ def render_naming_tab(active_model):
             st.code(gen_esx, language="text")
 
             if st.button("🤖 AI Verify ESXi Host", key="ai_chk_esx"):
-                with st.spinner("Auditing..."):
-                    st.info(verify_and_suggest_with_ai(gen_esx, active_model, asset_type="ESXi Hypervisor Hostname"))
+                with st.spinner("Auditing against standards & real inventory..."):
+                    st.info(verify_and_suggest_with_ai(gen_esx, active_model, asset_type="ESXi Hypervisor Hostname", category_key="hypervisor"))
 
             render_reference_uploader(
                 category_key="hypervisor",
-                default_lines="NYCESX001.corp.local  (Standard Enterprise ESXi Node 001)\nSYDOTINFHOST1.ot.net  (Industrial OT Cluster Node 1)\nPWSESX001.eswine.adds (Campo Viejo IT ESXi Host)\nLONESX01              (Branch Hypervisor Standalone)",
+                default_lines="NYCESX001.corp.internal  (Enterprise ESXi Node 001)\nLONESX001.corp.internal  (Enterprise ESXi Node 001)\nSYDESX01.corp.local      (Branch Hypervisor Standalone)",
                 label="Hypervisor"
             )
 
         with col_b:
             st.markdown("#### 🖲️ Virtual Machine (VM) Hostname")
-            v_site = st.text_input("Site Prefix / Country & Site", value="", placeholder="e.g. aurfl, nyc, syd, rofl, mel", key="vm_site").strip()
-            v_role = st.text_input("Role Code / Workload", value="", placeholder="e.g. wotapp, wscingp, sfs, cvi, afs, sani, app, db", key="vm_role").strip()
+            v_site = st.text_input("Site Prefix / Country & Site", value="", placeholder="e.g. usnyc, uklon, ausyd", key="vm_site").strip()
+            v_role = st.text_input("Role Code / Workload", value="", placeholder="e.g. app, web, db, fs, dc", key="vm_role").strip()
             v_seq = st.text_input("Sequence Number", value="01", placeholder="e.g. 01, 02", key="vm_seq").strip()
 
             raw_vm = f"{v_site}{v_role}{v_seq}"
@@ -179,12 +179,12 @@ def render_naming_tab(active_model):
             st.code(gen_vm, language="text")
 
             if st.button("🤖 AI Verify VM Hostname", key="ai_chk_vm"):
-                with st.spinner("Auditing..."):
-                    st.info(verify_and_suggest_with_ai(gen_vm, active_model, asset_type="Virtual Machine (VM) Hostname"))
+                with st.spinner("Auditing against standards & real inventory..."):
+                    st.info(verify_and_suggest_with_ai(gen_vm, active_model, asset_type="Virtual Machine (VM) Hostname", category_key="vm"))
 
             render_reference_uploader(
                 category_key="vm",
-                default_lines="AURFLWOTAPP01 (Rowland Flat OT App Server 01)\nAUGLOSFS01    (Berri Estates File Server 01)\nNYCCVI01      (NYC Core Virtualization VM 01)\nROFLAFS01     (Rowland Flat App/File Server 01)",
+                default_lines="USNYCAPP01     (NYC Application Server 01)\nUKLONDB01      (London Database Server 01)\nAUSYDFS01      (Sydney File Server 01)",
                 label="Virtual Machine"
             )
 
@@ -212,7 +212,7 @@ def render_naming_tab(active_model):
 
         with col_b:
             st.markdown("#### 2. Port Group Teaming (`PG-`)")
-            vsw_pg_raw = st.text_input("vSwitch Name", value="PG-", placeholder="e.g. PG-iscsi", key="vsw2")
+            vsw_pg_raw = st.text_input("vSwitch Name", value="PG-", placeholder="e.g. PG-VM Network", help="Port Group name (defaults to PG- prefix).", key="vsw2")
             act_nics_raw = st.text_input("Active vmnics", value="vmnic", placeholder="e.g. vmnic0, vmnic1", key="act_nics_in")
             stb_nics_raw = st.text_input("Standby vmnics", value="", placeholder="e.g. vmnic2 (optional)", key="stb_nics_in")
             
@@ -230,8 +230,8 @@ def render_naming_tab(active_model):
 
         with col_c:
             st.markdown("#### 3. VMkernel Adapter (`vmk`)")
-            vmk_purp = st.text_input("Purpose / Service", value="", placeholder="e.g. iSCSI01, Management", key="vmk_p_in").strip()
-            vsw_vmk_raw = st.text_input("vSwitch Name", value="vSwitch", placeholder="e.g. vswitch0", key="vsw3")
+            vmk_purp = st.text_input("Purpose / Service", value="", placeholder="e.g. Management, vMotion, Storage", key="vmk_p_in").strip()
+            vsw_vmk_raw = st.text_input("vSwitch Name", value="vSwitch", placeholder="e.g. vSwitch0", key="vsw3")
             
             clean_vsw_vmk = normalize_vswitch(vsw_vmk_raw) if auto_correct else vsw_vmk_raw.strip()
             
