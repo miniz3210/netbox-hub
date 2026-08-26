@@ -109,3 +109,9 @@ RULES_FILE = "naming_rules.json"
 * **Wording Normalization**: Standardized label to "NetBox Data" across the application.
 * **Site-Aware NetBox Lookup**: Reference cards and AI validation dynamically filter records matching the entered site code (e.g., `AGE`, `DAL`).
 * **Custom AI Model Input**: Added manual model input in the sidebar for quick testing of any gateway model.
+
+## Release v2.2.5 — Custom Model Input & Cleaned Defaults
+
+### 🛠️ Improvements & Refinements
+* **Custom Model Field**: Renamed on-the-fly test input field to `Custom Model`.
+* **Cleaned Default Presets**: Updated default fallback list to verified working models (`gemini-3-flash-preview`, `qwen3.6-27b`, `gpt-oss-120b`).
