@@ -28,13 +28,14 @@ def handle_csv_upload():
 
 def handle_csv_reset():
     clear_all_records()
-    st.toast("🗑️ Real inventory records cleared. Showing default examples.", icon="🧹")
+    st.toast("🗑️ NetBox Data cleared. Showing default examples.", icon="🧹")
 
-def display_reference_box(category_key: str, default_lines: str, label: str):
-    real_items = get_records_by_category(category_key)
-    with st.expander(f"💡 Click to view reference {label} examples ({len(real_items) if real_items else 'Default'} records)"):
+def display_reference_box(category_key: str, default_lines: str, label: str, site_filter: str = ""):
+    real_items = get_records_by_category(category_key, site_filter=site_filter)
+    filter_hint = f" matching '{site_filter.upper()}'" if site_filter else ""
+    with st.expander(f"💡 Click to view reference {label} examples ({len(real_items) if real_items else 'Default'} records{filter_hint})"):
         if real_items:
-            st.markdown(f"##### 🟢 Real NetBox Data ({len(real_items)} records):")
+            st.markdown(f"##### 🟢 NetBox Data ({len(real_items)} records{filter_hint}):")
             formatted = []
             for r in real_items[:12]:
                 meta_parts = []
@@ -55,7 +56,6 @@ def display_reference_box(category_key: str, default_lines: str, label: str):
             st.code(default_lines, language="text")
 
 def render_compact_toolbar():
-    """Renders a sleek, minimal toolbar for Sections 1 & 2 only."""
     top_c1, top_c2 = st.columns([1.2, 2.8])
     with top_c1:
         case_mode = st.radio(
@@ -67,9 +67,9 @@ def render_compact_toolbar():
         )
     with top_c2:
         total_recs = get_total_record_count()
-        status_tag = f"🟢 ({total_recs} records active)" if total_recs > 0 else "⚪ (Default Examples)"
+        status_tag = f"🟢 ({total_recs} records active)" if total_recs > 0 else "⚪ (Default Mode)"
         
-        with st.expander(f"📁 NetBox CSV Data Ingest {status_tag}", expanded=False):
+        with st.expander(f"📁 NetBox Data CSV Ingest {status_tag}", expanded=False):
             up_col, reset_col = st.columns([3, 1])
             with up_col:
                 st.file_uploader(
@@ -135,7 +135,7 @@ def render_naming_tab(active_model):
 
             c_ctry = st.text_input("Country Code (2-letter)", value="", placeholder="e.g. US, UK, AU, DE, JP", key="u_ctry").strip()
             c_state = st.text_input("State / Region (Optional)", value="", placeholder="e.g. NY, CA, TX, NSW", key="u_state").strip()
-            c_site = st.text_input("Site Code", value=auto_code, placeholder="e.g. NYC, LON, SYD, DAL", key="u_site").strip()
+            c_site = st.text_input("Site Code", value=auto_code, placeholder="e.g. NYC, LON, SYD, AGE", key="u_site").strip()
             c_zone = st.text_input("Zone / Role / Vendor (Optional)", value="", placeholder="e.g. CORE, DIST, EDGE, PA", key="u_zone").strip()
             c_seq = st.text_input("Sequence Number", value="01", placeholder="e.g. 01, 02", key="u_seq").strip()
             c_stack = st.text_input("Stack / Member ID (Optional)", value="", placeholder="e.g. 0, 1", key="u_stk").strip()
@@ -147,13 +147,20 @@ def render_naming_tab(active_model):
             st.code(final_device_name, language="text")
 
             if st.button("🤖 AI Verify / Suggest Device Hostname", key="ai_chk_dev"):
-                with st.spinner("Auditing against standards & real inventory..."):
-                    st.info(verify_and_suggest_with_ai(final_device_name, active_model, asset_type=f"Network/Security Device ({dev_type_preset})", category_key="device"))
+                with st.spinner("Auditing against NetBox Data & standards..."):
+                    st.info(verify_and_suggest_with_ai(
+                        final_device_name, 
+                        active_model, 
+                        asset_type=f"Network/Security Device ({dev_type_preset})", 
+                        category_key="device",
+                        site_filter=c_site
+                    ))
 
             display_reference_box(
                 category_key="device",
                 default_lines="SWUSNYC01-0       (Switch Stack, Member 0)\nWAPUSNYC01        (Access Point 01)\nFWUSNYCPA01       (Firewall 01)",
-                label="Device"
+                label="Device",
+                site_filter=c_site
             )
 
         with col_b:
@@ -186,10 +193,10 @@ def render_naming_tab(active_model):
         col_a, col_b = st.columns(2)
         with col_a:
             st.markdown("#### 🖥️ ESXi Hypervisor Hostname")
-            h_site = st.text_input("Site Prefix", value="", placeholder="e.g. nyc, lon, syd, dal", key="esx_site").strip()
-            h_role = st.text_input("Host Role (Optional)", value="", placeholder="e.g. esx, infhost", key="esx_role").strip()
-            h_num = st.text_input("Host Sequence Number", value="001", placeholder="e.g. 001, 01", key="esx_num").strip()
-            h_dom = st.text_input("Domain Name (FQDN Suffix)", value="", placeholder="e.g. corp.internal, corp.local, enterprise.net", key="esx_dom").strip()
+            h_site = st.text_input("Site Prefix", value="", placeholder="e.g. age, nyc, lon, syd", key="esx_site").strip()
+            h_role = st.text_input("Host Role (Optional)", value="", placeholder="e.g. esx, otinfhost, infhost", key="esx_role").strip()
+            h_num = st.text_input("Host Sequence Number", value="001", placeholder="e.g. 001, 01, 1", key="esx_num").strip()
+            h_dom = st.text_input("Domain Name (FQDN Suffix)", value="", placeholder="e.g. corp.internal, eswine.adds, enterprise.net", key="esx_dom").strip()
 
             raw_host = f"{h_site}{h_role or 'esx'}{h_num}"
             host_formatted = apply_case(raw_host, case_mode)
@@ -199,18 +206,25 @@ def render_naming_tab(active_model):
             st.code(gen_esx, language="text")
 
             if st.button("🤖 AI Verify ESXi Host", key="ai_chk_esx"):
-                with st.spinner("Auditing against standards & real inventory..."):
-                    st.info(verify_and_suggest_with_ai(gen_esx, active_model, asset_type="ESXi Hypervisor Hostname", category_key="hypervisor"))
+                with st.spinner("Auditing against NetBox Data & standards..."):
+                    st.info(verify_and_suggest_with_ai(
+                        gen_esx, 
+                        active_model, 
+                        asset_type="ESXi Hypervisor Hostname", 
+                        category_key="hypervisor",
+                        site_filter=h_site
+                    ))
 
             display_reference_box(
                 category_key="hypervisor",
                 default_lines="NYCESX001.corp.internal  (Enterprise ESXi Node 001)\nLONESX001.corp.internal  (Enterprise ESXi Node 001)\nSYDESX01.corp.local      (Branch Hypervisor Standalone)",
-                label="Hypervisor"
+                label="Hypervisor",
+                site_filter=h_site
             )
 
         with col_b:
             st.markdown("#### 🖲️ Virtual Machine (VM) Hostname")
-            v_site = st.text_input("Site Prefix / Country & Site", value="", placeholder="e.g. usnyc, uklon, ausyd", key="vm_site").strip()
+            v_site = st.text_input("Site Prefix / Country & Site", value="", placeholder="e.g. age, usnyc, uklon", key="vm_site").strip()
             v_role = st.text_input("Role Code / Workload", value="", placeholder="e.g. app, web, db, fs, dc", key="vm_role").strip()
             v_seq = st.text_input("Sequence Number", value="01", placeholder="e.g. 01, 02", key="vm_seq").strip()
 
@@ -221,16 +235,23 @@ def render_naming_tab(active_model):
             st.code(gen_vm, language="text")
 
             if st.button("🤖 AI Verify VM Hostname", key="ai_chk_vm"):
-                with st.spinner("Auditing against standards & real inventory..."):
-                    st.info(verify_and_suggest_with_ai(gen_vm, active_model, asset_type="Virtual Machine (VM) Hostname", category_key="vm"))
+                with st.spinner("Auditing against NetBox Data & standards..."):
+                    st.info(verify_and_suggest_with_ai(
+                        gen_vm, 
+                        active_model, 
+                        asset_type="Virtual Machine (VM) Hostname", 
+                        category_key="vm",
+                        site_filter=v_site
+                    ))
 
             display_reference_box(
                 category_key="vm",
                 default_lines="USNYCAPP01     (NYC Application Server 01)\nUKLONDB01      (London Database Server 01)\nAUSYDFS01      (Sydney File Server 01)",
-                label="Virtual Machine"
+                label="Virtual Machine",
+                site_filter=v_site
             )
 
-    # 3. ESXi Network Descriptions (No Casing or CSV Bar)
+    # 3. ESXi Network Descriptions
     else:
         auto_correct = st.checkbox(
             "⚡ Auto-Correct VMware Syntax (e.g. vswitch1 -> vSwitch1, nic0 -> vmnic0)",

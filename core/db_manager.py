@@ -31,8 +31,6 @@ def save_universal_csv(file_bytes) -> Dict[str, int]:
     df = pd.read_csv(file_bytes)
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
-    # Wipe old inventory to prevent stale duplication
     cursor.execute("DELETE FROM inventory_records")
     
     cols = {str(c).lower().strip(): c for c in df.columns}
@@ -62,7 +60,6 @@ def save_universal_csv(file_bytes) -> Dict[str, int]:
             if k.lower() == "nan": 
                 k = ""
 
-        # Auto-classify based on name, role, hardware type, or columns
         combined_text = f"{name} {role} {dtype} {desc}".lower()
         if any(h in combined_text for h in ["esx", "hypervisor", "infhost", "vmhost", "esxi"]):
             cat = "hypervisor"
@@ -82,11 +79,25 @@ def save_universal_csv(file_bytes) -> Dict[str, int]:
     conn.close()
     return counts
 
-def get_records_by_category(category: str) -> List[Dict[str, Any]]:
+def get_records_by_category(category: str, site_filter: str = "") -> List[Dict[str, Any]]:
     init_db()
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
+    
+    clean_filter = site_filter.strip().lower()
+    if clean_filter:
+        pattern = f"%{clean_filter}%"
+        cursor.execute("""
+            SELECT * FROM inventory_records 
+            WHERE category = ? AND (LOWER(site) LIKE ? OR LOWER(name) LIKE ?)
+            ORDER BY id ASC
+        """, (category, pattern, pattern))
+        rows = cursor.fetchall()
+        if rows:
+            conn.close()
+            return [dict(r) for r in rows]
+
     cursor.execute("SELECT * FROM inventory_records WHERE category = ? ORDER BY id ASC", (category,))
     rows = cursor.fetchall()
     conn.close()

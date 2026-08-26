@@ -5,23 +5,25 @@ from core.ai_client import call_ai
 from config.naming_rules import load_naming_rules, export_rules_as_prompt
 from core.db_manager import get_records_by_category
 
-def build_inventory_context_for_ai(category: str) -> str:
-    """Builds a contextual summary of actual uploaded NetBox inventory records."""
-    records = get_records_by_category(category)
+def build_inventory_context_for_ai(category: str, site_filter: str = "") -> str:
+    """Builds a contextual summary of actual uploaded NetBox Data records."""
+    records = get_records_by_category(category, site_filter=site_filter)
     if not records:
-        return "No uploaded NetBox inventory records present. Evaluate strictly against standard enterprise guidelines."
+        return "No matching NetBox Data records present. Evaluate strictly against standard enterprise guidelines."
     
     samples = []
     for r in records[:15]:
+        site_str = f", Site: {r['site']}" if r.get('site') else ""
         desc_info = f" - {r['description']}" if r.get('description') else ""
-        type_info = f" [{r.get('model_or_role') or r.get('site')}]"
+        type_info = f" [{r.get('model_or_role') or ''}{site_str}]"
         samples.append(f"• {r['name']}{type_info}{desc_info}")
     
-    return "ACTUAL PRODUCTION INVENTORY CONTEXT (Uploaded NetBox Records):\n" + "\n".join(samples)
+    site_notice = f" for Site '{site_filter.upper()}'" if site_filter else ""
+    return f"MATCHED NETBOX DATA CONTEXT{site_notice}:\n" + "\n".join(samples)
 
-def verify_and_suggest_with_ai(user_input_text: str, model_name: str, asset_type: str = "General Asset", category_key: str = "device") -> str:
+def verify_and_suggest_with_ai(user_input_text: str, model_name: str, asset_type: str = "General Asset", category_key: str = "device", site_filter: str = "") -> str:
     naming_context = export_rules_as_prompt(load_naming_rules())
-    inventory_context = build_inventory_context_for_ai(category_key)
+    inventory_context = build_inventory_context_for_ai(category_key, site_filter=site_filter)
 
     system_msg = f"""You are a Principal Infrastructure Architect and NetBox Standards Auditor.
 Evaluate the following asset: **{asset_type}**.
@@ -29,12 +31,12 @@ Evaluate the following asset: **{asset_type}**.
 {inventory_context}
 
 STRICT AUDIT INSTRUCTIONS:
-1. If uploaded production inventory records are provided above, align your audit and recommendations to match the proven site codes, role conventions, and patterns observed in those records.
-2. Accept enterprise internal domain suffixes (e.g. `.internal`, `.corp`, `.adds`, `.local`, `.lan`) as valid private directory structures.
+1. If matched NetBox Data records are provided above for this site/cluster, align your audit and recommendations to match the proven site codes, role conventions, and patterns observed in those records.
+2. Accept enterprise internal domain suffixes (e.g. `.internal`, `.corp`, `.adds`, `.local`, `.eswine.adds`, `.lan`) as valid private directory structures.
 3. Output Format:
 - **Verdict**: [✅ Compliant | 💡 Suggestion]
 - **Target Asset Class**: {asset_type}
-- **Observed Production Pattern**: <Explain pattern based on uploaded NetBox records if present>
+- **Observed Site / NetBox Pattern**: <Explain pattern based on NetBox Data records if present>
 - **Recommended Output**: `<clean recommended hostname or syntax>`
 - **Audit Reason**: Clear concise architectural explanation.
 
