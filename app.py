@@ -1,28 +1,25 @@
+import inspect
 import streamlit as st
 from config.constants import APP_VERSION
 from config.settings import AVAILABLE_MODELS, OPENROUTER_BASE_URL
 from core.db_manager import init_db
 
 # ----------------- Safe Tab Imports -----------------
-# 1. Device Tab
 try:
     from ui.tabs.device_tab import render_device_tab
 except ImportError:
     render_device_tab = lambda cat, model: st.warning("Device tab module not found.")
 
-# 2. Module Tab
 try:
     from ui.tabs.module_tab import render_module_tab
 except ImportError:
     render_module_tab = lambda cat, model: st.warning("Module tab module not found.")
 
-# 3. Rack Tab
 try:
     from ui.tabs.rack_tab import render_rack_tab
 except ImportError:
-    render_rack_tab = lambda cat: st.warning("Rack tab module not found.")
+    render_rack_tab = lambda cat, model: st.warning("Rack tab module not found.")
 
-# 4. Image Tab
 try:
     from ui.tabs.image_tab import render_image_tab
 except ImportError:
@@ -31,7 +28,6 @@ except ImportError:
     except ImportError:
         render_image_tab = lambda cat: st.warning("Image tab module not found.")
 
-# 5. Batch / Excel Tab
 try:
     from ui.tabs.batch_tab import render_batch_tab as render_excel_tab
 except ImportError:
@@ -43,13 +39,11 @@ except ImportError:
         except ImportError:
             render_excel_tab = lambda cat, model: st.warning("Batch Excel tab module not found.")
 
-# 6. Naming Generator Tab
 try:
     from ui.tabs.naming_tab import render_naming_tab
 except ImportError:
     render_naming_tab = lambda model: st.warning("Naming tab module not found.")
 
-# 7. Rules Context Tab
 try:
     from ui.tabs.rules_tab import render_rules_tab
 except ImportError:
@@ -68,16 +62,32 @@ st.set_page_config(
 
 init_db()
 
-st.markdown("""
+# Custom Header & Fixed Corner Version Badge
+st.markdown(f"""
     <style>
-    .block-container {
+    .block-container {{
         padding-top: 1.5rem;
         padding-bottom: 2rem;
-    }
-    .stSelectbox label, .stTextInput label {
+    }}
+    .stSelectbox label, .stTextInput label {{
         font-weight: 600;
-    }
+    }}
+    .fixed-version-corner {{
+        position: fixed;
+        bottom: 14px;
+        left: 18px;
+        background-color: rgba(15, 23, 42, 0.85);
+        color: #94a3b8;
+        padding: 4px 10px;
+        border-radius: 6px;
+        font-size: 0.78rem;
+        font-family: monospace;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        z-index: 999999;
+        pointer-events: none;
+    }}
     </style>
+    <div class="fixed-version-corner">⚡ NetBox Hub {APP_VERSION}</div>
 """, unsafe_allow_html=True)
 
 # ----------------- Sidebar -----------------
@@ -103,7 +113,6 @@ with st.sidebar:
     st.info(f"**Active Model:** `{active_model}`")
     st.caption(f"📡 Routed via OmniRoute (`{OPENROUTER_BASE_URL}`)")
     st.markdown("---")
-    st.caption(f"⚡ NetBox Hub `{APP_VERSION}`")
 
 # ----------------- Main Page Header -----------------
 st.title("⚡ NetBox Universal Library Hub")
@@ -123,6 +132,30 @@ try:
 except Exception as e:
     st.warning(f"Could not load GitHub repository catalog: {e}")
 
+# Helper for calling render functions with dynamic parameters
+def dispatch_tab(render_fn, catalog, active_model):
+    try:
+        sig = inspect.signature(render_fn)
+        param_count = len(sig.parameters)
+        if param_count == 2:
+            render_fn(catalog, active_model)
+        elif param_count == 1:
+            first_name = list(sig.parameters.keys())[0]
+            if "model" in first_name:
+                render_fn(active_model)
+            else:
+                render_fn(catalog)
+        else:
+            render_fn()
+    except Exception:
+        try:
+            render_fn(catalog, active_model)
+        except TypeError:
+            try:
+                render_fn(catalog)
+            except TypeError:
+                render_fn(active_model)
+
 # ----------------- Navigation Tabs -----------------
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "🖥️ Device Types",
@@ -135,22 +168,22 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
 ])
 
 with tab1:
-    render_device_tab(catalog, active_model)
+    dispatch_tab(render_device_tab, catalog, active_model)
 
 with tab2:
-    render_module_tab(catalog, active_model)
+    dispatch_tab(render_module_tab, catalog, active_model)
 
 with tab3:
-    render_rack_tab(catalog)
+    dispatch_tab(render_rack_tab, catalog, active_model)
 
 with tab4:
-    render_image_tab(catalog)
+    dispatch_tab(render_image_tab, catalog, active_model)
 
 with tab5:
-    render_excel_tab(catalog, active_model)
+    dispatch_tab(render_excel_tab, catalog, active_model)
 
 with tab6:
-    render_naming_tab(active_model)
+    dispatch_tab(render_naming_tab, catalog, active_model)
 
 with tab7:
-    render_rules_tab(active_model)
+    dispatch_tab(render_rules_tab, catalog, active_model)
