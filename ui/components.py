@@ -1,7 +1,7 @@
 import streamlit as st
 from config.constants import APP_VERSION
 from config.settings import AVAILABLE_MODELS, OPENROUTER_BASE_URL
-from core.ai_client import test_model_connection, fetch_gateway_models
+from core.ai_client import test_model_connection
 
 SUGGESTED_TEST_MODELS = [
     "ox-alpha",
@@ -17,18 +17,15 @@ def render_sidebar() -> str:
     with st.sidebar:
         st.header("⚙️ AI Engine Selection")
         
-        # 1. Preset / Gateway Model Dropdown
-        live_gateway = fetch_gateway_models()
-        preset_list = live_gateway if live_gateway else AVAILABLE_MODELS
-        
+        # 1. Fixed Preset Models (Strictly your configured AVAILABLE_MODELS)
         selected_preset = st.selectbox(
             "Preset Models",
-            options=preset_list,
+            options=AVAILABLE_MODELS,
             index=0,
-            help="Configured default or gateway models."
+            help="Curated preset models from environment settings."
         )
 
-        # 2. Suggested Models Pull-Down Menu (Select & Copy)
+        # 2. Quick-Select Test Models Dropdown (Select & Copy)
         quick_pick = st.selectbox(
             "Quick-Select Test Model",
             options=["-- None (Use Preset / Manual) --"] + SUGGESTED_TEST_MODELS,
@@ -73,7 +70,7 @@ def render_sidebar() -> str:
         else:
             st.info(f"**Selected:**\n`{active_model}`")
 
-        # 6. Test Results History Log
+        # 6. Test Results History Log (Clean single-line formatting)
         if history:
             with st.expander("📋 Model Test Log", expanded=False):
                 for m_name, data in history.items():
