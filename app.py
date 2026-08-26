@@ -21,18 +21,14 @@ st.set_page_config(
 
 init_db()
 
-# Render sidebar
 active_model = render_sidebar()
 
-# Main Page Header
 st.title("⚡ NetBox Universal Library Hub")
 st.caption("Device Types | Module Types | Rack Types | Images | Excel Engine | Naming Standards | OmniRoute AI")
 
-# Load catalog
 with st.spinner("Synchronizing device-type repository..."):
     catalog = load_catalog()
 
-# Navigation Tabs
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "🖥️ Device Types",
     "🧩 Module Types",
