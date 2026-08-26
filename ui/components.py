@@ -4,7 +4,7 @@ from config.settings import AVAILABLE_MODELS, OPENROUTER_BASE_URL
 from core.ai_client import test_model_connection
 
 SUGGESTED_TEST_MODELS = [
-    "ox-alpha",
+    "stealth/ox-alpha",
     "groq/openai/gpt-oss-120b",
     "gemini/gemini-3-flash-preview",
     "groq/qwen/qwen3.6-27b",
@@ -17,15 +17,15 @@ def render_sidebar() -> str:
     with st.sidebar:
         st.header("⚙️ AI Engine Selection")
         
-        # 1. Fixed Preset Models (Strictly your configured AVAILABLE_MODELS)
+        # 1. Preset Models strictly uses your configured AVAILABLE_MODELS
         selected_preset = st.selectbox(
             "Preset Models",
             options=AVAILABLE_MODELS,
             index=0,
-            help="Curated preset models from environment settings."
+            help="Configured environment presets from OPENROUTER_MODELS / GROQ_MODELS."
         )
 
-        # 2. Quick-Select Test Models Dropdown (Select & Copy)
+        # 2. Suggested Models Pull-Down Menu (Select & Copy)
         quick_pick = st.selectbox(
             "Quick-Select Test Model",
             options=["-- None (Use Preset / Manual) --"] + SUGGESTED_TEST_MODELS,
@@ -70,7 +70,7 @@ def render_sidebar() -> str:
         else:
             st.info(f"**Selected:**\n`{active_model}`")
 
-        # 6. Test Results History Log (Clean single-line formatting)
+        # 6. Test Results History Log
         if history:
             with st.expander("📋 Model Test Log", expanded=False):
                 for m_name, data in history.items():
