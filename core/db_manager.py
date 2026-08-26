@@ -25,14 +25,38 @@ def init_db():
     conn.commit()
     conn.close()
 
-def save_universal_csv(file_bytes) -> Dict[str, int]:
-    """Ingests a NetBox CSV export, auto-categorizing devices, ESXi hosts, and VMs."""
+def save_records_batch(records: List[Dict[str, Any]], clear_first: bool = True) -> Dict[str, int]:
+    """Saves a normalized list of records into SQLite database."""
     init_db()
-    df = pd.read_csv(file_bytes)
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM inventory_records")
-    
+    if clear_first:
+        cursor.execute("DELETE FROM inventory_records")
+
+    counts = {"device": 0, "hypervisor": 0, "vm": 0}
+    for r in records:
+        cat = r.get("category", "device")
+        cursor.execute("""
+            INSERT INTO inventory_records (category, name, description, manufacturer, model_or_role, site, cluster)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            cat,
+            r.get("name", "").strip(),
+            r.get("description", "").strip(),
+            r.get("manufacturer", "").strip(),
+            r.get("model_or_role", "").strip(),
+            r.get("site", "").strip(),
+            r.get("cluster", "").strip()
+        ))
+        counts[cat] = counts.get(cat, 0) + 1
+
+    conn.commit()
+    conn.close()
+    return counts
+
+def save_universal_csv(file_bytes) -> Dict[str, int]:
+    """Ingests a NetBox CSV export file."""
+    df = pd.read_csv(file_bytes)
     cols = {str(c).lower().strip(): c for c in df.columns}
     name_col = cols.get("name", "Name")
     role_col = cols.get("role", cols.get("device role", cols.get("role name", "")))
@@ -42,49 +66,49 @@ def save_universal_csv(file_bytes) -> Dict[str, int]:
     desc_col = cols.get("description", cols.get("comments", ""))
     cluster_col = cols.get("cluster", "")
 
-    counts = {"device": 0, "hypervisor": 0, "vm": 0}
-
+    records = []
     for _, row in df.iterrows():
         name = str(row.get(name_col, "")).strip()
         if not name or name.lower() == "nan":
             continue
-        
+
         role = str(row.get(role_col, "")).strip() if role_col else ""
         dtype = str(row.get(type_col, "")).strip() if type_col else ""
         mfg = str(row.get(mfg_col, "")).strip() if mfg_col else ""
         site = str(row.get(site_col, "")).strip() if site_col else ""
         desc = str(row.get(desc_col, "")).strip() if desc_col else ""
         cluster = str(row.get(cluster_col, "")).strip() if cluster_col else ""
-        
+
         for k in [role, dtype, mfg, site, desc, cluster]:
             if k.lower() == "nan": 
                 k = ""
 
-        combined_text = f"{name} {role} {dtype} {desc}".lower()
-        if any(h in combined_text for h in ["esx", "hypervisor", "infhost", "vmhost", "esxi"]):
+        combined = f"{name} {role} {dtype} {desc}".lower()
+        if any(h in combined for h in ["esx", "hypervisor", "infhost", "vmhost", "esxi"]):
             cat = "hypervisor"
-        elif any(v in combined_text for v in ["virtual machine", "vm", "vcenter", "guest", "app", "server", "srv", "db"]) or ("vcpus" in cols or "memory" in cols or "disk" in cols):
+        elif any(v in combined for v in ["virtual machine", "vm", "vcenter", "guest", "app", "server", "srv", "db"]) or ("vcpus" in cols or "memory" in cols or "disk" in cols):
             cat = "vm"
         else:
             cat = "device"
 
-        cursor.execute("""
-            INSERT INTO inventory_records (category, name, description, manufacturer, model_or_role, site, cluster)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (cat, name, desc if desc.lower() != "nan" else "", mfg if mfg.lower() != "nan" else "", dtype or role, site if site.lower() != "nan" else "", cluster if cluster.lower() != "nan" else ""))
-        
-        counts[cat] += 1
-        
-    conn.commit()
-    conn.close()
-    return counts
+        records.append({
+            "category": cat,
+            "name": name,
+            "description": desc if desc.lower() != "nan" else "",
+            "manufacturer": mfg if mfg.lower() != "nan" else "",
+            "model_or_role": dtype or role,
+            "site": site if site.lower() != "nan" else "",
+            "cluster": cluster if cluster.lower() != "nan" else ""
+        })
+
+    return save_records_batch(records, clear_first=True)
 
 def get_records_by_category(category: str, site_filter: str = "") -> List[Dict[str, Any]]:
     init_db()
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    
+
     clean_filter = site_filter.strip().lower()
     if clean_filter:
         pattern = f"%{clean_filter}%"
