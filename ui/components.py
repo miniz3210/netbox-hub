@@ -3,16 +3,16 @@ from config.constants import APP_VERSION
 from config.settings import AVAILABLE_MODELS, OPENROUTER_BASE_URL
 from core.ai_client import test_model_connection
 
-# Verified official free models for Groq, Google AI Studio, and custom routes
-REAL_FREE_MODELS = [
-    "groq/llama-3.3-70b-versatile",
-    "groq/llama-3.1-8b-instant",
-    "gemini/gemini-2.0-flash",
-    "gemini/gemini-1.5-flash",
-    "gemini/gemini-2.5-flash",
-    "gemini/gemini-3-flash-preview",
+# Exact matching models from your Groq limits, Google Gemini 3.6, and OmniRoute prefix
+VERIFIED_TEST_MODELS = [
+    "openai/ox-alpha",
+    "groq/qwen/qwen3.8-27b",
     "groq/qwen/qwen3.6-27b",
-    "ox-alpha"
+    "groq/openai/gpt-oss-20b",
+    "groq/openai/gpt-oss-120b",
+    "groq/allam-2-7b",
+    "gemini/gemini-3.6-flash",
+    "gemini/gemini-3-flash-preview"
 ]
 
 def render_sidebar() -> str:
@@ -29,7 +29,7 @@ def render_sidebar() -> str:
 
         # 2. Filter candidate models to exclude any already in Preset Models
         filtered_suggestions = [
-            m for m in REAL_FREE_MODELS 
+            m for m in VERIFIED_TEST_MODELS 
             if m not in AVAILABLE_MODELS
         ]
 
@@ -38,7 +38,7 @@ def render_sidebar() -> str:
             "Quick-Select Test Model",
             options=["-- None (Use Preset / Manual) --"] + filtered_suggestions,
             index=0,
-            help="Select verified free models from Groq, Gemini, or custom routes."
+            help="Select verified active models from your Groq limits or Google Gemini."
         )
 
         # 3. Custom Manual Input
