@@ -7,7 +7,6 @@ from typing import Dict, List, Optional
 from config.constants import GITHUB_REPO, BRANCH
 from core.exceptions import GitHubCatalogError
 
-# Common enterprise hardware aliases mapping
 MANUFACTURER_ALIASES = {
     "hp": "hpe",
     "hewlett packard": "hpe",
@@ -89,29 +88,24 @@ def get_canonical_manufacturer(user_input: str, mfg_list: List[str]) -> str:
     if not cleaned:
         return user_input
 
-    # 1. Explicit Alias Lookup
     if cleaned in MANUFACTURER_ALIASES:
         target_alias = MANUFACTURER_ALIASES[cleaned]
         for mfg in mfg_list:
             if mfg.lower() == target_alias:
                 return mfg
 
-    # 2. Exact Case-Insensitive Match
     for mfg in mfg_list:
         if cleaned == mfg.lower():
             return mfg
 
-    # 3. Prefix Match
     for mfg in mfg_list:
         if mfg.lower().startswith(cleaned):
             return mfg
 
-    # 4. Wildcard Match
     for mfg in mfg_list:
         if wildcard_match(cleaned, mfg):
             return mfg
 
-    # 5. Fuzzy Match Fallback
     close = difflib.get_close_matches(cleaned, [m.lower() for m in mfg_list], n=1, cutoff=0.6)
     if close:
         for mfg in mfg_list:

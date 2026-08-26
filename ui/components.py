@@ -1,34 +1,47 @@
 import streamlit as st
 from config.constants import APP_VERSION
 from config.settings import AVAILABLE_MODELS, OPENROUTER_BASE_URL
+from core.ai_client import fetch_gateway_models, test_model_connection
 
 def render_sidebar() -> str:
     with st.sidebar:
         st.header("⚙️ AI Engine Selection")
         
-        # 1. Preset Dropdown
+        # 1. Discover live models from OmniRoute gateway
+        live_models = fetch_gateway_models()
+        model_options = live_models if live_models else AVAILABLE_MODELS
+        
         selected_preset = st.selectbox(
             "Preset Models",
-            options=AVAILABLE_MODELS,
+            options=model_options,
             index=0,
-            help="Select from configured environment presets."
+            help="Live models discovered directly from OmniRoute gateway."
         )
 
-        # 2. Custom Model On-The-Fly Input Field
+        # 2. Custom Model On-The-Fly Input Field with suggestions
         custom_model = st.text_input(
             "Custom Model",
             value="",
-            placeholder="e.g. gemini/gemini-3.1-flash-lite",
-            help="Type any model slug here to override the preset and test on the fly."
+            placeholder="e.g. ox-alpha, groq/openai/gpt-oss-120b",
+            help="Type any valid OmniRoute route ID or model slug. Tested suggestions: ox-alpha, groq/openai/gpt-oss-120b, gemini/gemini-3-flash-preview, groq/qwen/qwen3.6-27b"
         ).strip()
 
-        # Custom model overrides dropdown if typed
+        # Custom model overrides dropdown when typed
         active_model = custom_model if custom_model else selected_preset
 
         st.info(f"**Selected:**\n`{active_model}`")
         st.caption(f"🔌 Routed via **OmniRoute** (`{OPENROUTER_BASE_URL}`)")
 
-        # Pinned bottom-left corner badge
+        # 3. Test Model Connection Button
+        if st.button("🧪 Test Model Connection", key="btn_ping_model", use_container_width=True):
+            with st.spinner(f"Testing `{active_model}` via OmniRoute..."):
+                ok, msg = test_model_connection(active_model)
+                if ok:
+                    st.success(msg)
+                else:
+                    st.error(msg)
+
+        # Fixed bottom-left corner badge
         st.markdown(
             f"""
             <style>

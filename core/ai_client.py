@@ -1,12 +1,67 @@
 import json
+import time
 import logging
 import requests
-from typing import Optional
+from typing import Optional, List, Tuple
 from config.settings import OPENROUTER_BASE_URL, OPENROUTER_API_KEY
 from config.naming_rules import load_naming_rules, export_rules_as_prompt
 from core.exceptions import AIProviderError
 
 logger = logging.getLogger("netbox-hub")
+
+def fetch_gateway_models() -> List[str]:
+    """Queries OmniRoute /v1/models to dynamically discover all configured routes."""
+    base = OPENROUTER_BASE_URL.rstrip("/")
+    endpoint = f"{base}/models" if base.endswith("/v1") else f"{base}/v1/models"
+    clean_token = OPENROUTER_API_KEY.replace("Bearer ", "").strip()
+    headers = {"Authorization": f"Bearer {clean_token}"}
+    
+    try:
+        resp = requests.get(endpoint, headers=headers, timeout=3)
+        if resp.status_code == 200:
+            data = resp.json()
+            models = []
+            if "data" in data and isinstance(data["data"], list):
+                for item in data["data"]:
+                    if isinstance(item, dict) and "id" in item:
+                        models.append(item["id"])
+                    elif isinstance(item, str):
+                        models.append(item)
+            if models:
+                return sorted(list(set(models)))
+    except Exception as e:
+        logger.debug(f"Could not auto-fetch models from gateway: {e}")
+    return []
+
+def test_model_connection(model_name: str) -> Tuple[bool, str]:
+    """Sends a lightweight ping to verify if the model is alive or cooling down."""
+    base = OPENROUTER_BASE_URL.rstrip("/")
+    endpoint = f"{base}/chat/completions" if base.endswith("/v1") else f"{base}/v1/chat/completions"
+    clean_token = OPENROUTER_API_KEY.replace("Bearer ", "").strip()
+    headers = {
+        "Authorization": f"Bearer {clean_token}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": model_name,
+        "max_tokens": 5,
+        "messages": [{"role": "user", "content": "ping"}]
+    }
+    start = time.time()
+    try:
+        resp = requests.post(endpoint, headers=headers, json=payload, timeout=12)
+        latency = round((time.time() - start) * 1000)
+        if resp.status_code == 200:
+            return True, f"✅ Online ({latency}ms)"
+        else:
+            try:
+                err_data = resp.json()
+                msg = err_data.get("error", {}).get("message", resp.text)
+            except Exception:
+                msg = resp.text
+            return False, f"❌ HTTP {resp.status_code}: {msg}"
+    except Exception as e:
+        return False, f"❌ Connection Error: {str(e)}"
 
 def parse_raw_gateway_payload(raw_text: str) -> str:
     trimmed = raw_text.strip()
