@@ -14,19 +14,18 @@ def render_sidebar():
             help="Select from configured environment presets."
         )
 
-        # 2. Custom Model On-The-Fly Input Field
+        # 2. On-the-fly Custom Model Text Field
         custom_model = st.text_input(
             "Custom Model",
             value="",
             placeholder="e.g. gemini/gemini-3.1-flash-lite",
-            help="Type any valid model slug here to test on the fly."
+            help="Type any valid model slug here to override the preset on the fly."
         ).strip()
 
-        # If custom model is typed, it overrides the dropdown
+        # Custom model overrides the dropdown when typed
         active_model = custom_model if custom_model else selected_preset
 
         st.info(f"**Active Model:** `{active_model}`")
         st.caption(f"📡 Routed via OmniRoute (`{OPENROUTER_BASE_URL}`)")
         st.markdown("---")
-        st.caption(f"⚡ NetBox Hub `{APP_VERSION}`")
         return active_model
