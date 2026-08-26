@@ -13,15 +13,15 @@ def render_sidebar():
             help="Choose from your configured environment presets."
         )
 
-        # 2. Custom Model Input Box
+        # 2. Custom Model Text Box
         custom_model = st.text_input(
             "Custom Model",
             value="",
             placeholder="e.g. groq/llama-3.3-70b-versatile",
-            help="Type any valid model slug here to override the preset and test on the fly."
+            help="Type any valid model slug here to override the preset on the fly."
         ).strip()
 
-        # Custom model overrides dropdown if typed
+        # Custom input takes precedence if typed
         active_model = custom_model if custom_model else selected_preset
 
         st.info(f"**Active Model:** `{active_model}`")
