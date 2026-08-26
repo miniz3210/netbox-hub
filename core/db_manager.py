@@ -9,6 +9,7 @@ def init_db():
     os.makedirs("data", exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    # 1. Shared Inventory Records (Devices, Hypervisors, VMs)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS inventory_records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -22,11 +23,25 @@ def init_db():
             imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # 2. Dedicated IPAM / Prefix Records
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS ipam_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            prefix_or_subnet TEXT,
+            vlan_id INTEGER,
+            vlan_name TEXT,
+            role TEXT,
+            site TEXT,
+            description TEXT,
+            imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
     conn.commit()
     conn.close()
 
+# ── INVENTORY RECORDS (Shared Naming & Devices) ──────────────────────────
+
 def save_records_batch(records: List[Dict[str, Any]], clear_first: bool = True) -> Dict[str, int]:
-    """Saves a normalized list of records into SQLite database."""
     init_db()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -55,7 +70,6 @@ def save_records_batch(records: List[Dict[str, Any]], clear_first: bool = True) 
     return counts
 
 def save_universal_csv(file_bytes) -> Dict[str, int]:
-    """Ingests a NetBox CSV export file."""
     df = pd.read_csv(file_bytes)
     cols = {str(c).lower().strip(): c for c in df.columns}
     name_col = cols.get("name", "Name")
@@ -142,6 +156,63 @@ def get_total_record_count() -> int:
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM inventory_records")
+    total = cursor.fetchone()[0]
+    conn.close()
+    return total
+
+# ── DEDICATED IPAM RECORDS ──────────────────────────────────────────────
+
+def save_ipam_records_batch(records: List[Dict[str, Any]], clear_first: bool = True) -> int:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    if clear_first:
+        cursor.execute("DELETE FROM ipam_records")
+
+    count = 0
+    for r in records:
+        cursor.execute("""
+            INSERT INTO ipam_records (prefix_or_subnet, vlan_id, vlan_name, role, site, description)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            str(r.get("prefix_or_subnet") or r.get("prefix") or r.get("subnet") or "").strip(),
+            int(r.get("vlan_id") or r.get("vid") or 0) if str(r.get("vlan_id") or r.get("vid") or "").isdigit() else None,
+            str(r.get("vlan_name") or r.get("name") or "").strip(),
+            str(r.get("role") or "").strip(),
+            str(r.get("site") or "").strip(),
+            str(r.get("description") or r.get("desc") or "").strip()
+        ))
+        count += 1
+
+    conn.commit()
+    conn.close()
+    return count
+
+def get_all_ipam_records() -> List[Dict[str, Any]]:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM ipam_records ORDER BY id ASC")
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def clear_ipam_records() -> int:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM ipam_records")
+    deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
+
+def get_total_ipam_count() -> int:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM ipam_records")
     total = cursor.fetchone()[0]
     conn.close()
     return total
