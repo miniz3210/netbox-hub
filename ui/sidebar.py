@@ -5,27 +5,26 @@ def render_sidebar():
     with st.sidebar:
         st.markdown("### ⚙️ AI Engine Selection")
         
-        model_options = AVAILABLE_MODELS + ["✏️ Custom Model Input..."]
-        selected_option = st.selectbox(
-            "Active AI Model",
-            options=model_options,
+        # 1. Preset Dropdown
+        selected_preset = st.selectbox(
+            "Preset Models",
+            options=AVAILABLE_MODELS,
             index=0,
-            help="Select a configured model or choose custom input to test any model identifier."
+            help="Choose from your configured environment presets."
         )
 
-        if selected_option == "✏️ Custom Model Input...":
-            active_model = st.text_input(
-                "Enter Model ID / Slug",
-                value="",
-                placeholder="e.g. groq/llama-3.3-70b-versatile",
-                help="Type the exact model slug supported by your backend gateway."
-            ).strip()
-            if not active_model:
-                active_model = AVAILABLE_MODELS[0] if AVAILABLE_MODELS else "groq/openai/gpt-oss-120b"
-        else:
-            active_model = selected_option
+        # 2. Custom Model Input Box
+        custom_model = st.text_input(
+            "Custom Model",
+            value="",
+            placeholder="e.g. groq/llama-3.3-70b-versatile",
+            help="Type any valid model slug here to override the preset and test on the fly."
+        ).strip()
 
-        st.info(f"**Selected:** `{active_model}`")
+        # Custom model overrides dropdown if typed
+        active_model = custom_model if custom_model else selected_preset
+
+        st.info(f"**Active Model:** `{active_model}`")
         st.caption(f"📡 Routed via OmniRoute (`{OPENROUTER_BASE_URL}`)")
         st.markdown("---")
         
