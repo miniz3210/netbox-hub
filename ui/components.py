@@ -3,17 +3,16 @@ from config.constants import APP_VERSION
 from config.settings import AVAILABLE_MODELS, OPENROUTER_BASE_URL
 from core.ai_client import test_model_connection
 
-# Candidate test routes from your OmniRoute gateway
 RAW_SUGGESTED_MODELS = [
+    "ox-alpha",
+    "stealth/ox-alpha",
     "aug/gemini-3.1-pro-preview",
     "aug/glm-5.2",
     "aug/gpt5.4",
     "aug/gpt5.2",
     "aug/gpt5.1",
     "aug/gpt5.4-mini",
-    "aug/fable-5",
-    "groq/qwen/qwen3.6-27b",
-    "gemini/gemini-3-flash-preview"
+    "aug/fable-5"
 ]
 
 def render_sidebar() -> str:
