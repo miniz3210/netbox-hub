@@ -1,233 +1,161 @@
-import os
-import glob
-import subprocess
-import requests
 import re
-from typing import Dict, List, Any, Optional
+import fnmatch
+import difflib
+import requests
+import streamlit as st
+from typing import Dict, List, Optional
+from config.constants import GITHUB_REPO, BRANCH
+from core.exceptions import GitHubCatalogError
 
-CATALOG_REPO_URL = "https://github.com/netbox-community/devicetype-library.git"
-REPO_URL = CATALOG_REPO_URL
-CATALOG_PATH = os.path.join("data", "devicetype-library")
-CATALOG_DIR = CATALOG_PATH
-
+# Common enterprise hardware aliases mapping
 MANUFACTURER_ALIASES = {
-    "hp": "HPE",
-    "hewlett packard": "HPE",
-    "hewlett-packard": "HPE",
-    "hewlett packard enterprise": "HPE",
-    "hpe": "HPE",
-    "palo alto": "Palo Alto",
-    "paloalto": "Palo Alto",
-    "palo alto networks": "Palo Alto",
-    "cisco": "Cisco",
-    "cisco systems": "Cisco",
-    "dell": "Dell",
-    "dell emc": "Dell",
-    "dell inc": "Dell",
-    "forti": "Fortinet",
-    "fortinet": "Fortinet",
-    "aruba": "Aruba",
-    "aruba networks": "Aruba",
-    "intel": "Intel",
-    "lenovo": "Lenovo",
-    "juniper": "Juniper",
-    "juniper networks": "Juniper",
-    "extreme": "Extreme Networks",
-    "extreme networks": "Extreme Networks",
-    "arista": "Arista",
-    "arista networks": "Arista",
-    "supermicro": "Supermicro"
+    "hp": "hpe",
+    "hewlett packard": "hpe",
+    "hewlett-packard": "hpe",
+    "hewlett packard enterprise": "hpe",
+    "cisco systems": "cisco",
+    "palo alto": "paloaltonetworks",
+    "palo alto networks": "paloaltonetworks",
+    "paloalto": "paloaltonetworks",
+    "forti": "fortinet",
+    "juniper networks": "juniper",
+    "arista networks": "arista",
+    "dell emc": "dell",
+    "dell technologies": "dell",
+    "supermicro": "supermicro",
+    "extreme networks": "extremenetworks"
 }
 
-MFG_ALIASES = MANUFACTURER_ALIASES
-MFG_MAP = MANUFACTURER_ALIASES
-
-def normalize_mfg(mfg_str: str) -> str:
-    clean = str(mfg_str).lower().strip()
-    return MANUFACTURER_ALIASES.get(clean, clean)
-
-def sync_repository() -> str:
-    os.makedirs("data", exist_ok=True)
-    if not os.path.exists(CATALOG_PATH):
-        try:
-            subprocess.run(["git", "clone", "--depth", "1", CATALOG_REPO_URL, CATALOG_PATH], check=True, capture_output=True)
-        except Exception:
-            pass
-    else:
-        try:
-            subprocess.run(["git", "-C", CATALOG_PATH, "pull"], check=False, capture_output=True)
-        except Exception:
-            pass
-    return CATALOG_PATH
-
-def sync_github_repo() -> str:
-    return sync_repository()
-
-def load_catalog() -> Dict[str, Any]:
-    repo_dir = sync_repository()
-    
-    dev_types_dir = os.path.join(repo_dir, "device-types")
-    mod_types_dir = os.path.join(repo_dir, "module-types")
-    
-    mfg_set = set()
-    device_files = []
-    module_files = []
-    
-    if os.path.exists(dev_types_dir):
-        for root, dirs, files in os.walk(dev_types_dir):
-            for file in files:
-                if file.endswith((".yaml", ".yml")):
-                    rel_path = os.path.relpath(os.path.join(root, file), repo_dir).replace("\\", "/")
-                    mfg = os.path.basename(root)
-                    mfg_set.add(mfg)
-                    device_files.append({
-                        "manufacturer": mfg,
-                        "filename": file,
-                        "slug": os.path.splitext(file)[0],
-                        "rel_path": rel_path,
-                        "full_path": os.path.join(root, file)
-                    })
-
-    if os.path.exists(mod_types_dir):
-        for root, dirs, files in os.walk(mod_types_dir):
-            for file in files:
-                if file.endswith((".yaml", ".yml")):
-                    rel_path = os.path.relpath(os.path.join(root, file), repo_dir).replace("\\", "/")
-                    mfg = os.path.basename(root)
-                    mfg_set.add(mfg)
-                    module_files.append({
-                        "manufacturer": mfg,
-                        "filename": file,
-                        "slug": os.path.splitext(file)[0],
-                        "rel_path": rel_path,
-                        "full_path": os.path.join(root, file)
-                    })
-
-    return {
-        "repo_path": repo_dir,
-        "manufacturers": sorted(list(mfg_set)),
-        "device_types": device_files,
-        "module_types": module_files,
-        "devices": device_files
+@st.cache_data(ttl=3600, show_spinner="Indexing NetBox devicetype-library from GitHub...")
+def get_repo_catalog() -> Dict[str, List[str]]:
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/git/trees/{BRANCH}?recursive=1"
+    catalog = {
+        "device_types": [],
+        "module_types": [],
+        "rack_types": [],
+        "elevation_images": [],
+        "module_images": [],
+        "manufacturers": set()
     }
+    try:
+        res = requests.get(url, timeout=15)
+        if res.status_code == 200:
+            for item in res.json().get("tree", []):
+                path = item["path"]
+                parts = path.split("/")
+                if len(parts) >= 3 and parts[0] in ["device-types", "module-types", "rack-types"]:
+                    catalog["manufacturers"].add(parts[1])
 
-def load_github_catalog() -> Dict[str, Any]:
-    return load_catalog()
-
-def get_catalog() -> Dict[str, Any]:
-    return load_catalog()
-
-def get_canonical_manufacturer(mfg_query: str, available_mfgs: Optional[List[str]] = None) -> str:
-    if not mfg_query:
-        return ""
-    clean = mfg_query.strip().lower()
+                if path.startswith("device-types/") and path.endswith((".yaml", ".yml")):
+                    catalog["device_types"].append(path)
+                elif path.startswith("module-types/") and path.endswith((".yaml", ".yml")):
+                    catalog["module_types"].append(path)
+                elif path.startswith("rack-types/") and path.endswith((".yaml", ".yml")):
+                    catalog["rack_types"].append(path)
+                elif path.startswith("elevation-images/") and path.lower().endswith((".png", ".svg", ".jpg")):
+                    catalog["elevation_images"].append(path)
+                elif path.startswith("module-images/") and path.lower().endswith((".png", ".svg", ".jpg")):
+                    catalog["module_images"].append(path)
+        else:
+            raise GitHubCatalogError(f"GitHub API Error: HTTP {res.status_code}")
+    except Exception as e:
+        raise GitHubCatalogError(str(e))
     
-    target_canonical = MANUFACTURER_ALIASES.get(clean, mfg_query.strip())
+    catalog["manufacturers"] = sorted(list(catalog["manufacturers"]))
+    return catalog
+
+def wildcard_match(pattern: str, target: str) -> bool:
+    p = pattern.strip().lower()
+    t = target.strip().lower()
+    if not p:
+        return True
+
+    glob_p = p if any(c in p for c in ["*", "?", "["]) else f"*{p}*"
+    if fnmatch.fnmatch(t, glob_p):
+        return True
+
+    clean_p = re.sub(r"[^a-zA-Z0-9]", "", p)
+    clean_t = re.sub(r"[^a-zA-Z0-9]", "", t)
     
-    if available_mfgs:
-        for m in available_mfgs:
-            if m.lower() == target_canonical.lower():
-                return m
-        for m in available_mfgs:
-            if m.lower() == clean:
-                return m
-        for m in available_mfgs:
-            if clean in m.lower():
-                return m
-                
-    return target_canonical
+    if len(clean_p) >= 3 and clean_p in clean_t:
+        return True
 
-def search_catalog_wildcard(catalog: Dict[str, Any], manufacturer: str, query: str, category: str = "device-types") -> List[Dict[str, Any]]:
-    if not catalog:
-        return []
+    words = re.findall(r"[a-zA-Z0-9]+", t)
+    initials = "".join(w[0] for w in words).lower()
+    return bool(clean_p and (clean_p == initials or clean_p in initials))
 
-    if category in ("module-types", "modules", "module_types"):
-        items = catalog.get("module_types", [])
-    else:
-        items = catalog.get("device_types", [])
+def get_canonical_manufacturer(user_input: str, mfg_list: List[str]) -> str:
+    cleaned = user_input.strip().lower()
+    if not cleaned:
+        return user_input
 
-    mfg_clean = manufacturer.strip().lower() if manufacturer else ""
-    query_clean = query.strip().lower().replace(" ", "-").replace("_", "-") if query else ""
-    tokens = [t for t in query_clean.split("-") if t]
+    # 1. Explicit Alias Lookup
+    if cleaned in MANUFACTURER_ALIASES:
+        target_alias = MANUFACTURER_ALIASES[cleaned]
+        for mfg in mfg_list:
+            if mfg.lower() == target_alias:
+                return mfg
 
-    results = []
-    for item in items:
-        item_mfg = item.get("manufacturer", "").lower()
-        slug = item.get("slug", "").lower().replace("_", "-")
-        filename = item.get("filename", "").lower()
+    # 2. Exact Case-Insensitive Match
+    for mfg in mfg_list:
+        if cleaned == mfg.lower():
+            return mfg
 
-        mfg_match = True
-        if mfg_clean:
-            mfg_match = (mfg_clean == item_mfg) or (mfg_clean in item_mfg) or (item_mfg in mfg_clean)
+    # 3. Prefix Match
+    for mfg in mfg_list:
+        if mfg.lower().startswith(cleaned):
+            return mfg
 
-        if mfg_match:
-            if not query_clean:
-                results.append(item)
-            elif query_clean in slug or query_clean in filename or (tokens and all(t in slug or t in filename for t in tokens)):
-                results.append(item)
+    # 4. Wildcard Match
+    for mfg in mfg_list:
+        if wildcard_match(cleaned, mfg):
+            return mfg
 
-    if not results and tokens:
-        for item in items:
-            slug = item.get("slug", "").lower().replace("_", "-")
-            filename = item.get("filename", "").lower()
-            if all(t in slug or t in filename for t in tokens):
-                results.append(item)
+    # 5. Fuzzy Match Fallback
+    close = difflib.get_close_matches(cleaned, [m.lower() for m in mfg_list], n=1, cutoff=0.6)
+    if close:
+        for mfg in mfg_list:
+            if mfg.lower() == close[0]:
+                return mfg
 
-    return results
+    return user_input
 
-def search_library(catalog: Dict[str, Any], mfg_input: str, model_input: str) -> Optional[Dict[str, Any]]:
-    res = search_catalog_wildcard(catalog, mfg_input, model_input, category="device-types")
-    return res[0] if res else None
+def search_catalog_wildcard(file_list: List[str], manufacturer_query: str, model_query: str) -> List[str]:
+    mfg_q = manufacturer_query.strip().lower()
+    model_q = model_query.strip().lower()
 
-def search_device_types(catalog: Dict[str, Any], manufacturer: str, query: str) -> List[Dict[str, Any]]:
-    return search_catalog_wildcard(catalog, manufacturer, query, category="device-types")
+    if mfg_q in MANUFACTURER_ALIASES:
+        mfg_q = MANUFACTURER_ALIASES[mfg_q]
 
-def search_module_types(catalog: Dict[str, Any], manufacturer: str, query: str) -> List[Dict[str, Any]]:
-    return search_catalog_wildcard(catalog, manufacturer, query, category="module-types")
+    primary, secondary = [], []
 
-def fetch_raw_content(path_or_url: str) -> str:
-    """Reads file content safely from relative path, absolute path, or URL."""
-    if not path_or_url:
-        return ""
-    if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
-        try:
-            resp = requests.get(path_or_url, timeout=10)
-            if resp.status_code == 200:
-                return resp.text
-        except Exception:
-            return ""
-    
-    candidates = [
-        path_or_url,
-        os.path.join(CATALOG_PATH, path_or_url),
-        os.path.join("data", "devicetype-library", path_or_url),
-        os.path.join(os.getcwd(), path_or_url)
-    ]
-    for p in candidates:
-        if os.path.exists(p) and os.path.isfile(p):
-            try:
-                with open(p, "r", encoding="utf-8") as f:
-                    return f.read()
-            except Exception:
-                pass
-    return ""
+    for path in file_list:
+        parts = path.split("/")
+        r_mfg = parts[1].lower() if len(parts) >= 3 else ""
+        r_file = re.sub(r"\.(yaml|yml|png|svg|jpg)$", "", parts[-1].lower())
+        
+        mfg_hit = wildcard_match(mfg_q, r_mfg) if mfg_q else True
+        model_hit = wildcard_match(model_q, r_file) if model_q else True
 
-def read_yaml_content(file_path: str) -> str:
-    return fetch_raw_content(file_path)
+        if mfg_hit and model_hit:
+            primary.append(path)
+        elif model_hit and len(model_q) >= 3:
+            secondary.append(path)
 
-def extract_reference_interface_pattern(content: str) -> str:
-    """Extracts interface naming style/pattern from a reference YAML file content."""
+    seen = set()
+    return [x for x in primary + secondary if not (x in seen or seen.add(x))]
+
+def fetch_raw_content(path: str, binary: bool = False):
+    raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{BRANCH}/{path}"
+    res = requests.get(raw_url, timeout=10)
+    if res.status_code == 200:
+        return res.content if binary else res.text
+    return None
+
+def extract_reference_interface_pattern(content: Optional[str]) -> Optional[str]:
     if not content:
-        return ""
-    patterns = []
-    for line in content.splitlines():
-        line_s = line.strip()
-        if line_s.startswith("- name:") or line_s.startswith("name:"):
-            val = line_s.split("name:", 1)[1].strip().strip('"').strip("'")
-            if val and "{" in val:
-                return val
-            elif val:
-                patterns.append(val)
-    if patterns:
-        return patterns[0]
-    return ""
+        return None
+    match = re.search(r"-\s+name:\s*['\"]?([^'\"\n\r]+)['\"]?", content)
+    if match and "{module}" in match.group(1):
+        return match.group(1).strip()
+    return None
