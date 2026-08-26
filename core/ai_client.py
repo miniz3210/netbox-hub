@@ -10,7 +10,7 @@ from core.exceptions import AIProviderError
 logger = logging.getLogger("netbox-hub")
 
 def test_model_connection(model_name: str) -> Tuple[bool, int, str]:
-    """Pings the target model through OmniRoute with non-streaming payload to measure latency."""
+    """Tests model health through OmniRoute using full request structure."""
     base = OPENROUTER_BASE_URL.rstrip("/")
     endpoint = f"{base}/chat/completions" if base.endswith("/v1") else f"{base}/v1/chat/completions"
     clean_token = OPENROUTER_API_KEY.replace("Bearer ", "").strip()
@@ -22,16 +22,16 @@ def test_model_connection(model_name: str) -> Tuple[bool, int, str]:
     }
     payload = {
         "model": model_name,
-        "max_tokens": 10,
         "temperature": 0.0,
+        "max_tokens": 100,
         "stream": False,
         "messages": [
-            {"role": "user", "content": "Respond with OK"}
+            {"role": "user", "content": "Respond with: OK"}
         ]
     }
     start = time.time()
     try:
-        resp = requests.post(endpoint, headers=headers, json=payload, timeout=20)
+        resp = requests.post(endpoint, headers=headers, json=payload, timeout=25)
         latency = round((time.time() - start) * 1000)
         if resp.status_code == 200:
             return True, latency, f"Online ({latency}ms)"
