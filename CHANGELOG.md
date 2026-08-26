@@ -121,3 +121,9 @@ RULES_FILE = "naming_rules.json"
 ### 🛠️ Bug Fixes & Improvements
 * **Safe Tab Loading**: Added multi-path import handling for all UI tabs to prevent `ModuleNotFoundError`.
 * **Sidebar Custom Model**: Fixed the active model input field directly in the sidebar.
+
+## Release v2.2.11 — Zero-Dependency Catalog Search & Crashproof Imports
+
+### 🛠️ Bug Fixes & Refinements
+* **Zero External Dependencies**: Removed all third-party YAML and Git module requirements from `catalog.py` and `device_tab.py`, eliminating `ModuleNotFoundError`.
+* **Standard Library I/O**: Switched catalog file indexing to standard Python `os` and `glob` streams.

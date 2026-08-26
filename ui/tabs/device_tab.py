@@ -1,5 +1,4 @@
 import streamlit as st
-import yaml
 from core.catalog import search_library, read_yaml_content, normalize_mfg
 from core.ai_client import call_ai
 
@@ -12,7 +11,6 @@ Do not output conversational text or markdown explanation, ONLY valid YAML."""
     prompt = f"Generate NetBox YAML for: Manufacturer: {manufacturer}, Model: {model}"
     raw_res = call_ai(prompt, active_model, custom_system_msg=system_msg)
     
-    # Strip markdown block wrappers if present
     cleaned = raw_res.strip()
     if cleaned.startswith("```yaml"):
         cleaned = cleaned[7:]
@@ -35,7 +33,6 @@ def render_device_tab(catalog, active_model):
         st.info("Enter a Manufacturer and Device Model to search the NetBox community library or generate with AI.")
         return
 
-    # Check for library match
     matched_dev = search_library(catalog, mfg_input, model_input)
 
     if matched_dev:
