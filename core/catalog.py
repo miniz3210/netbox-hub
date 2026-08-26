@@ -1,13 +1,11 @@
 import os
 import glob
-import yaml
-import git
+import subprocess
 from typing import Dict, List, Any, Optional
 
 CATALOG_DIR = "data/devicetype-library"
 REPO_URL = "https://github.com/netbox-community/devicetype-library.git"
 
-# Common manufacturer aliases
 MFG_ALIASES = {
     "hp": "hpe",
     "hewlett packard": "hpe",
@@ -25,24 +23,26 @@ MFG_ALIASES = {
 }
 
 def normalize_mfg(mfg_str: str) -> str:
-    clean = mfg_str.lower().strip()
+    clean = str(mfg_str).lower().strip()
     return MFG_ALIASES.get(clean, clean)
 
 def sync_github_repo() -> str:
-    """Clones or pulls the latest netbox-community/devicetype-library repo."""
+    """Clones or pulls the catalog repo using the system git binary."""
     os.makedirs("data", exist_ok=True)
     if not os.path.exists(CATALOG_DIR):
-        git.Repo.clone_from(REPO_URL, CATALOG_DIR, depth=1)
+        try:
+            subprocess.run(["git", "clone", "--depth", "1", REPO_URL, CATALOG_DIR], check=True, capture_output=True)
+        except Exception:
+            pass
     else:
         try:
-            repo = git.Repo(CATALOG_DIR)
-            repo.remotes.origin.pull()
+            subprocess.run(["git", "-C", CATALOG_DIR, "pull"], check=False, capture_output=True)
         except Exception:
             pass
     return CATALOG_DIR
 
 def load_catalog() -> Dict[str, Any]:
-    """Indexes all manufacturers and device-types in devicetype-library."""
+    """Indexes all manufacturers and device-type YAML files without external libraries."""
     repo_path = sync_github_repo()
     dev_types_dir = os.path.join(repo_path, "device-types")
     
@@ -54,13 +54,14 @@ def load_catalog() -> Dict[str, Any]:
             full_mfg_path = os.path.join(dev_types_dir, mfg_folder)
             if os.path.isdir(full_mfg_path):
                 manufacturers.add(mfg_folder)
-                for yml_file in glob.glob(os.path.join(full_mfg_path, "*.y*ml")):
-                    slug = os.path.splitext(os.path.basename(yml_file))[0]
-                    devices.append({
-                        "manufacturer": mfg_folder,
-                        "slug": slug,
-                        "file_path": yml_file
-                    })
+                for ext in ("*.yaml", "*.yml"):
+                    for yml_file in glob.glob(os.path.join(full_mfg_path, ext)):
+                        slug = os.path.splitext(os.path.basename(yml_file))[0]
+                        devices.append({
+                            "manufacturer": mfg_folder,
+                            "slug": slug,
+                            "file_path": yml_file
+                        })
 
     return {
         "manufacturers": sorted(list(manufacturers)),
@@ -69,7 +70,7 @@ def load_catalog() -> Dict[str, Any]:
     }
 
 def search_library(catalog: Dict[str, Any], mfg_input: str, model_input: str) -> Optional[Dict[str, Any]]:
-    """Finds exact or best matching device-type YAML in the catalog."""
+    """Searches catalog using exact match, partial match, and cross-manufacturer fallbacks."""
     if not catalog or not catalog.get("devices"):
         return None
 
@@ -77,13 +78,13 @@ def search_library(catalog: Dict[str, Any], mfg_input: str, model_input: str) ->
     clean_model = model_input.lower().strip().replace(" ", "-").replace("_", "-")
     model_words = [w for w in clean_model.split("-") if w]
 
-    # 1. Exact match within matched manufacturer
+    # 1. Exact match within specified manufacturer
     for dev in catalog["devices"]:
         if normalize_mfg(dev["manufacturer"]) == clean_mfg:
             if dev["slug"].lower() == clean_model:
                 return dev
 
-    # 2. Substring/prefix match within matched manufacturer
+    # 2. Substring / multi-word match within specified manufacturer
     for dev in catalog["devices"]:
         if normalize_mfg(dev["manufacturer"]) == clean_mfg:
             if clean_model in dev["slug"].lower() or all(w in dev["slug"].lower() for w in model_words):
@@ -98,6 +99,7 @@ def search_library(catalog: Dict[str, Any], mfg_input: str, model_input: str) ->
     return None
 
 def read_yaml_content(file_path: str) -> str:
+    """Reads raw YAML content as string without requiring yaml parser packages."""
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             return f.read()
