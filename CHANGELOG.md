@@ -98,3 +98,14 @@
 ### 🛠️ Bug Fixes & Improvements
 * **Blank Input Library Loading**: Fixed an issue where selecting an item from the library dropdown with a blank model input field resulted in no response. Model names are now derived from the selected library definition path.
 
+APP_VERSION = "v2.2.3"
+GITHUB_REPO = "netbox-community/devicetype-library"
+BRANCH = "master"
+RULES_FILE = "naming_rules.json"
+
+## Release v2.2.3 — Site-Specific NetBox Data Matching & Custom AI Model Input
+
+### 🛠️ Improvements & Refinements
+* **Wording Normalization**: Standardized label to "NetBox Data" across the application.
+* **Site-Aware NetBox Lookup**: Reference cards and AI validation dynamically filter records matching the entered site code (e.g., `AGE`, `DAL`).
+* **Custom AI Model Input**: Added manual model input in the sidebar for quick testing of any gateway model.
