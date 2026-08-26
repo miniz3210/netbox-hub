@@ -3,15 +3,17 @@ from config.constants import APP_VERSION
 from config.settings import AVAILABLE_MODELS, OPENROUTER_BASE_URL
 from core.ai_client import test_model_connection
 
-SUGGESTED_TEST_MODELS = [
-    "groq/openai/gpt-oss-120b",
-    "gemini/gemini-3-flash-preview",
-    "groq/qwen/qwen3.6-27b",
-    "openrouter/qwen/qwen-2.5-coder-32b-instruct:free",
-    "openrouter/deepseek/deepseek-r1:free",
-    "openrouter/meta-llama/llama-3.3-70b-instruct:free",
+# Candidate test routes from your OmniRoute gateway
+RAW_SUGGESTED_MODELS = [
     "aug/gemini-3.1-pro-preview",
-    "aug/fable-5"
+    "aug/glm-5.2",
+    "aug/gpt5.4",
+    "aug/gpt5.2",
+    "aug/gpt5.1",
+    "aug/gpt5.4-mini",
+    "aug/fable-5",
+    "groq/qwen/qwen3.6-27b",
+    "gemini/gemini-3-flash-preview"
 ]
 
 def render_sidebar() -> str:
@@ -23,15 +25,21 @@ def render_sidebar() -> str:
             "Preset Models",
             options=AVAILABLE_MODELS,
             index=0,
-            help="Configured environment presets from OPENROUTER_MODELS / GROQ_MODELS."
+            help="Configured environment presets."
         )
 
-        # 2. Suggested Models Pull-Down Menu (Select & Copy)
+        # 2. Filter out any models already present in Preset Models
+        filtered_suggestions = [
+            m for m in RAW_SUGGESTED_MODELS 
+            if m not in AVAILABLE_MODELS
+        ]
+
+        # Quick-Select Test Model Pull-Down Menu
         quick_pick = st.selectbox(
             "Quick-Select Test Model",
-            options=["-- None (Use Preset / Manual) --"] + SUGGESTED_TEST_MODELS,
+            options=["-- None (Use Preset / Manual) --"] + filtered_suggestions,
             index=0,
-            help="Select any popular route to load it instantly without typing."
+            help="Select any candidate route from your OmniRoute gateway to test."
         )
 
         # 3. Custom Manual Input
