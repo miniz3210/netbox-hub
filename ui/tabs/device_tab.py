@@ -1,64 +1,7 @@
 import os
 import streamlit as st
+from core.catalog import get_canonical_manufacturer, search_catalog_wildcard
 from core.ai_client import call_ai
-
-MFG_MAP = {
-    "hp": "HPE",
-    "hewlett packard": "HPE",
-    "hewlett-packard": "HPE",
-    "hewlett packard enterprise": "HPE",
-    "palo alto": "Palo Alto",
-    "paloalto": "Palo Alto",
-    "palo alto networks": "Palo Alto",
-    "cisco systems": "Cisco",
-    "dell emc": "Dell",
-    "dell inc": "Dell",
-    "forti": "Fortinet",
-    "aruba networks": "Aruba"
-}
-
-def resolve_mfg(input_mfg: str, catalog_mfgs: list) -> tuple:
-    raw = input_mfg.strip()
-    if not raw:
-        return "", ""
-    
-    mapped = MFG_MAP.get(raw.lower())
-    if mapped:
-        return raw, mapped
-
-    for m in catalog_mfgs:
-        if m.lower() == raw.lower():
-            return raw, m
-            
-    for m in catalog_mfgs:
-        if raw.lower() in m.lower():
-            return raw, m
-
-    return raw, raw
-
-def search_device_catalog(catalog: dict, target_mfg: str, model_query: str) -> list:
-    if not catalog or "device_types" not in catalog:
-        return []
-    
-    devices = catalog.get("device_types", [])
-    mfg_clean = target_mfg.lower().strip()
-    query_clean = model_query.lower().strip().replace(" ", "-").replace("_", "-")
-    tokens = [t for t in query_clean.split("-") if t]
-
-    results = []
-    for dev in devices:
-        if dev["manufacturer"].lower() == mfg_clean:
-            slug_clean = dev["slug"].lower().replace("_", "-")
-            if query_clean in slug_clean or all(t in slug_clean for t in tokens):
-                results.append(dev)
-
-    if not results and tokens:
-        for dev in devices:
-            slug_clean = dev["slug"].lower().replace("_", "-")
-            if all(t in slug_clean for t in tokens):
-                results.append(dev)
-
-    return results
 
 def generate_device_yaml_ai(mfg: str, model: str, active_model: str) -> str:
     system_msg = """You are a NetBox Device-Type schema generator.
@@ -85,14 +28,14 @@ def render_device_tab(catalog, active_model):
 
     with col_left:
         mfg_input = st.text_input("Manufacturer", value="", placeholder="e.g., HP, Cisco, Dell", key="dt_mfg_in").strip()
-        model_input = st.text_input("Device Model", value="", placeholder="e.g., dl360, PowerEdge R750", key="dt_model_in").strip()
+        model_input = st.text_input("Device Model", value="", placeholder="e.g., dl360, microserver, PowerEdge R750", key="dt_model_in").strip()
 
-        matched_raw, resolved_mfg = resolve_mfg(mfg_input, catalog_mfgs)
-        if matched_raw and resolved_mfg and matched_raw.lower() != resolved_mfg.lower():
-            st.info(f"ℹ️ Matched manufacturer: `{matched_raw}` ➔ **`{resolved_mfg}`**")
+        resolved_mfg = get_canonical_manufacturer(mfg_input, catalog_mfgs) if mfg_input else ""
+        if mfg_input and resolved_mfg and mfg_input.lower() != resolved_mfg.lower():
+            st.info(f"ℹ️ Matched manufacturer: `{mfg_input}` ➔ **`{resolved_mfg}`**")
 
         target_mfg = resolved_mfg if resolved_mfg else mfg_input
-        matches = search_device_catalog(catalog, target_mfg, model_input) if (target_mfg and model_input) else []
+        matches = search_catalog_wildcard(catalog, target_mfg, model_input, category="device-types") if (target_mfg or model_input) else []
 
         selected_dev = None
         if matches:
@@ -117,7 +60,8 @@ def render_device_tab(catalog, active_model):
                         label="⬇️ Download YAML",
                         data=content,
                         file_name=selected_dev["filename"],
-                        mime="text/yaml"
+                        mime="text/yaml",
+                        key="dt_dl_btn"
                     )
                 except Exception as e:
                     st.error(f"Error loading file: {e}")
@@ -131,7 +75,8 @@ def render_device_tab(catalog, active_model):
                             label="⬇️ Download YAML",
                             data=ai_yaml,
                             file_name=f"{target_mfg.lower()}_{model_input.lower().replace(' ', '-')}.yaml",
-                            mime="text/yaml"
+                            mime="text/yaml",
+                            key="dt_ai_dl_btn"
                         )
                     except Exception as e:
                         st.error(f"Generation Failed: {e}")
