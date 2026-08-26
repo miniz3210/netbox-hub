@@ -33,8 +33,8 @@ def fetch_gateway_models() -> List[str]:
         logger.debug(f"Could not auto-fetch models from gateway: {e}")
     return []
 
-def test_model_connection(model_name: str) -> Tuple[bool, str]:
-    """Sends a lightweight ping to verify if the model is alive or cooling down."""
+def test_model_connection(model_name: str) -> Tuple[bool, int, str]:
+    """Pings the target model through OmniRoute to measure latency and verify health."""
     base = OPENROUTER_BASE_URL.rstrip("/")
     endpoint = f"{base}/chat/completions" if base.endswith("/v1") else f"{base}/v1/chat/completions"
     clean_token = OPENROUTER_API_KEY.replace("Bearer ", "").strip()
@@ -52,16 +52,16 @@ def test_model_connection(model_name: str) -> Tuple[bool, str]:
         resp = requests.post(endpoint, headers=headers, json=payload, timeout=12)
         latency = round((time.time() - start) * 1000)
         if resp.status_code == 200:
-            return True, f"✅ Online ({latency}ms)"
+            return True, latency, f"Online ({latency}ms)"
         else:
             try:
                 err_data = resp.json()
                 msg = err_data.get("error", {}).get("message", resp.text)
             except Exception:
                 msg = resp.text
-            return False, f"❌ HTTP {resp.status_code}: {msg}"
+            return False, 0, f"HTTP {resp.status_code}: {msg}"
     except Exception as e:
-        return False, f"❌ Connection Error: {str(e)}"
+        return False, 0, f"Connection Error: {str(e)}"
 
 def parse_raw_gateway_payload(raw_text: str) -> str:
     trimmed = raw_text.strip()
