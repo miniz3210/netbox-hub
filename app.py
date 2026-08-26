@@ -1,17 +1,64 @@
 import streamlit as st
 from config.constants import APP_VERSION
 from config.settings import AVAILABLE_MODELS, OPENROUTER_BASE_URL
-import core.catalog as cat_module
 from core.db_manager import init_db
-from ui.tabs.device_tab import render_device_tab
-from ui.tabs.module_tab import render_module_tab
-from ui.tabs.rack_tab import render_rack_tab
-from ui.tabs.image_tab import render_image_tab
-from ui.tabs.excel_tab import render_excel_tab
-from ui.tabs.naming_tab import render_naming_tab
-from ui.tabs.rules_tab import render_rules_tab
 
-# Initialize Streamlit Page Configuration
+# ----------------- Safe Tab Imports -----------------
+# 1. Device Tab
+try:
+    from ui.tabs.device_tab import render_device_tab
+except ImportError:
+    render_device_tab = lambda cat, model: st.warning("Device tab module not found.")
+
+# 2. Module Tab
+try:
+    from ui.tabs.module_tab import render_module_tab
+except ImportError:
+    render_module_tab = lambda cat, model: st.warning("Module tab module not found.")
+
+# 3. Rack Tab
+try:
+    from ui.tabs.rack_tab import render_rack_tab
+except ImportError:
+    render_rack_tab = lambda cat: st.warning("Rack tab module not found.")
+
+# 4. Image Tab
+try:
+    from ui.tabs.image_tab import render_image_tab
+except ImportError:
+    try:
+        from ui.tabs.images_tab import render_images_tab as render_image_tab
+    except ImportError:
+        render_image_tab = lambda cat: st.warning("Image tab module not found.")
+
+# 5. Batch / Excel Tab
+try:
+    from ui.tabs.batch_tab import render_batch_tab as render_excel_tab
+except ImportError:
+    try:
+        from ui.tabs.excel_tab import render_excel_tab
+    except ImportError:
+        try:
+            from ui.tabs.batch_excel_tab import render_batch_excel_tab as render_excel_tab
+        except ImportError:
+            render_excel_tab = lambda cat, model: st.warning("Batch Excel tab module not found.")
+
+# 6. Naming Generator Tab
+try:
+    from ui.tabs.naming_tab import render_naming_tab
+except ImportError:
+    render_naming_tab = lambda model: st.warning("Naming tab module not found.")
+
+# 7. Rules Context Tab
+try:
+    from ui.tabs.rules_tab import render_rules_tab
+except ImportError:
+    try:
+        from ui.tabs.standards_tab import render_standards_tab as render_rules_tab
+    except ImportError:
+        render_rules_tab = lambda model: st.warning("Rules context tab module not found.")
+
+# ----------------- Streamlit Page Configuration -----------------
 st.set_page_config(
     page_title="NetBox Universal Library Hub",
     page_icon="⚡",
@@ -19,10 +66,8 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Initialize SQLite database schema
 init_db()
 
-# Custom Header / App Styling
 st.markdown("""
     <style>
     .block-container {
@@ -39,7 +84,6 @@ st.markdown("""
 with st.sidebar:
     st.markdown("### ⚙️ AI Engine Selection")
     
-    # 1. Preset Dropdown
     selected_preset = st.selectbox(
         "Preset Models",
         options=AVAILABLE_MODELS,
@@ -47,7 +91,6 @@ with st.sidebar:
         help="Choose from your configured environment presets."
     )
 
-    # 2. Custom Model Text Box
     custom_model = st.text_input(
         "Custom Model",
         value="",
@@ -55,7 +98,6 @@ with st.sidebar:
         help="Type any valid model slug here to override the preset on the fly."
     ).strip()
 
-    # Custom model takes precedence if typed
     active_model = custom_model if custom_model else selected_preset
 
     st.info(f"**Active Model:** `{active_model}`")
@@ -67,16 +109,19 @@ with st.sidebar:
 st.title("⚡ NetBox Universal Library Hub")
 st.caption("Device Types | Module Types | Rack Types | Images | Excel Engine | Naming Standards | OmniRoute AI")
 
-# Load Catalog safely regardless of internal function naming
-with st.spinner("Synchronizing device-type repository..."):
-    if hasattr(cat_module, "load_catalog"):
-        catalog = cat_module.load_catalog()
-    elif hasattr(cat_module, "load_github_catalog"):
-        catalog = cat_module.load_github_catalog()
-    elif hasattr(cat_module, "get_catalog"):
-        catalog = cat_module.get_catalog()
-    else:
-        catalog = {"manufacturers": [], "device_types": [], "module_types": [], "rack_types": []}
+# Safe Catalog Loading
+catalog = {"manufacturers": [], "device_types": [], "module_types": [], "rack_types": []}
+try:
+    import core.catalog as cat_module
+    with st.spinner("Synchronizing device-type repository..."):
+        if hasattr(cat_module, "load_catalog"):
+            catalog = cat_module.load_catalog()
+        elif hasattr(cat_module, "load_github_catalog"):
+            catalog = cat_module.load_github_catalog()
+        elif hasattr(cat_module, "get_catalog"):
+            catalog = cat_module.get_catalog()
+except Exception as e:
+    st.warning(f"Could not load GitHub repository catalog: {e}")
 
 # ----------------- Navigation Tabs -----------------
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
