@@ -1,7 +1,7 @@
 import streamlit as st
 from config.constants import APP_VERSION
 from config.settings import AVAILABLE_MODELS, OPENROUTER_BASE_URL
-from core.catalog import load_github_catalog
+import core.catalog as cat_module
 from core.db_manager import init_db
 from ui.tabs.device_tab import render_device_tab
 from ui.tabs.module_tab import render_module_tab
@@ -67,9 +67,16 @@ with st.sidebar:
 st.title("⚡ NetBox Universal Library Hub")
 st.caption("Device Types | Module Types | Rack Types | Images | Excel Engine | Naming Standards | OmniRoute AI")
 
-# Load GitHub Device-Type Catalog into memory
+# Load Catalog safely regardless of internal function naming
 with st.spinner("Synchronizing device-type repository..."):
-    catalog = load_github_catalog()
+    if hasattr(cat_module, "load_catalog"):
+        catalog = cat_module.load_catalog()
+    elif hasattr(cat_module, "load_github_catalog"):
+        catalog = cat_module.load_github_catalog()
+    elif hasattr(cat_module, "get_catalog"):
+        catalog = cat_module.get_catalog()
+    else:
+        catalog = {"manufacturers": [], "device_types": [], "module_types": [], "rack_types": []}
 
 # ----------------- Navigation Tabs -----------------
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
