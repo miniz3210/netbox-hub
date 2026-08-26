@@ -115,3 +115,9 @@ RULES_FILE = "naming_rules.json"
 ### 🛠️ Improvements & Refinements
 * **Custom Model Field**: Renamed on-the-fly test input field to `Custom Model`.
 * **Cleaned Default Presets**: Updated default fallback list to verified working models (`gemini-3-flash-preview`, `qwen3.6-27b`, `gpt-oss-120b`).
+
+## Release v2.2.8 — Resilient Tab Imports & Custom Model UI
+
+### 🛠️ Bug Fixes & Improvements
+* **Safe Tab Loading**: Added multi-path import handling for all UI tabs to prevent `ModuleNotFoundError`.
+* **Sidebar Custom Model**: Fixed the active model input field directly in the sidebar.
