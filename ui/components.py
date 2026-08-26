@@ -4,13 +4,14 @@ from config.settings import AVAILABLE_MODELS, OPENROUTER_BASE_URL
 from core.ai_client import test_model_connection
 
 SUGGESTED_TEST_MODELS = [
-    "stealth/ox-alpha",
     "groq/openai/gpt-oss-120b",
     "gemini/gemini-3-flash-preview",
     "groq/qwen/qwen3.6-27b",
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "deepseek/deepseek-r1:free",
-    "qwen/qwen-2.5-coder-32b-instruct:free"
+    "openrouter/qwen/qwen-2.5-coder-32b-instruct:free",
+    "openrouter/deepseek/deepseek-r1:free",
+    "openrouter/meta-llama/llama-3.3-70b-instruct:free",
+    "aug/gemini-3.1-pro-preview",
+    "aug/fable-5"
 ]
 
 def render_sidebar() -> str:
