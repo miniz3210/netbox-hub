@@ -1,5 +1,6 @@
 import streamlit as st
 from config.settings import AVAILABLE_MODELS, OPENROUTER_BASE_URL
+from config.constants import APP_VERSION
 
 def render_sidebar():
     with st.sidebar:
@@ -10,22 +11,22 @@ def render_sidebar():
             "Preset Models",
             options=AVAILABLE_MODELS,
             index=0,
-            help="Choose from your configured environment presets."
+            help="Select from configured environment presets."
         )
 
-        # 2. Custom Model Text Box
+        # 2. Custom Model On-The-Fly Input Field
         custom_model = st.text_input(
             "Custom Model",
             value="",
-            placeholder="e.g. groq/llama-3.3-70b-versatile",
-            help="Type any valid model slug here to override the preset on the fly."
+            placeholder="e.g. gemini/gemini-3.1-flash-lite",
+            help="Type any valid model slug here to test on the fly."
         ).strip()
 
-        # Custom input takes precedence if typed
+        # If custom model is typed, it overrides the dropdown
         active_model = custom_model if custom_model else selected_preset
 
         st.info(f"**Active Model:** `{active_model}`")
         st.caption(f"📡 Routed via OmniRoute (`{OPENROUTER_BASE_URL}`)")
         st.markdown("---")
-        
-    return active_model
+        st.caption(f"⚡ NetBox Hub `{APP_VERSION}`")
+        return active_model
