@@ -3,8 +3,9 @@ import streamlit as st
 from config.constants import APP_VERSION
 from config.settings import AVAILABLE_MODELS, OPENROUTER_BASE_URL
 from core.db_manager import init_db
+from core.catalog import load_catalog
 
-# ----------------- Safe Tab Imports -----------------
+# Safe Tab Imports
 try:
     from ui.tabs.device_tab import render_device_tab
 except ImportError:
@@ -52,7 +53,6 @@ except ImportError:
     except ImportError:
         render_rules_tab = lambda model: st.warning("Rules context tab module not found.")
 
-# ----------------- Streamlit Page Configuration -----------------
 st.set_page_config(
     page_title="NetBox Universal Library Hub",
     page_icon="⚡",
@@ -62,7 +62,7 @@ st.set_page_config(
 
 init_db()
 
-# Custom Header & Fixed Corner Version Badge
+# Fixed bottom-left version badge
 st.markdown(f"""
     <style>
     .block-container {{
@@ -90,7 +90,7 @@ st.markdown(f"""
     <div class="fixed-version-corner">⚡ NetBox Hub {APP_VERSION}</div>
 """, unsafe_allow_html=True)
 
-# ----------------- Sidebar -----------------
+# Sidebar AI Selector
 with st.sidebar:
     st.markdown("### ⚙️ AI Engine Selection")
     
@@ -114,49 +114,35 @@ with st.sidebar:
     st.caption(f"📡 Routed via OmniRoute (`{OPENROUTER_BASE_URL}`)")
     st.markdown("---")
 
-# ----------------- Main Page Header -----------------
 st.title("⚡ NetBox Universal Library Hub")
 st.caption("Device Types | Module Types | Rack Types | Images | Excel Engine | Naming Standards | OmniRoute AI")
 
-# Safe Catalog Loading
-catalog = {"manufacturers": [], "device_types": [], "module_types": [], "rack_types": []}
-try:
-    import core.catalog as cat_module
-    with st.spinner("Synchronizing device-type repository..."):
-        if hasattr(cat_module, "load_catalog"):
-            catalog = cat_module.load_catalog()
-        elif hasattr(cat_module, "load_github_catalog"):
-            catalog = cat_module.load_github_catalog()
-        elif hasattr(cat_module, "get_catalog"):
-            catalog = cat_module.get_catalog()
-except Exception as e:
-    st.warning(f"Could not load GitHub repository catalog: {e}")
+# Load Catalog
+with st.spinner("Synchronizing device-type repository..."):
+    catalog = load_catalog()
 
-# Helper for calling render functions with dynamic parameters
-def dispatch_tab(render_fn, catalog, active_model):
+def dispatch_tab(render_fn, cat, model):
     try:
         sig = inspect.signature(render_fn)
-        param_count = len(sig.parameters)
-        if param_count == 2:
-            render_fn(catalog, active_model)
-        elif param_count == 1:
+        if len(sig.parameters) == 2:
+            render_fn(cat, model)
+        elif len(sig.parameters) == 1:
             first_name = list(sig.parameters.keys())[0]
             if "model" in first_name:
-                render_fn(active_model)
+                render_fn(model)
             else:
-                render_fn(catalog)
+                render_fn(cat)
         else:
             render_fn()
     except Exception:
         try:
-            render_fn(catalog, active_model)
+            render_fn(cat, model)
         except TypeError:
             try:
-                render_fn(catalog)
+                render_fn(cat)
             except TypeError:
-                render_fn(active_model)
+                render_fn(model)
 
-# ----------------- Navigation Tabs -----------------
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "🖥️ Device Types",
     "🧩 Module Types",
