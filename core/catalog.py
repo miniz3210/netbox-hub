@@ -2,6 +2,7 @@ import os
 import glob
 import subprocess
 import requests
+import re
 from typing import Dict, List, Any, Optional
 
 CATALOG_REPO_URL = "https://github.com/netbox-community/devicetype-library.git"
@@ -110,6 +111,12 @@ def load_catalog() -> Dict[str, Any]:
         "devices": device_files
     }
 
+def load_github_catalog() -> Dict[str, Any]:
+    return load_catalog()
+
+def get_catalog() -> Dict[str, Any]:
+    return load_catalog()
+
 def get_canonical_manufacturer(mfg_query: str, available_mfgs: Optional[List[str]] = None) -> str:
     if not mfg_query:
         return ""
@@ -159,7 +166,6 @@ def search_catalog_wildcard(catalog: Dict[str, Any], manufacturer: str, query: s
             elif query_clean in slug or query_clean in filename or (tokens and all(t in slug or t in filename for t in tokens)):
                 results.append(item)
 
-    # Fallback to search across all manufacturers if nothing found
     if not results and tokens:
         for item in items:
             slug = item.get("slug", "").lower().replace("_", "-")
@@ -173,8 +179,14 @@ def search_library(catalog: Dict[str, Any], mfg_input: str, model_input: str) ->
     res = search_catalog_wildcard(catalog, mfg_input, model_input, category="device-types")
     return res[0] if res else None
 
+def search_device_types(catalog: Dict[str, Any], manufacturer: str, query: str) -> List[Dict[str, Any]]:
+    return search_catalog_wildcard(catalog, manufacturer, query, category="device-types")
+
+def search_module_types(catalog: Dict[str, Any], manufacturer: str, query: str) -> List[Dict[str, Any]]:
+    return search_catalog_wildcard(catalog, manufacturer, query, category="module-types")
+
 def fetch_raw_content(path_or_url: str) -> str:
-    """Reads file content from path or URL."""
+    """Reads file content safely from relative path, absolute path, or URL."""
     if not path_or_url:
         return ""
     if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
@@ -202,3 +214,20 @@ def fetch_raw_content(path_or_url: str) -> str:
 
 def read_yaml_content(file_path: str) -> str:
     return fetch_raw_content(file_path)
+
+def extract_reference_interface_pattern(content: str) -> str:
+    """Extracts interface naming style/pattern from a reference YAML file content."""
+    if not content:
+        return ""
+    patterns = []
+    for line in content.splitlines():
+        line_s = line.strip()
+        if line_s.startswith("- name:") or line_s.startswith("name:"):
+            val = line_s.split("name:", 1)[1].strip().strip('"').strip("'")
+            if val and "{" in val:
+                return val
+            elif val:
+                patterns.append(val)
+    if patterns:
+        return patterns[0]
+    return ""
