@@ -1,47 +1,90 @@
 import streamlit as st
 from config.constants import APP_VERSION
 from config.settings import AVAILABLE_MODELS, OPENROUTER_BASE_URL
-from core.ai_client import fetch_gateway_models, test_model_connection
+from core.ai_client import test_model_connection, fetch_gateway_models
+
+SUGGESTED_TEST_MODELS = [
+    "ox-alpha",
+    "groq/openai/gpt-oss-120b",
+    "gemini/gemini-3-flash-preview",
+    "groq/qwen/qwen3.6-27b",
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "deepseek/deepseek-r1:free",
+    "qwen/qwen-2.5-coder-32b-instruct:free"
+]
 
 def render_sidebar() -> str:
     with st.sidebar:
         st.header("⚙️ AI Engine Selection")
         
-        # 1. Discover live models from OmniRoute gateway
-        live_models = fetch_gateway_models()
-        model_options = live_models if live_models else AVAILABLE_MODELS
+        # 1. Preset / Gateway Model Dropdown
+        live_gateway = fetch_gateway_models()
+        preset_list = live_gateway if live_gateway else AVAILABLE_MODELS
         
         selected_preset = st.selectbox(
             "Preset Models",
-            options=model_options,
+            options=preset_list,
             index=0,
-            help="Live models discovered directly from OmniRoute gateway."
+            help="Configured default or gateway models."
         )
 
-        # 2. Custom Model On-The-Fly Input Field with suggestions
+        # 2. Suggested Models Pull-Down Menu (Select & Copy)
+        quick_pick = st.selectbox(
+            "Quick-Select Test Model",
+            options=["-- None (Use Preset / Manual) --"] + SUGGESTED_TEST_MODELS,
+            index=0,
+            help="Select any popular route to load it instantly without typing."
+        )
+
+        # 3. Custom Manual Input
+        default_manual = "" if quick_pick.startswith("--") else quick_pick
         custom_model = st.text_input(
             "Custom Model",
-            value="",
-            placeholder="e.g. ox-alpha, groq/openai/gpt-oss-120b",
-            help="Type any valid OmniRoute route ID or model slug. Tested suggestions: ox-alpha, groq/openai/gpt-oss-120b, gemini/gemini-3-flash-preview, groq/qwen/qwen3.6-27b"
+            value=default_manual,
+            placeholder="Type or edit model slug...",
+            help="Overrides preset when populated."
         ).strip()
 
-        # Custom model overrides dropdown when typed
+        # Active Model Resolution
         active_model = custom_model if custom_model else selected_preset
 
-        st.info(f"**Selected:**\n`{active_model}`")
+        # Track model test results in session state
+        if "model_test_history" not in st.session_state:
+            st.session_state["model_test_history"] = {}
+
+        # 4. Connection Test Button
+        if st.button("🧪 Test Model Connection", key="btn_ping_model", use_container_width=True):
+            with st.spinner(f"Testing `{active_model}`..."):
+                ok, latency, msg = test_model_connection(active_model)
+                st.session_state["model_test_history"][active_model] = {
+                    "ok": ok,
+                    "latency": latency,
+                    "msg": msg
+                }
+
+        # 5. Active Model Card with Latency or Strikethrough
+        history = st.session_state["model_test_history"]
+        if active_model in history:
+            res = history[active_model]
+            if res["ok"]:
+                st.success(f"**Selected:**\n`{active_model}` — ⚡ **{res['latency']}ms**")
+            else:
+                st.error(f"**Selected:**\n~~`{active_model}`~~ ❌ *(Offline)*\n\n`{res['msg']}`")
+        else:
+            st.info(f"**Selected:**\n`{active_model}`")
+
+        # 6. Test Results History Log
+        if history:
+            with st.expander("📋 Model Test Log", expanded=False):
+                for m_name, data in history.items():
+                    if data["ok"]:
+                        st.markdown(f"• `{m_name}`: 🟢 **{data['latency']}ms**")
+                    else:
+                        st.markdown(f"• ~~`{m_name}`~~: 🔴 **Fail**")
+
         st.caption(f"🔌 Routed via **OmniRoute** (`{OPENROUTER_BASE_URL}`)")
 
-        # 3. Test Model Connection Button
-        if st.button("🧪 Test Model Connection", key="btn_ping_model", use_container_width=True):
-            with st.spinner(f"Testing `{active_model}` via OmniRoute..."):
-                ok, msg = test_model_connection(active_model)
-                if ok:
-                    st.success(msg)
-                else:
-                    st.error(msg)
-
-        # Fixed bottom-left corner badge
+        # Pinned bottom-left corner badge
         st.markdown(
             f"""
             <style>
