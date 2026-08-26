@@ -1,6 +1,5 @@
-import os
 import streamlit as st
-from core.catalog import get_canonical_manufacturer, search_catalog_wildcard
+from core.catalog import get_canonical_manufacturer, search_catalog_wildcard, fetch_raw_content
 from core.ai_client import call_ai
 
 def generate_device_yaml_ai(mfg: str, model: str, active_model: str) -> str:
@@ -51,9 +50,8 @@ def render_device_tab(catalog, active_model):
     with col_right:
         if clicked and target_mfg and model_input:
             if selected_dev:
-                try:
-                    with open(selected_dev["full_path"], "r", encoding="utf-8") as f:
-                        content = f.read()
+                content = fetch_raw_content(selected_dev["full_path"])
+                if content:
                     st.markdown(f"**Source:** 🟢 Official Repository (`{selected_dev['rel_path']}`)")
                     st.code(content, language="yaml")
                     st.download_button(
@@ -63,8 +61,8 @@ def render_device_tab(catalog, active_model):
                         mime="text/yaml",
                         key="dt_dl_btn"
                     )
-                except Exception as e:
-                    st.error(f"Error loading file: {e}")
+                else:
+                    st.error("Error reading file content.")
             else:
                 with st.spinner(f"Generating Device-Type YAML using `{active_model}`..."):
                     try:

@@ -14,7 +14,7 @@ def render_sidebar():
             help="Select from configured environment presets."
         )
 
-        # 2. Custom Model On-The-Fly Input Field
+        # 2. Custom Model Input Field
         custom_model = st.text_input(
             "Custom Model",
             value="",
@@ -22,7 +22,6 @@ def render_sidebar():
             help="Type any valid model slug here to test on the fly."
         ).strip()
 
-        # Custom model overrides preset if typed
         active_model = custom_model if custom_model else selected_preset
 
         st.info(f"**Active Model:** `{active_model}`")
