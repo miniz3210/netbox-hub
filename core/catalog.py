@@ -1,10 +1,13 @@
 import os
 import glob
 import subprocess
+import requests
 from typing import Dict, List, Any, Optional
 
 CATALOG_REPO_URL = "https://github.com/netbox-community/devicetype-library.git"
+REPO_URL = CATALOG_REPO_URL
 CATALOG_PATH = os.path.join("data", "devicetype-library")
+CATALOG_DIR = CATALOG_PATH
 
 MANUFACTURER_ALIASES = {
     "hp": "HPE",
@@ -35,6 +38,13 @@ MANUFACTURER_ALIASES = {
     "supermicro": "Supermicro"
 }
 
+MFG_ALIASES = MANUFACTURER_ALIASES
+MFG_MAP = MANUFACTURER_ALIASES
+
+def normalize_mfg(mfg_str: str) -> str:
+    clean = str(mfg_str).lower().strip()
+    return MANUFACTURER_ALIASES.get(clean, clean)
+
 def sync_repository() -> str:
     os.makedirs("data", exist_ok=True)
     if not os.path.exists(CATALOG_PATH):
@@ -48,6 +58,9 @@ def sync_repository() -> str:
         except Exception:
             pass
     return CATALOG_PATH
+
+def sync_github_repo() -> str:
+    return sync_repository()
 
 def load_catalog() -> Dict[str, Any]:
     repo_dir = sync_repository()
@@ -63,7 +76,7 @@ def load_catalog() -> Dict[str, Any]:
         for root, dirs, files in os.walk(dev_types_dir):
             for file in files:
                 if file.endswith((".yaml", ".yml")):
-                    rel_path = os.path.relpath(os.path.join(root, file), repo_dir)
+                    rel_path = os.path.relpath(os.path.join(root, file), repo_dir).replace("\\", "/")
                     mfg = os.path.basename(root)
                     mfg_set.add(mfg)
                     device_files.append({
@@ -78,7 +91,7 @@ def load_catalog() -> Dict[str, Any]:
         for root, dirs, files in os.walk(mod_types_dir):
             for file in files:
                 if file.endswith((".yaml", ".yml")):
-                    rel_path = os.path.relpath(os.path.join(root, file), repo_dir)
+                    rel_path = os.path.relpath(os.path.join(root, file), repo_dir).replace("\\", "/")
                     mfg = os.path.basename(root)
                     mfg_set.add(mfg)
                     module_files.append({
@@ -93,7 +106,8 @@ def load_catalog() -> Dict[str, Any]:
         "repo_path": repo_dir,
         "manufacturers": sorted(list(mfg_set)),
         "device_types": device_files,
-        "module_types": module_files
+        "module_types": module_files,
+        "devices": device_files
     }
 
 def get_canonical_manufacturer(mfg_query: str, available_mfgs: Optional[List[str]] = None) -> str:
@@ -155,9 +169,36 @@ def search_catalog_wildcard(catalog: Dict[str, Any], manufacturer: str, query: s
 
     return results
 
+def search_library(catalog: Dict[str, Any], mfg_input: str, model_input: str) -> Optional[Dict[str, Any]]:
+    res = search_catalog_wildcard(catalog, mfg_input, model_input, category="device-types")
+    return res[0] if res else None
+
+def fetch_raw_content(path_or_url: str) -> str:
+    """Reads file content from path or URL."""
+    if not path_or_url:
+        return ""
+    if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
+        try:
+            resp = requests.get(path_or_url, timeout=10)
+            if resp.status_code == 200:
+                return resp.text
+        except Exception:
+            return ""
+    
+    candidates = [
+        path_or_url,
+        os.path.join(CATALOG_PATH, path_or_url),
+        os.path.join("data", "devicetype-library", path_or_url),
+        os.path.join(os.getcwd(), path_or_url)
+    ]
+    for p in candidates:
+        if os.path.exists(p) and os.path.isfile(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    return f.read()
+            except Exception:
+                pass
+    return ""
+
 def read_yaml_content(file_path: str) -> str:
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            return f.read()
-    except Exception as e:
-        return f"# Error reading file: {e}"
+    return fetch_raw_content(file_path)
