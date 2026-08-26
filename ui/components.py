@@ -5,7 +5,8 @@ from core.ai_client import test_model_connection
 
 RAW_SUGGESTED_MODELS = [
     "ox-alpha",
-    "stealth/ox-alpha",
+    "groq/qwen/qwen3.6-27b",
+    "gemini/gemini-3-flash-preview",
     "aug/gemini-3.1-pro-preview",
     "aug/glm-5.2",
     "aug/gpt5.4",
@@ -19,7 +20,7 @@ def render_sidebar() -> str:
     with st.sidebar:
         st.header("⚙️ AI Engine Selection")
         
-        # 1. Preset Models strictly uses your configured AVAILABLE_MODELS
+        # 1. Preset Models
         selected_preset = st.selectbox(
             "Preset Models",
             options=AVAILABLE_MODELS,
@@ -38,7 +39,7 @@ def render_sidebar() -> str:
             "Quick-Select Test Model",
             options=["-- None (Use Preset / Manual) --"] + filtered_suggestions,
             index=0,
-            help="Select any candidate route from your OmniRoute gateway to test."
+            help="Select any candidate route to load into Custom Model."
         )
 
         # 3. Custom Manual Input
