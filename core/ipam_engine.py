@@ -27,8 +27,28 @@ def calculate_usable_range(network: ipaddress.IPv4Network) -> str:
     last_usable = network[-2]
     return f"{first_usable} - {last_usable}"
 
+def evaluate_subnet_entry(subnet_str: str, supernet_str: str = "") -> Dict[str, str]:
+    clean = str(subnet_str).strip()
+    if not clean or clean == "nan":
+        return {"usable_range": "-", "status": "Unassigned"}
+    if "x" in clean.lower():
+        return {"usable_range": "RFC1918 Custom Pool", "status": "Special Pool"}
+    try:
+        net = ipaddress.ip_network(clean, strict=False)
+        usable = calculate_usable_range(net)
+        status = "OK"
+        if supernet_str:
+            try:
+                sup = ipaddress.ip_network(supernet_str.strip(), strict=False)
+                if not net.subnet_of(sup):
+                    status = "⚠️ Outside Supernet"
+            except ValueError:
+                pass
+        return {"usable_range": usable, "status": status}
+    except ValueError:
+        return {"usable_range": "Invalid CIDR", "status": "❌ Syntax Error"}
+
 def slice_supernet(supernet_str: str, vlan_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Calculates non-overlapping subnets from a base supernet."""
     try:
         clean_sup = supernet_str.strip()
         base_net = ipaddress.ip_network(clean_sup, strict=False)
@@ -37,7 +57,6 @@ def slice_supernet(supernet_str: str, vlan_list: List[Dict[str, Any]]) -> List[D
 
     assigned = []
     current_iter = None
-    
     if base_net:
         if base_net.prefixlen < 24:
             current_iter = base_net.subnets(new_prefix=24)
@@ -47,30 +66,24 @@ def slice_supernet(supernet_str: str, vlan_list: List[Dict[str, Any]]) -> List[D
     for v in vlan_list:
         item = dict(v)
         assigned_net = None
-        
         if current_iter and not item.get("suggest_fallback"):
             try:
                 assigned_net = next(current_iter)
             except StopIteration:
                 assigned_net = None
-                
+
         if assigned_net:
             item["assigned_subnet"] = str(assigned_net)
-            item["assigned_prefix"] = str(assigned_net.network_address)
-            item["mask"] = f"/{assigned_net.prefixlen}"
             item["usable_range"] = calculate_usable_range(assigned_net)
             item["status"] = "OK"
         elif item.get("suggest_fallback"):
             item["assigned_subnet"] = item["suggest_fallback"]
-            item["assigned_prefix"] = ""
             item["usable_range"] = "RFC1918 Custom Pool"
             item["status"] = "Special Pool"
         else:
             item["assigned_subnet"] = ""
-            item["assigned_prefix"] = ""
             item["usable_range"] = "⚠️ Supernet Depleted"
             item["status"] = "Exhausted"
-            
         assigned.append(item)
     return assigned
 
@@ -83,14 +96,18 @@ def generate_netbox_vlan_group_csv(site_name: str, scope_id: str) -> str:
     slug = slugify(group_name)
     return f"name,slug,scope_type,scope_id\n{group_name},{slug},dcim.site,{scope_id}"
 
-def generate_netbox_vlans_csv(site_name: str, vlan_records: List[Dict[str, Any]]) -> str:
+def generate_netbox_vlans_csv(site_name: str, df_records: List[Dict[str, Any]]) -> str:
     group_name = f"{site_name} VLAN Group"
     lines = ["vid,name,status,site,group,description,role"]
-    for r in vlan_records:
-        lines.append(f"{r['vid']},{r['name']},active,{site_name},{group_name},{r['desc']},{r['role']}")
+    for r in df_records:
+        vid = r.get("VLAN ID") or r.get("vid", "")
+        name = r.get("VLAN Name") or r.get("name", "")
+        desc = r.get("Description") or r.get("desc", name)
+        role = r.get("Role") or r.get("role", name)
+        lines.append(f"{vid},{name},active,{site_name},{group_name},{desc},{role}")
     return "\n".join(lines)
 
-def generate_netbox_prefixes_csv(site_name: str, scope_id: str, supernet_str: str, vlan_records: List[Dict[str, Any]]) -> str:
+def generate_netbox_prefixes_csv(site_name: str, scope_id: str, supernet_str: str, df_records: List[Dict[str, Any]]) -> str:
     group_name = f"{site_name} VLAN Group"
     lines = ["prefix,status,scope_type,scope_id,vlan_group,vlan,role,description"]
     
@@ -102,12 +119,16 @@ def generate_netbox_prefixes_csv(site_name: str, scope_id: str, supernet_str: st
         except ValueError:
             pass
 
-    for r in vlan_records:
-        sub = r.get("assigned_subnet", "")
+    for r in df_records:
+        vid = r.get("VLAN ID") or r.get("vid", "")
+        name = r.get("VLAN Name") or r.get("name", "")
+        role = r.get("Role") or r.get("role", name)
+        sub = str(r.get("Subnet") or r.get("assigned_subnet", "")).strip()
+        
         if "/" in sub:
-            desc = f"{site_name} {r['name']} -- VLAN {r['vid']}"
-            lines.append(f"{sub},active,dcim.site,{scope_id},{group_name},{r['vid']},{r['role']},{desc}")
+            desc = f"{site_name} {name} -- VLAN {vid}"
+            lines.append(f"{sub},active,dcim.site,{scope_id},{group_name},{vid},{role},{desc}")
         else:
-            lines.append(f"/24,active,dcim.site,{scope_id},{group_name},{r['vid']},{r['role']},{site_name} {r['name']} -- VLAN {r['vid']}")
+            lines.append(f"/24,active,dcim.site,{scope_id},{group_name},{vid},{role},{site_name} {name} -- VLAN {vid}")
             
     return "\n".join(lines)
