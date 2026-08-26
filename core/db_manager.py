@@ -1,7 +1,7 @@
 import os
 import sqlite3
 import pandas as pd
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 DB_PATH = "data/netbox_hub.db"
 
@@ -9,7 +9,18 @@ def init_db():
     os.makedirs("data", exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    # 1. Shared Inventory Records (Devices, Hypervisors, VMs)
+    
+    # 1. Sites / Scope Table (Stores NetBox Site Name <-> Scope ID mapping)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS sites_records (
+            id INTEGER PRIMARY KEY,
+            name TEXT UNIQUE,
+            slug TEXT,
+            imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # 2. Shared Inventory Records (Devices, Hypervisors, VMs)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS inventory_records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -23,7 +34,8 @@ def init_db():
             imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    # 2. Dedicated IPAM / Prefix Records
+
+    # 3. Dedicated IPAM / Prefix Records (Used for overlap/collision checks)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS ipam_records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,6 +44,7 @@ def init_db():
             vlan_name TEXT,
             role TEXT,
             site TEXT,
+            scope_id INTEGER,
             description TEXT,
             imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -39,7 +52,64 @@ def init_db():
     conn.commit()
     conn.close()
 
-# ── INVENTORY RECORDS (Shared Naming & Devices) ──────────────────────────
+# ── SITE / SCOPE ID LOOKUP (Excel E1 XLOOKUP equivalent) ─────────────────
+
+def save_sites_batch(sites: List[Dict[str, Any]], clear_first: bool = False) -> int:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    if clear_first:
+        cursor.execute("DELETE FROM sites_records")
+    
+    count = 0
+    for s in sites:
+        site_id = s.get("id")
+        name = str(s.get("name") or "").strip()
+        slug = str(s.get("slug") or "").strip()
+        if site_id and name:
+            cursor.execute("""
+                INSERT OR REPLACE INTO sites_records (id, name, slug)
+                VALUES (?, ?, ?)
+            """, (int(site_id), name, slug))
+            count += 1
+            
+    conn.commit()
+    conn.close()
+    return count
+
+def lookup_scope_id(site_name: str) -> Optional[int]:
+    """Exact XLOOKUP equivalent matching site name case-insensitively."""
+    if not site_name:
+        return None
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    clean = site_name.strip()
+    cursor.execute("SELECT id FROM sites_records WHERE LOWER(name) = LOWER(?) LIMIT 1", (clean,))
+    row = cursor.fetchone()
+    if not row:
+        cursor.execute("SELECT id FROM sites_records WHERE LOWER(slug) = LOWER(?) LIMIT 1", (clean,))
+        row = cursor.fetchone()
+    if not row:
+        # Partial match fallback
+        cursor.execute("SELECT id FROM sites_records WHERE LOWER(name) LIKE LOWER(?) LIMIT 1", (f"%{clean}%",))
+        row = cursor.fetchone()
+        
+    conn.close()
+    return row[0] if row else None
+
+def get_all_sites() -> List[Dict[str, Any]]:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM sites_records ORDER BY name ASC")
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+# ── INVENTORY RECORDS ───────────────────────────────────────────────────
 
 def save_records_batch(records: List[Dict[str, Any]], clear_first: bool = True) -> Dict[str, int]:
     init_db()
@@ -141,11 +211,73 @@ def get_records_by_category(category: str, site_filter: str = "") -> List[Dict[s
     conn.close()
     return [dict(r) for r in rows]
 
+# ── DEDICATED IPAM & PREFIXES ───────────────────────────────────────────
+
+def save_ipam_records_batch(records: List[Dict[str, Any]], clear_first: bool = True) -> int:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    if clear_first:
+        cursor.execute("DELETE FROM ipam_records")
+
+    count = 0
+    for r in records:
+        cursor.execute("""
+            INSERT INTO ipam_records (prefix_or_subnet, vlan_id, vlan_name, role, site, scope_id, description)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            str(r.get("prefix_or_subnet") or r.get("prefix") or r.get("subnet") or "").strip(),
+            int(r.get("vlan_id") or r.get("vid") or 0) if str(r.get("vlan_id") or r.get("vid") or "").isdigit() else None,
+            str(r.get("vlan_name") or r.get("name") or "").strip(),
+            str(r.get("role") or "").strip(),
+            str(r.get("site") or "").strip(),
+            int(r.get("scope_id")) if str(r.get("scope_id") or "").isdigit() else None,
+            str(r.get("description") or r.get("desc") or "").strip()
+        ))
+        count += 1
+
+    conn.commit()
+    conn.close()
+    return count
+
+def get_existing_prefix_strings() -> List[str]:
+    """Returns all prefix strings currently in the database to check collisions."""
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT DISTINCT prefix_or_subnet FROM ipam_records WHERE prefix_or_subnet != ''")
+    rows = cursor.fetchall()
+    conn.close()
+    return [r[0] for r in rows if r[0] and "/" in r[0]]
+
+def get_all_ipam_records() -> List[Dict[str, Any]]:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM ipam_records ORDER BY id ASC")
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
 def clear_all_records() -> int:
     init_db()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("DELETE FROM inventory_records")
+    cursor.execute("DELETE FROM sites_records")
+    cursor.execute("DELETE FROM ipam_records")
+    deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
+
+def clear_ipam_records() -> int:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM ipam_records")
+    cursor.execute("DELETE FROM sites_records")
     deleted = cursor.rowcount
     conn.commit()
     conn.close()
@@ -159,54 +291,6 @@ def get_total_record_count() -> int:
     total = cursor.fetchone()[0]
     conn.close()
     return total
-
-# ── DEDICATED IPAM RECORDS ──────────────────────────────────────────────
-
-def save_ipam_records_batch(records: List[Dict[str, Any]], clear_first: bool = True) -> int:
-    init_db()
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    if clear_first:
-        cursor.execute("DELETE FROM ipam_records")
-
-    count = 0
-    for r in records:
-        cursor.execute("""
-            INSERT INTO ipam_records (prefix_or_subnet, vlan_id, vlan_name, role, site, description)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (
-            str(r.get("prefix_or_subnet") or r.get("prefix") or r.get("subnet") or "").strip(),
-            int(r.get("vlan_id") or r.get("vid") or 0) if str(r.get("vlan_id") or r.get("vid") or "").isdigit() else None,
-            str(r.get("vlan_name") or r.get("name") or "").strip(),
-            str(r.get("role") or "").strip(),
-            str(r.get("site") or "").strip(),
-            str(r.get("description") or r.get("desc") or "").strip()
-        ))
-        count += 1
-
-    conn.commit()
-    conn.close()
-    return count
-
-def get_all_ipam_records() -> List[Dict[str, Any]]:
-    init_db()
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM ipam_records ORDER BY id ASC")
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-def clear_ipam_records() -> int:
-    init_db()
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM ipam_records")
-    deleted = cursor.rowcount
-    conn.commit()
-    conn.close()
-    return deleted
 
 def get_total_ipam_count() -> int:
     init_db()
