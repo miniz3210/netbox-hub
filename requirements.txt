@@ -2,6 +2,10 @@ streamlit
 requests
 pandas
 openpyxl
+Flask
+flask-cors
+python-dotenv
+ipaddress
 # google-genai
 # groq
 # openai
