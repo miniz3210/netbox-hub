@@ -50,6 +50,16 @@ def init_db():
             imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    
+    # Schema Migration: Add missing scope_id column to existing legacy databases
+    cursor.execute("PRAGMA table_info(ipam_records)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if "scope_id" not in columns:
+        try:
+            cursor.execute("ALTER TABLE ipam_records ADD COLUMN scope_id INTEGER")
+        except Exception:
+            pass
+
     conn.commit()
     conn.close()
 
@@ -145,7 +155,7 @@ def get_all_sites() -> List[Dict[str, Any]]:
 
 # ── INVENTORY RECORDS (Naming Tab) ──────────────────────────────────────
 
-def save_records_batch(records: List[Dict[str, Any]], clear_first: bool = True) -> Dict[str, int]:
+def save_records_batch(records: List[Dict[str, Any]], clear_first: bool = False) -> Dict[str, int]:
     init_db()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -173,10 +183,31 @@ def save_records_batch(records: List[Dict[str, Any]], clear_first: bool = True) 
     conn.close()
     return counts
 
-def save_universal_csv(file_bytes) -> Dict[str, int]:
+def save_universal_csv(file_bytes, clear_first: bool = False) -> Dict[str, int]:
+    """Parses and validates NetBox Devices and Virtual Machines export CSVs."""
     df = pd.read_csv(file_bytes)
     cols = {str(c).lower().strip(): c for c in df.columns}
-    name_col = cols.get("name", "Name")
+
+    # 1. Validation guards: Reject VLANs and Sites exports explicitly
+    if "vid" in cols or "q-in-q role" in cols or "q-in-q svlan" in cols or "prefixes" in cols:
+        raise ValueError("Invalid file uploaded to Naming. This is a NetBox VLANs export (netbox_VLANs.csv). Please upload 'netbox_devices.csv' or 'netbox_virtual machines.csv'.")
+
+    if "asns" in cols or "facility" in cols or "time zone" in cols:
+        raise ValueError("Invalid file uploaded to Naming. This is a NetBox Sites export (netbox_sites.csv). Please upload 'netbox_devices.csv' or 'netbox_virtual machines.csv'.")
+
+    # 2. Check for required device/VM columns
+    name_col = cols.get("name", cols.get("Name"))
+    if not name_col:
+        raise ValueError("Invalid CSV: missing 'Name' column. Please export official data from NetBox.")
+
+    valid_device_vm_cols = [
+        "device type", "device_type", "type", "manufacturer", "make", 
+        "cluster", "vcpus", "memory", "disk", "rack", "serial", 
+        "asset tag", "primary ipv4", "platform", "device role"
+    ]
+    if not any(c in cols for c in valid_device_vm_cols):
+        raise ValueError("Invalid CSV format. Please upload official NetBox export for Devices or Virtual Machines.")
+
     role_col = cols.get("role", cols.get("device role", cols.get("role name", "")))
     type_col = cols.get("device type", cols.get("type", cols.get("device_type", "")))
     mfg_col = cols.get("manufacturer", cols.get("make", ""))
@@ -204,7 +235,7 @@ def save_universal_csv(file_bytes) -> Dict[str, int]:
         combined = f"{name} {role} {dtype} {desc}".lower()
         if any(h in combined for h in ["esx", "hypervisor", "infhost", "vmhost", "esxi"]):
             cat = "hypervisor"
-        elif any(v in combined for v in ["virtual machine", "vm", "vcenter", "guest", "app", "server", "srv", "db"]) or ("vcpus" in cols or "memory" in cols or "disk" in cols):
+        elif any(v in combined for v in ["virtual machine", "vm", "vcenter", "guest", "app", "server", "srv", "db"]) or ("vcpus" in cols or "memory" in cols or "disk" in cols or cluster):
             cat = "vm"
         else:
             cat = "device"
@@ -219,7 +250,7 @@ def save_universal_csv(file_bytes) -> Dict[str, int]:
             "cluster": cluster if cluster.lower() != "nan" else ""
         })
 
-    return save_records_batch(records, clear_first=True)
+    return save_records_batch(records, clear_first=clear_first)
 
 def get_records_by_category(category: str, site_filter: str = "") -> List[Dict[str, Any]]:
     init_db()
@@ -247,7 +278,7 @@ def get_records_by_category(category: str, site_filter: str = "") -> List[Dict[s
 
 # ── DEDICATED IPAM & PREFIXES ───────────────────────────────────────────
 
-def save_ipam_records_batch(records: List[Dict[str, Any]], clear_first: bool = True) -> int:
+def save_ipam_records_batch(records: List[Dict[str, Any]], clear_first: bool = False) -> int:
     init_db()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -260,7 +291,6 @@ def save_ipam_records_batch(records: List[Dict[str, Any]], clear_first: bool = T
         if not raw_prefix or raw_prefix.lower() == "nan":
             continue
         
-        # Extract all CIDRs inside the string
         cidrs = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}/\d{1,2}\b', raw_prefix)
         if not cidrs and "/" in raw_prefix:
             cidrs = [raw_prefix]

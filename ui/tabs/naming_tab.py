@@ -18,13 +18,33 @@ def apply_case(text: str, mode: str) -> str:
     return text.upper() if mode == "UPPERCASE" else text.lower()
 
 def handle_csv_upload():
-    uploaded_file = st.session_state.get("global_netbox_csv")
-    if uploaded_file is not None:
+    uploaded_files = st.session_state.get("global_netbox_csv")
+    if not uploaded_files:
+        return
+
+    if not isinstance(uploaded_files, list):
+        uploaded_files = [uploaded_files]
+
+    total_devices = 0
+    total_hypervisors = 0
+    total_vms = 0
+    errors = []
+
+    for f in uploaded_files:
         try:
-            counts = save_universal_csv(uploaded_file)
-            st.toast(f"✅ Ingested CSV: {counts['device']} Devices, {counts['hypervisor']} Hypervisors, {counts['vm']} VMs!", icon="🚀")
+            counts = save_universal_csv(f, clear_first=False)
+            total_devices += counts.get("device", 0)
+            total_hypervisors += counts.get("hypervisor", 0)
+            total_vms += counts.get("vm", 0)
         except Exception as e:
-            st.error(f"Error parsing CSV: {e}")
+            errors.append(f"• **{f.name}**: {str(e)}")
+
+    if errors:
+        for err in errors:
+            st.error(err)
+
+    if total_devices > 0 or total_hypervisors > 0 or total_vms > 0:
+        st.toast(f"✅ Ingested: {total_devices} Devices, {total_hypervisors} Hypervisors, {total_vms} VMs!", icon="🚀")
 
 def handle_csv_reset():
     clear_all_records()
@@ -87,6 +107,7 @@ def render_compact_toolbar():
                 st.file_uploader(
                     "Upload NetBox CSV Export",
                     type=["csv"],
+                    accept_multiple_files=True,
                     key="global_netbox_csv",
                     on_change=handle_csv_upload,
                     label_visibility="collapsed"
