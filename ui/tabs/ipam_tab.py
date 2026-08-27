@@ -154,6 +154,11 @@ def render_ipam_tab(active_model: str):
     with top1:
         site_name_in = st.text_input("Branch / Site Name", value="weybridge", key="ipam_site_in").strip()
 
+    # Display name is title-cased (e.g. "bristol" -> "Bristol") for human
+    # reading, but the lowercase `matched_site_name` is preserved for
+    # every NetBox export (CSV generators, slug, scope, etc).
+    display_site_name = site_name_in.title() if site_name_in else ""
+
     # Step A: Perform Live API Search or Local DB lookup
     resolved_scope_id = None
     resolved_supernet = None
@@ -185,7 +190,7 @@ def render_ipam_tab(active_model: str):
             help="Auto-discovered directly from NetBox API or database."
         ).strip()
         if resolved_scope_id:
-            st.caption(f"🟢 Matched **`{matched_site_name}`** (ID: `{resolved_scope_id}`)")
+            st.caption(f"🟢 Matched **`{display_site_name}`** (ID: `{resolved_scope_id}`)")
         else:
             st.caption("⚪ Manual Scope ID mode (Not Found)")
 
@@ -242,13 +247,11 @@ def render_ipam_tab(active_model: str):
             "VLAN ID": st.column_config.NumberColumn("VLAN ID", step=1, required=True),
             "VLAN Name": st.column_config.TextColumn("VLAN Name", required=True),
             "Role": st.column_config.TextColumn("Role"),
-            # Description is a derived field. Formula: Site + VLAN Role + VLAN ID
-            # e.g. "bristol Corporate WiFi -- VLAN 300". Marked disabled so the
-            # user cannot type a value that the formula would immediately overwrite.
+            # Description is editable (previous behaviour restored). Default
+            # value comes from the formula "{Site} {Role} -- VLAN {ID}".
             "Description": st.column_config.TextColumn(
-                "Description (auto)",
-                help="Auto-generated: Site + VLAN Role + VLAN ID",
-                disabled=True,
+                "Description",
+                help="Free-text description. Default: Site + VLAN Role + VLAN ID",
             ),
             "Subnet": st.column_config.TextColumn("Subnet (CIDR)", help="Type any valid CIDR like 10.113.240.0/24"),
         },
@@ -261,33 +264,40 @@ def render_ipam_tab(active_model: str):
         allocated_subnets.append(sub_str)
         vlan_id_val = r.get("VLAN ID")
         vlan_role_val = r.get("Role", "")
-        eval_res = evaluate_subnet_row(
-            sub_str,
-            vlan_id_val,
-            vlan_role_val,
-            matched_site_name,
-            supernet_in,
-            existing_prefixes
-        )
-        # Recompute the description from the formula on every render so
-        # changes to Site / Role / VLAN ID immediately propagate.
-        if vlan_id_val:
-            formula_desc = f"{matched_site_name} {vlan_role_val} -- VLAN {vlan_id_val}"
+        # Only auto-fill the description if the user has not typed a custom one.
+        existing_desc = str(r.get("Description", "")).strip()
+        if not existing_desc:
+            if vlan_id_val:
+                r["Description"] = f"{display_site_name} {vlan_role_val} -- VLAN {vlan_id_val}"
+            else:
+                r["Description"] = f"{display_site_name} {vlan_role_val}"
+        # Suppress "Invalid CIDR" for empty rows so the table stays readable.
+        if not sub_str or "x" in sub_str.lower():
+            r["Usable Range"] = "—"
+            r["Status"] = "Unassigned"
         else:
-            formula_desc = f"{matched_site_name} {vlan_role_val}"
-        r["Description"] = formula_desc
-        r["Usable Range"] = eval_res["usable_range"]
-        r["Status"] = eval_res["status"]
-        r["Prefix Description"] = eval_res["desc"]
+            eval_res = evaluate_subnet_row(
+                sub_str,
+                vlan_id_val,
+                vlan_role_val,
+                matched_site_name,
+                supernet_in,
+                existing_prefixes,
+            )
+            r["Usable Range"] = eval_res["usable_range"]
+            r["Status"] = eval_res["status"]
+        r["Prefix Description"] = r.get("Description", "")
 
-    # Preview summary table and Remaining Capacity Matrix
+    # Preview summary is now folded into the editor (avoids duplicate
+    # VLAN ID / VLAN Name columns).  Only the Remaining Capacity column
+    # is shown alongside a compact status summary.
     c_prev, c_cap = st.columns([3, 1.2])
     with c_prev:
         st.markdown("##### 🔍 Live Usable IP Ranges & Collision Status")
         st.dataframe(
-            pd.DataFrame(records_dict)[["VLAN ID", "VLAN Name", "Subnet", "Usable Range", "Status", "Prefix Description"]], 
-            use_container_width=True, 
-            hide_index=True
+            pd.DataFrame(records_dict)[["Subnet", "Usable Range", "Status", "Description"]],
+            use_container_width=True,
+            hide_index=True,
         )
 
     with c_cap:
