@@ -66,17 +66,27 @@ def calculate_remaining_subnets(supernet_str: str, allocated_subnets: List[str])
     return capacity
 
 def evaluate_subnet_row(
-    subnet_input: str, 
-    vlan_id: Any, 
-    vlan_role: str, 
-    site_name: str, 
+    subnet_input: str,
+    vlan_id: Any,
+    vlan_role: str,
+    site_name: str,
     supernet_str: str = "",
     existing_prefixes: Optional[List[str]] = None
 ) -> Dict[str, Any]:
-    """Evaluates an individual row, generating range, collision tag, description, and status."""
+    """Evaluates an individual row, generating range, collision tag, description, and status.
+
+    Description formula (matches Excel pattern in calculate_usable_range):
+        "{site_name} {vlan_role} -- VLAN {vlan_id}"
+    e.g. "bristol Corporate WiFi -- VLAN 300".
+
+    When the user enters a misaligned CIDR like "10.113.249.0/23" the live
+    range is CEILING-aligned to the next valid block boundary (matching the
+    Excel CEILING.MATH pattern used in calculate_next_subnet) so the
+    displayed range never overlaps with the previous allocation.
+    """
     clean = str(subnet_input).strip()
     desc = f"{site_name} {vlan_role} -- VLAN {vlan_id}" if vlan_id else f"{site_name} {vlan_role}"
-    
+
     if not clean or clean == "nan":
         return {"usable_range": "-", "status": "Unassigned", "desc": desc, "in_use": False}
 
@@ -84,10 +94,22 @@ def evaluate_subnet_row(
         return {"usable_range": "RFC1918 Custom Pool", "status": "Special Pool", "desc": desc, "in_use": False}
 
     try:
+        # First parse the CIDR — strict=False lets the user type a host IP.
         net = ipaddress.ip_network(clean, strict=False)
+
+        # CEILING.MATH-style alignment: round the network address UP to the
+        # next aligned boundary for this prefix length. This way typing
+        # "10.113.249.0/23" surfaces the next valid /23 (10.113.250.0/23,
+        # which then displays as 10.113.250.0 - 10.113.251.255) instead of
+        # silently FLOORing down to 10.113.248.0/23.
+        block_size = 2 ** (32 - net.prefixlen)
+        ip_int = int(net.network_address)
+        aligned_int = ((ip_int + block_size - 1) // block_size) * block_size
+        net = ipaddress.ip_network(f"{aligned_int}/{net.prefixlen}", strict=False)
+
         range_str = calculate_ip_range_str(net)
         is_in_use = check_prefix_collision(net, existing_prefixes or [])
-        
+
         status = "OK"
         if is_in_use:
             status = "⚠️ [IN-USE]"
