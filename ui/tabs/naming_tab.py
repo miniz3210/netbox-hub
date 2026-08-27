@@ -9,12 +9,10 @@ from utils.formatters import (
 from core.naming_engine import verify_and_suggest_with_ai
 from core.db_manager import (
     save_universal_csv, 
-    save_records_batch,
     get_records_by_category, 
     clear_all_records,
     get_total_record_count
 )
-from core.netbox_client import fetch_netbox_inventory
 
 def apply_case(text: str, mode: str) -> str:
     return text.upper() if mode == "UPPERCASE" else text.lower()
@@ -71,47 +69,28 @@ def render_compact_toolbar():
         total_recs = get_total_record_count()
         status_tag = f"🟢 ({total_recs} records in DB)" if total_recs > 0 else "⚪ (Default Examples)"
         
-        with st.expander(f"📥 Ingest NetBox Data (CSV or REST API) {status_tag}", expanded=False):
-            tab_csv, tab_api = st.tabs(["📄 Upload CSV Export", "🔌 Pull via NetBox API"])
-            
-            with tab_csv:
-                c_up, c_rst = st.columns([3, 1])
-                with c_up:
-                    st.file_uploader(
-                        "Upload NetBox CSV Export",
-                        type=["csv"],
-                        key="global_netbox_csv",
-                        on_change=handle_csv_upload,
-                        label_visibility="collapsed"
-                    )
-                with c_rst:
-                    if total_recs > 0:
-                        st.button("🗑️ Clear DB", on_click=handle_csv_reset, use_container_width=True, key="rst_csv_btn")
-                    else:
-                        st.caption("No custom data loaded.")
-
-            with tab_api:
-                api_col1, api_col2 = st.columns(2)
-                with api_col1:
-                    nb_url = st.text_input("NetBox URL", value="http://netbox:8080", placeholder="https://netbox.company.internal", key="nb_sync_url").strip()
-                with api_col2:
-                    nb_tok = st.text_input("NetBox API Token", value="", type="password", placeholder="Paste API Token", key="nb_sync_tok").strip()
-
-                if st.button("🚀 Sync Inventory from NetBox API", use_container_width=True, key="btn_sync_nb_api"):
-                    if not nb_url or not nb_tok:
-                        st.warning("Please provide NetBox URL and API Token.")
-                    else:
-                        with st.spinner("Connecting to NetBox REST API and syncing records..."):
-                            try:
-                                recs = fetch_netbox_inventory(nb_url, nb_tok)
-                                if recs:
-                                    counts = save_records_batch(recs, clear_first=True)
-                                    st.success(f"✅ Ingested via API: {counts.get('device',0)} Devices, {counts.get('hypervisor',0)} Hypervisors, {counts.get('vm',0)} VMs!")
-                                    st.rerun()
-                                else:
-                                    st.warning("Connected successfully, but no active device or VM records were returned.")
-                            except Exception as e:
-                                st.error(f"API Sync Failed: {e}")
+        with st.expander(f"📥 Ingest NetBox Data (CSV) {status_tag}", expanded=False):
+            st.markdown(
+                """
+                **Export Instructions from NetBox:**
+                * **Devices / Servers / Switches:** Go to `Devices` ➔ `Devices` ➔ `Export` ➔ `All Data` (`netbox_devices.csv`)
+                * **Virtual Machines:** Go to `Virtualization` ➔ `Virtual Machines` ➔ `Export` ➔ `All Data`
+                """
+            )
+            c_up, c_rst = st.columns([3, 1])
+            with c_up:
+                st.file_uploader(
+                    "Upload NetBox CSV Export",
+                    type=["csv"],
+                    key="global_netbox_csv",
+                    on_change=handle_csv_upload,
+                    label_visibility="collapsed"
+                )
+            with c_rst:
+                if total_recs > 0:
+                    st.button("🗑️ Clear DB", on_click=handle_csv_reset, use_container_width=True, key="rst_csv_btn")
+                else:
+                    st.caption("No custom data loaded.")
 
     return case_mode
 

@@ -152,13 +152,21 @@ def render_ipam_tab(active_model: str):
     st.subheader("🌐 IPAM & Site Subnet Provisioning Engine")
     st.caption("Plan site supernets, allocate non-overlapping VLAN subnets, and export ready-to-import NetBox CSV blocks.")
 
-    # 1. Ingestion Toolbar (Matching Naming Tab Structure)
+    # 1. Ingestion Toolbar with NetBox Export Step Instructions
     total_ipam_recs = get_total_ipam_count()
     total_sites_recs = get_total_sites_count()
     total_db_count = total_ipam_recs + total_sites_recs
     status_tag = f"🟢 ({total_sites_recs} sites, {total_ipam_recs} prefixes in DB)" if total_db_count > 0 else "⚪ (Default Examples)"
 
     with st.expander(f"📥 Ingest NetBox Sites & VLANs / Prefixes CSV {status_tag}", expanded=False):
+        st.markdown(
+            """
+            **Export Instructions from NetBox:**
+            * **Scope IDs & Site Names:** Go to `Organization` ➔ `Sites` ➔ `Export` ➔ `All Data` (`netbox_sites.csv`)
+            * **VLANs & In-Use Prefixes:** Go to `IPAM` ➔ `VLANs` ➔ `Export` ➔ `All Data` (`netbox_VLANs.csv`)
+            * *Tip: You can select and upload both CSV files together.*
+            """
+        )
         c_up, c_rst = st.columns([3, 1])
         with c_up:
             st.file_uploader(
@@ -185,11 +193,9 @@ def render_ipam_tab(active_model: str):
             placeholder="e.g. Bristol, AGE, Adelaide, Site-01",
         ).strip()
 
-    # Auto-lookup Scope ID and Site Supernet from stored records
     auto_scope_id = lookup_scope_id(site_name) if site_name else None
     auto_supernet = lookup_site_supernet_from_db(site_name) if site_name else None
 
-    # Sync session_state to auto-populate Scope ID input box
     if auto_scope_id is not None:
         last_site = st.session_state.get("_last_synced_site", "")
         if last_site != site_name:
@@ -231,7 +237,6 @@ def render_ipam_tab(active_model: str):
     existing_prefixes = get_existing_prefix_strings()
 
     # 3. Base Row Template Structure with Dynamic Row Support
-    # Default base templates (all 10 VLANs always included)
     base_default = []
     for v in STANDARD_VLAN_TEMPLATES:
         base_default.append({
@@ -243,28 +248,23 @@ def render_ipam_tab(active_model: str):
             "fallback_subnet": v.get("fallback_subnet", "")
         })
 
-    # Load stored rows or initialize from base defaults
     if "ipam_persisted_rows" in st.session_state:
         working_rows = [dict(r) for r in st.session_state["ipam_persisted_rows"]]
     else:
         working_rows = [dict(t) for t in base_default]
 
-    # Process immediate data_editor widget additions/deletions/edits
     widget_state = st.session_state.get("ipam_data_editor", {})
 
-    # Deleted rows
     deleted_indices = set(widget_state.get("deleted_rows", []))
     if deleted_indices:
         working_rows = [r for i, r in enumerate(working_rows) if i not in deleted_indices]
 
-    # Edited rows
     edited_changes = widget_state.get("edited_rows", {})
     for row_idx_str, changes in edited_changes.items():
         row_idx = int(row_idx_str)
         if row_idx < len(working_rows):
             working_rows[row_idx].update(changes)
 
-    # Added rows (from '+' button in data_editor)
     added_changes = widget_state.get("added_rows", [])
     for new_row in added_changes:
         working_rows.append({
@@ -276,7 +276,6 @@ def render_ipam_tab(active_model: str):
             "fallback_subnet": ""
         })
 
-    # Clean None values
     for r in working_rows:
         for k in ["Role", "VLAN Name", "VLAN Description", "Subnet (CIDR)"]:
             if k not in r or r[k] is None or str(r[k]).lower() == "none":
@@ -284,7 +283,6 @@ def render_ipam_tab(active_model: str):
         if r.get("VLAN ID") is not None and str(r.get("VLAN ID")).lower() == "none":
             r["VLAN ID"] = None
 
-    # Compute chained rows with all updates
     computed_rows = compute_chained_rows(supernet_in, working_rows)
     st.session_state["ipam_persisted_rows"] = computed_rows
 
@@ -333,7 +331,7 @@ def render_ipam_tab(active_model: str):
     with c_prev:
         st.markdown("##### 🔍 Live Usable IP Ranges & Collision Status")
         st.dataframe(
-            pd.DataFrame(final_records)[["VLAN ID", "VLAN Name", "Subnet (CIDR)", "Usable Range", "Status", "Prefix Description"]], 
+            pd.DataFrame(final_records)[["VLAN ID", "Role", "VLAN Name", "Subnet (CIDR)", "Usable Range", "Status", "Prefix Description"]], 
             use_container_width=True, 
             hide_index=True
         )
