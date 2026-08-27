@@ -152,7 +152,7 @@ def render_ipam_tab(active_model: str):
     st.subheader("🌐 IPAM & Site Subnet Provisioning Engine")
     st.caption("Plan site supernets, allocate non-overlapping VLAN subnets, and export ready-to-import NetBox CSV blocks.")
 
-    # 1. Ingestion Toolbar
+    # 1. Ingestion Toolbar (Matching Naming Tab Structure)
     total_ipam_recs = get_total_ipam_count()
     total_sites_recs = get_total_sites_count()
     total_db_count = total_ipam_recs + total_sites_recs
@@ -185,9 +185,11 @@ def render_ipam_tab(active_model: str):
             placeholder="e.g. Bristol, AGE, Adelaide, Site-01",
         ).strip()
 
+    # Auto-lookup Scope ID and Site Supernet from stored records
     auto_scope_id = lookup_scope_id(site_name) if site_name else None
     auto_supernet = lookup_site_supernet_from_db(site_name) if site_name else None
 
+    # Sync session_state to auto-populate Scope ID input box
     if auto_scope_id is not None:
         last_site = st.session_state.get("_last_synced_site", "")
         if last_site != site_name:
@@ -226,42 +228,66 @@ def render_ipam_tab(active_model: str):
             except ValueError:
                 st.caption("⚠️ Invalid CIDR format")
 
-    include_opt = st.toggle("Include Optional VLANs (Routing, OT, IoT)", value=True, key="ipam_opt_toggle")
     existing_prefixes = get_existing_prefix_strings()
 
-    # 3. Base Row Template Structure
-    selected_templates = [v for v in STANDARD_VLAN_TEMPLATES if include_opt or not v["opt"]]
-    
-    working_rows = []
-    for v in selected_templates:
-        working_rows.append({
+    # 3. Base Row Template Structure with Dynamic Row Support
+    # Default base templates (all 10 VLANs always included)
+    base_default = []
+    for v in STANDARD_VLAN_TEMPLATES:
+        base_default.append({
             "VLAN ID": v["vid"],
             "Role": v["role"],
+            "VLAN Name": v["role"],
+            "VLAN Description": "",
             "Subnet (CIDR)": "",
             "fallback_subnet": v.get("fallback_subnet", "")
         })
 
+    # Load stored rows or initialize from base defaults
     if "ipam_persisted_rows" in st.session_state:
-        stored = st.session_state["ipam_persisted_rows"]
-        for idx, r in enumerate(working_rows):
-            if idx < len(stored):
-                r["VLAN ID"] = stored[idx].get("VLAN ID", r["VLAN ID"])
-                r["Role"] = stored[idx].get("Role", r["Role"])
-                r["Subnet (CIDR)"] = stored[idx].get("Subnet (CIDR)", "")
+        working_rows = [dict(r) for r in st.session_state["ipam_persisted_rows"]]
+    else:
+        working_rows = [dict(t) for t in base_default]
 
+    # Process immediate data_editor widget additions/deletions/edits
     widget_state = st.session_state.get("ipam_data_editor", {})
+
+    # Deleted rows
+    deleted_indices = set(widget_state.get("deleted_rows", []))
+    if deleted_indices:
+        working_rows = [r for i, r in enumerate(working_rows) if i not in deleted_indices]
+
+    # Edited rows
     edited_changes = widget_state.get("edited_rows", {})
     for row_idx_str, changes in edited_changes.items():
         row_idx = int(row_idx_str)
         if row_idx < len(working_rows):
-            for col_name, val in changes.items():
-                if col_name in working_rows[row_idx]:
-                    working_rows[row_idx][col_name] = val
+            working_rows[row_idx].update(changes)
 
+    # Added rows (from '+' button in data_editor)
+    added_changes = widget_state.get("added_rows", [])
+    for new_row in added_changes:
+        working_rows.append({
+            "VLAN ID": new_row.get("VLAN ID", None),
+            "Role": new_row.get("Role", ""),
+            "VLAN Name": new_row.get("VLAN Name", ""),
+            "VLAN Description": new_row.get("VLAN Description", ""),
+            "Subnet (CIDR)": new_row.get("Subnet (CIDR)", ""),
+            "fallback_subnet": ""
+        })
+
+    # Clean None values
+    for r in working_rows:
+        for k in ["Role", "VLAN Name", "VLAN Description", "Subnet (CIDR)"]:
+            if k not in r or r[k] is None or str(r[k]).lower() == "none":
+                r[k] = ""
+        if r.get("VLAN ID") is not None and str(r.get("VLAN ID")).lower() == "none":
+            r["VLAN ID"] = None
+
+    # Compute chained rows with all updates
     computed_rows = compute_chained_rows(supernet_in, working_rows)
     st.session_state["ipam_persisted_rows"] = computed_rows
 
-    # Column ordering: Role immediately follows VLAN ID
     df_init = pd.DataFrame(computed_rows)[[
         "VLAN ID", "Role", "VLAN Name", "VLAN Description", "Suggest Subnet", "Subnet (CIDR)"
     ]]
@@ -276,8 +302,8 @@ def render_ipam_tab(active_model: str):
         column_config={
             "VLAN ID": st.column_config.NumberColumn("VLAN ID", step=1, required=True),
             "Role": st.column_config.TextColumn("Role", help="Type role (e.g. Guest, Corporate WiFi, Audio Visual). Auto-corrects on Enter."),
-            "VLAN Name": st.column_config.TextColumn("VLAN Name", help="Auto-derived from Role.", disabled=True),
-            "VLAN Description": st.column_config.TextColumn("VLAN Description", help="Auto-looked up from Role.", disabled=True),
+            "VLAN Name": st.column_config.TextColumn("VLAN Name", help="VLAN Name. Auto-filled from Role or editable."),
+            "VLAN Description": st.column_config.TextColumn("VLAN Description", help="VLAN Description. Auto-looked up from Role or editable."),
             "Suggest Subnet": st.column_config.TextColumn("Suggest Subnet", help="Calculated dynamically based on previous Subnet (CIDR) input.", disabled=True),
             "Subnet (CIDR)": st.column_config.TextColumn("Subnet (CIDR)", help="Type subnet CIDR (e.g. 10.1.1.0/24) and hit Enter.")
         }
@@ -307,7 +333,7 @@ def render_ipam_tab(active_model: str):
     with c_prev:
         st.markdown("##### 🔍 Live Usable IP Ranges & Collision Status")
         st.dataframe(
-            pd.DataFrame(final_records)[["VLAN ID", "Role", "VLAN Name", "Subnet (CIDR)", "Usable Range", "Status", "Prefix Description"]], 
+            pd.DataFrame(final_records)[["VLAN ID", "VLAN Name", "Subnet (CIDR)", "Usable Range", "Status", "Prefix Description"]], 
             use_container_width=True, 
             hide_index=True
         )

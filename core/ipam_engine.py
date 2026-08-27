@@ -57,8 +57,16 @@ STANDARD_VLAN_TEMPLATES = [
     {"vid": 600, "role": "IoT", "opt": True}
 ]
 
+def format_branch_display(site_text: str) -> str:
+    """Auto-capitalizes/uppercases branch site name (e.g. bristol -> Bristol, age -> AGE)."""
+    clean = str(site_text or "").strip()
+    if not clean:
+        return ""
+    if len(clean) <= 4:
+        return clean.upper()
+    return clean.title()
+
 def resolve_role_details(user_role_input: str) -> Dict[str, Any]:
-    """Auto-corrects and wildcard-matches any role text to canonical naming."""
     clean = re.sub(r"[^a-zA-Z0-9/_\s-]", "", str(user_role_input or "")).strip().lower()
     if not clean:
         return {"canonical_role": "", "vlan_name": "", "vlan_desc": "", "fallback": None}
@@ -134,10 +142,6 @@ def compute_chained_rows(
     supernet_str: str, 
     rows_data: List[Dict[str, Any]]
 ) -> List[Dict[str, Any]]:
-    """
-    Computes dynamic sequential 'Suggest Subnet'. 
-    Only shows the next subnet when the previous row has been filled in.
-    """
     try:
         clean_sup = supernet_str.strip()
         sup_net = ipaddress.ip_network(clean_sup, strict=False)
@@ -153,9 +157,13 @@ def compute_chained_rows(
         role_info = resolve_role_details(role_raw)
         
         canonical_role = role_info["canonical_role"] or str(role_raw).strip()
-        vlan_name = role_info["vlan_name"] or canonical_role
-        vlan_desc = role_info["vlan_desc"] or canonical_role
-        fallback = role_info["fallback"]
+        
+        custom_name = str(r.get("VLAN Name") or "").strip()
+        custom_desc = str(r.get("VLAN Description") or "").strip()
+        
+        vlan_name = custom_name if (custom_name and custom_name.lower() != "none") else (role_info["vlan_name"] or canonical_role)
+        vlan_desc = custom_desc if (custom_desc and custom_desc.lower() != "none") else (role_info["vlan_desc"] or canonical_role)
+        fallback = role_info["fallback"] or r.get("fallback_subnet")
 
         user_subnet = str(r.get("Subnet (CIDR)") or r.get("Subnet") or "").strip()
         if user_subnet.lower() in ("nan", "none", "null", "—", "-"):
@@ -181,12 +189,13 @@ def compute_chained_rows(
                 suggest = ""
 
         processed.append({
-            "VLAN ID": r.get("VLAN ID") or r.get("vid"),
+            "VLAN ID": r.get("VLAN ID") if r.get("VLAN ID") not in (None, "None", "") else None,
             "VLAN Name": vlan_name,
             "Role": canonical_role,
             "VLAN Description": vlan_desc,
             "Suggest Subnet": suggest,
-            "Subnet (CIDR)": user_subnet
+            "Subnet (CIDR)": user_subnet,
+            "fallback_subnet": fallback or ""
         })
         
     return processed
@@ -204,10 +213,10 @@ def evaluate_subnet_row(
     except Exception:
         clean = ""
 
-    vid_str = str(vlan_id) if vlan_id not in (None, "", "nan") else ""
+    vid_str = str(vlan_id) if vlan_id not in (None, "", "nan", "None") else ""
     role_text = str(vlan_role or "").strip()
-    site_text = str(site_name or "").strip()
-    desc = f"{site_text} {role_text} -- VLAN {vid_str}".strip() if vid_str else f"{site_text} {role_text}".strip()
+    site_display = format_branch_display(site_name)
+    desc = f"{site_display} {role_text} -- VLAN {vid_str}".strip() if vid_str else f"{site_display} {role_text}".strip()
 
     if not clean or clean.lower() in ("nan", "none", "null", "<na>", "—", "-"):
         return {"usable_range": "—", "status": "Unassigned", "desc": desc, "in_use": False}
@@ -249,44 +258,50 @@ def evaluate_subnet_row(
         return {"usable_range": "Invalid CIDR", "status": "Syntax Error", "desc": desc, "in_use": False}
 
 def generate_netbox_site_csv(site_name: str) -> str:
-    return f"name,slug,status\n{site_name},{slugify(site_name)},active"
+    display = format_branch_display(site_name) or "Site"
+    return f"name,slug,status\n{display},{slugify(display)},active"
 
 def generate_netbox_vlan_group_csv(site_name: str, scope_id: str) -> str:
-    group_name = f"{site_name} VLAN Group"
-    slug = f"{slugify(site_name)}-vlan-group"
+    display = format_branch_display(site_name) or "Site"
+    group_name = f"{display} VLAN Group"
+    slug = f"{slugify(display)}-vlan-group"
     return f"name,slug,scope_type,scope_id\n{group_name},{slug},dcim.site,{scope_id}"
 
 def generate_netbox_vlans_csv(site_name: str, records: List[Dict[str, Any]]) -> str:
-    group_name = f"{site_name} VLAN Group"
+    display = format_branch_display(site_name) or "Site"
+    group_name = f"{display} VLAN Group"
     lines = ["vid,name,status,site,group,description,role"]
     for r in records:
         vid = r.get("VLAN ID") or r.get("vid", "")
+        if not vid or str(vid).lower() == "none":
+            continue
         name = r.get("VLAN Name") or r.get("name", "")
         desc = r.get("VLAN Description") or r.get("Description") or r.get("desc", name)
         role = r.get("Role") or r.get("role", name)
-        lines.append(f"{vid},{name},active,{site_name},{group_name},{desc},{role}")
+        lines.append(f"{vid},{name},active,{display},{group_name},{desc},{role}")
     return "\n".join(lines)
 
 def generate_netbox_prefixes_csv(site_name: str, scope_id: str, supernet_str: str, records: List[Dict[str, Any]]) -> str:
-    group_name = f"{site_name} VLAN Group"
+    display = format_branch_display(site_name) or "Site"
+    group_name = f"{display} VLAN Group"
     lines = ["prefix,status,scope_type,scope_id,vlan_group,vlan,role,description"]
     
     if supernet_str:
         try:
             s_net = ipaddress.ip_network(supernet_str.strip(), strict=False)
-            desc = f"Site Subnet - {calculate_ip_range_str(s_net)}"
+            desc = f"{display} Subnet - {calculate_ip_range_str(s_net)}"
             lines.append(f"{s_net},active,dcim.site,{scope_id},\"{group_name}\",,,\"{desc}\"")
         except ValueError:
             pass
 
     for r in records:
         vid = r.get("VLAN ID") or r.get("vid", "")
-        name = r.get("VLAN Name") or r.get("name", "")
         role = r.get("Role") or r.get("role", "")
-        desc = r.get("Prefix Description") or r.get("desc") or f"{site_name} {role} -- VLAN {vid}"
+        desc = r.get("Prefix Description") or r.get("desc") or f"{display} {role} -- VLAN {vid}"
         sub = str(r.get("Subnet (CIDR)") or r.get("Subnet") or r.get("assigned_subnet", "")).strip()
         
+        vid_str = str(vid) if vid and str(vid).lower() != "none" else ""
         if "/" in sub:
-            lines.append(f"{sub},active,dcim.site,{scope_id},\"{group_name}\",{vid},\"{role}\",\"{desc}\"")
+            lines.append(f"{sub},active,dcim.site,{scope_id},\"{group_name}\",{vid_str},\"{role}\",\"{desc}\"")
             
     return "\n".join(lines)
