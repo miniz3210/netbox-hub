@@ -231,7 +231,14 @@ def generate_netbox_prefixes_csv(site_name: str, scope_id: str, supernet_str: st
     for r in records:
         vid = r.get("VLAN ID") or r.get("vid", "")
         role = r.get("Role") or r.get("role", "")
-        desc = r.get("Description") or r.get("desc") or f"{site_name} {role} -- VLAN {vid}"
+        # Prefix Description takes priority (the "Live Usable IP Ranges" auto-formula);
+        # fall back to VLAN Description, then to role-based default.
+        desc = (
+            r.get("Prefix Description")
+            or r.get("Description")
+            or r.get("desc")
+            or f"{site_name} {role} -- VLAN {vid}"
+        )
         sub = str(r.get("Subnet") or r.get("assigned_subnet", "")).strip()
         
         if "/" in sub:

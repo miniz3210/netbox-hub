@@ -152,7 +152,13 @@ def render_ipam_tab(active_model: str):
     # Top Inputs & Live Search
     top1, top2, top3 = st.columns([2, 1, 2])
     with top1:
-        site_name_in = st.text_input("Branch / Site Name", value="weybridge", key="ipam_site_in").strip()
+        # Default: empty.  Type a site name (e.g. "bristol") to begin.
+        site_name_in = st.text_input(
+            "Branch / Site Name",
+            value="",
+            key="ipam_site_in",
+            placeholder="e.g. bristol, weybridge, london-1",
+        ).strip()
 
     # Display name is title-cased (e.g. "bristol" -> "Bristol") for human
     # reading, but the lowercase `matched_site_name` is preserved for
@@ -226,11 +232,19 @@ def render_ipam_tab(active_model: str):
 
     raw_rows = []
     for r in sliced:
+        # VLAN Description defaults to the VLAN Name (i.e. the role text
+        # the user expects to see).  The user is free to overwrite it
+        # manually cell-by-cell.  Example mapping coming from the
+        # STANDARD_VLAN_TEMPLATES table:
+        #   VIN_Corp         -> Corporate WiFi
+        #   Wired Workstations -> Workstations
+        #   Management       -> Management
+        #   ...
         raw_rows.append({
             "VLAN ID": r["vid"],
             "VLAN Name": r["name"],
             "Role": r["role"],
-            "Description": r["desc"],
+            "Description": r["name"],   # default = role text (user can edit)
             "Subnet": r["assigned_subnet"]
         })
 
@@ -239,10 +253,9 @@ def render_ipam_tab(active_model: str):
     st.markdown("##### 📊 Subnet Allocation Editor (✏️ Click any cell to edit)")
 
     # ── Prefix Description column (separate from VLAN Description) ─────────
-    # This column feeds the "Live Usable IP Ranges" preview and the
-    # NetBox Prefixes CSV.  It uses the formula:
-    #   "{Site} {Role} -- VLAN {VLAN ID} /{CIDR}"  e.g. "Bristol Corporate -- VLAN 300 /24"
-    # while VLAN Description stays independent (free-text, used in VLANs CSV).
+    # Used in the "Live Usable IP Ranges" preview AND in the NetBox
+    # Prefixes CSV. Formula: "{Site} {Role} -- VLAN {VLAN ID}"
+    # e.g. "Bristol Corporate WiFi -- VLAN 300"
     for row in raw_rows:
         row["Prefix Description"] = ""
 
@@ -278,39 +291,49 @@ def render_ipam_tab(active_model: str):
         sub_str = str(r.get("Subnet", "")).strip()
         allocated_subnets.append(sub_str)
         vlan_id_val = r.get("VLAN ID")
-        vlan_role_val = r.get("Role", "")
+        vlan_role_val = str(r.get("Role", "")).strip()
 
         # ── VLAN Description auto-fill (only when blank) ─────────────────
+        # Default = the VLAN Role text (e.g. "Corporate WiFi").  The user
+        # can still overwrite this cell manually.
         existing_vlan_desc = str(r.get("Description", "")).strip()
         if not existing_vlan_desc:
-            if vlan_id_val:
-                r["Description"] = f"{display_site_name} {vlan_role_val} -- VLAN {vlan_id_val}"
-            else:
-                r["Description"] = f"{display_site_name} {vlan_role_val}"
+            r["Description"] = vlan_role_val or ""
 
         # ── Prefix Description auto-fill (only when blank) ──────────────
-        # Formula: "{Site} {Role} -- VLAN {VLAN ID} /{CIDR}"
-        # e.g.  "Bristol Corporate -- VLAN 300 /24"
+        # Formula: "{Site} {Role} -- VLAN {VLAN ID}"
+        # e.g.  "Bristol Corporate WiFi -- VLAN 300"
+        # (no CIDR suffix — that lives in the Subnet column instead).
         existing_pfx_desc = str(r.get("Prefix Description", "")).strip()
         if not existing_pfx_desc:
-            cidr_suffix = ""
-            if sub_str and "/" in sub_str:
-                cidr_suffix = f" /{sub_str.split('/')[1]}"
             if vlan_id_val:
-                r["Prefix Description"] = f"{display_site_name} {vlan_role_val} -- VLAN {vlan_id_val}{cidr_suffix}"
+                r["Prefix Description"] = f"{display_site_name} {vlan_role_val} -- VLAN {vlan_id_val}"
             else:
-                r["Prefix Description"] = f"{display_site_name} {vlan_role_val}{cidr_suffix}"
+                r["Prefix Description"] = f"{display_site_name} {vlan_role_val}"
 
         # ── Usable Range & Status ───────────────────────────────────────
-        # Guard against empty, placeholder, or malformed inputs before
-        # calling evaluate_subnet_row so "Invalid CIDR" never surfaces.
-        is_empty   = not sub_str
-        is_placeholder = "x" in sub_str.lower()
-        is_valid_cidr  = "/" in sub_str and sub_str.split("/")[0].count(".") == 3
+        # Robust CIDR validation so "Invalid CIDR" never surfaces for
+        # mid-typing or malformed inputs.  We require:
+        #   • exactly one "/"
+        #   • prefix length 0-32
+        #   • 4 dotted decimal octets, each 0-255
+        is_valid_cidr = False
+        if sub_str and sub_str.count("/") == 1:
+            head, _, tail = sub_str.partition("/")
+            if head.count(".") == 3:
+                octets = head.split(".")
+                if all(o.isdigit() and 0 <= int(o) <= 255 for o in octets) and tail.isdigit() and 0 <= int(tail) <= 32:
+                    is_valid_cidr = True
 
-        if is_empty or is_placeholder or not is_valid_cidr:
+        if not sub_str:
             r["Usable Range"] = "—"
             r["Status"] = "Unassigned"
+        elif "x" in sub_str.lower():
+            r["Usable Range"] = "RFC1918 Custom Pool"
+            r["Status"] = "Special Pool"
+        elif not is_valid_cidr:
+            r["Usable Range"] = "—"
+            r["Status"] = "Pending Input"
         else:
             eval_res = evaluate_subnet_row(
                 sub_str,
