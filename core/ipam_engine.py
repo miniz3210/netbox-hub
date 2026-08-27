@@ -66,10 +66,10 @@ def calculate_remaining_subnets(supernet_str: str, allocated_subnets: List[str])
     return capacity
 
 def evaluate_subnet_row(
-    subnet_input: str,
-    vlan_id: Any,
-    vlan_role: str,
-    site_name: str,
+    subnet_input: Any,
+    vlan_id: Any = None,
+    vlan_role: str = "",
+    site_name: str = "",
     supernet_str: str = "",
     existing_prefixes: Optional[List[str]] = None
 ) -> Dict[str, Any]:
@@ -84,25 +84,45 @@ def evaluate_subnet_row(
     Excel CEILING.MATH pattern used in calculate_next_subnet) so the
     displayed range never overlaps with the previous allocation.
     """
-    clean = str(subnet_input).strip()
-    desc = f"{site_name} {vlan_role} -- VLAN {vlan_id}" if vlan_id else f"{site_name} {vlan_role}"
+    # Coerce any value (None, NaN, float, int, pandas NA) into a clean string.
+    try:
+        if subnet_input is None:
+            clean = ""
+        else:
+            clean = str(subnet_input).strip()
+    except Exception:
+        clean = ""
+
+    # Build the description in a tolerant way (handles NaN, None, etc).
+    try:
+        vid_int = int(vlan_id) if vlan_id not in (None, "", "nan") else None
+    except (TypeError, ValueError):
+        vid_int = None
+    role_text = str(vlan_role or "").strip()
+    site_text = str(site_name or "").strip()
+    if vid_int:
+        desc = f"{site_text} {role_text} -- VLAN {vid_int}"
+    else:
+        desc = f"{site_text} {role_text}".strip()
 
     # Friendly view for empty / mid-typing rows. This prevents "Invalid CIDR"
     # from leaking into the live preview when the user is still typing.
-    if not clean or clean == "nan" or clean.lower() in ("none", "null"):
+    if not clean or clean == "nan" or clean.lower() in ("none", "null", "<na>"):
         return {"usable_range": "—", "status": "Unassigned", "desc": desc, "in_use": False}
 
     if "x" in clean.lower():
         return {"usable_range": "RFC1918 Custom Pool", "status": "Special Pool", "desc": desc, "in_use": False}
 
     # Only attempt a parse if the input has the shape of a CIDR (e.g. "10.0.0.0/24").
-    # Without this guard, partial / malformed values from the Streamlit data_editor
-    # cascade into ipaddress.ip_network() and surface as "Invalid CIDR".
     if "/" not in clean or clean.count("/") > 1:
         return {"usable_range": "—", "status": "Pending Input", "desc": desc, "in_use": False}
 
     head = clean.split("/")[0]
     if head.count(".") != 3 or not all(p.isdigit() and 0 <= int(p) <= 255 for p in head.split(".")):
+        return {"usable_range": "—", "status": "Pending Input", "desc": desc, "in_use": False}
+
+    tail = clean.split("/")[1]
+    if not tail.isdigit() or not (0 <= int(tail) <= 32):
         return {"usable_range": "—", "status": "Pending Input", "desc": desc, "in_use": False}
 
     try:
@@ -141,8 +161,12 @@ def evaluate_subnet_row(
             "in_use": is_in_use,
             "net": net
         }
-    except ValueError:
-        return {"usable_range": "Invalid CIDR", "status": "❌ Syntax Error", "desc": desc, "in_use": False}
+    except (ValueError, TypeError, AttributeError):
+        # Last-ditch safety net.  In practice the guards above should
+        # have caught malformed input; this only fires if a downstream
+        # math step (CEILING alignment, prefix parsing, etc.) fails on
+        # a value that passed the surface-level checks.
+        return {"usable_range": "—", "status": "Pending Input", "desc": desc, "in_use": False}
 
 def slice_supernet(
     supernet_str: str, 

@@ -253,12 +253,23 @@ def render_ipam_tab(active_model: str):
         # The user can still overwrite any cell manually.
         role_text = r["role"]
         default_desc = VLAN_DESC_MAP.get(role_text, role_text)
+        # "Next Available" shows ONLY the network ID (e.g. "10.113.252.0"),
+        # not the CIDR.  The mask is implied by the VLAN template mask.
+        next_avail = ""
+        if r["assigned_subnet"] and "/" in str(r["assigned_subnet"]):
+            try:
+                _n = ipaddress.ip_network(r["assigned_subnet"], strict=False)
+                next_avail = str(_n.network_address)
+            except ValueError:
+                next_avail = str(r["assigned_subnet"]).split("/")[0]
+        elif r["assigned_subnet"]:
+            next_avail = str(r["assigned_subnet"])
         raw_rows.append({
             "VLAN ID": r["vid"],
             "VLAN Name": r["name"],
             "Role": role_text,
             "Description": default_desc,
-            "Next Available": r["assigned_subnet"],   # suggestion, user can override
+            "Next Available": next_avail,             # suggestion (network ID only)
             "Subnet (CIDR)": str(r["assigned_subnet"] or ""),  # actual value, user types here
         })
 
@@ -300,29 +311,43 @@ def render_ipam_tab(active_model: str):
     records_dict = edited_df.to_dict(orient="records")
     allocated_subnets = []
     for r in records_dict:
-        # `Sub` is the alias used in the preview/CSV; we normalise it
-        # to "Subnet" for downstream code that reads r["Subnet"].
-        sub_str = str(r.get("Subnet (CIDR)", "")).strip()
-        if sub_str.lower() in ("nan", "none", "null"):
+        # Normalise the Subnet cell to a clean string.  pandas / Streamlit
+        # can pass None, NaN, floats, etc. when the user hasn't touched
+        # the cell.  We collapse them all to "" so downstream code only
+        # ever sees a string.
+        raw_sub = r.get("Subnet (CIDR)", "")
+        if raw_sub is None:
+            sub_str = ""
+        else:
+            try:
+                # If pandas/NumPy NaN comes in, this is_finite check catches it
+                import math
+                if isinstance(raw_sub, float) and math.isnan(raw_sub):
+                    sub_str = ""
+                else:
+                    sub_str = str(raw_sub).strip()
+            except Exception:
+                sub_str = ""
+        if sub_str.lower() in ("nan", "none", "null", "<na>"):
             sub_str = ""
         r["Subnet"] = sub_str
         allocated_subnets.append(sub_str)
         vlan_id_val = r.get("VLAN ID")
-        vlan_role_val = str(r.get("Role", "")).strip()
+        vlan_role_val = str(r.get("Role", "") or "").strip()
 
         # ── VLAN Description auto-fill (only when blank) ─────────────────
         # Default = the VLAN Role text (e.g. "Corporate WiFi").  The user
         # can still overwrite this cell manually.
-        existing_vlan_desc = str(r.get("Description", "")).strip()
-        if not existing_vlan_desc:
+        existing_vlan_desc = str(r.get("Description", "") or "").strip()
+        if not existing_vlan_desc or existing_vlan_desc.lower() in ("nan", "none", "null"):
             r["Description"] = vlan_role_val or ""
 
         # ── Prefix Description auto-fill (only when blank) ──────────────
         # Formula: "{Site} {Role} -- VLAN {VLAN ID}"
         # e.g.  "Bristol Corporate WiFi -- VLAN 300"
         # Used in the "Live Usable IP Ranges" preview and the NetBox Prefixes CSV.
-        existing_pfx_desc = str(r.get("Prefix Description", "")).strip()
-        if not existing_pfx_desc:
+        existing_pfx_desc = str(r.get("Prefix Description", "") or "").strip()
+        if not existing_pfx_desc or existing_pfx_desc.lower() in ("nan", "none", "null"):
             if vlan_id_val:
                 r["Prefix Description"] = f"{display_site_name} {vlan_role_val} -- VLAN {vlan_id_val}"
             else:
@@ -339,7 +364,8 @@ def render_ipam_tab(active_model: str):
             head, _, tail = sub_str.partition("/")
             if head.count(".") == 3:
                 octets = head.split(".")
-                if all(o.isdigit() and 0 <= int(o) <= 255 for o in octets) and tail.isdigit() and 0 <= int(tail) <= 32:
+                if (all(o.isdigit() and 0 <= int(o) <= 255 for o in octets)
+                        and tail.isdigit() and 0 <= int(tail) <= 32):
                     is_valid_cidr = True
 
         if not sub_str:
@@ -352,16 +378,32 @@ def render_ipam_tab(active_model: str):
             r["Usable Range"] = "—"
             r["Status"] = "Pending Input"
         else:
-            eval_res = evaluate_subnet_row(
-                sub_str,
-                vlan_id_val,
-                vlan_role_val,
-                matched_site_name,
-                supernet_in,
-                existing_prefixes,
-            )
-            r["Usable Range"] = eval_res["usable_range"]
-            r["Status"] = eval_res["status"]
+            try:
+                eval_res = evaluate_subnet_row(
+                    sub_str,
+                    vlan_id_val,
+                    vlan_role_val,
+                    matched_site_name,
+                    supernet_in,
+                    existing_prefixes,
+                )
+                # Defensive: if the engine ever returns "Invalid CIDR"
+                # for a CIDR we already validated, fall back to a clean
+                # OK / computed-range view so the user is never stuck.
+                if eval_res.get("status") == "❌ Syntax Error":
+                    try:
+                        _n = ipaddress.ip_network(sub_str, strict=False)
+                        r["Usable Range"] = calculate_ip_range_str(_n)
+                        r["Status"] = "OK"
+                    except Exception:
+                        r["Usable Range"] = "—"
+                        r["Status"] = "Pending Input"
+                else:
+                    r["Usable Range"] = eval_res["usable_range"]
+                    r["Status"] = eval_res["status"]
+            except Exception:
+                r["Usable Range"] = "—"
+                r["Status"] = "Pending Input"
 
     # ── Live preview: Prefix Description shown separately from VLAN Description
     c_prev, c_cap = st.columns([3, 1.2])
