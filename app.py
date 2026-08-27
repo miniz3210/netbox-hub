@@ -254,15 +254,41 @@ def _register_rest_api() -> None:
 
     # Streamlit ≥ 1.30 exposes the running Tornado server; we hook a
     # wildcard rule so /api/v1/* hits Flask while the rest goes to Streamlit.
+    # The private attribute name varies across versions (SafeSessionMiddleware
+    # wrapper vs bare Application), so we walk the attributes defensively.
     try:
         from streamlit import server as st_server  # type: ignore
 
-        server = st_server.get_server()
-        if server is not None:
-            server._Application__application.add_rules(  # type: ignore[attr-defined]
-                [(f"/api/v1/.*", api)]
+        st_server_inst = st_server.get_server()
+        if st_server_inst is None:
+            raise RuntimeError("Streamlit server is not initialised yet")
+
+        # Walk to the underlying tornado.web.Application.  Different Streamlit
+        # versions store it under different attribute names.
+        candidate_attrs = [
+            "_Application__application",   # older name-mangled form
+            "_application",                # bare
+            "application",                 # post-refactor
+            "app",                         # fallback
+        ]
+        tornado_app = None
+        for attr in candidate_attrs:
+            tornado_app = getattr(st_server_inst, attr, None)
+            if tornado_app is not None and hasattr(tornado_app, "add_rules"):
+                logger.debug("Found Tornado Application at attribute %r", attr)
+                break
+        if tornado_app is None:
+            raise RuntimeError(
+                f"Could not locate Tornado Application on streamlit server "
+                f"(tried {candidate_attrs})"
             )
-            logger.info("REST API mounted at /api/v1/*")
+
+        # Register the Flask WSGI app under the /api/v1/* prefix.
+        # Tornado's Rule.path_args uses regex group names; \g<api_v1> matches
+        # /api/v1/<anything> and is forwarded to the Flask handler.
+        tornado_app.add_rules([(r"/api/v1/(?P<api_v1>.*)", api)])
+        logger.info("REST API mounted at /api/v1/*  (Flask rules: %s)",
+                    [str(r) for r in api.url_map.iter_rules()])
     except Exception as e:  # pragma: no cover
         logger.warning("Could not mount REST API onto Streamlit server: %s", e)
 
