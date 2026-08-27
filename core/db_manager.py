@@ -1,4 +1,5 @@
 import os
+import re
 import sqlite3
 import pandas as pd
 from typing import List, Dict, Any, Optional
@@ -20,7 +21,7 @@ def init_db():
         )
     """)
 
-    # 2. Shared Inventory Records (Devices, Hypervisors, VMs)
+    # 2. Shared Inventory Records (Devices, Hypervisors, VMs for Naming Tab)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS inventory_records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,10 +64,10 @@ def save_sites_batch(sites: List[Dict[str, Any]], clear_first: bool = False) -> 
     
     count = 0
     for s in sites:
-        site_id = s.get("id")
-        name = str(s.get("name") or "").strip()
-        slug = str(s.get("slug") or "").strip()
-        if name:
+        site_id = s.get("id") or s.get("ID")
+        name = str(s.get("name") or s.get("Name") or "").strip()
+        slug = str(s.get("slug") or s.get("Slug") or "").strip()
+        if name and name.lower() != "nan":
             cursor.execute("""
                 INSERT OR REPLACE INTO sites_records (id, name, slug)
                 VALUES (?, ?, ?)
@@ -78,7 +79,7 @@ def save_sites_batch(sites: List[Dict[str, Any]], clear_first: bool = False) -> 
     return count
 
 def lookup_scope_id(site_name: str) -> Optional[int]:
-    """Looks up the Scope integer ID matching the site name or slug."""
+    """Looks up Scope integer ID matching the site name or slug."""
     if not site_name:
         return None
     init_db()
@@ -99,7 +100,7 @@ def lookup_scope_id(site_name: str) -> Optional[int]:
     return row[0] if (row and row[0] is not None) else None
 
 def lookup_site_supernet_from_db(site_name: str) -> Optional[str]:
-    """Finds the top-level container prefix (/21, /23, etc.) for a site from stored IPAM records."""
+    """Finds top-level container prefix for a site from stored IPAM records."""
     if not site_name:
         return None
     init_db()
@@ -255,19 +256,29 @@ def save_ipam_records_batch(records: List[Dict[str, Any]], clear_first: bool = T
 
     count = 0
     for r in records:
-        cursor.execute("""
-            INSERT INTO ipam_records (prefix_or_subnet, vlan_id, vlan_name, role, site, scope_id, description)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (
-            str(r.get("prefix_or_subnet") or r.get("prefix") or r.get("subnet") or r.get("address") or "").strip(),
-            int(r.get("vlan_id") or r.get("vid") or 0) if str(r.get("vlan_id") or r.get("vid") or "").isdigit() else None,
-            str(r.get("vlan_name") or r.get("name") or "").strip(),
-            str(r.get("role") or "").strip(),
-            str(r.get("site") or "").strip(),
-            int(r.get("scope_id")) if str(r.get("scope_id") or "").isdigit() else None,
-            str(r.get("description") or r.get("desc") or "").strip()
-        ))
-        count += 1
+        raw_prefix = str(r.get("prefix_or_subnet") or r.get("prefix") or r.get("subnet") or r.get("address") or r.get("Prefixes") or "").strip()
+        if not raw_prefix or raw_prefix.lower() == "nan":
+            continue
+        
+        # Extract all CIDRs inside the string
+        cidrs = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}/\d{1,2}\b', raw_prefix)
+        if not cidrs and "/" in raw_prefix:
+            cidrs = [raw_prefix]
+
+        for cidr in cidrs:
+            cursor.execute("""
+                INSERT INTO ipam_records (prefix_or_subnet, vlan_id, vlan_name, role, site, scope_id, description)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                cidr,
+                int(r.get("vlan_id") or r.get("vid") or r.get("VID") or 0) if str(r.get("vlan_id") or r.get("vid") or r.get("VID") or "").isdigit() else None,
+                str(r.get("vlan_name") or r.get("name") or r.get("Name") or "").strip(),
+                str(r.get("role") or r.get("Role") or "").strip(),
+                str(r.get("site") or r.get("Site") or "").strip(),
+                int(r.get("scope_id")) if str(r.get("scope_id") or "").isdigit() else None,
+                str(r.get("description") or r.get("desc") or r.get("Description") or "").strip()
+            ))
+            count += 1
 
     conn.commit()
     conn.close()
@@ -281,16 +292,6 @@ def get_existing_prefix_strings() -> List[str]:
     rows = cursor.fetchall()
     conn.close()
     return [r[0] for r in rows if r[0] and "/" in r[0]]
-
-def get_all_ipam_records() -> List[Dict[str, Any]]:
-    init_db()
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM ipam_records ORDER BY id ASC")
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
 
 def clear_all_records() -> int:
     init_db()
@@ -329,6 +330,15 @@ def get_total_ipam_count() -> int:
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM ipam_records")
+    total = cursor.fetchone()[0]
+    conn.close()
+    return total
+
+def get_total_sites_count() -> int:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM sites_records")
     total = cursor.fetchone()[0]
     conn.close()
     return total
