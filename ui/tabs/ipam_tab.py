@@ -149,10 +149,11 @@ def render_ipam_tab(active_model: str):
                 label_visibility="collapsed"
             )
 
-    # Top Inputs & Live Search
+    # ═══════════════════════════════════════════════════════════════════════
+    # Site Inputs (Branch + Scope ID + Site Supernet) — all default to empty
+    # ═══════════════════════════════════════════════════════════════════════
     top1, top2, top3 = st.columns([2, 1, 2])
     with top1:
-        # Default: empty.  Type a site name (e.g. "bristol") to begin.
         site_name_in = st.text_input(
             "Branch / Site Name",
             value="",
@@ -160,40 +161,39 @@ def render_ipam_tab(active_model: str):
             placeholder="e.g. bristol, weybridge, london-1",
         ).strip()
 
-    # Display name is title-cased (e.g. "bristol" -> "Bristol") for human
-    # reading, but the lowercase `matched_site_name` is preserved for
+    # Display name is title-cased ("bristol" -> "Bristol") for human
+    # reading; the lowercase `matched_site_name` is preserved for
     # every NetBox export (CSV generators, slug, scope, etc).
     display_site_name = site_name_in.title() if site_name_in else ""
 
-    # Step A: Perform Live API Search or Local DB lookup
+    # Try Live API Search or Local DB lookup ONLY for display purposes
+    # (we never auto-fill the Subnet (CIDR) cell from this).
     resolved_scope_id = None
     resolved_supernet = None
     matched_site_name = site_name_in
-
     if site_name_in:
-        # 1. Try Live API Search if URL & Token are supplied (session-state-backed)
         if st.session_state.get("ipam_nb_url") and st.session_state.get("ipam_nb_tok"):
             nb_url_val = st.session_state["ipam_nb_url"].strip()
             nb_tok_val = st.session_state["ipam_nb_tok"].strip()
-            s_id, s_name, s_slug, s_pfx, _ = lookup_site_and_supernet_live(nb_url_val, nb_tok_val, site_name_in)
+            s_id, s_name, _slug, s_pfx, _ = lookup_site_and_supernet_live(
+                nb_url_val, nb_tok_val, site_name_in
+            )
             if s_id is not None:
                 resolved_scope_id = s_id
                 matched_site_name = s_name or site_name_in
                 if s_pfx:
                     resolved_supernet = s_pfx
-
-        # 2. Fallback to local DB lookup
         if resolved_scope_id is None:
             resolved_scope_id = lookup_scope_id(site_name_in)
 
     with top2:
         scope_default_val = str(resolved_scope_id) if resolved_scope_id is not None else ""
         scope_id = st.text_input(
-            "Scope ID (NetBox Site ID)", 
-            value=scope_default_val, 
+            "Scope ID (NetBox Site ID)",
+            value=scope_default_val,
             key="ipam_scope_in",
             placeholder="Auto-detected or enter ID",
-            help="Auto-discovered directly from NetBox API or database."
+            help="Auto-discovered directly from NetBox API or database.",
         ).strip()
         if resolved_scope_id:
             st.caption(f"🟢 Matched **`{display_site_name}`** (ID: `{resolved_scope_id}`)")
@@ -201,14 +201,14 @@ def render_ipam_tab(active_model: str):
             st.caption("⚪ Manual Scope ID mode (Not Found)")
 
     with top3:
-        supernet_default_val = resolved_supernet or "10.113.252.0/23"
+        # Site Supernet is fully manual — default empty.
         supernet_in = st.text_input(
             "Site Supernet (CIDR)",
-            value=supernet_default_val,
+            value="",
             key="ipam_super_in",
-            help="Top-level container subnet for this branch site."
+            placeholder="e.g. 10.113.252.0/23",
+            help="Top-level container subnet for this branch site. Leave blank if unknown.",
         ).strip()
-        # ── Site Supernet Usable Range ───────────────────────────────────────
         if supernet_in and "/" in supernet_in:
             try:
                 sup_net = ipaddress.ip_network(supernet_in, strict=False)
@@ -217,19 +217,16 @@ def render_ipam_tab(active_model: str):
             except ValueError:
                 st.caption("⚠️ Invalid CIDR format")
         if resolved_supernet:
-            st.caption(f"🟢 Auto-detected Site Supernet: **`{resolved_supernet}`**")
-        else:
-            st.caption("⚪ Standard default /23 container")
+            st.caption(f"💡 Auto-detected Site Supernet from NetBox: **`{resolved_supernet}`**")
 
     include_opt = st.toggle("Include Optional VLANs (Routing, OT, IoT)", value=True, key="ipam_opt_toggle")
 
-    # Load existing prefixes for collision detection
     existing_prefixes = get_existing_prefix_strings()
 
-    # ── Static role → VLAN description map (user-edited via cell) ─────────
-    # If the user types a role not in this map, the auto-fill falls back
-    # to the role text itself.  The user can still override any cell.
-    VLAN_DESC_MAP = {
+    # ═══════════════════════════════════════════════════════════════════════
+    # VLAN Role → VLAN Name / VLAN Description lookup map
+    # ═══════════════════════════════════════════════════════════════════════
+    VLAN_NAME_MAP = {
         "VIN_Corp": "Corporate WiFi",
         "Wired Workstations": "Workstations",
         "Management": "Management",
@@ -241,46 +238,28 @@ def render_ipam_tab(active_model: str):
         "OT": "OT",
         "IoT/Security": "IoT",
     }
+    VLAN_DESC_MAP = dict(VLAN_NAME_MAP)  # same map drives both columns
 
-    # Dynamic Slicing
+    # ═══════════════════════════════════════════════════════════════════════
+    # Build the initial editor table — ALL fields empty by default
+    # ═══════════════════════════════════════════════════════════════════════
     selected_templates = [v for v in STANDARD_VLAN_TEMPLATES if include_opt or not v["opt"]]
-    sliced = slice_supernet(supernet_in, selected_templates, matched_site_name, existing_prefixes)
-
     raw_rows = []
-    for r in sliced:
-        # VLAN Description defaults from the role-to-description map.
-        # Example: "VIN_Corp" -> "Corporate WiFi".
-        # The user can still overwrite any cell manually.
-        role_text = r["role"]
-        default_desc = VLAN_DESC_MAP.get(role_text, role_text)
-        # "Next Available" shows ONLY the network ID (e.g. "10.113.252.0"),
-        # not the CIDR.  The mask is implied by the VLAN template mask.
-        next_avail = ""
-        if r["assigned_subnet"] and "/" in str(r["assigned_subnet"]):
-            try:
-                _n = ipaddress.ip_network(r["assigned_subnet"], strict=False)
-                next_avail = str(_n.network_address)
-            except ValueError:
-                next_avail = str(r["assigned_subnet"]).split("/")[0]
-        elif r["assigned_subnet"]:
-            next_avail = str(r["assigned_subnet"])
+    for v in selected_templates:
         raw_rows.append({
-            "VLAN ID": r["vid"],
-            "VLAN Name": r["name"],
-            "Role": role_text,
-            "Description": default_desc,
-            "Next Available": next_avail,             # suggestion (network ID only)
-            "Subnet (CIDR)": str(r["assigned_subnet"] or ""),  # actual value, user types here
+            "VLAN ID": v["vid"],
+            "VLAN Name": v["name"],   # shown as the suggested VLAN name
+            "Role": v["role"],         # user-editable role code
+            "VLAN Description": v["name"],
+            "Next Available": "",
+            "Subnet (CIDR)": "",
         })
 
-    df_init = pd.DataFrame(raw_rows)
+    df_editor = pd.DataFrame(raw_rows)
+    for col in ("VLAN Name", "Role", "VLAN Description", "Next Available", "Subnet (CIDR)"):
+        df_editor[col] = df_editor[col].astype("string").fillna("")
 
     st.markdown("##### 📊 Subnet Allocation Editor (✏️ Click any cell to edit)")
-
-    df_editor = pd.DataFrame(raw_rows)
-    # Force string dtype on the Subnet cell so user input like "10.113.248.0/24"
-    # is never coerced to NaN / float by pandas.
-    df_editor["Subnet (CIDR)"] = df_editor["Subnet (CIDR)"].astype("string").fillna("")
 
     edited_df = st.data_editor(
         df_editor,
@@ -289,41 +268,50 @@ def render_ipam_tab(active_model: str):
         key="ipam_data_editor",
         column_config={
             "VLAN ID": st.column_config.NumberColumn("VLAN ID", step=1, required=True),
-            "VLAN Name": st.column_config.TextColumn("VLAN Name", required=True),
-            "Role": st.column_config.TextColumn("Role"),
-            # VLAN Description — free-text, used in NetBox VLANs CSV.
-            "Description": st.column_config.TextColumn(
+            "VLAN Name": st.column_config.TextColumn(
+                "VLAN Name",
+                help="Auto-filled from VLAN Role. Editable.",
+            ),
+            "Role": st.column_config.TextColumn(
+                "Role",
+                help="Type a role code (e.g. VIN_Corp, Management). Auto-fills Name + Description.",
+            ),
+            "VLAN Description": st.column_config.TextColumn(
                 "VLAN Description",
-                help="Free-text VLAN description (NetBox: ipam.vlan.description).",
+                help="Auto-filled from VLAN Role lookup. Editable.",
             ),
             "Next Available": st.column_config.TextColumn(
                 "Next Available",
-                help="Suggested next free subnet in supernet (read-only suggestion).",
+                help="Computed dynamically from the previous row's Subnet. Read-only suggestion.",
                 disabled=True,
             ),
             "Subnet (CIDR)": st.column_config.TextColumn(
                 "Subnet (CIDR)",
-                help="Type any valid CIDR like 10.113.240.0/24",
+                help="Type any valid CIDR (e.g. 10.113.252.0/24). Live usable range shows below.",
             ),
         },
     )
 
+    # ═══════════════════════════════════════════════════════════════════════
+    # Post-process: auto-fill Name/Description from Role, compute Next Available
+    # ═══════════════════════════════════════════════════════════════════════
     records_dict = edited_df.to_dict(orient="records")
     allocated_subnets = []
-    for r in records_dict:
-        # Normalise the Subnet cell to a clean string.  pandas / Streamlit
-        # can pass None, NaN, floats, etc. when the user hasn't touched
-        # the cell.  We collapse them all to "" so downstream code only
-        # ever sees a string.
+    last_subnet_net = None      # ipaddress.IPv4Network of the previous row
+
+    for idx, r in enumerate(records_dict):
+        # --- Normalise Subnet cell to a clean string -----------------------
         raw_sub = r.get("Subnet (CIDR)", "")
         if raw_sub is None:
             sub_str = ""
         else:
             try:
-                # If pandas/NumPy NaN comes in, this is_finite check catches it
-                import math
-                if isinstance(raw_sub, float) and math.isnan(raw_sub):
-                    sub_str = ""
+                if isinstance(raw_sub, float):
+                    import math
+                    if math.isnan(raw_sub):
+                        sub_str = ""
+                    else:
+                        sub_str = str(raw_sub).strip()
                 else:
                     sub_str = str(raw_sub).strip()
             except Exception:
@@ -332,90 +320,114 @@ def render_ipam_tab(active_model: str):
             sub_str = ""
         r["Subnet"] = sub_str
         allocated_subnets.append(sub_str)
-        vlan_id_val = r.get("VLAN ID")
-        vlan_role_val = str(r.get("Role", "") or "").strip()
 
-        # ── VLAN Description auto-fill (only when blank) ─────────────────
-        # Default = the VLAN Role text (e.g. "Corporate WiFi").  The user
-        # can still overwrite this cell manually.
-        existing_vlan_desc = str(r.get("Description", "") or "").strip()
-        if not existing_vlan_desc or existing_vlan_desc.lower() in ("nan", "none", "null"):
-            r["Description"] = vlan_role_val or ""
+        # --- Normalise role / name / description ---------------------------
+        role_val = str(r.get("Role", "") or "").strip()
+        name_val = str(r.get("VLAN Name", "") or "").strip()
+        desc_val = str(r.get("VLAN Description", "") or "").strip()
+        if role_val.lower() in ("nan", "none", "null"):
+            role_val = ""
 
-        # ── Prefix Description auto-fill (only when blank) ──────────────
-        # Formula: "{Site} {Role} -- VLAN {VLAN ID}"
-        # e.g.  "Bristol Corporate WiFi -- VLAN 300"
-        # Used in the "Live Usable IP Ranges" preview and the NetBox Prefixes CSV.
-        existing_pfx_desc = str(r.get("Prefix Description", "") or "").strip()
-        if not existing_pfx_desc or existing_pfx_desc.lower() in ("nan", "none", "null"):
-            if vlan_id_val:
-                r["Prefix Description"] = f"{display_site_name} {vlan_role_val} -- VLAN {vlan_id_val}"
-            else:
-                r["Prefix Description"] = f"{display_site_name} {vlan_role_val}"
+        # --- Auto-fill VLAN Name from Role if blank ------------------------
+        if not name_val and role_val in VLAN_NAME_MAP:
+            r["VLAN Name"] = VLAN_NAME_MAP[role_val]
+            name_val = VLAN_NAME_MAP[role_val]
+        elif not name_val:
+            r["VLAN Name"] = role_val
+            name_val = role_val
 
-        # ── Usable Range & Status ───────────────────────────────────────
-        # Robust CIDR validation so "Invalid CIDR" never surfaces for
-        # mid-typing or malformed inputs.  We require:
-        #   • exactly one "/"
-        #   • prefix length 0-32
-        #   • 4 dotted decimal octets, each 0-255
+        # --- Auto-fill VLAN Description from Role if blank -----------------
+        if not desc_val and role_val in VLAN_DESC_MAP:
+            r["VLAN Description"] = VLAN_DESC_MAP[role_val]
+            desc_val = VLAN_DESC_MAP[role_val]
+        elif not desc_val:
+            r["VLAN Description"] = name_val
+            desc_val = name_val
+
+        # --- Compute Next Available: last_subnet_net.broadcast_address + 1 -
+        next_avail = ""
+        if last_subnet_net is not None:
+            try:
+                next_int = int(last_subnet_net.broadcast_address) + 1
+                # Use the same prefix length as the previous row
+                next_avail = str(ipaddress.ip_network(
+                    f"{next_int}/{last_subnet_net.prefixlen}", strict=False
+                ).network_address)
+            except Exception:
+                next_avail = ""
+        r["Next Available"] = next_avail
+
+        # --- CIDR validity check ------------------------------------------
         is_valid_cidr = False
         if sub_str and sub_str.count("/") == 1:
             head, _, tail = sub_str.partition("/")
-            if head.count(".") == 3:
-                octets = head.split(".")
-                if (all(o.isdigit() and 0 <= int(o) <= 255 for o in octets)
-                        and tail.isdigit() and 0 <= int(tail) <= 32):
+            if head.count(".") == 3 and tail.isdigit() and 0 <= int(tail) <= 32:
+                if all(p.isdigit() and 0 <= int(p) <= 255 for p in head.split(".")):
                     is_valid_cidr = True
 
+        # --- Compute Usable Range & Status ---------------------------------
         if not sub_str:
             r["Usable Range"] = "—"
             r["Status"] = "Unassigned"
+            last_subnet_net = None
         elif "x" in sub_str.lower():
             r["Usable Range"] = "RFC1918 Custom Pool"
             r["Status"] = "Special Pool"
+            last_subnet_net = None
         elif not is_valid_cidr:
             r["Usable Range"] = "—"
             r["Status"] = "Pending Input"
+            last_subnet_net = None
         else:
             try:
-                eval_res = evaluate_subnet_row(
-                    sub_str,
-                    vlan_id_val,
-                    vlan_role_val,
-                    matched_site_name,
-                    supernet_in,
-                    existing_prefixes,
-                )
-                # Defensive: if the engine ever returns "Invalid CIDR"
-                # for a CIDR we already validated, fall back to a clean
-                # OK / computed-range view so the user is never stuck.
-                if eval_res.get("status") == "❌ Syntax Error":
+                # Direct parse — we already validated the CIDR, so just
+                # use ipaddress.ip_network and compute the range.
+                net = ipaddress.ip_network(sub_str, strict=False)
+                # Re-parse with strict CIDR alignment
+                net = ipaddress.ip_network(f"{net.network_address}/{net.prefixlen}", strict=False)
+                range_str = f"{net.network_address} - {net.broadcast_address}"
+                is_in_use = check_prefix_collision(net, existing_prefixes)
+                status = "OK"
+                if is_in_use:
+                    status = "⚠️ [IN-USE]"
+                    range_str += " ⚠️ [IN-USE]"
+                elif supernet_in and "/" in supernet_in:
                     try:
-                        _n = ipaddress.ip_network(sub_str, strict=False)
-                        r["Usable Range"] = calculate_ip_range_str(_n)
-                        r["Status"] = "OK"
-                    except Exception:
-                        r["Usable Range"] = "—"
-                        r["Status"] = "Pending Input"
-                else:
-                    r["Usable Range"] = eval_res["usable_range"]
-                    r["Status"] = eval_res["status"]
+                        sup = ipaddress.ip_network(supernet_in, strict=False)
+                        if not net.subnet_of(sup):
+                            status = "Outside Supernet"
+                    except ValueError:
+                        pass
+                r["Usable Range"] = range_str
+                r["Status"] = status
+                last_subnet_net = net
             except Exception:
                 r["Usable Range"] = "—"
                 r["Status"] = "Pending Input"
+                last_subnet_net = None
 
-    # ── Live preview: Prefix Description shown separately from VLAN Description
+        # --- Compute Prefix Description for preview / NetBox prefixes CSV
+        try:
+            vlan_id_int = int(r.get("VLAN ID")) if r.get("VLAN ID") not in (None, "") else None
+        except (TypeError, ValueError):
+            vlan_id_int = None
+        if vlan_id_int is not None:
+            r["Prefix Description"] = f"{display_site_name} {name_val} -- VLAN {vlan_id_int}"
+        else:
+            r["Prefix Description"] = f"{display_site_name} {name_val}".strip()
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # Live preview: editable editor already shows Next Available + Subnet
+    # ═══════════════════════════════════════════════════════════════════════
     c_prev, c_cap = st.columns([3, 1.2])
     with c_prev:
         st.markdown("##### 🔍 Live Usable IP Ranges & Collision Status")
-        st.dataframe(
-            pd.DataFrame(records_dict)[[
-                "Subnet", "Usable Range", "Status", "Prefix Description"
-            ]],
-            use_container_width=True,
-            hide_index=True,
-        )
+        preview_cols = ["Subnet", "Usable Range", "Status", "Prefix Description"]
+        preview_df = pd.DataFrame(records_dict)
+        for col in preview_cols:
+            if col not in preview_df.columns:
+                preview_df[col] = ""
+        st.dataframe(preview_df[preview_cols], use_container_width=True, hide_index=True)
 
     with c_cap:
         st.markdown("##### 📈 Remaining Capacity")
@@ -423,7 +435,9 @@ def render_ipam_tab(active_model: str):
         cap_rows = [{"Subnet Size": k, "Available": f"{v} subnets"} for k, v in cap_matrix.items()]
         st.dataframe(pd.DataFrame(cap_rows), use_container_width=True, hide_index=True)
 
+    # ═══════════════════════════════════════════════════════════════════════
     # NetBox Bulk-Import CSV Generators
+    # ═══════════════════════════════════════════════════════════════════════
     st.markdown("---")
     st.markdown("### 📋 NetBox Bulk-Import CSV Generators")
 
