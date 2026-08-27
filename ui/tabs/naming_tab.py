@@ -67,14 +67,19 @@ def render_compact_toolbar():
         )
     with top_c2:
         total_recs = get_total_record_count()
-        status_tag = f"🟢 ({total_recs} records in DB)" if total_recs > 0 else "⚪ (Default Examples)"
+        device_count = len(get_records_by_category("device")) + len(get_records_by_category("hypervisor"))
+        vm_count = len(get_records_by_category("vm"))
         
+        status_tag = f"🟢 ({total_recs} records in DB)" if total_recs > 0 else "⚪ (Default Examples)"
+        tick_devices = " ✅" if device_count > 0 else ""
+        tick_vms = " ✅" if vm_count > 0 else ""
+
         with st.expander(f"📥 Ingest NetBox Data (CSV) {status_tag}", expanded=False):
             st.markdown(
-                """
+                f"""
                 **Export Instructions from NetBox:**
-                * **Devices / Servers / Switches:** Go to `Devices` ➔ `Devices` ➔ `Export` ➔ `All Data` (`netbox_devices.csv`)
-                * **Virtual Machines:** Go to `Virtualization` ➔ `Virtual Machines` ➔ `Export` ➔ `All Data`
+                * **Devices / Servers / Switches:** Go to `Devices` ➔ `Devices` ➔ `Export` ➔ `All Data` (`netbox_devices.csv`){tick_devices}
+                * **Virtual Machines:** Go to `Virtualization` ➔ `Virtual Machines` ➔ `Export` ➔ `All Data` (`netbox_virtual machines.csv`){tick_vms}
                 """
             )
             c_up, c_rst = st.columns([3, 1])

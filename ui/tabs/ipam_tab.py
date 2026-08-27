@@ -152,18 +152,21 @@ def render_ipam_tab(active_model: str):
     st.subheader("🌐 IPAM & Site Subnet Provisioning Engine")
     st.caption("Plan site supernets, allocate non-overlapping VLAN subnets, and export ready-to-import NetBox CSV blocks.")
 
-    # 1. Ingestion Toolbar with NetBox Export Step Instructions
+    # 1. Ingestion Toolbar with Dynamic Checkmarks
     total_ipam_recs = get_total_ipam_count()
     total_sites_recs = get_total_sites_count()
     total_db_count = total_ipam_recs + total_sites_recs
     status_tag = f"🟢 ({total_sites_recs} sites, {total_ipam_recs} prefixes in DB)" if total_db_count > 0 else "⚪ (Default Examples)"
 
+    tick_sites = " ✅" if total_sites_recs > 0 else ""
+    tick_vlans = " ✅" if total_ipam_recs > 0 else ""
+
     with st.expander(f"📥 Ingest NetBox Sites & VLANs / Prefixes CSV {status_tag}", expanded=False):
         st.markdown(
-            """
+            f"""
             **Export Instructions from NetBox:**
-            * **Scope IDs & Site Names:** Go to `Organization` ➔ `Sites` ➔ `Export` ➔ `All Data` (`netbox_sites.csv`)
-            * **VLANs & In-Use Prefixes:** Go to `IPAM` ➔ `VLANs` ➔ `Export` ➔ `All Data` (`netbox_VLANs.csv`)
+            * **Scope IDs & Site Names:** Go to `Organization` ➔ `Sites` ➔ `Export` ➔ `All Data` (`netbox_sites.csv`){tick_sites}
+            * **VLANs & In-Use Prefixes:** Go to `IPAM` ➔ `VLANs` ➔ `Export` ➔ `All Data` (`netbox_VLANs.csv`){tick_vlans}
             * *Tip: You can select and upload both CSV files together.*
             """
         )
