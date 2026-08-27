@@ -4,7 +4,8 @@ import pandas as pd
 import openpyxl
 from core.ipam_engine import (
     STANDARD_VLAN_TEMPLATES,
-    calculate_suggested_subnets,
+    ROLE_TO_DESC_MAP,
+    compute_chained_rows,
     slugify,
     evaluate_subnet_row,
     calculate_remaining_subnets,
@@ -157,7 +158,7 @@ def render_ipam_tab(active_model: str):
             placeholder="e.g. Bristol, Weybridge, London",
         ).strip()
 
-    # Automatic Scope ID & Site Supernet lookup from database
+    # Lookup Scope ID and Site Supernet from DB
     auto_scope_id = lookup_scope_id(site_name)
     auto_supernet = lookup_site_supernet_from_db(site_name)
 
@@ -194,23 +195,44 @@ def render_ipam_tab(active_model: str):
     include_opt = st.toggle("Include Optional VLANs (Routing, OT, IoT)", value=True, key="ipam_opt_toggle")
     existing_prefixes = get_existing_prefix_strings()
 
-    # 3. Dynamic Calculation of Suggested Subnets (Matching Excel F4:F18)
+    # 3. Build Template Rows (Subnet (CIDR) starts empty, VLAN Name & VLAN Desc follow Role)
     selected_templates = [v for v in STANDARD_VLAN_TEMPLATES if include_opt or not v["opt"]]
-    suggested_rows = calculate_suggested_subnets(supernet_in, selected_templates)
-
-    # Initialize editor DataFrame with suggested values
-    raw_rows = []
-    for r in suggested_rows:
-        raw_rows.append({
-            "VLAN ID": r["vid"],
-            "VLAN Name": r["name"],
-            "Role": r["role"],
-            "VLAN Description": r["desc"],
-            "Suggest Subnet": r["suggest_subnet"],
-            "Subnet (CIDR)": f"{r['suggest_subnet']}/24" if (r['suggest_subnet'] and "x" not in r['suggest_subnet']) else (r['suggest_subnet'] or "")
+    base_rows = []
+    for v in selected_templates:
+        r_role = v["role"]
+        base_rows.append({
+            "VLAN ID": v["vid"],
+            "VLAN Name": r_role,
+            "Role": r_role,
+            "VLAN Description": ROLE_TO_DESC_MAP.get(r_role, r_role),
+            "Suggest Subnet": "",
+            "Subnet (CIDR)": "",
+            "fallback_subnet": v.get("fallback_subnet", "")
         })
 
-    df_init = pd.DataFrame(raw_rows)
+    # Retrieve existing edited state if available in session state
+    if "ipam_table_state" not in st.session_state:
+        st.session_state["ipam_table_state"] = compute_chained_rows(supernet_in, base_rows)
+    else:
+        # Re-apply template structure while keeping user edits
+        current_data = st.session_state["ipam_table_state"]
+        merged = []
+        for idx, t in enumerate(base_rows):
+            existing_sub = current_data[idx].get("Subnet (CIDR)", "") if idx < len(current_data) else ""
+            user_role = current_data[idx].get("Role", t["Role"]) if idx < len(current_data) else t["Role"]
+            merged.append({
+                "VLAN ID": t["VLAN ID"],
+                "VLAN Name": user_role,
+                "Role": user_role,
+                "VLAN Description": ROLE_TO_DESC_MAP.get(user_role, user_role),
+                "Subnet (CIDR)": existing_sub,
+                "fallback_subnet": t.get("fallback_subnet", "")
+            })
+        st.session_state["ipam_table_state"] = compute_chained_rows(supernet_in, merged)
+
+    df_init = pd.DataFrame(st.session_state["ipam_table_state"])[[
+        "VLAN ID", "VLAN Name", "Role", "VLAN Description", "Suggest Subnet", "Subnet (CIDR)"
+    ]]
 
     st.markdown("##### 📊 Subnet Allocation Editor (✏️ Click any cell to edit)")
 
@@ -224,16 +246,19 @@ def render_ipam_tab(active_model: str):
             "VLAN Name": st.column_config.TextColumn("VLAN Name", required=True),
             "Role": st.column_config.TextColumn("Role"),
             "VLAN Description": st.column_config.TextColumn("VLAN Description"),
-            "Suggest Subnet": st.column_config.TextColumn("Suggest Subnet", help="Calculated dynamically based on Site Supernet.", disabled=True),
-            "Subnet (CIDR)": st.column_config.TextColumn("Subnet (CIDR)", help="Type any valid CIDR like 10.113.64.0/24")
+            "Suggest Subnet": st.column_config.TextColumn("Suggest Subnet", help="Calculated dynamically based on previous Subnet (CIDR) inputs.", disabled=True),
+            "Subnet (CIDR)": st.column_config.TextColumn("Subnet (CIDR)", help="Type any valid CIDR like 10.113.64.0/23")
         }
     )
 
-    # 4. Live Evaluation of Usable Ranges, Collision Check, and Descriptions
-    records_dict = edited_df.to_dict(orient="records")
+    # 4. Recompute Chained State and Live Usable Ranges
+    raw_edited = edited_df.to_dict(orient="records")
+    st.session_state["ipam_table_state"] = compute_chained_rows(supernet_in, raw_edited)
+    
+    final_records = st.session_state["ipam_table_state"]
     allocated_subnets = []
     
-    for r in records_dict:
+    for r in final_records:
         sub_str = str(r.get("Subnet (CIDR)", "") or "").strip()
         allocated_subnets.append(sub_str)
         eval_res = evaluate_subnet_row(
@@ -253,7 +278,7 @@ def render_ipam_tab(active_model: str):
     with c_prev:
         st.markdown("##### 🔍 Live Usable IP Ranges & Collision Status")
         st.dataframe(
-            pd.DataFrame(records_dict)[["VLAN ID", "VLAN Name", "Subnet (CIDR)", "Usable Range", "Status", "Prefix Description"]], 
+            pd.DataFrame(final_records)[["VLAN ID", "VLAN Name", "Subnet (CIDR)", "Usable Range", "Status", "Prefix Description"]], 
             use_container_width=True, 
             hide_index=True
         )
@@ -270,8 +295,8 @@ def render_ipam_tab(active_model: str):
 
     csv_site = generate_netbox_site_csv(site_name)
     csv_group = generate_netbox_vlan_group_csv(site_name, scope_id)
-    csv_vlans = generate_netbox_vlans_csv(site_name, records_dict)
-    csv_prefixes = generate_netbox_prefixes_csv(site_name, scope_id, supernet_in, records_dict)
+    csv_vlans = generate_netbox_vlans_csv(site_name, final_records)
+    csv_prefixes = generate_netbox_prefixes_csv(site_name, scope_id, supernet_in, final_records)
 
     c1, c2 = st.columns(2)
     with c1:
