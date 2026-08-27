@@ -10,7 +10,7 @@ from core.naming_engine import verify_and_suggest_with_ai
 from core.db_manager import (
     save_universal_csv, 
     get_records_by_category, 
-    clear_all_records,
+    clear_inventory_records,
     get_total_record_count
 )
 
@@ -32,7 +32,7 @@ def handle_csv_upload():
 
     for f in uploaded_files:
         try:
-            counts = save_universal_csv(f, clear_first=False)
+            counts = save_universal_csv(f, filename=f.name, clear_first=False)
             total_devices += counts.get("device", 0)
             total_hypervisors += counts.get("hypervisor", 0)
             total_vms += counts.get("vm", 0)
@@ -47,8 +47,8 @@ def handle_csv_upload():
         st.toast(f"✅ Ingested: {total_devices} Devices, {total_hypervisors} Hypervisors, {total_vms} VMs!", icon="🚀")
 
 def handle_csv_reset():
-    clear_all_records()
-    st.toast("🗑️ Database Cleared. Restored default examples.", icon="🧹")
+    clear_inventory_records()
+    st.toast("🗑️ Inventory Cleared. Restored default examples.", icon="🧹")
 
 def display_reference_box(category_key: str, default_lines: str, label: str, site_filter: str = ""):
     real_items = get_records_by_category(category_key, site_filter=site_filter)
