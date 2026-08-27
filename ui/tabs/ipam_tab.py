@@ -1,3 +1,5 @@
+import io
+import re
 import ipaddress
 import streamlit as st
 import pandas as pd
@@ -19,129 +21,151 @@ from core.db_manager import (
     save_sites_batch,
     clear_ipam_records, 
     get_total_ipam_count,
+    get_total_sites_count,
     lookup_scope_id,
     lookup_site_supernet_from_db,
     get_existing_prefix_strings
 )
 
-def handle_ipam_file_upload():
-    uploaded = st.session_state.get("ipam_uploader_widget")
-    if uploaded is not None:
-        filename = uploaded.name.lower()
-        try:
-            if filename.endswith(".xlsx"):
-                wb = openpyxl.load_workbook(uploaded, data_only=True)
+def process_uploaded_files(uploaded_files):
+    if not uploaded_files:
+        return 0, 0
+
+    total_scopes = 0
+    total_prefixes = 0
+
+    for file_obj in uploaded_files:
+        filename = file_obj.name.lower()
+        content = file_obj.getvalue()
+        
+        # 1. Multi-Sheet Excel (.xlsx)
+        if filename.endswith(".xlsx"):
+            wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+            scope_records = []
+            ipam_records = []
+
+            if "Scope" in wb.sheetnames:
+                ws_scope = wb["Scope"]
+                for r in range(2, ws_scope.max_row + 1):
+                    s_id = ws_scope.cell(row=r, column=1).value
+                    s_name = ws_scope.cell(row=r, column=5).value
+                    s_slug = ws_scope.cell(row=r, column=6).value
+                    if s_name:
+                        scope_records.append({"id": s_id, "name": s_name, "slug": s_slug})
+                if scope_records:
+                    cnt = save_sites_batch(scope_records, clear_first=False)
+                    total_scopes += cnt
+
+            if "Prefixes" in wb.sheetnames:
+                ws_pfx = wb["Prefixes"]
+                for r in range(2, ws_pfx.max_row + 1):
+                    pfx_str = ws_pfx.cell(row=r, column=6).value
+                    scope_id_val = ws_pfx.cell(row=r, column=9).value
+                    vlan_val = ws_pfx.cell(row=r, column=12).value
+                    role_val = ws_pfx.cell(row=r, column=14).value
+                    desc_val = ws_pfx.cell(row=r, column=17).value
+                    if pfx_str and str(pfx_str).strip():
+                        ipam_records.append({
+                            "prefix_or_subnet": str(pfx_str).strip(),
+                            "scope_id": scope_id_val,
+                            "vlan_name": str(vlan_val or ""),
+                            "role": str(role_val or ""),
+                            "description": str(desc_val or "")
+                        })
+                if ipam_records:
+                    cnt = save_ipam_records_batch(ipam_records, clear_first=False)
+                    total_prefixes += cnt
+
+        # 2. NetBox CSVs (netbox_sites.csv, netbox_VLANs.csv, etc.)
+        else:
+            df = pd.read_csv(io.BytesIO(content))
+            cols = {str(c).lower().strip(): c for c in df.columns}
+
+            # Case A: netbox_sites.csv (Name, Status, Facility, Region, Group, Tenant, Description, ID, Slug...)
+            if "slug" in cols and ("name" in cols or "site" in cols) and "id" in cols:
+                name_col = cols.get("name", cols.get("site"))
+                id_col = cols.get("id")
+                slug_col = cols.get("slug")
                 scope_records = []
-                ipam_records = []
+                for _, row in df.iterrows():
+                    s_name = str(row.get(name_col, "")).strip()
+                    s_id = row.get(id_col)
+                    s_slug = str(row.get(slug_col, "")).strip()
+                    if s_name and s_name.lower() != "nan":
+                        scope_records.append({"id": s_id, "name": s_name, "slug": s_slug})
+                if scope_records:
+                    cnt = save_sites_batch(scope_records, clear_first=False)
+                    total_scopes += cnt
 
-                if "Scope" in wb.sheetnames:
-                    ws_scope = wb["Scope"]
-                    for r in range(2, ws_scope.max_row + 1):
-                        s_id = ws_scope.cell(row=r, column=1).value
-                        s_name = ws_scope.cell(row=r, column=5).value
-                        s_slug = ws_scope.cell(row=r, column=6).value
-                        if s_name:
-                            scope_records.append({"id": s_id, "name": s_name, "slug": s_slug})
-                    if scope_records:
-                        save_sites_batch(scope_records, clear_first=False)
-
-                if "Prefixes" in wb.sheetnames:
-                    ws_pfx = wb["Prefixes"]
-                    for r in range(2, ws_pfx.max_row + 1):
-                        pfx_str = ws_pfx.cell(row=r, column=6).value
-                        scope_id_val = ws_pfx.cell(row=r, column=9).value
-                        vlan_val = ws_pfx.cell(row=r, column=12).value
-                        role_val = ws_pfx.cell(row=r, column=14).value
-                        desc_val = ws_pfx.cell(row=r, column=17).value
-                        if pfx_str and str(pfx_str).strip():
-                            ipam_records.append({
-                                "prefix_or_subnet": str(pfx_str).strip(),
-                                "scope_id": scope_id_val,
-                                "vlan_name": str(vlan_val or ""),
-                                "role": str(role_val or ""),
-                                "description": str(desc_val or "")
-                            })
-                    if ipam_records:
-                        save_ipam_records_batch(ipam_records, clear_first=True)
-                st.toast(f"✅ Ingested {len(scope_records)} Scopes and {len(ipam_records)} Prefixes from Excel!", icon="📊")
-            else:
-                df = pd.read_csv(uploaded)
-                cols = {str(c).lower().strip(): c for c in df.columns}
-                scope_records = []
-                ipam_records = []
-
-                if "slug" in cols and ("name" in cols or "site" in cols):
-                    name_c = cols.get("name", cols.get("site"))
-                    id_c = cols.get("id")
-                    slug_c = cols.get("slug")
-                    for _, row in df.iterrows():
-                        s_name = str(row.get(name_c, "")).strip()
-                        s_id = row.get(id_c) if id_c else None
-                        s_slug = str(row.get(slug_c, "")).strip()
-                        if s_name and s_name.lower() != "nan":
-                            scope_records.append({"id": s_id, "name": s_name, "slug": s_slug})
-                    if scope_records:
-                        save_sites_batch(scope_records, clear_first=False)
-
-                pfx_col = cols.get("prefix", cols.get("address", cols.get("subnet", cols.get("ip address", ""))))
-                vid_col = cols.get("vlan_id", cols.get("vid", cols.get("vlan", "")))
-                vname_col = cols.get("vlan_name", cols.get("vlan", cols.get("name", "")))
+            # Case B: netbox_VLANs.csv or prefix export (VID, Name, Site, Group, Prefixes...)
+            if "prefixes" in cols or "prefix" in cols or "address" in cols:
+                pfx_col = cols.get("prefixes", cols.get("prefix", cols.get("address", cols.get("subnet"))))
+                vid_col = cols.get("vid", cols.get("vlan_id", cols.get("vlan", "")))
+                vname_col = cols.get("name", cols.get("vlan_name", ""))
                 role_col = cols.get("role", cols.get("vlan_role", ""))
-                site_col = cols.get("site", cols.get("scope", cols.get("scope_id", "")))
+                site_col = cols.get("site", cols.get("scope", ""))
                 desc_col = cols.get("description", cols.get("comments", ""))
 
+                ipam_records = []
                 for _, row in df.iterrows():
-                    sub = str(row.get(pfx_col, "")).strip() if pfx_col else ""
-                    if not sub or sub.lower() == "nan":
+                    raw_prefixes = str(row.get(pfx_col, "")).strip()
+                    if not raw_prefixes or raw_prefixes.lower() == "nan":
                         continue
+
+                    # Extract all CIDRs in cell
+                    found_cidrs = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}/\d{1,2}\b', raw_prefixes)
                     vid = str(row.get(vid_col, "")).strip() if vid_col else ""
                     vname = str(row.get(vname_col, "")).strip() if vname_col else ""
                     role = str(row.get(role_col, "")).strip() if role_col else ""
                     site_val = str(row.get(site_col, "")).strip() if site_col else ""
                     desc = str(row.get(desc_col, "")).strip() if desc_col else ""
 
-                    ipam_records.append({
-                        "prefix_or_subnet": sub,
-                        "vlan_id": vid if vid.isdigit() else None,
-                        "vlan_name": vname if vname.lower() != "nan" else "",
-                        "role": role if role.lower() != "nan" else "",
-                        "site": site_val if site_val.lower() != "nan" else "",
-                        "description": desc if desc.lower() != "nan" else ""
-                    })
+                    for cidr in found_cidrs:
+                        ipam_records.append({
+                            "prefix_or_subnet": cidr,
+                            "vlan_id": vid if vid.isdigit() else None,
+                            "vlan_name": vname if vname.lower() != "nan" else "",
+                            "role": role if role.lower() != "nan" else "",
+                            "site": site_val if site_val.lower() != "nan" else "",
+                            "description": desc if desc.lower() != "nan" else ""
+                        })
 
                 if ipam_records:
-                    save_ipam_records_batch(ipam_records, clear_first=True)
-                st.toast(f"✅ Ingested {len(ipam_records)} IP/Prefix records from CSV!", icon="🌐")
-        except Exception as e:
-            st.error(f"Error reading file: {e}")
+                    cnt = save_ipam_records_batch(ipam_records, clear_first=False)
+                    total_prefixes += cnt
+
+    return total_scopes, total_prefixes
 
 def render_ipam_tab(active_model: str):
     st.subheader("🌐 IPAM & Site Subnet Provisioning Engine")
     st.caption("Plan site supernets, allocate non-overlapping VLAN subnets, and export ready-to-import NetBox CSV blocks.")
 
-    # 1. Ingestion Toolbar
+    # 1. Ingestion Toolbar with Multi-File Upload & Clear DB Button
     total_ipam_recs = get_total_ipam_count()
-    status_label = f"🟢 ({total_ipam_recs} records in IPAM database)" if total_ipam_recs > 0 else "⚪ (No custom file loaded - Template Mode)"
+    total_sites_recs = get_total_sites_count()
+    status_label = f"🟢 ({total_sites_recs} sites, {total_ipam_recs} prefixes in DB)" if (total_ipam_recs > 0 or total_sites_recs > 0) else "⚪ (No custom file loaded - Template Mode)"
 
-    with st.expander(f"📁 Ingest Scope & Prefixes / IP Address File {status_label}", expanded=(total_ipam_recs == 0)):
+    with st.expander(f"📁 Ingest NetBox Sites & VLANs / Prefixes CSV {status_label}", expanded=(total_ipam_recs == 0 and total_sites_recs == 0)):
         c_file, c_btn, c_clr = st.columns([3, 1.2, 1])
         with c_file:
-            uploaded_file = st.file_uploader(
-                "Upload Standard VLAN_Prefixes_v2.xlsx or NetBox CSV", 
+            uploaded_files = st.file_uploader(
+                "Upload netbox_sites.csv, netbox_VLANs.csv, or Excel", 
                 type=["xlsx", "csv"], 
-                key="ipam_uploader_widget"
+                accept_multiple_files=True,
+                key="ipam_multi_uploader"
             )
         with c_btn:
             st.write("")
-            if st.button("📥 Load & Process File", use_container_width=True, key="btn_do_load_ipam"):
-                if uploaded_file is not None:
-                    handle_ipam_file_upload()
+            if st.button("📥 Load & Process File(s)", use_container_width=True, key="btn_do_load_ipam"):
+                if uploaded_files:
+                    sc_cnt, pfx_cnt = process_uploaded_files(uploaded_files)
+                    st.toast(f"✅ Loaded {sc_cnt} Sites and {pfx_cnt} Prefixes into database!", icon="🌐")
                     st.rerun()
                 else:
-                    st.warning("Please choose a file first.")
+                    st.warning("Please choose file(s) first.")
         with c_clr:
             st.write("")
-            if total_ipam_recs > 0:
+            if (total_ipam_recs > 0 or total_sites_recs > 0):
                 if st.button("🗑️ Clear DB", use_container_width=True, key="btn_clr_ipam_records"):
                     clear_ipam_records()
                     if "ipam_persisted_rows" in st.session_state:
@@ -156,7 +180,7 @@ def render_ipam_tab(active_model: str):
             "Branch / Site Name",
             value="",
             key="ipam_site_in",
-            placeholder="e.g. London Branch, Site-01",
+            placeholder="e.g. Bristol, AGE, Adelaide, Site-01",
         ).strip()
 
     # Auto-lookup Scope ID and Site Supernet from stored records
@@ -170,7 +194,7 @@ def render_ipam_tab(active_model: str):
             value=scope_display, 
             key="ipam_scope_in",
             placeholder="e.g. 42",
-            help="Auto-discovered from uploaded Scope data, or editable manually."
+            help="Auto-discovered from uploaded netbox_sites.csv, or editable manually."
         ).strip()
         if auto_scope_id:
             st.caption(f"🟢 Matched Scope ID: **`{auto_scope_id}`**")
@@ -183,7 +207,7 @@ def render_ipam_tab(active_model: str):
             "Site Supernet (CIDR)", 
             value=supernet_default, 
             key="ipam_super_in",
-            placeholder="e.g. 10.0.0.0/21",
+            placeholder="e.g. 10.1.0.0/16",
             help="Top-level container subnet for this branch site."
         ).strip()
         if supernet_in and "/" in supernet_in:
@@ -249,7 +273,7 @@ def render_ipam_tab(active_model: str):
             "Role": st.column_config.TextColumn("Role", help="Type role (e.g. Guest, Corporate WiFi, Audio Visual). Auto-corrects on Enter."),
             "VLAN Description": st.column_config.TextColumn("VLAN Description", help="Auto-looked up from Role.", disabled=True),
             "Suggest Subnet": st.column_config.TextColumn("Suggest Subnet", help="Calculated dynamically based on previous Subnet (CIDR) input.", disabled=True),
-            "Subnet (CIDR)": st.column_config.TextColumn("Subnet (CIDR)", help="Type subnet CIDR (e.g. 10.113.64.0/23) and hit Enter.")
+            "Subnet (CIDR)": st.column_config.TextColumn("Subnet (CIDR)", help="Type subnet CIDR (e.g. 10.1.1.0/24) and hit Enter.")
         }
     )
 
