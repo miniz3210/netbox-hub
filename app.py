@@ -28,31 +28,31 @@ logging.basicConfig(
 )
 logger = logging.getLogger("netbox-hub")
 
-# ── REST API Ingest Endpoint ────────────────────────────────────────────────
-def _register_rest_api() -> None:
-    try:
-        from flask import Flask, jsonify, request
-        from flask_cors import CORS
-        from core.db_manager import save_sites_batch, save_ipam_records_batch, save_records_batch
-    except Exception as e:
-        logger.warning("REST API initialization skipped: %s", e)
-        return
+# ── REST API Ingest Endpoint (Mounted on Tornado) ───────────────────────────
+def _create_flask_app():
+    from flask import Flask, jsonify, request
+    from flask_cors import CORS
+    from core.db_manager import save_sites_batch, save_ipam_records_batch, save_records_batch
 
     api = Flask("netbox-hub-rest")
     CORS(api)
 
     HUB_SECRET_KEY = os.getenv("HUB_SYNC_KEY", "netbox-hub-secret-sync-key")
 
-    @api.get("/api/v1/health")
+    @api.route("/api/v1/health", methods=["GET"])
     def _health():
         return jsonify({"status": "online", "version": APP_VERSION})
 
-    @api.post("/api/v1/sync/push")
+    @api.route("/api/v1/sync/push", methods=["GET", "POST", "OPTIONS"])
     def _sync_push():
+        if request.method == "OPTIONS":
+            return "", 204
+        if request.method == "GET":
+            return jsonify({"status": "online", "message": "Send a POST request with NetBox JSON data to sync."})
+
         auth_header = request.headers.get("X-Hub-Key", "")
         payload: Dict[str, Any] = request.get_json(silent=True) or {}
         
-        # Verify sync key if configured
         if HUB_SECRET_KEY and auth_header != HUB_SECRET_KEY and payload.get("sync_key") != HUB_SECRET_KEY:
             return jsonify({"success": False, "error": "Unauthorized: Invalid X-Hub-Key"}), 401
 
@@ -88,7 +88,6 @@ def _register_rest_api() -> None:
             desc = v.get("description", "")
             raw_pfxs = v.get("prefixes", []) or []
 
-            # Handle either string or object prefix lists
             for p in raw_pfxs:
                 pfx_str = p.get("prefix", "") if isinstance(p, dict) else str(p)
                 if pfx_str and "/" in pfx_str:
@@ -176,16 +175,38 @@ def _register_rest_api() -> None:
 
         return jsonify({"success": True, "imported": imported}), 200
 
-    try:
-        from streamlit import server as st_server
-        server = st_server.get_server()
-        if server is not None:
-            server._Application__application.add_rules([("/api/v1/.*", api)])
-            logger.info("REST Ingestion API mounted at /api/v1/*")
-    except Exception as e:
-        logger.warning("Could not mount REST API onto Streamlit: %s", e)
+    return api
 
-_register_rest_api()
+def _mount_rest_api():
+    try:
+        from tornado.wsgi import WSGIContainer
+        import tornado.web
+        flask_app = _create_flask_app()
+        wsgi_container = WSGIContainer(flask_app)
+
+        # Access Streamlit's Tornado application instance
+        server = None
+        try:
+            from streamlit.web.server.server import Server
+            server = Server.get_current()
+        except Exception:
+            try:
+                from streamlit.server.server import Server
+                server = Server.get_current()
+            except Exception:
+                pass
+
+        if server is not None:
+            tornado_app = server._app
+            tornado_app.add_handlers(
+                r".*",
+                [(r"/api/v1/.*", tornado.web.FallbackHandler, dict(fallback=wsgi_container))]
+            )
+            logger.info("REST Ingestion API successfully mounted onto Streamlit Tornado server at /api/v1/*")
+    except Exception as e:
+        logger.warning("Could not mount WSGI REST API: %s", e)
+
+_mount_rest_api()
 
 # ── Application boot ───────────────────────────────────────────────────────
 from core.catalog import get_repo_catalog
