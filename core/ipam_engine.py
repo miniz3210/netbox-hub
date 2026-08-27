@@ -87,11 +87,23 @@ def evaluate_subnet_row(
     clean = str(subnet_input).strip()
     desc = f"{site_name} {vlan_role} -- VLAN {vlan_id}" if vlan_id else f"{site_name} {vlan_role}"
 
-    if not clean or clean == "nan":
-        return {"usable_range": "-", "status": "Unassigned", "desc": desc, "in_use": False}
+    # Friendly view for empty / mid-typing rows. This prevents "Invalid CIDR"
+    # from leaking into the live preview when the user is still typing.
+    if not clean or clean == "nan" or clean.lower() in ("none", "null"):
+        return {"usable_range": "—", "status": "Unassigned", "desc": desc, "in_use": False}
 
     if "x" in clean.lower():
         return {"usable_range": "RFC1918 Custom Pool", "status": "Special Pool", "desc": desc, "in_use": False}
+
+    # Only attempt a parse if the input has the shape of a CIDR (e.g. "10.0.0.0/24").
+    # Without this guard, partial / malformed values from the Streamlit data_editor
+    # cascade into ipaddress.ip_network() and surface as "Invalid CIDR".
+    if "/" not in clean or clean.count("/") > 1:
+        return {"usable_range": "—", "status": "Pending Input", "desc": desc, "in_use": False}
+
+    head = clean.split("/")[0]
+    if head.count(".") != 3 or not all(p.isdigit() and 0 <= int(p) <= 255 for p in head.split(".")):
+        return {"usable_range": "—", "status": "Pending Input", "desc": desc, "in_use": False}
 
     try:
         # First parse the CIDR — strict=False lets the user type a host IP.
