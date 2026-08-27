@@ -194,11 +194,29 @@ def _mount_native_tornado_api():
 
         if server is not None:
             tornado_app = server._app
-            # Prepend the REST handler to Tornado routes
-            tornado_app.wildcard_router.rules.insert(
-                0,
-                tornado.web.url(r"/api/v1/sync/push", NetBoxSyncPushHandler)
-            )
+            sync_rule = tornado.web.url(r"/api/v1/sync/push", NetBoxSyncPushHandler)
+
+            # Newer Streamlit (>=1.18) wraps the Tornado app in SafeSessionMiddleware
+            # and exposes its real Application instance via ``.application`` (or via
+            # ``.app`` on the bare WebSocketApplication). Fall back through both.
+            real_app = getattr(tornado_app, "application", None) \
+                or getattr(tornado_app, "app", None) \
+                or tornado_app
+
+            # Streamlit >= 1.30 no longer exposes ``wildcard_router`` on the
+            # Application. Use ``default_router`` (a ``Router``) which is
+            # present on every modern Tornado version. ``add_handlers`` is
+            # the most stable, version-agnostic way to register a route.
+            try:
+                if hasattr(real_app, "wildcard_router") and hasattr(real_app.wildcard_router, "rules"):
+                    real_app.wildcard_router.rules.insert(0, sync_rule)
+                else:
+                    real_app.add_handlers(r".*", [sync_rule])
+            except Exception as mount_exc:
+                # Last-ditch fallback for any oddball Tornado version
+                real_app.add_handlers(r".*", [sync_rule])
+                logger.debug("Used add_handlers fallback for sync route: %s", mount_exc)
+
             logger.info("Native Tornado REST handler successfully mounted at /api/v1/sync/push")
     except Exception as e:
         logger.warning("Could not mount native Tornado REST handler: %s", e)
