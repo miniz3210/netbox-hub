@@ -1,10 +1,10 @@
 import logging
-from typing import Optional
+from typing import Optional, Dict, List
 
 import streamlit as st
 
 # Project imports
-from core.catalog import get_repo_catalog, Catalog
+from core.catalog import get_repo_catalog
 from core.exceptions import GitHubCatalogError
 from core.db_manager import init_db
 from ui.components import render_sidebar
@@ -77,7 +77,7 @@ except ValueError as e:
 # ---------------------------------------------------------------------------
 # GitHub catalog – graceful degradation if GitHub is unavailable
 # ---------------------------------------------------------------------------
-catalog: Optional[Catalog] = None
+catalog: Optional[Dict[str, List[str]]] = None
 try:
     catalog = get_repo_catalog()
 except GitHubCatalogError as e:
