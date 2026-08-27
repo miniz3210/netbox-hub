@@ -66,11 +66,11 @@ def save_sites_batch(sites: List[Dict[str, Any]], clear_first: bool = False) -> 
         site_id = s.get("id")
         name = str(s.get("name") or "").strip()
         slug = str(s.get("slug") or "").strip()
-        if site_id and name:
+        if name:
             cursor.execute("""
                 INSERT OR REPLACE INTO sites_records (id, name, slug)
                 VALUES (?, ?, ?)
-            """, (int(site_id), name, slug))
+            """, (int(site_id) if str(site_id).isdigit() else None, name, slug))
             count += 1
             
     conn.commit()
@@ -78,26 +78,59 @@ def save_sites_batch(sites: List[Dict[str, Any]], clear_first: bool = False) -> 
     return count
 
 def lookup_scope_id(site_name: str) -> Optional[int]:
-    """Exact XLOOKUP equivalent matching site name case-insensitively."""
+    """Looks up the Scope integer ID matching the site name or slug."""
     if not site_name:
         return None
     init_db()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
     clean = site_name.strip()
+    
     cursor.execute("SELECT id FROM sites_records WHERE LOWER(name) = LOWER(?) LIMIT 1", (clean,))
     row = cursor.fetchone()
-    if not row:
+    if not row or row[0] is None:
         cursor.execute("SELECT id FROM sites_records WHERE LOWER(slug) = LOWER(?) LIMIT 1", (clean,))
         row = cursor.fetchone()
-    if not row:
-        # Partial match fallback
+    if not row or row[0] is None:
         cursor.execute("SELECT id FROM sites_records WHERE LOWER(name) LIKE LOWER(?) LIMIT 1", (f"%{clean}%",))
         row = cursor.fetchone()
         
     conn.close()
-    return row[0] if row else None
+    return row[0] if (row and row[0] is not None) else None
+
+def lookup_site_supernet_from_db(site_name: str) -> Optional[str]:
+    """Finds the top-level container prefix (/21, /23, etc.) for a site from stored IPAM records."""
+    if not site_name:
+        return None
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    clean = site_name.strip().lower()
+    
+    cursor.execute("""
+        SELECT prefix_or_subnet, description, role FROM ipam_records 
+        WHERE LOWER(site) LIKE ? OR LOWER(description) LIKE ?
+    """, (f"%{clean}%", f"%{clean}%"))
+    rows = cursor.fetchall()
+    conn.close()
+
+    candidates = []
+    for r in rows:
+        p_str = r[0]
+        desc = (r[1] or "").lower()
+        role = (r[2] or "").lower()
+        if p_str and "/" in p_str:
+            try:
+                cidr = int(p_str.split("/")[1])
+                is_supernet_role = "site subnet" in role or "site subnet" in desc
+                candidates.append((cidr, is_supernet_role, p_str))
+            except ValueError:
+                pass
+
+    if candidates:
+        candidates.sort(key=lambda x: (not x[1], x[0]))
+        return candidates[0][2]
+    return None
 
 def get_all_sites() -> List[Dict[str, Any]]:
     init_db()
@@ -109,7 +142,7 @@ def get_all_sites() -> List[Dict[str, Any]]:
     conn.close()
     return [dict(r) for r in rows]
 
-# ── INVENTORY RECORDS ───────────────────────────────────────────────────
+# ── INVENTORY RECORDS (Naming Tab) ──────────────────────────────────────
 
 def save_records_batch(records: List[Dict[str, Any]], clear_first: bool = True) -> Dict[str, int]:
     init_db()
@@ -226,7 +259,7 @@ def save_ipam_records_batch(records: List[Dict[str, Any]], clear_first: bool = T
             INSERT INTO ipam_records (prefix_or_subnet, vlan_id, vlan_name, role, site, scope_id, description)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (
-            str(r.get("prefix_or_subnet") or r.get("prefix") or r.get("subnet") or "").strip(),
+            str(r.get("prefix_or_subnet") or r.get("prefix") or r.get("subnet") or r.get("address") or "").strip(),
             int(r.get("vlan_id") or r.get("vid") or 0) if str(r.get("vlan_id") or r.get("vid") or "").isdigit() else None,
             str(r.get("vlan_name") or r.get("name") or "").strip(),
             str(r.get("role") or "").strip(),
@@ -241,7 +274,6 @@ def save_ipam_records_batch(records: List[Dict[str, Any]], clear_first: bool = T
     return count
 
 def get_existing_prefix_strings() -> List[str]:
-    """Returns all prefix strings currently in the database to check collisions."""
     init_db()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
