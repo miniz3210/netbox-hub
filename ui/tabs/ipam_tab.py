@@ -238,8 +238,18 @@ def render_ipam_tab(active_model: str):
 
     st.markdown("##### 📊 Subnet Allocation Editor (✏️ Click any cell to edit)")
 
+    # ── Prefix Description column (separate from VLAN Description) ─────────
+    # This column feeds the "Live Usable IP Ranges" preview and the
+    # NetBox Prefixes CSV.  It uses the formula:
+    #   "{Site} {Role} -- VLAN {VLAN ID} /{CIDR}"  e.g. "Bristol Corporate -- VLAN 300 /24"
+    # while VLAN Description stays independent (free-text, used in VLANs CSV).
+    for row in raw_rows:
+        row["Prefix Description"] = ""
+
+    df_editor = pd.DataFrame(raw_rows)
+
     edited_df = st.data_editor(
-        df_init,
+        df_editor,
         use_container_width=True,
         num_rows="dynamic",
         key="ipam_data_editor",
@@ -247,11 +257,16 @@ def render_ipam_tab(active_model: str):
             "VLAN ID": st.column_config.NumberColumn("VLAN ID", step=1, required=True),
             "VLAN Name": st.column_config.TextColumn("VLAN Name", required=True),
             "Role": st.column_config.TextColumn("Role"),
-            # Description is editable (previous behaviour restored). Default
-            # value comes from the formula "{Site} {Role} -- VLAN {ID}".
+            # VLAN Description — free-text, used in NetBox VLANs CSV.
             "Description": st.column_config.TextColumn(
-                "Description",
-                help="Free-text description. Default: Site + VLAN Role + VLAN ID",
+                "VLAN Description",
+                help="Free-text VLAN description (NetBox: ipam.vlan.description).",
+            ),
+            # Prefix Description — auto-formula shown in the IP range preview
+            # and used in NetBox Prefixes CSV.
+            "Prefix Description": st.column_config.TextColumn(
+                "Prefix Description",
+                help="Auto: Site + Role + VLAN + CIDR. Used in ipam.prefix.description.",
             ),
             "Subnet": st.column_config.TextColumn("Subnet (CIDR)", help="Type any valid CIDR like 10.113.240.0/24"),
         },
@@ -264,15 +279,36 @@ def render_ipam_tab(active_model: str):
         allocated_subnets.append(sub_str)
         vlan_id_val = r.get("VLAN ID")
         vlan_role_val = r.get("Role", "")
-        # Only auto-fill the description if the user has not typed a custom one.
-        existing_desc = str(r.get("Description", "")).strip()
-        if not existing_desc:
+
+        # ── VLAN Description auto-fill (only when blank) ─────────────────
+        existing_vlan_desc = str(r.get("Description", "")).strip()
+        if not existing_vlan_desc:
             if vlan_id_val:
                 r["Description"] = f"{display_site_name} {vlan_role_val} -- VLAN {vlan_id_val}"
             else:
                 r["Description"] = f"{display_site_name} {vlan_role_val}"
-        # Suppress "Invalid CIDR" for empty rows so the table stays readable.
-        if not sub_str or "x" in sub_str.lower():
+
+        # ── Prefix Description auto-fill (only when blank) ──────────────
+        # Formula: "{Site} {Role} -- VLAN {VLAN ID} /{CIDR}"
+        # e.g.  "Bristol Corporate -- VLAN 300 /24"
+        existing_pfx_desc = str(r.get("Prefix Description", "")).strip()
+        if not existing_pfx_desc:
+            cidr_suffix = ""
+            if sub_str and "/" in sub_str:
+                cidr_suffix = f" /{sub_str.split('/')[1]}"
+            if vlan_id_val:
+                r["Prefix Description"] = f"{display_site_name} {vlan_role_val} -- VLAN {vlan_id_val}{cidr_suffix}"
+            else:
+                r["Prefix Description"] = f"{display_site_name} {vlan_role_val}{cidr_suffix}"
+
+        # ── Usable Range & Status ───────────────────────────────────────
+        # Guard against empty, placeholder, or malformed inputs before
+        # calling evaluate_subnet_row so "Invalid CIDR" never surfaces.
+        is_empty   = not sub_str
+        is_placeholder = "x" in sub_str.lower()
+        is_valid_cidr  = "/" in sub_str and sub_str.split("/")[0].count(".") == 3
+
+        if is_empty or is_placeholder or not is_valid_cidr:
             r["Usable Range"] = "—"
             r["Status"] = "Unassigned"
         else:
@@ -286,16 +322,15 @@ def render_ipam_tab(active_model: str):
             )
             r["Usable Range"] = eval_res["usable_range"]
             r["Status"] = eval_res["status"]
-        r["Prefix Description"] = r.get("Description", "")
 
-    # Preview summary is now folded into the editor (avoids duplicate
-    # VLAN ID / VLAN Name columns).  Only the Remaining Capacity column
-    # is shown alongside a compact status summary.
+    # ── Live preview: Prefix Description shown separately from VLAN Description
     c_prev, c_cap = st.columns([3, 1.2])
     with c_prev:
         st.markdown("##### 🔍 Live Usable IP Ranges & Collision Status")
         st.dataframe(
-            pd.DataFrame(records_dict)[["Subnet", "Usable Range", "Status", "Description"]],
+            pd.DataFrame(records_dict)[[
+                "Subnet", "Usable Range", "Status", "Prefix Description"
+            ]],
             use_container_width=True,
             hide_index=True,
         )
