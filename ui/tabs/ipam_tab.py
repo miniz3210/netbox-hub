@@ -4,7 +4,6 @@ import pandas as pd
 import openpyxl
 from core.ipam_engine import (
     STANDARD_VLAN_TEMPLATES,
-    ROLE_TO_DESC_MAP,
     compute_chained_rows,
     slugify,
     evaluate_subnet_row,
@@ -145,29 +144,32 @@ def render_ipam_tab(active_model: str):
             if total_ipam_recs > 0:
                 if st.button("🗑️ Clear DB", use_container_width=True, key="btn_clr_ipam_records"):
                     clear_ipam_records()
+                    if "ipam_table_state" in st.session_state:
+                        del st.session_state["ipam_table_state"]
                     st.toast("🧹 IPAM database cleared.", icon="🗑️")
                     st.rerun()
 
-    # 2. Site Inputs
+    # 2. Site Inputs (Generic Placeholders)
     top1, top2, top3 = st.columns([2, 1, 2])
     with top1:
         site_name = st.text_input(
             "Branch / Site Name",
-            value="Bristol",
+            value="",
             key="ipam_site_in",
-            placeholder="e.g. Bristol, Weybridge, London",
+            placeholder="e.g. London Branch, Site-01",
         ).strip()
 
-    # Lookup Scope ID and Site Supernet from DB
-    auto_scope_id = lookup_scope_id(site_name)
-    auto_supernet = lookup_site_supernet_from_db(site_name)
+    # Auto-lookup Scope ID and Site Supernet from stored records
+    auto_scope_id = lookup_scope_id(site_name) if site_name else None
+    auto_supernet = lookup_site_supernet_from_db(site_name) if site_name else None
 
     with top2:
         scope_display = str(auto_scope_id) if auto_scope_id is not None else ""
         scope_id = st.text_input(
             "Scope ID (NetBox Site ID)", 
-            value=scope_display or "30", 
+            value=scope_display, 
             key="ipam_scope_in",
+            placeholder="e.g. 42",
             help="Auto-discovered from uploaded Scope data, or editable manually."
         ).strip()
         if auto_scope_id:
@@ -176,12 +178,12 @@ def render_ipam_tab(active_model: str):
             st.caption("⚪ Manual Scope ID mode")
 
     with top3:
-        supernet_default = auto_supernet or "10.113.64.0/21"
+        supernet_default = auto_supernet or ""
         supernet_in = st.text_input(
             "Site Supernet (CIDR)", 
             value=supernet_default, 
             key="ipam_super_in",
-            placeholder="e.g. 10.113.64.0/21",
+            placeholder="e.g. 10.0.0.0/21",
             help="Top-level container subnet for this branch site."
         ).strip()
         if supernet_in and "/" in supernet_in:
@@ -195,36 +197,30 @@ def render_ipam_tab(active_model: str):
     include_opt = st.toggle("Include Optional VLANs (Routing, OT, IoT)", value=True, key="ipam_opt_toggle")
     existing_prefixes = get_existing_prefix_strings()
 
-    # 3. Build Template Rows (Subnet (CIDR) starts empty, VLAN Name & VLAN Desc follow Role)
+    # 3. Base Row Template Structure (Subnet (CIDR) starts completely empty)
     selected_templates = [v for v in STANDARD_VLAN_TEMPLATES if include_opt or not v["opt"]]
     base_rows = []
     for v in selected_templates:
-        r_role = v["role"]
         base_rows.append({
             "VLAN ID": v["vid"],
-            "VLAN Name": r_role,
-            "Role": r_role,
-            "VLAN Description": ROLE_TO_DESC_MAP.get(r_role, r_role),
-            "Suggest Subnet": "",
+            "Role": v["role"],
             "Subnet (CIDR)": "",
             "fallback_subnet": v.get("fallback_subnet", "")
         })
 
-    # Retrieve existing edited state if available in session state
+    # Retrieve existing edited state or initialize clean
     if "ipam_table_state" not in st.session_state:
         st.session_state["ipam_table_state"] = compute_chained_rows(supernet_in, base_rows)
     else:
-        # Re-apply template structure while keeping user edits
         current_data = st.session_state["ipam_table_state"]
         merged = []
         for idx, t in enumerate(base_rows):
             existing_sub = current_data[idx].get("Subnet (CIDR)", "") if idx < len(current_data) else ""
             user_role = current_data[idx].get("Role", t["Role"]) if idx < len(current_data) else t["Role"]
+            user_vid = current_data[idx].get("VLAN ID", t["VLAN ID"]) if idx < len(current_data) else t["VLAN ID"]
             merged.append({
-                "VLAN ID": t["VLAN ID"],
-                "VLAN Name": user_role,
+                "VLAN ID": user_vid,
                 "Role": user_role,
-                "VLAN Description": ROLE_TO_DESC_MAP.get(user_role, user_role),
                 "Subnet (CIDR)": existing_sub,
                 "fallback_subnet": t.get("fallback_subnet", "")
             })
@@ -243,15 +239,15 @@ def render_ipam_tab(active_model: str):
         key="ipam_data_editor",
         column_config={
             "VLAN ID": st.column_config.NumberColumn("VLAN ID", step=1, required=True),
-            "VLAN Name": st.column_config.TextColumn("VLAN Name", required=True),
-            "Role": st.column_config.TextColumn("Role"),
-            "VLAN Description": st.column_config.TextColumn("VLAN Description"),
-            "Suggest Subnet": st.column_config.TextColumn("Suggest Subnet", help="Calculated dynamically based on previous Subnet (CIDR) inputs.", disabled=True),
-            "Subnet (CIDR)": st.column_config.TextColumn("Subnet (CIDR)", help="Type any valid CIDR like 10.113.64.0/23")
+            "VLAN Name": st.column_config.TextColumn("VLAN Name", help="Auto-derived from Role.", disabled=True),
+            "Role": st.column_config.TextColumn("Role", help="Type role (e.g. Guest, Corporate WiFi, Audio Visual). Auto-corrects on Enter."),
+            "VLAN Description": st.column_config.TextColumn("VLAN Description", help="Auto-looked up from Role.", disabled=True),
+            "Suggest Subnet": st.column_config.TextColumn("Suggest Subnet", help="Calculated dynamically based on previous Subnet (CIDR) input.", disabled=True),
+            "Subnet (CIDR)": st.column_config.TextColumn("Subnet (CIDR)", help="Type subnet CIDR (e.g. 10.113.64.0/23) and hit Enter.")
         }
     )
 
-    # 4. Recompute Chained State and Live Usable Ranges
+    # 4. Immediate Re-compute Chained State and Usable Ranges on Enter
     raw_edited = edited_df.to_dict(orient="records")
     st.session_state["ipam_table_state"] = compute_chained_rows(supernet_in, raw_edited)
     
@@ -293,26 +289,27 @@ def render_ipam_tab(active_model: str):
     st.markdown("---")
     st.markdown("### 📋 NetBox Bulk-Import CSV Generators")
 
-    csv_site = generate_netbox_site_csv(site_name)
-    csv_group = generate_netbox_vlan_group_csv(site_name, scope_id)
-    csv_vlans = generate_netbox_vlans_csv(site_name, final_records)
-    csv_prefixes = generate_netbox_prefixes_csv(site_name, scope_id, supernet_in, final_records)
+    display_site = site_name or "Site"
+    csv_site = generate_netbox_site_csv(display_site)
+    csv_group = generate_netbox_vlan_group_csv(display_site, scope_id or "0")
+    csv_vlans = generate_netbox_vlans_csv(display_site, final_records)
+    csv_prefixes = generate_netbox_prefixes_csv(display_site, scope_id or "0", supernet_in, final_records)
 
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("**1. Import Site (`dcim.site`)**")
         st.code(csv_site, language="csv")
-        st.download_button("⬇️ Download Site CSV", csv_site, f"site_{slugify(site_name)}.csv", "text/csv", key="dl_site_csv")
+        st.download_button("⬇️ Download Site CSV", csv_site, f"site_{slugify(display_site)}.csv", "text/csv", key="dl_site_csv")
 
         st.markdown("**3. Import VLANs (`ipam.vlan`)**")
         st.code(csv_vlans, language="csv")
-        st.download_button("⬇️ Download VLANs CSV", csv_vlans, f"vlans_{slugify(site_name)}.csv", "text/csv", key="dl_vlans_csv")
+        st.download_button("⬇️ Download VLANs CSV", csv_vlans, f"vlans_{slugify(display_site)}.csv", "text/csv", key="dl_vlans_csv")
 
     with c2:
         st.markdown("**2. Import VLAN Group (`ipam.vlangroup`)**")
         st.code(csv_group, language="csv")
-        st.download_button("⬇️ Download VLAN Group CSV", csv_group, f"vlangroup_{slugify(site_name)}.csv", "text/csv", key="dl_group_csv")
+        st.download_button("⬇️ Download VLAN Group CSV", csv_group, f"vlangroup_{slugify(display_site)}.csv", "text/csv", key="dl_group_csv")
 
         st.markdown("**4. Import Prefixes (`ipam.prefix`)**")
         st.code(csv_prefixes, language="csv")
-        st.download_button("⬇️ Download Prefixes CSV", csv_prefixes, f"prefixes_{slugify(site_name)}.csv", "text/csv", key="dl_prefixes_csv")
+        st.download_button("⬇️ Download Prefixes CSV", csv_prefixes, f"prefixes_{slugify(display_site)}.csv", "text/csv", key="dl_prefixes_csv")

@@ -2,17 +2,46 @@ import ipaddress
 import re
 from typing import Dict, List, Any, Optional
 
-ROLE_TO_DESC_MAP = {
-    "Corporate WiFi": "VIN_Corp",
-    "Workstations": "Wired Workstations",
-    "Management": "Management",
-    "Printers": "Printers",
-    "Audio Visual": "AV equipment",
-    "Guests": "VIN_Guest",
-    "Mobiles": "VIN_Mobi",
-    "Routing": "Routing interface VLANs",
-    "OT": "OT",
-    "IoT": "IoT/Security",
+ROLE_LOOKUP_TABLE = {
+    "corporate wifi": {"canonical_role": "Corporate WiFi", "vlan_name": "Corporate WiFi", "vlan_desc": "VIN_Corp", "fallback": None},
+    "workstations": {"canonical_role": "Workstations", "vlan_name": "Workstations", "vlan_desc": "Wired Workstations", "fallback": None},
+    "management": {"canonical_role": "Management", "vlan_name": "Management", "vlan_desc": "Management", "fallback": None},
+    "printers": {"canonical_role": "Printers", "vlan_name": "Printers", "vlan_desc": "Printers", "fallback": None},
+    "audio visual": {"canonical_role": "Audio Visual", "vlan_name": "Audio Visual", "vlan_desc": "AV equipment", "fallback": None},
+    "guests": {"canonical_role": "Guests", "vlan_name": "Guests", "vlan_desc": "VIN_Guest", "fallback": "172.16.x.x"},
+    "mobiles": {"canonical_role": "Mobiles", "vlan_name": "Mobiles", "vlan_desc": "VIN_Mobi", "fallback": "172.18.x.x"},
+    "routing": {"canonical_role": "Routing", "vlan_name": "Routing", "vlan_desc": "Routing interface VLANs", "fallback": None},
+    "ot": {"canonical_role": "OT", "vlan_name": "OT", "vlan_desc": "OT", "fallback": None},
+    "iot": {"canonical_role": "IoT", "vlan_name": "IoT", "vlan_desc": "IoT/Security", "fallback": None},
+}
+
+ROLE_ALIASES = {
+    "corp": "corporate wifi",
+    "corp wifi": "corporate wifi",
+    "corporate": "corporate wifi",
+    "vin_corp": "corporate wifi",
+    "workstation": "workstations",
+    "wired": "workstations",
+    "wired workstations": "workstations",
+    "pc": "workstations",
+    "desktop": "workstations",
+    "mgmt": "management",
+    "printer": "printers",
+    "av": "audio visual",
+    "audiovisual": "audio visual",
+    "av equipment": "audio visual",
+    "guest": "guests",
+    "vin_guest": "guests",
+    "guest wifi": "guests",
+    "mobile": "mobiles",
+    "mobi": "mobiles",
+    "vin_mobi": "mobiles",
+    "mobi wifi": "mobiles",
+    "router": "routing",
+    "rtr": "routing",
+    "routing interface": "routing",
+    "iot/security": "iot",
+    "security": "iot",
 }
 
 STANDARD_VLAN_TEMPLATES = [
@@ -28,18 +57,47 @@ STANDARD_VLAN_TEMPLATES = [
     {"vid": 600, "role": "IoT", "opt": True}
 ]
 
+def resolve_role_details(user_role_input: str) -> Dict[str, Any]:
+    """Auto-corrects and wildcard-matches any role text to canonical naming."""
+    clean = re.sub(r"[^a-zA-Z0-9/_\s-]", "", str(user_role_input or "")).strip().lower()
+    if not clean:
+        return {"canonical_role": "", "vlan_name": "", "vlan_desc": "", "fallback": None}
+    
+    # 1. Exact match
+    if clean in ROLE_LOOKUP_TABLE:
+        return ROLE_LOOKUP_TABLE[clean]
+    
+    # 2. Alias match
+    if clean in ROLE_ALIASES:
+        target = ROLE_ALIASES[clean]
+        return ROLE_LOOKUP_TABLE[target]
+    
+    # 3. Wildcard / Substring scan
+    for alias, target in ROLE_ALIASES.items():
+        if alias in clean or clean in alias:
+            return ROLE_LOOKUP_TABLE[target]
+            
+    for key, val in ROLE_LOOKUP_TABLE.items():
+        if key in clean or clean in key:
+            return val
+            
+    # Fallback for custom user roles
+    return {
+        "canonical_role": str(user_role_input).strip(),
+        "vlan_name": str(user_role_input).strip(),
+        "vlan_desc": str(user_role_input).strip(),
+        "fallback": None
+    }
+
 def slugify(text: str) -> str:
-    """Matches Excel D1: =LOWER(SUBSTITUTE(SUBSTITUTE(B1, " - ", "-"), " ", "-"))"""
     s = str(text).strip().lower()
     s = s.replace(" - ", "-").replace(" ", "-")
     return re.sub(r"[^\w-]", "", s)
 
 def calculate_ip_range_str(network: ipaddress.IPv4Network) -> str:
-    """Matches Excel range string (e.g. 10.113.64.0 - 10.113.64.255)"""
     return f"{network.network_address} - {network.broadcast_address}"
 
 def check_prefix_collision(target_net: ipaddress.IPv4Network, existing_prefixes: List[str]) -> bool:
-    """Matches Excel REDUCE/LAMBDA overlap check against Prefixes sheet."""
     for p in existing_prefixes:
         try:
             ex_net = ipaddress.ip_network(p.strip(), strict=False)
@@ -50,7 +108,6 @@ def check_prefix_collision(target_net: ipaddress.IPv4Network, existing_prefixes:
     return False
 
 def calculate_remaining_subnets(supernet_str: str, allocated_subnets: List[str]) -> Dict[str, int]:
-    """Matches Excel M3:M9 usable subnet capacity matrix."""
     try:
         sup_net = ipaddress.ip_network(supernet_str.strip(), strict=False)
     except ValueError:
@@ -61,7 +118,7 @@ def calculate_remaining_subnets(supernet_str: str, allocated_subnets: List[str])
     
     for sub in allocated_subnets:
         clean = str(sub).strip()
-        if "/" in clean and not "x" in clean.lower():
+        if "/" in clean and "x" not in clean.lower():
             try:
                 n = ipaddress.ip_network(clean, strict=False)
                 if n.subnet_of(sup_net):
@@ -70,7 +127,6 @@ def calculate_remaining_subnets(supernet_str: str, allocated_subnets: List[str])
                 continue
 
     remain_ips = max(0, total_ips - used_ips)
-    
     capacity = {}
     for cidr in range(23, 30):
         block_size = 2 ** (32 - cidr)
@@ -83,61 +139,56 @@ def compute_chained_rows(
     rows_data: List[Dict[str, Any]]
 ) -> List[Dict[str, Any]]:
     """
-    Computes dynamic sequential 'Suggest Subnet' chained from user's 'Subnet (CIDR)' inputs.
+    Computes dynamic sequential 'Suggest Subnet'. 
+    Only shows the next subnet when the previous row has been filled in.
     """
     try:
         clean_sup = supernet_str.strip()
         sup_net = ipaddress.ip_network(clean_sup, strict=False)
-        base_ip = sup_net.network_address
+        base_ip = str(sup_net.network_address)
     except Exception:
         sup_net = None
-        base_ip = None
+        base_ip = ""
 
-    last_allocated_net = None
     processed = []
 
     for idx, r in enumerate(rows_data):
-        role = str(r.get("Role") or "").strip()
-        vlan_name = str(r.get("VLAN Name") or "").strip() or role
-        vlan_desc = str(r.get("VLAN Description") or "").strip() or ROLE_TO_DESC_MAP.get(role, role)
+        role_raw = r.get("Role", "")
+        role_info = resolve_role_details(role_raw)
         
-        fallback = r.get("fallback_subnet")
-        if not fallback:
-            if role in ["Guests", "VIN_Guest"]:
-                fallback = "172.16.x.x"
-            elif role in ["Mobiles", "VIN_Mobi"]:
-                fallback = "172.18.x.x"
+        canonical_role = role_info["canonical_role"] or str(role_raw).strip()
+        vlan_name = role_info["vlan_name"] or canonical_role
+        vlan_desc = role_info["vlan_desc"] or canonical_role
+        fallback = role_info["fallback"]
 
         user_subnet = str(r.get("Subnet (CIDR)") or r.get("Subnet") or "").strip()
         if user_subnet.lower() in ("nan", "none", "null", "—", "-"):
             user_subnet = ""
 
-        # Calculate Suggest Subnet
+        suggest = ""
         if fallback:
             suggest = fallback
-        elif idx == 0 and last_allocated_net is None:
-            suggest = str(base_ip) if base_ip else ""
-        elif last_allocated_net is not None:
-            next_int = int(last_allocated_net.broadcast_address) + 1
-            suggest = str(ipaddress.IPv4Address(next_int))
-        elif base_ip:
-            suggest = str(base_ip)
+        elif idx == 0:
+            suggest = base_ip
         else:
-            suggest = ""
-
-        # Check if user entered a valid subnet in this row to advance the chain
-        if user_subnet:
-            clean_sub = user_subnet if "/" in user_subnet else f"{user_subnet}/24"
-            try:
-                net = ipaddress.ip_network(clean_sub, strict=False)
-                last_allocated_net = net
-            except Exception:
-                pass
+            # Look at the previous row's entered subnet
+            prev_row = processed[idx - 1]
+            prev_sub = prev_row.get("Subnet (CIDR)", "").strip()
+            if prev_sub and "x" not in prev_sub.lower():
+                try:
+                    clean_prev = prev_sub if "/" in prev_sub else f"{prev_sub}/24"
+                    prev_net = ipaddress.ip_network(clean_prev, strict=False)
+                    next_int = int(prev_net.broadcast_address) + 1
+                    suggest = str(ipaddress.IPv4Address(next_int))
+                except Exception:
+                    suggest = ""
+            else:
+                suggest = ""
 
         processed.append({
             "VLAN ID": r.get("VLAN ID") or r.get("vid"),
             "VLAN Name": vlan_name,
-            "Role": role,
+            "Role": canonical_role,
             "VLAN Description": vlan_desc,
             "Suggest Subnet": suggest,
             "Subnet (CIDR)": user_subnet
@@ -153,7 +204,6 @@ def evaluate_subnet_row(
     supernet_str: str = "",
     existing_prefixes: Optional[List[str]] = None
 ) -> Dict[str, Any]:
-    """Evaluates typed CIDR and generates usable IP bounds, status, and NetBox description."""
     try:
         clean = "" if subnet_input is None else str(subnet_input).strip()
     except Exception:
