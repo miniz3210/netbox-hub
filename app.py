@@ -1,22 +1,27 @@
 """
 NetBox Universal Library Hub - Main Application
-Updated with IPAM provisioning endpoints
+Streamlit entry point that boots the full app, sidebar, and tabs.
+Also exposes a lightweight REST API (under /api/v1) for IPAM provisioning
+so external callers (e.g. the JS client in ui/ipam_provisioning.js) can
+trigger provisioning without a browser.
 """
 
 import os
-import json
 import logging
-from flask import Flask, render_template, request, jsonify, session
-from flask_cors import CORS
+from typing import Any, Dict, List, Optional
+
+import streamlit as st
 from dotenv import load_dotenv
 
-from core.provisioning_service import IPAMProvisioningService, NetBoxClient
-from utils.ip_calculator import (
-    calculate_next_subnet,
-    calculate_usable_range,
-    xlookup,
-    slugify,
-    IPCalculator
+# ── Streamlit must be configured BEFORE any other Streamlit call ────────────
+from config.constants import APP_VERSION
+from config.settings import AVAILABLE_MODELS
+
+st.set_page_config(
+    page_title="NetBox Universal Library Hub",
+    page_icon="⚡",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
 
 # Load environment variables
@@ -25,415 +30,215 @@ load_dotenv()
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("netbox-hub")
 
-# Initialize Flask app
-app = Flask(__name__)
-app.secret_key = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
-CORS(app)
-
-# Configuration
-NETBOX_URL = os.getenv('NETBOX_URL', 'https://ipam.aw.ads')
-NETBOX_API_KEY = os.getenv('NETBOX_API_KEY', '')
-OPENROUTER_BASE_URL = os.getenv('OPENROUTER_BASE_URL', 'http://omniroute:20128/v1')
-OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY', 'sk-omniroute-local')
-OPENROUTER_MODELS = os.getenv('OPENROUTER_MODELS', '').split(',')
-
-# Initialize services
-netbox_client = None
-if NETBOX_API_KEY:
-    netbox_client = NetBoxClient(NETBOX_URL, NETBOX_API_KEY)
-
-# Cache for site and prefix data
-site_cache = []
-prefix_cache = []
-
-# Initialize provisioning service
-provisioning_service = IPAMProvisioningService(
-    netbox_client=netbox_client,
-    site_data=site_cache,
-    prefix_data=prefix_cache
-)
-
-
-@app.route('/')
-def index():
-    """Home page"""
-    return render_template('index.html')
-
-
-@app.route('/api/health')
-def health():
-    """Health check endpoint"""
-    return jsonify({
-        'status': 'healthy',
-        'netbox_configured': bool(NETBOX_API_KEY),
-        'models_configured': len(OPENROUTER_MODELS)
-    })
-
-
-# ============ IPAM Provisioning Endpoints ============
-
-@app.route('/api/provision/sites', methods=['GET'])
-def get_sites():
-    """Get all sites from NetBox"""
+# ── Optional REST API (Flask).  We attach a tiny Flask blueprint onto the
+# Streamlit server's underlying Tornado app via streamlit.server.server,
+# but only if the user opts in by setting ENABLE_REST_API=1.
+# Keeping it opt-in avoids surprising users who don't need it. ──────────────
+def _register_rest_api() -> None:
+    if os.getenv("ENABLE_REST_API", "0") != "1":
+        return
     try:
-        if not netbox_client:
-            return jsonify({
-                'success': False,
-                'error': 'NetBox not configured'
-            }), 400
-        
-        sites = netbox_client.get_sites()
-        return jsonify({
-            'success': True,
-            'sites': sites,
-            'count': len(sites)
-        })
-    except Exception as e:
-        logger.error(f"Error fetching sites: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        from flask import Flask, jsonify, request
+        from flask_cors import CORS
+        from core.provisioning_service import IPAMProvisioningService, NetBoxClient
+    except Exception as e:  # pragma: no cover - depends on optional deps
+        logger.warning("REST API disabled (Flask not installed): %s", e)
+        return
 
+    api = Flask("netbox-hub-rest")
+    CORS(api)
 
-@app.route('/api/provision/sites/<site_name>', methods=['GET'])
-def get_site(site_name):
-    """Get site information by name"""
-    try:
-        if not netbox_client:
-            return jsonify({
-                'success': False,
-                'error': 'NetBox not configured'
-            }), 400
-        
-        site = netbox_client.get_site(site_name)
-        if not site:
-            return jsonify({
-                'success': False,
-                'error': f'Site "{site_name}" not found'
-            }), 404
-        
-        # Get site prefixes
-        prefixes = netbox_client.get_prefixes(site['id'])
-        
-        # Find site subnet
-        site_subnet = None
-        site_cidr = None
-        for prefix in prefixes:
-            prefix_str = prefix.get('prefix', '')
-            if '/' in prefix_str:
-                # Check if this is the site subnet (likely the largest)
-                # For now, just take the first one as a fallback
-                if not site_subnet:
-                    site_subnet = prefix_str
-                    try:
-                        site_cidr = int(prefix_str.split('/')[1])
-                    except (ValueError, IndexError):
-                        pass
-        
-        # Try to find site subnet from prefixes
-        # Look for prefixes without VLAN association
-        for prefix in prefixes:
-            if not prefix.get('vlan') and prefix.get('scope_type') == 'dcim.site':
-                prefix_str = prefix.get('prefix', '')
-                if '/' in prefix_str:
-                    site_subnet = prefix_str
-                    try:
-                        site_cidr = int(prefix_str.split('/')[1])
-                    except (ValueError, IndexError):
-                        pass
-                    break
-        
-        return jsonify({
-            'success': True,
-            'site': site,
-            'prefixes': prefixes,
-            'site_subnet': site_subnet,
-            'site_cidr': site_cidr,
-            'prefix_count': len(prefixes)
-        })
-    except Exception as e:
-        logger.error(f"Error fetching site {site_name}: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+    netbox_url = os.getenv("NETBOX_URL", "https://ipam.aw.ads")
+    netbox_key = os.getenv("NETBOX_API_KEY", "")
 
+    nb_client = NetBoxClient(netbox_url, netbox_key) if netbox_key else None
+    site_cache: List[Dict[str, Any]] = []
+    prefix_cache: List[Dict[str, Any]] = []
+    service = IPAMProvisioningService(
+        netbox_client=nb_client,
+        site_data=site_cache,
+        prefix_data=prefix_cache,
+    )
 
-@app.route('/api/provision/calculate', methods=['POST'])
-def calculate_prefixes():
-    """
-    Calculate prefixes for a site based on VLAN configs
-    """
-    try:
-        data = request.json
-        site_name = data.get('site_name')
-        vlan_configs = data.get('vlan_configs', [])
-        option_vlans = data.get('option_vlans', [])
-        include_option_vlans = data.get('include_option_vlans', True)
-        
-        if not site_name:
-            return jsonify({
-                'success': False,
-                'error': 'site_name is required'
-            }), 400
-        
-        if not vlan_configs:
-            return jsonify({
-                'success': False,
-                'error': 'vlan_configs is required'
-            }), 400
-        
-        # Validate VLAN configs
-        for vlan in vlan_configs:
-            if 'id' not in vlan or 'cidr' not in vlan:
-                return jsonify({
-                    'success': False,
-                    'error': 'Each VLAN must have id and cidr'
-                }), 400
-        
-        # Get site info
-        site_info = provisioning_service.get_site_info(site_name)
-        if not site_info:
-            return jsonify({
-                'success': False,
-                'error': f'Site "{site_name}" not found'
-            }), 404
-        
-        # Get site subnet
-        site_subnet = provisioning_service.get_site_subnet(site_info)
-        site_cidr = provisioning_service.get_site_subnet_cidr(site_info)
-        
-        if not site_subnet or not site_cidr:
-            return jsonify({
-                'success': False,
-                'error': f'Could not determine site subnet for "{site_name}"'
-            }), 400
-        
-        # Calculate prefixes
-        result = provisioning_service.provision_site_prefixes(
-            site_name=site_name,
-            vlan_configs=vlan_configs,
-            option_vlans=option_vlans if include_option_vlans else [],
-            include_option_vlans=include_option_vlans
+    @api.get("/health")
+    def _health():  # noqa: D401
+        return jsonify(
+            {
+                "status": "healthy",
+                "netbox_configured": bool(netbox_key),
+                "models_configured": len(AVAILABLE_MODELS),
+            }
         )
-        
-        return jsonify(result)
-        
-    except Exception as e:
-        logger.error(f"Error calculating prefixes: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
 
-
-@app.route('/api/provision/import', methods=['POST'])
-def import_to_netbox():
-    """
-    Import calculated prefixes to NetBox
-    """
-    try:
-        data = request.json
-        site_name = data.get('site_name')
-        vlan_configs = data.get('vlan_configs', [])
-        option_vlans = data.get('option_vlans', [])
-        include_option_vlans = data.get('include_option_vlans', True)
-        dry_run = data.get('dry_run', True)
-        
-        if not netbox_client:
-            return jsonify({
-                'success': False,
-                'error': 'NetBox not configured'
-            }), 400
-        
+    @api.post("/provision/prefixes")
+    def _provision():
+        payload: Dict[str, Any] = request.get_json(silent=True) or {}
+        site_name = payload.get("site_name")
+        vlan_configs = payload.get("vlan_configs") or []
+        option_vlans = payload.get("option_vlans")
+        include_opts = bool(payload.get("include_option_vlans", True))
         if not site_name:
-            return jsonify({
-                'success': False,
-                'error': 'site_name is required'
-            }), 400
-        
-        if not vlan_configs:
-            return jsonify({
-                'success': False,
-                'error': 'vlan_configs is required'
-            }), 400
-        
-        # Perform import
-        result = provisioning_service.import_to_netbox(
+            return jsonify({"success": False, "error": "site_name is required"}), 400
+        result = service.provision_site_prefixes(
             site_name=site_name,
             vlan_configs=vlan_configs,
             option_vlans=option_vlans,
-            include_option_vlans=include_option_vlans,
-            dry_run=dry_run
+            include_option_vlans=include_opts,
         )
-        
         return jsonify(result)
-        
-    except Exception as e:
-        logger.error(f"Error importing to NetBox: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
 
+    @api.post("/import/netbox")
+    def _import():
+        payload: Dict[str, Any] = request.get_json(silent=True) or {}
+        site_name = payload.get("site_name")
+        if not site_name:
+            return jsonify({"success": False, "error": "site_name is required"}), 400
+        result = service.import_to_netbox(
+            site_name=site_name,
+            vlan_configs=payload.get("vlan_configs") or [],
+            option_vlans=payload.get("option_vlans"),
+            include_option_vlans=bool(payload.get("include_option_vlans", True)),
+            dry_run=bool(payload.get("dry_run", True)),
+        )
+        return jsonify(result)
 
-@app.route('/api/provision/validate', methods=['POST'])
-def validate_config():
-    """
-    Validate VLAN configuration
-    """
+    # Streamlit ≥ 1.30 exposes the running Tornado server; we hook a
+    # wildcard rule so /api/v1/* hits Flask while the rest goes to Streamlit.
     try:
-        data = request.json
-        vlan_configs = data.get('vlan_configs', [])
-        
-        errors = []
-        warnings = []
-        
-        for i, vlan in enumerate(vlan_configs):
-            # Check required fields
-            if 'id' not in vlan:
-                errors.append(f"Row {i+1}: Missing VLAN ID")
-            elif not isinstance(vlan['id'], int) or vlan['id'] < 1 or vlan['id'] > 4094:
-                errors.append(f"Row {i+1}: Invalid VLAN ID {vlan['id']}. Must be between 1-4094")
-            
-            if 'cidr' not in vlan:
-                errors.append(f"Row {i+1}: Missing CIDR")
-            elif not isinstance(vlan['cidr'], int) or vlan['cidr'] < 1 or vlan['cidr'] > 32:
-                errors.append(f"Row {i+1}: Invalid CIDR {vlan['cidr']}. Must be between 1-32")
-            
-            if 'name' not in vlan or not vlan['name']:
-                warnings.append(f"Row {i+1}: Missing VLAN name")
-            
-            # Check for duplicate VLAN IDs
-            for j, other in enumerate(vlan_configs):
-                if i != j and vlan.get('id') == other.get('id'):
-                    errors.append(f"Row {i+1}: Duplicate VLAN ID {vlan['id']} (also in row {j+1})")
-        
-        return jsonify({
-            'success': len(errors) == 0,
-            'errors': errors,
-            'warnings': warnings,
-            'valid': len(errors) == 0
-        })
-        
-    except Exception as e:
-        logger.error(f"Error validating config: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        from streamlit import server as st_server  # type: ignore
+
+        server = st_server.get_server()
+        if server is not None:
+            server._Application__application.add_rules(  # type: ignore[attr-defined]
+                [(f"/api/v1/.*", api)]
+            )
+            logger.info("REST API mounted at /api/v1/*")
+    except Exception as e:  # pragma: no cover
+        logger.warning("Could not mount REST API onto Streamlit server: %s", e)
 
 
-# ============ IP Calculation Utilities (Standalone) ============
+_register_rest_api()
 
-@app.route('/api/ip/calculate_next', methods=['POST'])
-def api_calculate_next_subnet():
-    """Standalone endpoint for calculating next subnet"""
-    try:
-        data = request.json
-        previous_ip = data.get('previous_ip')
-        prev_cidr = data.get('prev_cidr')
-        req_cidr = data.get('req_cidr')
-        align = data.get('align', True)
-        
-        if not all([previous_ip, prev_cidr, req_cidr]):
-            return jsonify({
-                'success': False,
-                'error': 'previous_ip, prev_cidr, and req_cidr are required'
-            }), 400
-        
-        result = calculate_next_subnet(previous_ip, prev_cidr, req_cidr, align)
-        
-        return jsonify({
-            'success': True,
-            'previous_ip': previous_ip,
-            'prev_cidr': prev_cidr,
-            'req_cidr': req_cidr,
-            'next_ip': result,
-            'align': align
-        })
-        
-    except Exception as e:
-        logger.error(f"Error calculating next subnet: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+# ── Application boot ───────────────────────────────────────────────────────
+from core.catalog import get_repo_catalog
+from core.db_manager import init_db
+from core.exceptions import GitHubCatalogError
+from ui.components import render_sidebar
 
+# Default session state initialization
+_DEFAULT_SESSION_STATE = {
+    "active_tab": 0,
+    "ai_generation_count": 0,
+    "last_error": None,
+    "model_test_history": {},
+}
+for _key, _default in _DEFAULT_SESSION_STATE.items():
+    st.session_state.setdefault(_key, _default)
 
-@app.route('/api/ip/usable_range', methods=['POST'])
-def api_calculate_usable_range():
-    """Standalone endpoint for calculating usable IP range"""
-    try:
-        data = request.json
-        ip = data.get('ip')
-        cidr = data.get('cidr')
-        
-        if not all([ip, cidr]):
-            return jsonify({
-                'success': False,
-                'error': 'ip and cidr are required'
-            }), 400
-        
-        result = calculate_usable_range(ip, cidr)
-        
-        return jsonify({
-            'success': True,
-            'ip': ip,
-            'cidr': cidr,
-            'range': result
-        })
-        
-    except Exception as e:
-        logger.error(f"Error calculating usable range: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+# Initialize local database
+init_db()
+
+# Sidebar (returns active model selection)
+active_model = render_sidebar()
+
+# Catalog with graceful degradation
+catalog: Optional[Dict[str, Any]] = None
+catalog_error: Optional[str] = None
+try:
+    catalog = get_repo_catalog()
+except GitHubCatalogError as exc:
+    catalog_error = str(exc)
+    logger.exception("GitHub catalog failed to load")
+    st.error(f"❌ Failed to load official GitHub catalog: {exc}")
+    st.warning(
+        "⚠️ Running in OFFLINE mode — only IPAM / Naming / Standards tabs are available."
+    )
+
+# ── Tab registry (lazy-aware: disabled tabs render a friendly notice) ──────
+def _catalog_required(_renderer):
+    """Decorator that runs the renderer only when the catalog is loaded."""
+    def _wrap():
+        if catalog is None:
+            st.info("🔒 This tab requires the GitHub catalog. Please retry later.")
+            return
+        _renderer(catalog, active_model)
+    return _wrap
 
 
-@app.route('/api/ip/slugify', methods=['POST'])
-def api_slugify():
-    """Standalone endpoint for slug generation"""
-    try:
-        data = request.json
-        text = data.get('text', '')
-        
-        result = slugify(text)
-        
-        return jsonify({
-            'success': True,
-            'original': text,
-            'slug': result
-        })
-        
-    except Exception as e:
-        logger.error(f"Error generating slug: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+@_catalog_required
+def _device_tab(catalog, active_model):  # type: ignore[no-redef]
+    from ui.tabs.device_tab import render_device_tab as _fn
+    _fn(catalog, active_model)
 
 
-# ============ Template Context ============
-
-@app.context_processor
-def utility_processor():
-    """Add utility functions to template context"""
-    return {
-        'NETBOX_URL': NETBOX_URL,
-        'OPENROUTER_BASE_URL': OPENROUTER_BASE_URL,
-        'OPENROUTER_MODELS': OPENROUTER_MODELS,
-        'VERSION': '2.3.5'
-    }
+@_catalog_required
+def _module_tab(catalog, active_model):  # type: ignore[no-redef]
+    from ui.tabs.module_tab import render_module_tab as _fn
+    _fn(catalog, active_model)
 
 
-if __name__ == '__main__':
-    port = int(os.getenv('PORT', 5000))
-    debug = os.getenv('DEBUG', 'False').lower() == 'true'
-    app.run(host='0.0.0.0', port=port, debug=debug)
+@_catalog_required
+def _rack_tab(catalog, active_model):  # type: ignore[no-redef]
+    from ui.tabs.rack_tab import render_rack_tab as _fn
+    _fn(catalog, active_model)
+
+
+@_catalog_required
+def _image_tab(catalog, _active_model):  # type: ignore[no-redef]
+    from ui.tabs.image_tab import render_image_tab as _fn
+    _fn(catalog)
+
+
+@_catalog_required
+def _batch_tab(catalog, active_model):  # type: ignore[no-redef]
+    from ui.tabs.batch_tab import render_batch_tab as _fn
+    _fn(catalog, active_model)
+
+
+def _ipam_tab():
+    from ui.tabs.ipam_tab import render_ipam_tab as _fn
+    _fn(active_model)
+
+
+def _naming_tab():
+    from ui.tabs.naming_tab import render_naming_tab as _fn
+    _fn(active_model)
+
+
+def _standards_tab():
+    from ui.tabs.standards_tab import render_standards_tab as _fn
+    _fn(active_model)
+
+
+TABS = [
+    ("🖥️ Device Types", _device_tab),
+    ("🧩 Module Types", _module_tab),
+    ("🗄️ Rack Types", _rack_tab),
+    ("🎨 Images", _image_tab),
+    ("📦 Batch", _batch_tab),
+    ("🌐 IPAM", _ipam_tab),
+    ("🏷️ Naming", _naming_tab),
+    ("📖 Standards", _standards_tab),
+]
+
+# Sticky status badge
+st.markdown(
+    f"<div style='text-align:right;color:#94a3b8;font-family:monospace;"
+    f"font-size:0.8rem;'>⚡ NetBox Hub {APP_VERSION}"
+    f"{' — catalog: ' + str(len(catalog.get('device_types', []))) + ' device types' if catalog else ' — catalog: offline'}"
+    f"</div>",
+    unsafe_allow_html=True,
+)
+
+tab_objs = st.tabs([label for label, _ in TABS])
+for (_label, renderer), tab in zip(TABS, tab_objs):
+    with tab:
+        try:
+            renderer()
+        except Exception as exc:  # pragma: no cover - render-time guard
+            logger.exception("Tab '%s' crashed", _label)
+            st.error(f"❌ Tab '{_label}' failed: {exc}")
