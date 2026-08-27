@@ -226,40 +226,50 @@ def render_ipam_tab(active_model: str):
     # Load existing prefixes for collision detection
     existing_prefixes = get_existing_prefix_strings()
 
+    # ── Static role → VLAN description map (user-edited via cell) ─────────
+    # If the user types a role not in this map, the auto-fill falls back
+    # to the role text itself.  The user can still override any cell.
+    VLAN_DESC_MAP = {
+        "VIN_Corp": "Corporate WiFi",
+        "Wired Workstations": "Workstations",
+        "Management": "Management",
+        "Printers": "Printers",
+        "AV equipment": "Audio Visual",
+        "VIN_Guest": "Guests",
+        "VIN_Mobi": "Mobiles",
+        "Routing interface VLANs": "Routing",
+        "OT": "OT",
+        "IoT/Security": "IoT",
+    }
+
     # Dynamic Slicing
     selected_templates = [v for v in STANDARD_VLAN_TEMPLATES if include_opt or not v["opt"]]
     sliced = slice_supernet(supernet_in, selected_templates, matched_site_name, existing_prefixes)
 
     raw_rows = []
     for r in sliced:
-        # VLAN Description defaults to the VLAN Name (i.e. the role text
-        # the user expects to see).  The user is free to overwrite it
-        # manually cell-by-cell.  Example mapping coming from the
-        # STANDARD_VLAN_TEMPLATES table:
-        #   VIN_Corp         -> Corporate WiFi
-        #   Wired Workstations -> Workstations
-        #   Management       -> Management
-        #   ...
+        # VLAN Description defaults from the role-to-description map.
+        # Example: "VIN_Corp" -> "Corporate WiFi".
+        # The user can still overwrite any cell manually.
+        role_text = r["role"]
+        default_desc = VLAN_DESC_MAP.get(role_text, role_text)
         raw_rows.append({
             "VLAN ID": r["vid"],
             "VLAN Name": r["name"],
-            "Role": r["role"],
-            "Description": r["name"],   # default = role text (user can edit)
-            "Subnet": r["assigned_subnet"]
+            "Role": role_text,
+            "Description": default_desc,
+            "Next Available": r["assigned_subnet"],   # suggestion, user can override
+            "Subnet (CIDR)": str(r["assigned_subnet"] or ""),  # actual value, user types here
         })
 
     df_init = pd.DataFrame(raw_rows)
 
     st.markdown("##### 📊 Subnet Allocation Editor (✏️ Click any cell to edit)")
 
-    # ── Prefix Description column (separate from VLAN Description) ─────────
-    # Used in the "Live Usable IP Ranges" preview AND in the NetBox
-    # Prefixes CSV. Formula: "{Site} {Role} -- VLAN {VLAN ID}"
-    # e.g. "Bristol Corporate WiFi -- VLAN 300"
-    for row in raw_rows:
-        row["Prefix Description"] = ""
-
     df_editor = pd.DataFrame(raw_rows)
+    # Force string dtype on the Subnet cell so user input like "10.113.248.0/24"
+    # is never coerced to NaN / float by pandas.
+    df_editor["Subnet (CIDR)"] = df_editor["Subnet (CIDR)"].astype("string").fillna("")
 
     edited_df = st.data_editor(
         df_editor,
@@ -275,20 +285,27 @@ def render_ipam_tab(active_model: str):
                 "VLAN Description",
                 help="Free-text VLAN description (NetBox: ipam.vlan.description).",
             ),
-            # Prefix Description — auto-formula shown in the IP range preview
-            # and used in NetBox Prefixes CSV.
-            "Prefix Description": st.column_config.TextColumn(
-                "Prefix Description",
-                help="Auto: Site + Role + VLAN + CIDR. Used in ipam.prefix.description.",
+            "Next Available": st.column_config.TextColumn(
+                "Next Available",
+                help="Suggested next free subnet in supernet (read-only suggestion).",
+                disabled=True,
             ),
-            "Subnet": st.column_config.TextColumn("Subnet (CIDR)", help="Type any valid CIDR like 10.113.240.0/24"),
+            "Subnet (CIDR)": st.column_config.TextColumn(
+                "Subnet (CIDR)",
+                help="Type any valid CIDR like 10.113.240.0/24",
+            ),
         },
     )
 
     records_dict = edited_df.to_dict(orient="records")
     allocated_subnets = []
     for r in records_dict:
-        sub_str = str(r.get("Subnet", "")).strip()
+        # `Sub` is the alias used in the preview/CSV; we normalise it
+        # to "Subnet" for downstream code that reads r["Subnet"].
+        sub_str = str(r.get("Subnet (CIDR)", "")).strip()
+        if sub_str.lower() in ("nan", "none", "null"):
+            sub_str = ""
+        r["Subnet"] = sub_str
         allocated_subnets.append(sub_str)
         vlan_id_val = r.get("VLAN ID")
         vlan_role_val = str(r.get("Role", "")).strip()
@@ -303,7 +320,7 @@ def render_ipam_tab(active_model: str):
         # ── Prefix Description auto-fill (only when blank) ──────────────
         # Formula: "{Site} {Role} -- VLAN {VLAN ID}"
         # e.g.  "Bristol Corporate WiFi -- VLAN 300"
-        # (no CIDR suffix — that lives in the Subnet column instead).
+        # Used in the "Live Usable IP Ranges" preview and the NetBox Prefixes CSV.
         existing_pfx_desc = str(r.get("Prefix Description", "")).strip()
         if not existing_pfx_desc:
             if vlan_id_val:
