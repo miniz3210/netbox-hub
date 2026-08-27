@@ -22,7 +22,7 @@ def slugify(text: str) -> str:
     return re.sub(r"[^\w-]", "", s)
 
 def calculate_ip_range_str(network: ipaddress.IPv4Network) -> str:
-    """Matches Excel range string (e.g. 10.113.252.0 - 10.113.252.255)"""
+    """Matches Excel range string (e.g. 10.113.64.0 - 10.113.64.255)"""
     return f"{network.network_address} - {network.broadcast_address}"
 
 def check_prefix_collision(target_net: ipaddress.IPv4Network, existing_prefixes: List[str]) -> bool:
@@ -47,7 +47,7 @@ def calculate_remaining_subnets(supernet_str: str, allocated_subnets: List[str])
     used_ips = 0
     
     for sub in allocated_subnets:
-        clean = sub.strip()
+        clean = str(sub).strip()
         if "/" in clean and not "x" in clean.lower():
             try:
                 n = ipaddress.ip_network(clean, strict=False)
@@ -65,6 +65,42 @@ def calculate_remaining_subnets(supernet_str: str, allocated_subnets: List[str])
         
     return capacity
 
+def calculate_suggested_subnets(
+    supernet_str: str, 
+    vlan_list: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """
+    Exact replication of Excel Column F formulas (F4: =G1, F5:F18 = CEILING.MATH alignment).
+    """
+    try:
+        clean_sup = supernet_str.strip()
+        sup_net = ipaddress.ip_network(clean_sup, strict=False)
+        current_ip_int = int(sup_net.network_address)
+    except Exception:
+        sup_net = None
+        current_ip_int = None
+
+    rows = []
+    for v in vlan_list:
+        item = dict(v)
+        fallback = item.get("fallback_subnet")
+        mask = item.get("mask", "/24")
+        prefixlen = int(mask.replace("/", ""))
+        
+        if fallback:
+            item["suggest_subnet"] = fallback
+        elif current_ip_int is not None:
+            block_size = 2 ** (32 - prefixlen)
+            aligned_int = ((current_ip_int + block_size - 1) // block_size) * block_size
+            item["suggest_subnet"] = str(ipaddress.IPv4Address(aligned_int))
+            # Advance current IP integer for next sequential row
+            current_ip_int = aligned_int + block_size
+        else:
+            item["suggest_subnet"] = ""
+            
+        rows.append(item)
+    return rows
+
 def evaluate_subnet_row(
     subnet_input: Any,
     vlan_id: Any = None,
@@ -73,72 +109,34 @@ def evaluate_subnet_row(
     supernet_str: str = "",
     existing_prefixes: Optional[List[str]] = None
 ) -> Dict[str, Any]:
-    """Evaluates an individual row, generating range, collision tag, description, and status.
-
-    Description formula (matches Excel pattern in calculate_usable_range):
-        "{site_name} {vlan_role} -- VLAN {vlan_id}"
-    e.g. "bristol Corporate WiFi -- VLAN 300".
-
-    When the user enters a misaligned CIDR like "10.113.249.0/23" the live
-    range is CEILING-aligned to the next valid block boundary (matching the
-    Excel CEILING.MATH pattern used in calculate_next_subnet) so the
-    displayed range never overlaps with the previous allocation.
     """
-    # Coerce any value (None, NaN, float, int, pandas NA) into a clean string.
+    Evaluates any typed CIDR or IP, returning the exact usable range, collision tag, description, and status.
+    """
     try:
-        if subnet_input is None:
-            clean = ""
-        else:
-            clean = str(subnet_input).strip()
+        clean = "" if subnet_input is None else str(subnet_input).strip()
     except Exception:
         clean = ""
 
-    # Build the description in a tolerant way (handles NaN, None, etc).
-    try:
-        vid_int = int(vlan_id) if vlan_id not in (None, "", "nan") else None
-    except (TypeError, ValueError):
-        vid_int = None
+    vid_str = str(vlan_id) if vlan_id not in (None, "", "nan") else ""
     role_text = str(vlan_role or "").strip()
     site_text = str(site_name or "").strip()
-    if vid_int:
-        desc = f"{site_text} {role_text} -- VLAN {vid_int}"
-    else:
-        desc = f"{site_text} {role_text}".strip()
+    desc = f"{site_text} {role_text} -- VLAN {vid_str}".strip() if vid_str else f"{site_text} {role_text}".strip()
 
-    # Friendly view for empty / mid-typing rows. This prevents "Invalid CIDR"
-    # from leaking into the live preview when the user is still typing.
-    if not clean or clean == "nan" or clean.lower() in ("none", "null", "<na>"):
+    if not clean or clean.lower() in ("nan", "none", "null", "<na>", "—", "-"):
         return {"usable_range": "—", "status": "Unassigned", "desc": desc, "in_use": False}
 
     if "x" in clean.lower():
         return {"usable_range": "RFC1918 Custom Pool", "status": "Special Pool", "desc": desc, "in_use": False}
 
-    # Only attempt a parse if the input has the shape of a CIDR (e.g. "10.0.0.0/24").
-    if "/" not in clean or clean.count("/") > 1:
-        return {"usable_range": "—", "status": "Pending Input", "desc": desc, "in_use": False}
+    # Normalize single IP input into /24 if mask was omitted
+    if "/" not in clean and clean.count(".") == 3:
+        clean = f"{clean}/24"
 
-    head = clean.split("/")[0]
-    if head.count(".") != 3 or not all(p.isdigit() and 0 <= int(p) <= 255 for p in head.split(".")):
-        return {"usable_range": "—", "status": "Pending Input", "desc": desc, "in_use": False}
-
-    tail = clean.split("/")[1]
-    if not tail.isdigit() or not (0 <= int(tail) <= 32):
+    if "/" not in clean:
         return {"usable_range": "—", "status": "Pending Input", "desc": desc, "in_use": False}
 
     try:
-        # First parse the CIDR — strict=False lets the user type a host IP.
         net = ipaddress.ip_network(clean, strict=False)
-
-        # CEILING.MATH-style alignment: round the network address UP to the
-        # next aligned boundary for this prefix length. This way typing
-        # "10.113.249.0/23" surfaces the next valid /23 (10.113.250.0/23,
-        # which then displays as 10.113.250.0 - 10.113.251.255) instead of
-        # silently FLOORing down to 10.113.248.0/23.
-        block_size = 2 ** (32 - net.prefixlen)
-        ip_int = int(net.network_address)
-        aligned_int = ((ip_int + block_size - 1) // block_size) * block_size
-        net = ipaddress.ip_network(f"{aligned_int}/{net.prefixlen}", strict=False)
-
         range_str = calculate_ip_range_str(net)
         is_in_use = check_prefix_collision(net, existing_prefixes or [])
 
@@ -161,65 +159,8 @@ def evaluate_subnet_row(
             "in_use": is_in_use,
             "net": net
         }
-    except (ValueError, TypeError, AttributeError):
-        # Last-ditch safety net.  In practice the guards above should
-        # have caught malformed input; this only fires if a downstream
-        # math step (CEILING alignment, prefix parsing, etc.) fails on
-        # a value that passed the surface-level checks.
-        return {"usable_range": "—", "status": "Pending Input", "desc": desc, "in_use": False}
-
-def slice_supernet(
-    supernet_str: str, 
-    vlan_list: List[Dict[str, Any]], 
-    site_name: str,
-    existing_prefixes: Optional[List[str]] = None
-) -> List[Dict[str, Any]]:
-    """Implements Excel F5:F8 CEILING.MATH dynamic slicing logic."""
-    try:
-        sup_net = ipaddress.ip_network(supernet_str.strip(), strict=False)
-    except ValueError:
-        sup_net = None
-
-    assigned = []
-    current_iter = None
-    if sup_net:
-        if sup_net.prefixlen < 24:
-            current_iter = sup_net.subnets(new_prefix=24)
-        else:
-            current_iter = iter([sup_net])
-
-    for v in vlan_list:
-        item = dict(v)
-        assigned_net = None
-        if current_iter and not item.get("fallback_subnet"):
-            try:
-                assigned_net = next(current_iter)
-            except StopIteration:
-                assigned_net = None
-
-        if assigned_net:
-            item["assigned_subnet"] = str(assigned_net)
-        elif item.get("fallback_subnet"):
-            item["assigned_subnet"] = item["fallback_subnet"]
-        else:
-            item["assigned_subnet"] = ""
-
-        eval_res = evaluate_subnet_row(
-            item["assigned_subnet"],
-            item["vid"],
-            item["role"],
-            site_name,
-            supernet_str,
-            existing_prefixes
-        )
-        item["usable_range"] = eval_res["usable_range"]
-        item["status"] = eval_res["status"]
-        item["desc"] = eval_res["desc"]
-        assigned.append(item)
-
-    return assigned
-
-# ── CSV GENERATORS (Matching Excel Rows 22-61) ──────────────────────────
+    except (ValueError, TypeError):
+        return {"usable_range": "Invalid CIDR", "status": "Syntax Error", "desc": desc, "in_use": False}
 
 def generate_netbox_site_csv(site_name: str) -> str:
     return f"name,slug,status\n{site_name},{slugify(site_name)},active"
@@ -235,7 +176,7 @@ def generate_netbox_vlans_csv(site_name: str, records: List[Dict[str, Any]]) -> 
     for r in records:
         vid = r.get("VLAN ID") or r.get("vid", "")
         name = r.get("VLAN Name") or r.get("name", "")
-        desc = r.get("Description") or r.get("desc", name)
+        desc = r.get("VLAN Description") or r.get("Description") or r.get("desc", name)
         role = r.get("Role") or r.get("role", name)
         lines.append(f"{vid},{name},active,{site_name},{group_name},{desc},{role}")
     return "\n".join(lines)
@@ -254,16 +195,10 @@ def generate_netbox_prefixes_csv(site_name: str, scope_id: str, supernet_str: st
 
     for r in records:
         vid = r.get("VLAN ID") or r.get("vid", "")
+        name = r.get("VLAN Name") or r.get("name", "")
         role = r.get("Role") or r.get("role", "")
-        # Prefix Description takes priority (the "Live Usable IP Ranges" auto-formula);
-        # fall back to VLAN Description, then to role-based default.
-        desc = (
-            r.get("Prefix Description")
-            or r.get("Description")
-            or r.get("desc")
-            or f"{site_name} {role} -- VLAN {vid}"
-        )
-        sub = str(r.get("Subnet") or r.get("assigned_subnet", "")).strip()
+        desc = r.get("Prefix Description") or r.get("desc") or f"{site_name} {role} -- VLAN {vid}"
+        sub = str(r.get("Subnet (CIDR)") or r.get("Subnet") or r.get("assigned_subnet", "")).strip()
         
         if "/" in sub:
             lines.append(f"{sub},active,dcim.site,{scope_id},\"{group_name}\",{vid},\"{role}\",\"{desc}\"")
