@@ -28,9 +28,13 @@ from core.db_manager import (
     get_existing_prefix_strings
 )
 
-def process_uploaded_files(uploaded_files):
+def handle_ipam_file_upload():
+    uploaded_files = st.session_state.get("ipam_multi_uploader")
     if not uploaded_files:
-        return 0, 0, []
+        return
+
+    if not isinstance(uploaded_files, list):
+        uploaded_files = [uploaded_files]
 
     total_scopes = 0
     total_prefixes = 0
@@ -97,7 +101,7 @@ def process_uploaded_files(uploaded_files):
                 if "device type" in cols or "serial" in cols or "asset tag" in cols or "vcpus" in cols:
                     raise ValueError(f"This is a Device/VM export (`netbox_devices.csv`). Please upload it in the 'Naming' tab instead.")
 
-                # Case A: netbox_sites.csv (Name, Status, Facility, Region, Group, Tenant, Description, ID, Slug...)
+                # Case A: netbox_sites.csv
                 if "slug" in cols and ("name" in cols or "site" in cols) and "id" in cols:
                     name_col = cols.get("name", cols.get("site"))
                     id_col = cols.get("id")
@@ -113,7 +117,7 @@ def process_uploaded_files(uploaded_files):
                         cnt = save_sites_batch(scope_records, clear_first=False)
                         total_scopes += cnt
 
-                # Case B: netbox_VLANs.csv or prefix export (VID, Name, Site, Group, Prefixes...)
+                # Case B: netbox_VLANs.csv or prefix export
                 elif "prefixes" in cols or "prefix" in cols or "subnet" in cols or "vid" in cols or "q-in-q role" in cols:
                     pfx_col = cols.get("prefixes", cols.get("prefix", cols.get("subnet")))
                     vid_col = cols.get("vid", cols.get("vlan_id", cols.get("vlan", "")))
@@ -154,7 +158,12 @@ def process_uploaded_files(uploaded_files):
             except Exception as e:
                 errors.append(f"• **{file_obj.name}**: {str(e)}")
 
-    return total_scopes, total_prefixes, errors
+    if errors:
+        for err in errors:
+            st.error(err)
+
+    if total_scopes > 0 or total_prefixes > 0:
+        st.toast(f"✅ Ingested: {total_scopes} Sites, {total_prefixes} Prefixes!", icon="🚀")
 
 def handle_ipam_db_reset():
     clear_ipam_records()
@@ -168,7 +177,7 @@ def render_ipam_tab(active_model: str):
     st.subheader("🌐 IPAM & Site Subnet Provisioning Engine")
     st.caption("Plan site supernets, allocate non-overlapping VLAN subnets, and export ready-to-import NetBox CSV blocks.")
 
-    # 1. Ingestion Toolbar with Strict Validation and Checkmarks
+    # 1. Ingestion Toolbar with Dynamic Checkmarks & Real-Time Sync
     total_ipam_recs = get_total_ipam_count()
     total_sites_recs = get_total_sites_count()
     total_db_count = total_ipam_recs + total_sites_recs
@@ -188,20 +197,14 @@ def render_ipam_tab(active_model: str):
         )
         c_up, c_rst = st.columns([3, 1])
         with c_up:
-            uploaded_files = st.file_uploader(
+            st.file_uploader(
                 "Upload NetBox CSVs (netbox_sites.csv, netbox_VLANs.csv) or Excel", 
                 type=["xlsx", "csv"], 
                 accept_multiple_files=True,
                 key="ipam_multi_uploader",
+                on_change=handle_ipam_file_upload,
                 label_visibility="collapsed"
             )
-            if uploaded_files:
-                sc_cnt, pfx_cnt, errs = process_uploaded_files(uploaded_files)
-                if errs:
-                    for err in errs:
-                        st.error(err)
-                if sc_cnt > 0 or pfx_cnt > 0:
-                    st.toast(f"✅ Ingested: {sc_cnt} Sites, {pfx_cnt} Prefixes!", icon="🚀")
 
         with c_rst:
             if total_db_count > 0:
