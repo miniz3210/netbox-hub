@@ -144,7 +144,10 @@ class IPAMProvisioningService:
     
     def get_site_subnet(self, site_info: Dict) -> Optional[str]:
         """
-        Get site subnet from site info or prefixes
+        Get site subnet from site info or prefixes.
+
+        Returns the largest matching block (smallest CIDR value) because
+        the site supernet must contain all VLAN subnets.
         
         Args:
             site_info: Site information dictionary
@@ -152,15 +155,24 @@ class IPAMProvisioningService:
         Returns:
             Site subnet or None
         """
-        # Try to get from prefixes
+        # Try to get from prefixes — pick the largest block (smallest CIDR)
         if self.prefix_data:
+            best: Optional[str] = None
+            best_cidr: int = 33  # larger than any valid /32
             for prefix in self.prefix_data:
-                if (prefix.get('scope_type') == 'dcim.site' and 
+                if (prefix.get('scope_type') == 'dcim.site' and
                     prefix.get('scope_id') == site_info.get('id')):
-                    # Check if it's the site subnet (usually the largest)
                     prefix_str = prefix.get('prefix', '')
-                    if prefix_str:
-                        return prefix_str
+                    if '/' in prefix_str:
+                        try:
+                            cidr = int(prefix_str.split('/')[1])
+                        except (ValueError, IndexError):
+                            continue
+                        if cidr < best_cidr:
+                            best = prefix_str
+                            best_cidr = cidr
+            if best:
+                return best
         
         # Try to get from site info
         if site_info.get('site_subnet'):
@@ -170,7 +182,10 @@ class IPAMProvisioningService:
     
     def get_site_subnet_cidr(self, site_info: Dict) -> Optional[int]:
         """
-        Get site subnet CIDR from site info or prefixes
+        Get site subnet CIDR from site info or prefixes.
+
+        Returns the smallest CIDR (largest block) for the matching site,
+        mirroring the logic in get_site_subnet.
         
         Args:
             site_info: Site information dictionary
@@ -178,21 +193,26 @@ class IPAMProvisioningService:
         Returns:
             Site CIDR or None
         """
-        # Try to get from prefixes
+        # Try to get from prefixes — pick the largest block (smallest CIDR)
         if self.prefix_data:
+            best_cidr: Optional[int] = None
             for prefix in self.prefix_data:
-                if (prefix.get('scope_type') == 'dcim.site' and 
+                if (prefix.get('scope_type') == 'dcim.site' and
                     prefix.get('scope_id') == site_info.get('id')):
                     prefix_str = prefix.get('prefix', '')
                     if '/' in prefix_str:
                         try:
-                            return int(prefix_str.split('/')[1])
+                            cidr = int(prefix_str.split('/')[1])
                         except (ValueError, IndexError):
-                            pass
+                            continue
+                        if best_cidr is None or cidr < best_cidr:
+                            best_cidr = cidr
+            if best_cidr is not None:
+                return best_cidr
         
         # Try to get from site info
-        if site_info.get('site_cidr'):
-            return site_info['site_cidr']
+        if site_info.get('site_cidr') is not None:
+            return int(site_info['site_cidr'])
         
         return None
     
@@ -351,18 +371,23 @@ class IPAMProvisioningService:
             "errors": []
         }
         
+        # Use a real CSV parser — the generators wrap fields in quotes which
+        # would be mangled by a naive .split(',').
+        import csv as _csv
+        from io import StringIO
+
         # Import VLANs
         for vlan_line in import_data.get('vlan', []):
             try:
-                parts = vlan_line.split(',')
+                row = next(_csv.reader(StringIO(vlan_line)))
                 vlan_data = {
-                    'vid': int(parts[0]),
-                    'name': parts[1],
-                    'status': parts[2],
-                    'site': parts[3],
-                    'group': parts[4],
-                    'description': parts[5],
-                    'role': parts[6] if len(parts) > 6 else ''
+                    'vid': int(row[0]),
+                    'name': row[1],
+                    'status': row[2],
+                    'site': row[3],
+                    'group': row[4],
+                    'description': row[5] if len(row) > 5 else '',
+                    'role': row[6] if len(row) > 6 else ''
                 }
                 # Create VLAN in NetBox
                 response = self.netbox_client.create_vlan(vlan_data)
@@ -373,17 +398,16 @@ class IPAMProvisioningService:
         # Import prefixes
         for prefix_line in import_data.get('prefix', []):
             try:
-                # Parse prefix line
-                parts = prefix_line.split(',')
+                row = next(_csv.reader(StringIO(prefix_line)))
                 prefix_data = {
-                    'prefix': parts[0],
-                    'status': parts[1],
-                    'scope_type': parts[2],
-                    'scope_id': int(parts[3]),
-                    'vlan_group': parts[4],
-                    'vlan': int(parts[5]) if parts[5] else None,
-                    'role': parts[6] if len(parts) > 6 else '',
-                    'description': parts[7] if len(parts) > 7 else ''
+                    'prefix': row[0],
+                    'status': row[1] if len(row) > 1 else 'active',
+                    'scope_type': row[2] if len(row) > 2 else 'dcim.site',
+                    'scope_id': int(row[3]) if len(row) > 3 and row[3] else None,
+                    'vlan_group': row[4] if len(row) > 4 else '',
+                    'vlan': int(row[5]) if len(row) > 5 and row[5] else None,
+                    'role': row[6] if len(row) > 6 else '',
+                    'description': row[7] if len(row) > 7 else ''
                 }
                 # Create prefix in NetBox
                 response = self.netbox_client.create_prefix(prefix_data)

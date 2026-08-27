@@ -96,27 +96,39 @@ def calculate_next_subnet(
     """
     if not previous_ip or prev_cidr is None or req_cidr is None:
         return ""
-    
+
+    # Guard: a request for a larger block (smaller CIDR number) than the
+    # previous block can never fit. Without this check, a /22 requested
+    # after a /23 would silently overflow the parent container.
+    if req_cidr < prev_cidr:
+        raise ValueError(
+            f"Invalid allocation: requested /{req_cidr} (block={cidr_to_block_size(req_cidr)}) "
+            f"is larger than the previous /{prev_cidr} (block={cidr_to_block_size(prev_cidr)}). "
+            f"req_cidr ({req_cidr}) must be >= prev_cidr ({prev_cidr})."
+        )
+
     try:
         # Convert previous IP to integer
         prev_ip_int = ip_to_int(previous_ip)
-        
+
         # Calculate previous block size
         prev_block_size = cidr_to_block_size(prev_cidr)
-        
+
         # Calculate raw next IP (previous IP + previous block size)
         raw_next_ip_int = prev_ip_int + prev_block_size
-        
+
         if align:
             # Calculate requested block size
             req_block_size = cidr_to_block_size(req_cidr)
-            
+
             # Align to block size (CEILING.MATH equivalent)
             aligned_next_ip_int = math.ceil(raw_next_ip_int / req_block_size) * req_block_size
             return int_to_ip(aligned_next_ip_int)
         else:
             return int_to_ip(raw_next_ip_int)
-            
+
+    except ValueError:
+        raise  # re-raise our own ValueError above
     except Exception as e:
         return f"Error: {str(e)}"
 

@@ -99,26 +99,36 @@ def render_ipam_tab(active_model: str):
     status_label = f"🟢 ({total_ipam_recs} prefixes in DB)" if total_ipam_recs > 0 else "⚪ (Live API / Template Mode)"
 
     with st.expander(f"📥 NetBox Connection & Data Ingest {status_label}", expanded=True):
+        # Read (or initialise) the NetBox credentials from session state first
+        # so they are in scope for the buttons below.
+        st.session_state.setdefault("ipam_nb_url", "https://ipam.aw.ads/")
+        st.session_state.setdefault("ipam_nb_tok", "")
+
         tab_api, tab_file = st.tabs(["🔌 Live NetBox API (Real-Time Search)", "📄 Upload Excel / CSV Backup"])
-        
+
         with tab_api:
             a1, a2 = st.columns(2)
             with a1:
-                nb_url = st.text_input("NetBox URL", value="https://ipam.aw.ads/", key="ipam_nb_url").strip()
+                st.text_input("NetBox URL", value="https://ipam.aw.ads/", key="ipam_nb_url")
             with a2:
-                nb_tok = st.text_input("NetBox API Token", value="", type="password", key="ipam_nb_tok", help="Token e.g. 0ae9237edd...").strip()
+                st.text_input("NetBox API Token", value="", type="password", key="ipam_nb_tok", help="Token e.g. 0ae9237edd...")
+
+            nb_url_val = st.session_state["ipam_nb_url"].strip()
+            nb_tok_val = st.session_state["ipam_nb_tok"].strip()
 
             c_sync1, c_sync2 = st.columns([2.5, 1])
             with c_sync1:
                 if st.button("🚀 Full NetBox Sync (Cache all Sites, Devices, Prefixes to local DB)", use_container_width=True, key="btn_ipam_full_sync"):
-                    if not nb_url or not nb_tok:
+                    if not nb_url_val or not nb_tok_val:
                         st.warning("Please provide NetBox URL and API Token.")
                     else:
                         with st.spinner("Syncing Sites, Devices, VMs, and Prefixes from NetBox API..."):
                             try:
-                                sites, inv_records, ipam_records = fetch_netbox_full_sync(nb_url, nb_tok)
-                                save_sites_batch(sites, clear_first=True) if sites else 0
-                                save_records_batch(inv_records, clear_first=True) if inv_records else {"device": 0}
+                                sites, inv_records, ipam_records = fetch_netbox_full_sync(nb_url_val, nb_tok_val)
+                                if sites:
+                                    save_sites_batch(sites, clear_first=True)
+                                if inv_records:
+                                    save_records_batch(inv_records, clear_first=True)
                                 ipam_c = save_ipam_records_batch(ipam_records, clear_first=True) if ipam_records else 0
                                 st.success(f"✅ Full Sync Complete! Cached {len(sites)} Sites, {len(inv_records)} Devices/VMs & {ipam_c} Prefixes.")
                                 st.rerun()
@@ -148,9 +158,11 @@ def render_ipam_tab(active_model: str):
     matched_site_name = site_name_in
 
     if site_name_in:
-        # 1. Try Live API Search if URL & Token are supplied
-        if nb_url and nb_tok:
-            s_id, s_name, s_slug, s_pfx, _ = lookup_site_and_supernet_live(nb_url, nb_tok, site_name_in)
+        # 1. Try Live API Search if URL & Token are supplied (session-state-backed)
+        if st.session_state.get("ipam_nb_url") and st.session_state.get("ipam_nb_tok"):
+            nb_url_val = st.session_state["ipam_nb_url"].strip()
+            nb_tok_val = st.session_state["ipam_nb_tok"].strip()
+            s_id, s_name, s_slug, s_pfx, _ = lookup_site_and_supernet_live(nb_url_val, nb_tok_val, site_name_in)
             if s_id is not None:
                 resolved_scope_id = s_id
                 matched_site_name = s_name or site_name_in
