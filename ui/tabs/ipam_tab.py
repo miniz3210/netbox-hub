@@ -1,15 +1,17 @@
+import ipaddress
 import streamlit as st
 import pandas as pd
 import openpyxl
 from core.ipam_engine import (
-    STANDARD_VLAN_TEMPLATES, 
-    slice_supernet, 
-    slugify, 
+    STANDARD_VLAN_TEMPLATES,
+    slice_supernet,
+    slugify,
     evaluate_subnet_row,
     calculate_remaining_subnets,
-    generate_netbox_site_csv, 
-    generate_netbox_vlan_group_csv, 
-    generate_netbox_vlans_csv, 
+    calculate_ip_range_str,
+    generate_netbox_site_csv,
+    generate_netbox_vlan_group_csv,
+    generate_netbox_vlans_csv,
     generate_netbox_prefixes_csv
 )
 from core.db_manager import (
@@ -190,11 +192,19 @@ def render_ipam_tab(active_model: str):
     with top3:
         supernet_default_val = resolved_supernet or "10.113.252.0/23"
         supernet_in = st.text_input(
-            "Site Supernet (CIDR)", 
-            value=supernet_default_val, 
+            "Site Supernet (CIDR)",
+            value=supernet_default_val,
             key="ipam_super_in",
             help="Top-level container subnet for this branch site."
         ).strip()
+        # ── Site Supernet Usable Range ───────────────────────────────────────
+        if supernet_in and "/" in supernet_in:
+            try:
+                sup_net = ipaddress.ip_network(supernet_in, strict=False)
+                sup_range = calculate_ip_range_str(sup_net)
+                st.caption(f"📍 Supernet Usable Range: **`{sup_range}`**")
+            except ValueError:
+                st.caption("⚠️ Invalid CIDR format")
         if resolved_supernet:
             st.caption(f"🟢 Auto-detected Site Supernet: **`{resolved_supernet}`**")
         else:
@@ -222,7 +232,7 @@ def render_ipam_tab(active_model: str):
     df_init = pd.DataFrame(raw_rows)
 
     st.markdown("##### 📊 Subnet Allocation Editor (✏️ Click any cell to edit)")
-    
+
     edited_df = st.data_editor(
         df_init,
         use_container_width=True,
@@ -232,9 +242,16 @@ def render_ipam_tab(active_model: str):
             "VLAN ID": st.column_config.NumberColumn("VLAN ID", step=1, required=True),
             "VLAN Name": st.column_config.TextColumn("VLAN Name", required=True),
             "Role": st.column_config.TextColumn("Role"),
-            "Description": st.column_config.TextColumn("Description"),
-            "Subnet": st.column_config.TextColumn("Subnet (CIDR)", help="Type any valid CIDR like 10.113.240.0/24")
-        }
+            # Description is a derived field. Formula: Site + VLAN Role + VLAN ID
+            # e.g. "bristol Corporate WiFi -- VLAN 300". Marked disabled so the
+            # user cannot type a value that the formula would immediately overwrite.
+            "Description": st.column_config.TextColumn(
+                "Description (auto)",
+                help="Auto-generated: Site + VLAN Role + VLAN ID",
+                disabled=True,
+            ),
+            "Subnet": st.column_config.TextColumn("Subnet (CIDR)", help="Type any valid CIDR like 10.113.240.0/24"),
+        },
     )
 
     records_dict = edited_df.to_dict(orient="records")
@@ -242,14 +259,23 @@ def render_ipam_tab(active_model: str):
     for r in records_dict:
         sub_str = str(r.get("Subnet", "")).strip()
         allocated_subnets.append(sub_str)
+        vlan_id_val = r.get("VLAN ID")
+        vlan_role_val = r.get("Role", "")
         eval_res = evaluate_subnet_row(
-            sub_str, 
-            r.get("VLAN ID"), 
-            r.get("Role", ""), 
-            matched_site_name, 
-            supernet_in, 
+            sub_str,
+            vlan_id_val,
+            vlan_role_val,
+            matched_site_name,
+            supernet_in,
             existing_prefixes
         )
+        # Recompute the description from the formula on every render so
+        # changes to Site / Role / VLAN ID immediately propagate.
+        if vlan_id_val:
+            formula_desc = f"{matched_site_name} {vlan_role_val} -- VLAN {vlan_id_val}"
+        else:
+            formula_desc = f"{matched_site_name} {vlan_role_val}"
+        r["Description"] = formula_desc
         r["Usable Range"] = eval_res["usable_range"]
         r["Status"] = eval_res["status"]
         r["Prefix Description"] = eval_res["desc"]
