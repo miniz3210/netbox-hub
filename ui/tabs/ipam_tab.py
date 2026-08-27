@@ -143,20 +143,21 @@ def render_ipam_tab(active_model: str):
     # 1. Ingestion Toolbar with Multi-File Upload & Clear DB Button
     total_ipam_recs = get_total_ipam_count()
     total_sites_recs = get_total_sites_count()
-    status_label = f"🟢 ({total_sites_recs} sites, {total_ipam_recs} prefixes in DB)" if (total_ipam_recs > 0 or total_sites_recs > 0) else "⚪ (No custom file loaded - Template Mode)"
+    total_db_count = total_ipam_recs + total_sites_recs
+    status_label = f"🟢 ({total_sites_recs} sites, {total_ipam_recs} prefixes in DB)" if total_db_count > 0 else "⚪ (No custom file loaded - Template Mode)"
 
-    with st.expander(f"📁 Ingest NetBox Sites & VLANs / Prefixes CSV {status_label}", expanded=(total_ipam_recs == 0 and total_sites_recs == 0)):
+    with st.expander(f"📥 Ingest NetBox Sites & VLANs / Prefixes CSV {status_label}", expanded=True):
         c_file, c_btn, c_clr = st.columns([3, 1.2, 1])
         with c_file:
             uploaded_files = st.file_uploader(
-                "Upload netbox_sites.csv, netbox_VLANs.csv, or Excel", 
+                "Upload NetBox CSVs (netbox_sites.csv, netbox_VLANs.csv) or Excel", 
                 type=["xlsx", "csv"], 
                 accept_multiple_files=True,
-                key="ipam_multi_uploader"
+                key="ipam_multi_uploader",
+                label_visibility="collapsed"
             )
         with c_btn:
-            st.write("")
-            if st.button("📥 Load & Process File(s)", use_container_width=True, key="btn_do_load_ipam"):
+            if st.button("📥 Load File(s)", type="primary", use_container_width=True, key="btn_do_load_ipam"):
                 if uploaded_files:
                     sc_cnt, pfx_cnt = process_uploaded_files(uploaded_files)
                     st.toast(f"✅ Loaded {sc_cnt} Sites and {pfx_cnt} Prefixes into database!", icon="🌐")
@@ -164,14 +165,12 @@ def render_ipam_tab(active_model: str):
                 else:
                     st.warning("Please choose file(s) first.")
         with c_clr:
-            st.write("")
-            if (total_ipam_recs > 0 or total_sites_recs > 0):
-                if st.button("🗑️ Clear DB", use_container_width=True, key="btn_clr_ipam_records"):
-                    clear_ipam_records()
-                    if "ipam_persisted_rows" in st.session_state:
-                        del st.session_state["ipam_persisted_rows"]
-                    st.toast("🧹 IPAM database cleared.", icon="🗑️")
-                    st.rerun()
+            if st.button("🗑️ Clear DB", use_container_width=True, key="btn_clr_ipam_records", disabled=(total_db_count == 0)):
+                clear_ipam_records()
+                if "ipam_persisted_rows" in st.session_state:
+                    del st.session_state["ipam_persisted_rows"]
+                st.toast("🧹 IPAM database cleared.", icon="🗑️")
+                st.rerun()
 
     # 2. Site Inputs
     top1, top2, top3 = st.columns([2, 1, 2])
@@ -180,7 +179,7 @@ def render_ipam_tab(active_model: str):
             "Branch / Site Name",
             value="",
             key="ipam_site_in",
-            placeholder="e.g. Bristol, AGE, Adelaide, Site-01",
+            placeholder="e.g. London Branch, Site-01",
         ).strip()
 
     # Auto-lookup Scope ID and Site Supernet from stored records
@@ -207,7 +206,7 @@ def render_ipam_tab(active_model: str):
             "Site Supernet (CIDR)", 
             value=supernet_default, 
             key="ipam_super_in",
-            placeholder="e.g. 10.1.0.0/16",
+            placeholder="e.g. 10.0.0.0/21",
             help="Top-level container subnet for this branch site."
         ).strip()
         if supernet_in and "/" in supernet_in:
@@ -273,7 +272,7 @@ def render_ipam_tab(active_model: str):
             "Role": st.column_config.TextColumn("Role", help="Type role (e.g. Guest, Corporate WiFi, Audio Visual). Auto-corrects on Enter."),
             "VLAN Description": st.column_config.TextColumn("VLAN Description", help="Auto-looked up from Role.", disabled=True),
             "Suggest Subnet": st.column_config.TextColumn("Suggest Subnet", help="Calculated dynamically based on previous Subnet (CIDR) input.", disabled=True),
-            "Subnet (CIDR)": st.column_config.TextColumn("Subnet (CIDR)", help="Type subnet CIDR (e.g. 10.1.1.0/24) and hit Enter.")
+            "Subnet (CIDR)": st.column_config.TextColumn("Subnet (CIDR)", help="Type subnet CIDR (e.g. 10.113.64.0/23) and hit Enter.")
         }
     )
 
