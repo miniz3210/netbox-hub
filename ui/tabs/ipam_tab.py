@@ -144,12 +144,12 @@ def render_ipam_tab(active_model: str):
             if total_ipam_recs > 0:
                 if st.button("🗑️ Clear DB", use_container_width=True, key="btn_clr_ipam_records"):
                     clear_ipam_records()
-                    if "ipam_table_state" in st.session_state:
-                        del st.session_state["ipam_table_state"]
+                    if "ipam_persisted_rows" in st.session_state:
+                        del st.session_state["ipam_persisted_rows"]
                     st.toast("🧹 IPAM database cleared.", icon="🗑️")
                     st.rerun()
 
-    # 2. Site Inputs (Generic Placeholders)
+    # 2. Site Inputs
     top1, top2, top3 = st.columns([2, 1, 2])
     with top1:
         site_name = st.text_input(
@@ -197,36 +197,42 @@ def render_ipam_tab(active_model: str):
     include_opt = st.toggle("Include Optional VLANs (Routing, OT, IoT)", value=True, key="ipam_opt_toggle")
     existing_prefixes = get_existing_prefix_strings()
 
-    # 3. Base Row Template Structure (Subnet (CIDR) starts completely empty)
+    # 3. Base Row Template Structure
     selected_templates = [v for v in STANDARD_VLAN_TEMPLATES if include_opt or not v["opt"]]
-    base_rows = []
+    
+    working_rows = []
     for v in selected_templates:
-        base_rows.append({
+        working_rows.append({
             "VLAN ID": v["vid"],
             "Role": v["role"],
             "Subnet (CIDR)": "",
             "fallback_subnet": v.get("fallback_subnet", "")
         })
 
-    # Retrieve existing edited state or initialize clean
-    if "ipam_table_state" not in st.session_state:
-        st.session_state["ipam_table_state"] = compute_chained_rows(supernet_in, base_rows)
-    else:
-        current_data = st.session_state["ipam_table_state"]
-        merged = []
-        for idx, t in enumerate(base_rows):
-            existing_sub = current_data[idx].get("Subnet (CIDR)", "") if idx < len(current_data) else ""
-            user_role = current_data[idx].get("Role", t["Role"]) if idx < len(current_data) else t["Role"]
-            user_vid = current_data[idx].get("VLAN ID", t["VLAN ID"]) if idx < len(current_data) else t["VLAN ID"]
-            merged.append({
-                "VLAN ID": user_vid,
-                "Role": user_role,
-                "Subnet (CIDR)": existing_sub,
-                "fallback_subnet": t.get("fallback_subnet", "")
-            })
-        st.session_state["ipam_table_state"] = compute_chained_rows(supernet_in, merged)
+    # Overlay stored rows from previous cycle if present
+    if "ipam_persisted_rows" in st.session_state:
+        stored = st.session_state["ipam_persisted_rows"]
+        for idx, r in enumerate(working_rows):
+            if idx < len(stored):
+                r["VLAN ID"] = stored[idx].get("VLAN ID", r["VLAN ID"])
+                r["Role"] = stored[idx].get("Role", r["Role"])
+                r["Subnet (CIDR)"] = stored[idx].get("Subnet (CIDR)", "")
 
-    df_init = pd.DataFrame(st.session_state["ipam_table_state"])[[
+    # Overlay immediate widget edits from st.session_state BEFORE building DataFrame
+    widget_state = st.session_state.get("ipam_data_editor", {})
+    edited_changes = widget_state.get("edited_rows", {})
+    for row_idx_str, changes in edited_changes.items():
+        row_idx = int(row_idx_str)
+        if row_idx < len(working_rows):
+            for col_name, val in changes.items():
+                if col_name in working_rows[row_idx]:
+                    working_rows[row_idx][col_name] = val
+
+    # Compute chained rows with all new edits
+    computed_rows = compute_chained_rows(supernet_in, working_rows)
+    st.session_state["ipam_persisted_rows"] = computed_rows
+
+    df_init = pd.DataFrame(computed_rows)[[
         "VLAN ID", "VLAN Name", "Role", "VLAN Description", "Suggest Subnet", "Subnet (CIDR)"
     ]]
 
@@ -247,11 +253,8 @@ def render_ipam_tab(active_model: str):
         }
     )
 
-    # 4. Immediate Re-compute Chained State and Usable Ranges on Enter
-    raw_edited = edited_df.to_dict(orient="records")
-    st.session_state["ipam_table_state"] = compute_chained_rows(supernet_in, raw_edited)
-    
-    final_records = st.session_state["ipam_table_state"]
+    # 4. Live Usable Ranges and Status Evaluation
+    final_records = computed_rows
     allocated_subnets = []
     
     for r in final_records:
