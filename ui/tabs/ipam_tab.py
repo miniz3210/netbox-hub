@@ -394,7 +394,7 @@ def render_ipam_tab(active_model: str):
 
     existing_prefixes = get_existing_prefix_strings()
 
-    # 3. Preset Selection & Dynamic Allocation Editor
+    # 3. Preset Selection & Allocation Editor
     st.markdown("---")
     c_title, c_preset = st.columns([2.5, 1.5])
     with c_title:
@@ -463,8 +463,8 @@ def render_ipam_tab(active_model: str):
             "Role": st.column_config.TextColumn("Role", help="Type role (e.g. Corporate WiFi, Workstations). Auto-corrects on Enter."),
             "VLAN Name": st.column_config.TextColumn("VLAN Name", help="VLAN Name in NetBox (e.g. VIN_Corp, Wired Workstations)."),
             "VLAN Description": st.column_config.TextColumn("VLAN Description", help="VLAN Description."),
-            "Suggest Subnet": st.column_config.TextColumn("Suggest Subnet", help="Calculated dynamically based on previous Subnet (CIDR) input.", disabled=True),
-            "Subnet (CIDR)": st.column_config.TextColumn("Subnet (CIDR)", help="Type subnet CIDR (e.g. 10.27.0.0/24) and hit Enter.")
+            "Suggest Subnet": st.column_config.TextColumn("Suggest Subnet", help="Calculated next available network IP ID (without subnet mask).", disabled=True),
+            "Subnet (CIDR)": st.column_config.TextColumn("Subnet (CIDR)", help="Type subnet CIDR (e.g. 10.113.66.0/24) and hit Enter.")
         }
     )
 
@@ -508,7 +508,7 @@ def render_ipam_tab(active_model: str):
         cap_rows = [{"Subnet Size": k, "Available": f"{v} subnets"} for k, v in cap_matrix.items()]
         st.dataframe(pd.DataFrame(cap_rows), width="stretch", hide_index=True)
 
-    # 5. NetBox Bulk-Import CSV Generators
+    # 5. NetBox Bulk-Import CSV Copy Cards (Buttons Removed)
     st.markdown("---")
     st.markdown("### 📋 NetBox Bulk-Import CSV Generators")
 
@@ -522,17 +522,13 @@ def render_ipam_tab(active_model: str):
     with c1:
         st.markdown("**1. Import Site (`dcim.site`)**")
         st.code(csv_site, language="csv")
-        st.download_button("⬇️ Download Site CSV", csv_site, f"site_{slugify(display_site)}.csv", "text/csv", key="dl_site_csv")
 
-        st.markdown("**3. Import VLANs (`ipam.vlan`)**")
+        st.markdown("**3. Import VLANs (`ipam.vlan`)** *(Assigned IP subnets only)*")
         st.code(csv_vlans, language="csv")
-        st.download_button("⬇️ Download VLANs CSV", csv_vlans, f"vlans_{slugify(display_site)}.csv", "text/csv", key="dl_vlans_csv")
 
     with c2:
         st.markdown("**2. Import VLAN Group (`ipam.vlangroup`)**")
         st.code(csv_group, language="csv")
-        st.download_button("⬇️ Download VLAN Group CSV", csv_group, f"vlangroup_{slugify(display_site)}.csv", "text/csv", key="dl_group_csv")
 
         st.markdown("**4. Import Prefixes (`ipam.prefix`)**")
         st.code(csv_prefixes, language="csv")
-        st.download_button("⬇️ Download Prefixes CSV", csv_prefixes, f"prefixes_{slugify(display_site)}.csv", "text/csv", key="dl_prefixes_csv")
