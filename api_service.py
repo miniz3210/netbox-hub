@@ -3,7 +3,13 @@ import json
 import logging
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from core.db_manager import save_sites_batch, save_ipam_records_batch, save_records_batch, init_db
+from core.db_manager import (
+    save_sites_batch, 
+    save_ipam_records_batch, 
+    save_records_batch, 
+    init_db,
+    set_sync_metadata
+)
 from config.constants import APP_VERSION
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -33,11 +39,17 @@ def sync_push():
     if HUB_SECRET_KEY and auth_header != HUB_SECRET_KEY and payload.get("sync_key") != HUB_SECRET_KEY:
         return jsonify({"success": False, "error": "Unauthorized: Invalid X-Hub-Key"}), 401
 
+    # Safe key extraction supporting both hyphenated and underscored JSON keys
     sites_data = payload.get("sites") or payload.get("dcim_sites") or []
     vlans_data = payload.get("vlans") or payload.get("ipam_vlans") or []
     prefixes_data = payload.get("prefixes") or payload.get("ipam_prefixes") or []
     devices_data = payload.get("devices") or payload.get("dcim_devices") or []
-    vms_data = payload.get("vms") or payload.get("virtualization_virtual_machines") or []
+    vms_data = (
+        payload.get("vms") 
+        or payload.get("virtualization_virtual-machines") 
+        or payload.get("virtualization_virtual_machines") 
+        or []
+    )
 
     imported = {"sites": 0, "prefixes": 0, "devices": 0, "vms": 0}
 
@@ -51,7 +63,7 @@ def sync_push():
             if s_id and s_name:
                 site_records.append({"id": s_id, "name": s_name, "slug": s_slug})
         if site_records:
-            imported["sites"] = save_sites_batch(site_records, clear_first=True)
+            imported["sites"] = save_sites_batch(site_records, clear_first=True, source="Agent (PowerShell)")
 
     # 2. IPAM (VLANs & Prefixes)
     ipam_records = []
@@ -96,7 +108,7 @@ def sync_push():
             })
 
     if ipam_records:
-        imported["prefixes"] = save_ipam_records_batch(ipam_records, clear_first=True)
+        imported["prefixes"] = save_ipam_records_batch(ipam_records, clear_first=True, source="Agent (PowerShell)")
 
     # 3. Inventory (Devices & VMs)
     inv_records = []
@@ -144,9 +156,12 @@ def sync_push():
         })
 
     if inv_records:
-        counts = save_records_batch(inv_records, clear_first=True)
+        counts = save_records_batch(inv_records, clear_first=True, source="Agent (PowerShell)")
         imported["devices"] = counts.get("device", 0) + counts.get("hypervisor", 0)
         imported["vms"] = counts.get("vm", 0)
+
+    set_sync_metadata("ipam", "Agent (PowerShell)")
+    set_sync_metadata("naming", "Agent (PowerShell)")
 
     return jsonify({"success": True, "imported": imported})
 

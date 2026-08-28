@@ -25,8 +25,106 @@ from core.db_manager import (
     get_total_sites_count,
     lookup_scope_id,
     lookup_site_supernet_from_db,
-    get_existing_prefix_strings
+    get_existing_prefix_strings,
+    get_sync_metadata
 )
+
+POWERSHELL_AGENT_CODE = """<#
+.SYNOPSIS
+    NetBox Hub Sync Agent (Optimized Core Sync)
+#>
+[CmdletBinding()]
+param (
+    [Parameter(Mandatory = $true)]
+    [string]$NetBoxUrl,
+
+    [Parameter(Mandatory = $true)]
+    [Alias("NetBoxToken", "Token")]
+    [string]$ApiToken,
+
+    [Alias("Destination", "Hub")]
+    [string]$HubUrl = "https://netbox-hub.lovelyndha.pp.ua",
+
+    [string]$HubSyncKey = "netbox-hub-secret-sync-key",
+    [int]$PageSize = 2000
+)
+
+$NetBoxUrl = $NetBoxUrl.TrimEnd('/')
+$HubEndpoint = "$($HubUrl.TrimEnd('/'))/api/v1/sync/push"
+
+$BackupData = [ordered]@{ sync_key = $HubSyncKey }
+
+function Get-PaginatedData {
+    param([string]$Endpoint)
+    $Results = @()
+    $Url = "$NetBoxUrl/api/$Endpoint/?limit=$PageSize"
+    do {
+        Write-Host "Fetching: $Url"
+        try {
+            $rawJson = & curl.exe -k -s -L -H "Authorization: Token $ApiToken" -H "Accept: application/json" $Url
+            if (-not $rawJson) { break }
+            $Response = $rawJson | ConvertFrom-Json
+            if ($Response.results) {
+                $Results += $Response.results
+                Write-Host ("Retrieved {0} records" -f $Results.Count)
+            } else { break }
+            $Url = $Response.next
+        } catch { break }
+    } while ($Url)
+    return $Results
+}
+
+$Endpoints = @(
+    "dcim/sites",
+    "ipam/vlans",
+    "ipam/prefixes",
+    "dcim/devices",
+    "virtualization/virtual-machines"
+)
+
+Write-Host "`n=========================================" -ForegroundColor Cyan
+Write-Host "NETBOX CORE FAST SYNC & CLOUD HUB SYNC" -ForegroundColor Cyan
+Write-Host "=========================================`n" -ForegroundColor Cyan
+
+foreach ($Endpoint in $Endpoints) {
+    Write-Host "Exporting $Endpoint..." -ForegroundColor Yellow
+    $Key = $Endpoint.Replace("/", "_")
+    $BackupData[$Key] = Get-PaginatedData -Endpoint $Endpoint
+    Write-Host "Completed $Endpoint`n" -ForegroundColor Green
+}
+
+$PayloadJson = $BackupData | ConvertTo-Json -Depth 100 -Compress
+Write-Host "Payload size: $([Math]::Round(($PayloadJson.Length / 1MB), 2)) MB"
+Write-Host "Syncing with Cloud Hub: $HubEndpoint..." -ForegroundColor Yellow
+
+try {
+    $tempFile = [System.IO.Path]::GetTempFileName()
+    [System.IO.File]::WriteAllText($tempFile, $PayloadJson, [System.Text.Encoding]::UTF8)
+
+    $rawPush = & curl.exe -k -s -L -X POST `
+        -H "Content-Type: application/json" `
+        -H "X-Hub-Key: $HubSyncKey" `
+        --data-binary "@$tempFile" `
+        $HubEndpoint
+
+    Remove-Item -Path $tempFile -Force -ErrorAction SilentlyContinue
+    $PushResponse = $rawPush | ConvertFrom-Json
+
+    if ($PushResponse.success) {
+        Write-Host "`n=========================================" -ForegroundColor Green
+        Write-Host "CLOUD SYNC SUCCESSFUL!" -ForegroundColor Green
+        Write-Host "=========================================" -ForegroundColor Green
+        Write-Host "   • Sites Imported:    $($PushResponse.imported.sites)" -ForegroundColor White
+        Write-Host "   • Prefixes Imported: $($PushResponse.imported.prefixes)" -ForegroundColor White
+        Write-Host "   • Devices Imported:  $($PushResponse.imported.devices)" -ForegroundColor White
+        Write-Host "   • VMs Imported:      $($PushResponse.imported.vms)" -ForegroundColor White
+    } else {
+        Write-Host "❌ Error: $($PushResponse.error)" -ForegroundColor Red
+    }
+} catch {
+    Write-Host "❌ Push failed: $($_.Exception.Message)" -ForegroundColor Red
+}
+"""
 
 def handle_ipam_file_upload():
     uploaded_files = st.session_state.get("ipam_multi_uploader")
@@ -44,7 +142,6 @@ def handle_ipam_file_upload():
         filename = file_obj.name.lower()
         content = file_obj.getvalue()
         
-        # 1. Multi-Sheet Excel (.xlsx)
         if filename.endswith(".xlsx"):
             try:
                 wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
@@ -60,7 +157,7 @@ def handle_ipam_file_upload():
                         if s_name:
                             scope_records.append({"id": s_id, "name": s_name, "slug": s_slug})
                     if scope_records:
-                        cnt = save_sites_batch(scope_records, clear_first=False)
+                        cnt = save_sites_batch(scope_records, clear_first=False, source="Manual CSV Upload")
                         total_scopes += cnt
 
                 if "Prefixes" in wb.sheetnames:
@@ -80,26 +177,15 @@ def handle_ipam_file_upload():
                                 "description": str(desc_val or "")
                             })
                     if ipam_records:
-                        cnt = save_ipam_records_batch(ipam_records, clear_first=False)
+                        cnt = save_ipam_records_batch(ipam_records, clear_first=False, source="Manual CSV Upload")
                         total_prefixes += cnt
             except Exception as e:
                 errors.append(f"• **{file_obj.name}**: {str(e)}")
-
-        # 2. CSV Files with Strict Validation
         else:
             try:
                 df = pd.read_csv(io.BytesIO(content))
                 cols = {str(c).lower().strip(): c for c in df.columns}
 
-                if "address" in cols and ("interface" in cols or "device" in cols or "assigned_object" in cols or "dns_name" in cols or "assigned" in cols or "nat" in cols):
-                    raise ValueError(f"This is a NetBox IP Addresses export (`netbox_IP addresses.csv`). Please upload `netbox_sites.csv` or `netbox_VLANs.csv`.")
-                if "address" in cols and not ("prefixes" in cols or "prefix" in cols or "subnet" in cols or "slug" in cols):
-                    raise ValueError(f"This is an individual host IP addresses export (`netbox_IP addresses.csv`). Please upload `netbox_sites.csv` or `netbox_VLANs.csv`.")
-
-                if "device type" in cols or "serial" in cols or "asset tag" in cols or "vcpus" in cols:
-                    raise ValueError(f"This is a Device/VM export (`netbox_devices.csv`). Please upload it in the 'Naming' tab instead.")
-
-                # Case A: netbox_sites.csv
                 if "slug" in cols and ("name" in cols or "site" in cols) and "id" in cols:
                     name_col = cols.get("name", cols.get("site"))
                     id_col = cols.get("id")
@@ -112,11 +198,9 @@ def handle_ipam_file_upload():
                         if s_name and s_name.lower() != "nan":
                             scope_records.append({"id": s_id, "name": s_name, "slug": s_slug})
                     if scope_records:
-                        cnt = save_sites_batch(scope_records, clear_first=False)
+                        cnt = save_sites_batch(scope_records, clear_first=False, source="Manual CSV Upload")
                         total_scopes += cnt
-
-                # Case B: netbox_VLANs.csv or prefix export
-                elif "prefixes" in cols or "prefix" in cols or "subnet" in cols or "vid" in cols or "q-in-q role" in cols:
+                elif "prefixes" in cols or "prefix" in cols or "subnet" in cols or "vid" in cols:
                     pfx_col = cols.get("prefixes", cols.get("prefix", cols.get("subnet")))
                     vid_col = cols.get("vid", cols.get("vlan_id", cols.get("vlan", "")))
                     vname_col = cols.get("name", cols.get("vlan_name", ""))
@@ -133,7 +217,6 @@ def handle_ipam_file_upload():
                         found_cidrs = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}/\d{1,2}\b', raw_prefixes)
                         vid = str(row.get(vid_col, "")).strip() if vid_col else ""
                         vname = str(row.get(vname_col, "")).strip() if vname_col else ""
-                        role = str(role_col, "") if role_col else ""
                         role_val = str(row.get(role_col, "")).strip() if role_col else ""
                         site_val = str(row.get(site_col, "")).strip() if site_col else ""
                         desc = str(row.get(desc_col, "")).strip() if desc_col else ""
@@ -149,11 +232,10 @@ def handle_ipam_file_upload():
                             })
 
                     if ipam_records:
-                        cnt = save_ipam_records_batch(ipam_records, clear_first=False)
+                        cnt = save_ipam_records_batch(ipam_records, clear_first=False, source="Manual CSV Upload")
                         total_prefixes += cnt
                 else:
                     raise ValueError(f"Unrecognized CSV format. Expected `netbox_sites.csv` or `netbox_VLANs.csv`.")
-
             except Exception as e:
                 errors.append(f"• **{file_obj.name}**: {str(e)}")
 
@@ -176,22 +258,44 @@ def render_ipam_tab(active_model: str):
     st.subheader("🌐 IPAM & Site Subnet Provisioning Engine")
     st.caption("Plan site supernets, allocate non-overlapping VLAN subnets, and export ready-to-import NetBox CSV blocks.")
 
-    # 1. Ingestion Toolbar with Unified Layout & Clear DB Button
+    # 1. Ingestion Toolbar with Source & Timestamp Badge
     total_ipam_recs = get_total_ipam_count()
     total_sites_recs = get_total_sites_count()
     total_db_count = total_ipam_recs + total_sites_recs
-    status_tag = f"🟢 ({total_sites_recs} sites, {total_ipam_recs} prefixes in DB)" if total_db_count > 0 else "⚪ (Default Examples)"
+    meta = get_sync_metadata("ipam")
 
+    status_tag = f"🟢 ({total_sites_recs} sites, {total_ipam_recs} prefixes in DB)" if total_db_count > 0 else "⚪ (Default Examples)"
     tick_sites = " ✅" if total_sites_recs > 0 else ""
     tick_vlans = " ✅" if total_ipam_recs > 0 else ""
 
     with st.expander(f"📥 Ingest NetBox Sites & VLANs / Prefixes CSV {status_tag}", expanded=False):
+        if total_db_count > 0:
+            st.markdown(
+                f"**DB Status:** `Source: {meta['source']}` | `Last Updated: {meta['updated_at']}`"
+            )
+
         st.markdown(
             f"""
-            **Export Instructions from NetBox:**
+            **Option A: Automated Push via PowerShell Agent (Recommended):**
+            ```powershell
+            .\\Sync-NetBoxHub.ps1 -NetBoxUrl "[https://ipam.aw.ads](https://ipam.aw.ads)" -ApiToken "YOUR_NETBOX_TOKEN"
+            ```
+            """
+        )
+
+        st.download_button(
+            "⬇️ Download Sync-NetBoxHub.ps1 Agent",
+            POWERSHELL_AGENT_CODE,
+            file_name="Sync-NetBoxHub.ps1",
+            mime="text/plain",
+            key="dl_ps1_ipam"
+        )
+
+        st.markdown(
+            f"""
+            **Option B: Manual CSV Export & Upload:**
             * **Scope IDs & Site Names:** Go to `Organization` ➔ `Sites` ➔ `Export` ➔ `All Data` (`netbox_sites.csv`){tick_sites}
             * **VLANs & In-Use Prefixes:** Go to `IPAM` ➔ `VLANs` ➔ `Export` ➔ `All Data` (`netbox_VLANs.csv`){tick_vlans}
-            * *Tip: You can select and upload both CSV files together, or sync automatically using the PowerShell agent.*
             """
         )
         c_up, c_rst = st.columns([3, 1])
@@ -266,7 +370,7 @@ def render_ipam_tab(active_model: str):
 
     existing_prefixes = get_existing_prefix_strings()
 
-    # 3. Base Row Template Structure with Dynamic Row Support
+    # 3. Base Row Template Structure
     base_default = []
     for v in STANDARD_VLAN_TEMPLATES:
         base_default.append({
@@ -356,7 +460,6 @@ def render_ipam_tab(active_model: str):
         r["Status"] = eval_res["status"]
         r["Prefix Description"] = eval_res["desc"]
 
-    # Preview summary table and Remaining Capacity Matrix
     c_prev, c_cap = st.columns([3, 1.2])
     with c_prev:
         st.markdown("##### 🔍 Live Usable IP Ranges & Collision Status")

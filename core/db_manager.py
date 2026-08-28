@@ -2,7 +2,8 @@ import os
 import re
 import sqlite3
 import pandas as pd
-from typing import List, Dict, Any, Optional, Tuple
+from datetime import datetime, timezone
+from typing import List, Dict, Any, Optional
 
 DB_PATH = "data/netbox_hub.db"
 
@@ -11,7 +12,16 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # 1. Sites / Scope Table (Stores NetBox Site Name <-> Scope ID mapping)
+    # Metadata Table (Tracks Sync Source & Last Sync Timestamp)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS sync_metadata (
+            module TEXT PRIMARY KEY,
+            source TEXT,
+            updated_at TEXT
+        )
+    """)
+
+    # Sites / Scope Table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS sites_records (
             id INTEGER PRIMARY KEY,
@@ -21,7 +31,7 @@ def init_db():
         )
     """)
 
-    # 2. Shared Inventory Records (Devices, Hypervisors, VMs for Naming Tab)
+    # Inventory Records (Devices, Hypervisors, VMs)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS inventory_records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,7 +46,7 @@ def init_db():
         )
     """)
 
-    # 3. Dedicated IPAM / Prefix Records (Used for overlap/collision checks)
+    # IPAM / Prefix Records
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS ipam_records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,21 +60,38 @@ def init_db():
             imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    
-    cursor.execute("PRAGMA table_info(ipam_records)")
-    columns = [col[1] for col in cursor.fetchall()]
-    if "scope_id" not in columns:
-        try:
-            cursor.execute("ALTER TABLE ipam_records ADD COLUMN scope_id INTEGER")
-        except Exception:
-            pass
 
     conn.commit()
     conn.close()
 
+# ── METADATA TRACKING ───────────────────────────────────────────────────
+
+def set_sync_metadata(module: str, source: str):
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    cursor.execute("""
+        INSERT OR REPLACE INTO sync_metadata (module, source, updated_at)
+        VALUES (?, ?, ?)
+    """, (module, source, now_str))
+    conn.commit()
+    conn.close()
+
+def get_sync_metadata(module: str) -> Dict[str, str]:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT source, updated_at FROM sync_metadata WHERE module = ?", (module,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return {"source": row[0], "updated_at": row[1]}
+    return {"source": "None", "updated_at": "Never"}
+
 # ── SMART SITE / SCOPE ID LOOKUP ─────────────────────────────────────────
 
-def save_sites_batch(sites: List[Dict[str, Any]], clear_first: bool = False) -> int:
+def save_sites_batch(sites: List[Dict[str, Any]], clear_first: bool = False, source: str = "Agent (PowerShell)") -> int:
     init_db()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -85,6 +112,7 @@ def save_sites_batch(sites: List[Dict[str, Any]], clear_first: bool = False) -> 
             
     conn.commit()
     conn.close()
+    set_sync_metadata("ipam", source)
     return count
 
 def lookup_scope_id(site_name: str) -> Optional[int]:
@@ -108,7 +136,7 @@ def lookup_scope_id(site_name: str) -> Optional[int]:
         if (sname and sname.lower() == q) or (sslug and sslug.lower() == q):
             return sid
 
-    # 2. Exact word boundary match (e.g. "UK" matches "UK", "Site UK", "UK Office", not "azure-uk-south")
+    # 2. Exact word boundary match
     word_pattern = re.compile(rf'\b{re.escape(q)}\b', re.IGNORECASE)
     word_matches = []
     for sid, sname, sslug in all_sites:
@@ -128,14 +156,14 @@ def lookup_scope_id(site_name: str) -> Optional[int]:
         sname_str = sname or ""
         sslug_str = sslug or ""
         if sname_str.lower().startswith(q) or sslug_str.lower().startswith(q):
-            is_cloud = any(c in sname_str.lower() or c in sslug_str.lower() for c in ["azure", "aws", "gcp", "cloud"])
+            is_cloud = any(c in sname_str.lower() for c in ["azure", "aws", "gcp", "cloud"])
             starts_matches.append((is_cloud, len(sname_str), sid))
 
     if starts_matches:
         starts_matches.sort(key=lambda x: (x[0], x[1]))
         return starts_matches[0][2]
 
-    # 4. Substring match (Only allowed for queries with >= 4 characters to prevent 2-3 letter code collisions)
+    # 4. Substring match (for query length >= 4)
     if len(q) >= 4:
         sub_matches = []
         for sid, sname, sslug in all_sites:
@@ -151,7 +179,6 @@ def lookup_scope_id(site_name: str) -> Optional[int]:
     return None
 
 def lookup_site_supernet_from_db(site_name: str) -> Optional[str]:
-    """Finds top-level container prefix for a site from stored IPAM records."""
     if not site_name:
         return None
     init_db()
@@ -184,19 +211,9 @@ def lookup_site_supernet_from_db(site_name: str) -> Optional[str]:
         return candidates[0][2]
     return None
 
-def get_all_sites() -> List[Dict[str, Any]]:
-    init_db()
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM sites_records ORDER BY name ASC")
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+# ── INVENTORY RECORDS ───────────────────────────────────────────────────
 
-# ── INVENTORY RECORDS (Naming Tab) ──────────────────────────────────────
-
-def save_records_batch(records: List[Dict[str, Any]], clear_first: bool = False) -> Dict[str, int]:
+def save_records_batch(records: List[Dict[str, Any]], clear_first: bool = False, source: str = "Agent (PowerShell)") -> Dict[str, int]:
     init_db()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -222,10 +239,10 @@ def save_records_batch(records: List[Dict[str, Any]], clear_first: bool = False)
 
     conn.commit()
     conn.close()
+    set_sync_metadata("naming", source)
     return counts
 
 def save_universal_csv(file_bytes, filename: str = "", clear_first: bool = False) -> Dict[str, int]:
-    """Parses and validates NetBox Devices and Virtual Machines export CSVs."""
     df = pd.read_csv(file_bytes)
     cols = {str(c).lower().strip(): c for c in df.columns}
 
@@ -237,7 +254,7 @@ def save_universal_csv(file_bytes, filename: str = "", clear_first: bool = False
 
     name_col = cols.get("name")
     if not name_col:
-        raise ValueError("Invalid CSV: missing 'Name' column. Please export official data from NetBox.")
+        raise ValueError("Invalid CSV: missing 'Name' column.")
 
     fname_lower = filename.lower()
     is_vm_export = False
@@ -291,7 +308,7 @@ def save_universal_csv(file_bytes, filename: str = "", clear_first: bool = False
             "cluster": cluster if cluster.lower() != "nan" else ""
         })
 
-    return save_records_batch(records, clear_first=clear_first)
+    return save_records_batch(records, clear_first=clear_first, source="Manual CSV Upload")
 
 def get_records_by_category(category: str, site_filter: str = "") -> List[Dict[str, Any]]:
     init_db()
@@ -319,7 +336,7 @@ def get_records_by_category(category: str, site_filter: str = "") -> List[Dict[s
 
 # ── DEDICATED IPAM & PREFIXES ───────────────────────────────────────────
 
-def save_ipam_records_batch(records: List[Dict[str, Any]], clear_first: bool = False) -> int:
+def save_ipam_records_batch(records: List[Dict[str, Any]], clear_first: bool = False, source: str = "Agent (PowerShell)") -> int:
     init_db()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -353,6 +370,7 @@ def save_ipam_records_batch(records: List[Dict[str, Any]], clear_first: bool = F
 
     conn.commit()
     conn.close()
+    set_sync_metadata("ipam", source)
     return count
 
 def get_existing_prefix_strings() -> List[str]:
@@ -364,23 +382,12 @@ def get_existing_prefix_strings() -> List[str]:
     conn.close()
     return [r[0] for r in rows if r[0] and "/" in r[0]]
 
-def clear_all_records() -> int:
-    init_db()
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM inventory_records")
-    cursor.execute("DELETE FROM sites_records")
-    cursor.execute("DELETE FROM ipam_records")
-    deleted = cursor.rowcount
-    conn.commit()
-    conn.close()
-    return deleted
-
 def clear_inventory_records() -> int:
     init_db()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("DELETE FROM inventory_records")
+    cursor.execute("DELETE FROM sync_metadata WHERE module = 'naming'")
     deleted = cursor.rowcount
     conn.commit()
     conn.close()
@@ -392,6 +399,7 @@ def clear_ipam_records() -> int:
     cursor = conn.cursor()
     cursor.execute("DELETE FROM ipam_records")
     cursor.execute("DELETE FROM sites_records")
+    cursor.execute("DELETE FROM sync_metadata WHERE module = 'ipam'")
     deleted = cursor.rowcount
     conn.commit()
     conn.close()
