@@ -259,7 +259,7 @@ def render_ipam_tab(active_model: str):
     st.subheader("🌐 IPAM & Site Subnet Provisioning Engine")
     st.caption("Plan site supernets, allocate non-overlapping VLAN subnets, and export ready-to-import NetBox CSV blocks.")
 
-    # Ingestion Toolbar with Source, Timestamp, and Refresh Action
+    # Ingestion Toolbar
     total_ipam_recs = get_total_ipam_count()
     total_sites_recs = get_total_sites_count()
     total_db_count = total_ipam_recs + total_sites_recs
@@ -428,9 +428,10 @@ def render_ipam_tab(active_model: str):
 
     st.markdown("##### 📊 Subnet Allocation Editor (✏️ Click any cell to edit)")
 
+    # Upgraded width parameter to eliminate deprecation warnings
     edited_df = st.data_editor(
         df_init,
-        use_container_width=True,
+        width="stretch",
         num_rows="dynamic",
         key="ipam_data_editor",
         column_config={
@@ -467,7 +468,7 @@ def render_ipam_tab(active_model: str):
         st.markdown("##### 🔍 Live Usable IP Ranges & Collision Status")
         st.dataframe(
             pd.DataFrame(final_records)[["VLAN ID", "Role", "VLAN Name", "Subnet (CIDR)", "Usable Range", "Status", "Prefix Description"]], 
-            use_container_width=True, 
+            width="stretch", 
             hide_index=True
         )
 
@@ -475,7 +476,7 @@ def render_ipam_tab(active_model: str):
         st.markdown("##### 📈 Remaining Capacity")
         cap_matrix = calculate_remaining_subnets(supernet_in, allocated_subnets)
         cap_rows = [{"Subnet Size": k, "Available": f"{v} subnets"} for k, v in cap_matrix.items()]
-        st.dataframe(pd.DataFrame(cap_rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(cap_rows), width="stretch", hide_index=True)
 
     # NetBox Bulk-Import CSV Generators
     st.markdown("---")
