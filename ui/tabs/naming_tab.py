@@ -103,22 +103,23 @@ def render_compact_toolbar():
                     f"**DB Status:** `Source: {meta['source']}` | `Last Updated: {meta['updated_at']}`"
                 )
 
-            st.markdown(
-                f"""
-                **Option A: Automated Push via PowerShell Agent (Recommended):**
-                ```powershell
-                .\\Sync-NetBoxHub.ps1 -NetBoxUrl "[https://ipam.aw.ads](https://ipam.aw.ads)" -ApiToken "YOUR_NETBOX_TOKEN"
-                ```
-                """
-            )
+            st.markdown("**Option A: Automated Push via PowerShell Agent (Recommended):**")
+            st.code('.\\Sync-NetBoxHub.ps1 -NetBoxUrl "https://xxxx" -ApiToken "xxxx" -HubUrl "xxxx"', language="powershell")
 
-            st.download_button(
-                "⬇️ Download Sync-NetBoxHub.ps1 Agent",
-                POWERSHELL_AGENT_CODE,
-                file_name="Sync-NetBoxHub.ps1",
-                mime="text/plain",
-                key="dl_ps1_naming"
-            )
+            st.caption("💡 *Press **Refresh** after the upload is completed in PowerShell to reload the local data.*")
+
+            c_dl, c_ref = st.columns([2, 1])
+            with c_dl:
+                st.download_button(
+                    "⬇️ Download Sync-NetBoxHub.ps1 Agent",
+                    POWERSHELL_AGENT_CODE,
+                    file_name="Sync-NetBoxHub.ps1",
+                    mime="text/plain",
+                    key="dl_ps1_naming"
+                )
+            with c_ref:
+                if st.button("🔄 Refresh", key="ref_naming_btn", use_container_width=True):
+                    st.rerun()
 
             st.markdown(
                 f"""
@@ -160,7 +161,7 @@ def render_naming_tab(active_model):
 
     st.markdown("---")
 
-    # 1. Network & Security Devices
+    # Network & Security Devices
     if "1. Network" in naming_cat:
         case_mode = render_compact_toolbar()
 
@@ -245,7 +246,7 @@ def render_naming_tab(active_model):
                 st.caption(f"On Remote Device (`{r_dev}`):")
                 st.code(f"to {l_dev}_{l_port_short}{role_suffix}", language="text")
 
-    # 2. ESXi Hosts & VMs
+    # Hosts & VMs
     elif "2. Hosts" in naming_cat:
         case_mode = render_compact_toolbar()
 
@@ -310,7 +311,7 @@ def render_naming_tab(active_model):
                 site_filter=v_site
             )
 
-    # 3. ESXi Network Descriptions
+    # ESXi Network Descriptions
     else:
         auto_correct = st.checkbox(
             "⚡ Auto-Correct VMware Syntax (e.g. vswitch1 -> vSwitch1, nic0 -> vmnic0)",

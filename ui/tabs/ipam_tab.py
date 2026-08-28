@@ -42,8 +42,9 @@ param (
     [Alias("NetBoxToken", "Token")]
     [string]$ApiToken,
 
+    [Parameter(Mandatory = $true)]
     [Alias("Destination", "Hub")]
-    [string]$HubUrl = "https://netbox-hub.lovelyndha.pp.ua",
+    [string]$HubUrl,
 
     [string]$HubSyncKey = "netbox-hub-secret-sync-key",
     [int]$PageSize = 2000
@@ -258,7 +259,7 @@ def render_ipam_tab(active_model: str):
     st.subheader("🌐 IPAM & Site Subnet Provisioning Engine")
     st.caption("Plan site supernets, allocate non-overlapping VLAN subnets, and export ready-to-import NetBox CSV blocks.")
 
-    # 1. Ingestion Toolbar with Source & Timestamp Badge
+    # Ingestion Toolbar with Source, Timestamp, and Refresh Action
     total_ipam_recs = get_total_ipam_count()
     total_sites_recs = get_total_sites_count()
     total_db_count = total_ipam_recs + total_sites_recs
@@ -274,22 +275,23 @@ def render_ipam_tab(active_model: str):
                 f"**DB Status:** `Source: {meta['source']}` | `Last Updated: {meta['updated_at']}`"
             )
 
-        st.markdown(
-            f"""
-            **Option A: Automated Push via PowerShell Agent (Recommended):**
-            ```powershell
-            .\\Sync-NetBoxHub.ps1 -NetBoxUrl "[https://ipam.aw.ads](https://ipam.aw.ads)" -ApiToken "YOUR_NETBOX_TOKEN"
-            ```
-            """
-        )
+        st.markdown("**Option A: Automated Push via PowerShell Agent (Recommended):**")
+        st.code('.\\Sync-NetBoxHub.ps1 -NetBoxUrl "https://xxxx" -ApiToken "xxxx" -HubUrl "xxxx"', language="powershell")
 
-        st.download_button(
-            "⬇️ Download Sync-NetBoxHub.ps1 Agent",
-            POWERSHELL_AGENT_CODE,
-            file_name="Sync-NetBoxHub.ps1",
-            mime="text/plain",
-            key="dl_ps1_ipam"
-        )
+        st.caption("💡 *Press **Refresh** after the upload is completed in PowerShell to reload the local data.*")
+
+        c_dl, c_ref = st.columns([2, 1])
+        with c_dl:
+            st.download_button(
+                "⬇️ Download Sync-NetBoxHub.ps1 Agent",
+                POWERSHELL_AGENT_CODE,
+                file_name="Sync-NetBoxHub.ps1",
+                mime="text/plain",
+                key="dl_ps1_ipam"
+            )
+        with c_ref:
+            if st.button("🔄 Refresh", key="ref_ipam_btn", use_container_width=True):
+                st.rerun()
 
         st.markdown(
             f"""
@@ -315,7 +317,7 @@ def render_ipam_tab(active_model: str):
             else:
                 st.caption("No custom data loaded.")
 
-    # 2. Site Inputs (Smart Auto-Lookup of Scope ID & Supernet)
+    # Site Inputs
     top1, top2, top3 = st.columns([2, 1, 2])
     with top1:
         site_name = st.text_input(
@@ -370,7 +372,7 @@ def render_ipam_tab(active_model: str):
 
     existing_prefixes = get_existing_prefix_strings()
 
-    # 3. Base Row Template Structure
+    # Base Row Template Structure
     base_default = []
     for v in STANDARD_VLAN_TEMPLATES:
         base_default.append({
@@ -441,7 +443,7 @@ def render_ipam_tab(active_model: str):
         }
     )
 
-    # 4. Live Usable Ranges and Status Evaluation
+    # Status Evaluation
     final_records = computed_rows
     allocated_subnets = []
     
@@ -475,7 +477,7 @@ def render_ipam_tab(active_model: str):
         cap_rows = [{"Subnet Size": k, "Available": f"{v} subnets"} for k, v in cap_matrix.items()]
         st.dataframe(pd.DataFrame(cap_rows), use_container_width=True, hide_index=True)
 
-    # 5. NetBox Bulk-Import CSV Generators
+    # NetBox Bulk-Import CSV Generators
     st.markdown("---")
     st.markdown("### 📋 NetBox Bulk-Import CSV Generators")
 
