@@ -33,6 +33,7 @@ logger = logging.getLogger("netbox-hub")
 def _mount_native_tornado_api():
     try:
         import tornado.web
+        from tornado.routing import PathMatches, Rule
         from core.db_manager import save_sites_batch, save_ipam_records_batch, save_records_batch
 
         class NetBoxSyncPushHandler(tornado.web.RequestHandler):
@@ -41,14 +42,14 @@ def _mount_native_tornado_api():
                 self.set_header("Access-Control-Allow-Headers", "content-type, x-hub-key")
                 self.set_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
 
-            def options(self):
+            def options(self, *args, **kwargs):
                 self.set_status(204)
                 self.finish()
 
-            def get(self):
+            def get(self, *args, **kwargs):
                 self.write({"status": "online", "version": APP_VERSION, "endpoint": "/api/v1/sync/push"})
 
-            def post(self):
+            def post(self, *args, **kwargs):
                 try:
                     hub_secret = os.getenv("HUB_SYNC_KEY", "netbox-hub-secret-sync-key")
                     auth_header = self.request.headers.get("X-Hub-Key", "")
@@ -195,11 +196,16 @@ def _mount_native_tornado_api():
 
         if server is not None:
             tornado_app = server._app
+            # Insert top-priority rules matching with and without trailing slash
             tornado_app.wildcard_router.rules.insert(
                 0,
-                tornado.web.url(r"/api/v1/sync/push", NetBoxSyncPushHandler)
+                Rule(PathMatches(r"^/api/v1/sync/push/?$"), NetBoxSyncPushHandler)
             )
-            logger.info("Native Tornado REST handler successfully mounted at /api/v1/sync/push")
+            tornado_app.wildcard_router.rules.insert(
+                0,
+                Rule(PathMatches(r"^/api/v1/health/?$"), NetBoxSyncPushHandler)
+            )
+            logger.info("Native Tornado REST handler registered for /api/v1/sync/push")
     except Exception as e:
         logger.warning("Could not mount native Tornado REST handler: %s", e)
 
