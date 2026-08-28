@@ -2,32 +2,51 @@ import ipaddress
 import re
 from typing import List, Dict, Any, Optional
 
-STANDARD_VLAN_TEMPLATES = [
-    {"vid": 1, "role": "Site Subnet", "prefix_len": 16, "fallback_subnet": ""},
-    {"vid": 10, "role": "In-Band Management", "prefix_len": 24, "fallback_subnet": ""},
-    {"vid": 20, "role": "Data", "prefix_len": 24, "fallback_subnet": ""},
-    {"vid": 30, "role": "Voice", "prefix_len": 24, "fallback_subnet": ""},
-    {"vid": 40, "role": "Corporate WiFi", "prefix_len": 24, "fallback_subnet": ""},
-    {"vid": 50, "role": "Guest WiFi", "prefix_len": 24, "fallback_subnet": ""},
-    {"vid": 60, "role": "Printers", "prefix_len": 24, "fallback_subnet": ""},
-    {"vid": 70, "role": "Security / CCTV", "prefix_len": 24, "fallback_subnet": ""},
-    {"vid": 80, "role": "Building Management", "prefix_len": 24, "fallback_subnet": ""},
-    {"vid": 90, "role": "Audio Visual", "prefix_len": 24, "fallback_subnet": ""},
-    {"vid": 100, "role": "Server / DMZ", "prefix_len": 24, "fallback_subnet": ""},
+# Standard Branch Preset without any fake VID 1
+BRANCH_VLAN_PRESET = [
+    {"vid": 5, "role": "Management", "vlan_name": "Management", "desc": "Management"},
+    {"vid": 90, "role": "Routing", "vlan_name": "Routing", "desc": "Routing interface VLANs"},
+    {"vid": 100, "role": "Workstations", "vlan_name": "Wired Workstations", "desc": "Wired Workstations"},
+    {"vid": 200, "role": "Guests", "vlan_name": "VIN_Guest", "desc": "VIN_Guest"},
+    {"vid": 300, "role": "Corporate WiFi", "vlan_name": "VIN_Corp", "desc": "VIN_Corp"},
+    {"vid": 400, "role": "Mobiles", "vlan_name": "VIN_Mobi", "desc": "VIN_Mobi"},
+    {"vid": 500, "role": "OT", "vlan_name": "OT", "desc": "OT"},
+    {"vid": 600, "role": "IoT", "vlan_name": "IoT/Security", "desc": "IoT/Security"},
+    {"vid": 700, "role": "Printers", "vlan_name": "Printers", "desc": "Printers"},
+    {"vid": 800, "role": "Audio Visual", "vlan_name": "AV equipment", "desc": "AV equipment"},
 ]
 
+# Standard Data Center Preset
+DATACENTER_VLAN_PRESET = [
+    {"vid": 10, "role": "OOB / IPMI / iLO", "vlan_name": "OOB-Mgmt", "desc": "Out-of-Band server lights-out management (iLO/iDRAC)"},
+    {"vid": 20, "role": "In-Band Management", "vlan_name": "InBand-Mgmt", "desc": "ESXi hypervisors and core switch management"},
+    {"vid": 30, "role": "vMotion", "vlan_name": "vMotion", "desc": "Hypervisor live migration network"},
+    {"vid": 40, "role": "Storage / iSCSI-A", "vlan_name": "Storage-A", "desc": "Primary SAN / IP Storage traffic"},
+    {"vid": 50, "role": "Storage / iSCSI-B", "vlan_name": "Storage-B", "desc": "Secondary redundant SAN / IP Storage traffic"},
+    {"vid": 100, "role": "Production App / Web", "vlan_name": "Prod-App", "desc": "Production application server workloads"},
+    {"vid": 200, "role": "Production Database", "vlan_name": "Prod-DB", "desc": "Production database clusters"},
+    {"vid": 300, "role": "DMZ / Perimeter", "vlan_name": "DMZ", "desc": "External-facing reverse proxies and DMZ hosts"},
+    {"vid": 400, "role": "Core Infrastructure", "vlan_name": "Core-Infra", "desc": "DNS, Active Directory, NTP, and monitoring services"},
+    {"vid": 500, "role": "Backup / Recovery", "vlan_name": "Backup", "desc": "Dedicated data protection and backup traffic"},
+]
+
+VLAN_PRESETS = {
+    "-- Custom / Empty --": [],
+    "🏢 Branch Office VLAN Preset": BRANCH_VLAN_PRESET,
+    "🏛️ Data Center VLAN Preset": DATACENTER_VLAN_PRESET
+}
+
 ROLE_DESCRIPTIONS = {
-    "site subnet": "Top-level site container subnet",
-    "in-band management": "Management interfaces for network hardware",
-    "data": "Primary wired office endpoints",
-    "voice": "VoIP telephony network",
-    "corporate wifi": "Corporate wireless clients",
-    "guest wifi": "Isolated guest internet access",
-    "printers": "Network printers and multi-function devices",
-    "security / cctv": "Physical security cameras and access control",
-    "building management": "HVAC and BMS controllers",
-    "audio visual": "Video conferencing and digital signage",
-    "server / dmz": "Local branch infrastructure servers",
+    "management": "Management",
+    "routing": "Routing interface VLANs",
+    "workstations": "Wired Workstations",
+    "guests": "VIN_Guest",
+    "corporate wifi": "VIN_Corp",
+    "mobiles": "VIN_Mobi",
+    "ot": "OT",
+    "iot": "IoT/Security",
+    "printers": "Printers",
+    "audio visual": "AV equipment",
 }
 
 def slugify(text: str) -> str:
@@ -51,7 +70,7 @@ def calculate_ip_range_str(net: ipaddress.IPv4Network) -> str:
     return f"{first_host} - {last_host}"
 
 def compute_chained_rows(supernet_str: str, working_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Calculates suggested contiguous non-overlapping subnets based on supernet and prior row assignments."""
+    """Calculates suggested contiguous /24 subnets sequentially inside the site container."""
     current_base = None
     if supernet_str and "/" in supernet_str:
         try:
@@ -76,21 +95,15 @@ def compute_chained_rows(supernet_str: str, working_rows: List[Dict[str, Any]]) 
         user_subnet = str(row.get("Subnet (CIDR)") or "").strip()
 
         if current_base is not None:
-            # First row or site container
-            if str(row.get("VLAN ID")) == "1" or role.lower() == "site subnet":
-                suggested = supernet_str
-            else:
-                suggested = f"{current_base}/24"
+            suggested = f"{current_base}/24"
 
         row["Suggest Subnet"] = suggested
 
-        # Advance pointer for next subnet
         active_sub = user_subnet or suggested
         if active_sub and "/" in active_sub:
             try:
                 active_net = ipaddress.ip_network(active_sub, strict=False)
-                if str(row.get("VLAN ID")) != "1" and role.lower() != "site subnet":
-                    current_base = active_net.broadcast_address + 1
+                current_base = active_net.broadcast_address + 1
             except ValueError:
                 pass
 
@@ -115,15 +128,11 @@ def evaluate_subnet_row(
 
     usable_range = calculate_ip_range_str(net)
     
-    # Description Generator
     branch = format_branch_display(site_name) or "Site"
     clean_role = role.strip() if role else "Data"
-    if str(vid) == "1" or clean_role.lower() == "site subnet":
-        desc = f"{branch} - Site Supernet"
-    else:
-        desc = f"{branch} - VLAN {vid} ({clean_role})" if vid else f"{branch} - {clean_role}"
+    desc = f"{branch} - VLAN {vid} ({clean_role})" if vid else f"{branch} - {clean_role}"
 
-    # Supernet container boundary check
+    # Container boundary check
     if supernet_str and "/" in supernet_str:
         try:
             sup_net = ipaddress.ip_network(supernet_str, strict=False)
@@ -136,14 +145,13 @@ def evaluate_subnet_row(
         except ValueError:
             pass
 
-    # Global DB collision / overlap check
+    # Global DB collision check
     for exist_str in existing_prefixes:
-        if exist_str == subnet_str:
+        if exist_str == subnet_str or exist_str == supernet_str:
             continue
         try:
             exist_net = ipaddress.ip_network(exist_str, strict=False)
             if net.overlaps(exist_net) and net != exist_net:
-                # Allow standard site container containing its own subnets
                 if not (net.subnet_of(exist_net) and exist_net.prefixlen < 24):
                     return {
                         "usable_range": usable_range,
@@ -199,11 +207,10 @@ def generate_netbox_vlan_group_csv(site_name: str, scope_id: str) -> str:
 
 def generate_netbox_vlans_csv(site_name: str, rows: List[Dict[str, Any]]) -> str:
     clean = format_branch_display(site_name)
-    slug = slugify(clean)
     lines = ["vid,name,status,group,description"]
     for r in rows:
         vid = r.get("VLAN ID")
-        if not vid or str(vid) == "1":
+        if not vid:
             continue
         vname = r.get("VLAN Name") or r.get("Role") or f"VLAN_{vid}"
         desc = r.get("VLAN Description") or f"{clean} {vname}"
@@ -214,15 +221,15 @@ def generate_netbox_prefixes_csv(site_name: str, scope_id: str, supernet_str: st
     clean = format_branch_display(site_name)
     lines = ["prefix,status,scope_type,scope_id,vlan_group,vlan,description"]
     
-    # 1. Top-Level Site Container
+    # 1. Top-Level Site Supernet Container (Pure Prefix container, no VLAN Group or VLAN ID)
     if supernet_str and "/" in supernet_str:
         lines.append(f"\"{supernet_str}\",container,\"dcim.site\",{scope_id or '0'},,,\"{clean} - Site Supernet\"")
 
-    # 2. Subnets
+    # 2. Member VLAN Subnets
     for r in rows:
         subnet = str(r.get("Subnet (CIDR)") or "").strip()
         vid = r.get("VLAN ID")
-        if not subnet or "/" not in subnet or str(vid) == "1" or subnet == supernet_str:
+        if not subnet or "/" not in subnet or not vid or subnet == supernet_str:
             continue
         vname = r.get("VLAN Name") or r.get("Role") or f"VLAN_{vid}"
         desc = r.get("Prefix Description") or f"{clean} - VLAN {vid} ({vname})"

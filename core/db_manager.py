@@ -156,7 +156,7 @@ def lookup_scope_id(site_name: str) -> Optional[int]:
         sname_str = sname or ""
         sslug_str = sslug or ""
         if sname_str.lower().startswith(q) or sslug_str.lower().startswith(q):
-            is_cloud = any(c in sname_str.lower() for c in ["azure", "aws", "gcp", "cloud"])
+            is_cloud = any(c in sname_str.lower() or c in sslug_str.lower() for c in ["azure", "aws", "gcp", "cloud"])
             starts_matches.append((is_cloud, len(sname_str), sid))
 
     if starts_matches:

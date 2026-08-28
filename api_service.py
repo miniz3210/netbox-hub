@@ -39,7 +39,6 @@ def sync_push():
     if HUB_SECRET_KEY and auth_header != HUB_SECRET_KEY and payload.get("sync_key") != HUB_SECRET_KEY:
         return jsonify({"success": False, "error": "Unauthorized: Invalid X-Hub-Key"}), 401
 
-    # Safe key extraction supporting both hyphenated and underscored JSON keys
     sites_data = payload.get("sites") or payload.get("dcim_sites") or []
     vlans_data = payload.get("vlans") or payload.get("ipam_vlans") or []
     prefixes_data = payload.get("prefixes") or payload.get("ipam_prefixes") or []
