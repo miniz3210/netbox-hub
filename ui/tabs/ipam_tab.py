@@ -337,8 +337,8 @@ def render_ipam_tab(active_model: str):
             else:
                 st.caption("No custom data loaded.")
 
-    # 2. Site Inputs
-    top1, top2, top3 = st.columns([2, 1, 2])
+    # 2. Site Inputs and Compact Remaining Capacity
+    top1, top2, top3 = st.columns([2, 1, 2.2])
     with top1:
         site_name = st.text_input(
             "Branch / Site Name",
@@ -374,29 +374,37 @@ def render_ipam_tab(active_model: str):
         else:
             st.caption("⚪ Manual Scope ID mode")
 
+    allocated_subnets = []
+    if "ipam_persisted_rows" in st.session_state:
+        allocated_subnets = [str(r.get("Subnet (CIDR)", "") or "").strip() for r in st.session_state["ipam_persisted_rows"]]
+
     with top3:
         supernet_in = st.text_input(
             "Site Supernet (CIDR)", 
             value=st.session_state.get("ipam_super_in", auto_supernet or ""), 
             key="ipam_super_in",
-            placeholder="e.g. 10.1.0.0/16",
+            placeholder="e.g. 10.113.240.0/21",
             help="Top-level container subnet for this branch site."
         ).strip()
+        
         if supernet_in and "/" in supernet_in:
             try:
                 sup_net = ipaddress.ip_network(supernet_in, strict=False)
                 sup_range = calculate_ip_range_str(sup_net)
-                st.caption(f"📍 Supernet Usable Range: **`{sup_range}`**")
+                cap_matrix = calculate_remaining_subnets(supernet_in, allocated_subnets)
+                cap_str = f"**Available:** `{cap_matrix['/24']}x /24` | `{cap_matrix['/25']}x /25` | `{cap_matrix['/26']}x /26` | `{cap_matrix['/27']}x /27`"
+                st.markdown(f"📍 **Site Subnet:** `{sup_range}`")
+                st.caption(cap_str)
             except ValueError:
                 st.caption("⚠️ Invalid CIDR format")
 
     existing_prefixes = get_existing_prefix_strings()
 
-    # 3. Preset Selection & Dynamic Allocation Editor
+    # 3. Preset Selection & Unified Data Editor
     st.markdown("---")
     c_title, c_preset = st.columns([2.5, 1.5])
     with c_title:
-        st.markdown("##### 📊 Subnet Allocation Editor (✏️ Click any cell to edit)")
+        st.markdown("##### 📊 Subnet Allocation & Live Status (✏️ Click any cell to edit)")
     with c_preset:
         st.selectbox(
             "Load Standard Preset",
@@ -410,28 +418,24 @@ def render_ipam_tab(active_model: str):
     if "ipam_persisted_rows" not in st.session_state:
         st.session_state["ipam_persisted_rows"] = []
 
-    # Apply Delta Changes from previous interaction before computing next suggestions
+    # Delta edit tracking before next compute cycle
     raw_rows = [dict(r) for r in st.session_state["ipam_persisted_rows"]]
     editor_state = st.session_state.get("ipam_data_editor_live", {})
     
-    # 1. Apply row deletions
     deleted_indices = set(editor_state.get("deleted_rows", []))
     if deleted_indices:
         raw_rows = [r for i, r in enumerate(raw_rows) if i not in deleted_indices]
 
-    # 2. Apply cell edits
     edited_cells = editor_state.get("edited_rows", {})
     for row_idx_str, changes in edited_cells.items():
         row_idx = int(row_idx_str)
         if row_idx < len(raw_rows):
-            # If user typed or changed Role, auto-update VLAN Name & auto-lookup description
             if "Role" in changes and "VLAN Name" not in changes:
                 changes["VLAN Name"] = changes["Role"]
                 if "VLAN Description" not in changes:
                     changes["VLAN Description"] = lookup_role_description(changes["Role"])
             raw_rows[row_idx].update(changes)
 
-    # 3. Apply added rows
     for new_r in editor_state.get("added_rows", []):
         r_name = new_r.get("Role", "")
         raw_rows.append({
@@ -442,11 +446,28 @@ def render_ipam_tab(active_model: str):
             "Subnet (CIDR)": new_r.get("Subnet (CIDR)", "")
         })
 
-    # Accurately compute next network suggestions on the updated rows
     computed_rows = compute_chained_rows(supernet_in, raw_rows)
     st.session_state["ipam_persisted_rows"] = computed_rows
 
-    TABLE_COLS = ["VLAN ID", "Role", "VLAN Name", "VLAN Description", "Suggest Subnet", "Subnet (CIDR)"]
+    # Calculate status, usable range, and prefix description inline for the same table
+    for r in computed_rows:
+        sub_str = str(r.get("Subnet (CIDR)", "") or "").strip()
+        eval_res = evaluate_subnet_row(
+            sub_str, 
+            r.get("VLAN ID"), 
+            r.get("Role", ""), 
+            site_name, 
+            supernet_in, 
+            existing_prefixes
+        )
+        r["Usable Range"] = eval_res["usable_range"]
+        r["Status"] = eval_res["status"]
+        r["Prefix Description"] = eval_res["desc"]
+
+    TABLE_COLS = [
+        "VLAN ID", "Role", "VLAN Name", "VLAN Description", 
+        "Suggest Subnet", "Subnet (CIDR)", "Usable Range", "Status", "Prefix Description"
+    ]
     if computed_rows:
         df_init = pd.DataFrame(computed_rows)[TABLE_COLS]
     else:
@@ -459,65 +480,26 @@ def render_ipam_tab(active_model: str):
         key="ipam_data_editor_live",
         column_config={
             "VLAN ID": st.column_config.NumberColumn("VLAN ID", step=1, required=True),
-            "Role": st.column_config.TextColumn("Role", help="VLAN Role (e.g. Corporate WiFi, Workstations). Auto-sets VLAN Name & Description."),
+            "Role": st.column_config.TextColumn("Role", help="VLAN Role. Auto-sets VLAN Name & Description."),
             "VLAN Name": st.column_config.TextColumn("VLAN Name", help="VLAN Name in NetBox. Defaults to Role, or editable."),
             "VLAN Description": st.column_config.TextColumn("VLAN Description", help="VLAN Description. Auto-looked up from Role, or editable."),
-            "Suggest Subnet": st.column_config.TextColumn("Suggest Subnet", help="Calculated next available network IP ID (without subnet mask).", disabled=True),
-            "Subnet (CIDR)": st.column_config.TextColumn("Subnet (CIDR)", help="Type subnet CIDR (e.g. 10.113.66.0/24, 10.113.66.0/23) and hit Enter.")
+            "Suggest Subnet": st.column_config.TextColumn("Suggest Subnet", help="Calculated next available network IP ID.", disabled=True),
+            "Subnet (CIDR)": st.column_config.TextColumn("Subnet (CIDR)", help="Type subnet CIDR (e.g. 10.113.252.0/23) and hit Enter."),
+            "Usable Range": st.column_config.TextColumn("Usable Range", help="Calculated usable host IP range.", disabled=True),
+            "Status": st.column_config.TextColumn("Status", help="Collision & Database usage status.", disabled=True),
+            "Prefix Description": st.column_config.TextColumn("Prefix Description", help="Calculated NetBox prefix description.", disabled=True)
         }
     )
 
-    # 4. Live Usable Ranges & Status Evaluation
-    final_records = []
-    allocated_subnets = []
-    
-    for r in computed_rows:
-        sub_str = str(r.get("Subnet (CIDR)", "") or "").strip()
-        allocated_subnets.append(sub_str)
-        eval_res = evaluate_subnet_row(
-            sub_str, 
-            r.get("VLAN ID"), 
-            r.get("Role", ""), 
-            site_name, 
-            supernet_in, 
-            existing_prefixes
-        )
-        row_eval = dict(r)
-        row_eval["Usable Range"] = eval_res["usable_range"]
-        row_eval["Status"] = eval_res["status"]
-        row_eval["Prefix Description"] = eval_res["desc"]
-        final_records.append(row_eval)
-
-    c_prev, c_cap = st.columns([3, 1.2])
-    with c_prev:
-        st.markdown("##### 🔍 Live Usable IP Ranges & Collision Status")
-        PREV_COLS = ["VLAN ID", "Role", "VLAN Name", "Subnet (CIDR)", "Usable Range", "Status", "Prefix Description"]
-        if final_records:
-            df_prev = pd.DataFrame(final_records)[PREV_COLS]
-        else:
-            df_prev = pd.DataFrame(columns=PREV_COLS)
-            
-        st.dataframe(
-            df_prev, 
-            width="stretch", 
-            hide_index=True
-        )
-
-    with c_cap:
-        st.markdown("##### 📈 Remaining Capacity")
-        cap_matrix = calculate_remaining_subnets(supernet_in, allocated_subnets)
-        cap_rows = [{"Subnet Size": k, "Available": f"{v} subnets"} for k, v in cap_matrix.items()]
-        st.dataframe(pd.DataFrame(cap_rows), width="stretch", hide_index=True)
-
-    # 5. NetBox Bulk-Import CSV Copy Cards
+    # 4. NetBox Bulk-Import CSV Copy Cards
     st.markdown("---")
     st.markdown("### 📋 NetBox Bulk-Import CSV Generators")
 
     display_site = display_site_name or "Site"
     csv_site = generate_netbox_site_csv(display_site)
     csv_group = generate_netbox_vlan_group_csv(display_site, scope_id or "0")
-    csv_vlans = generate_netbox_vlans_csv(display_site, final_records)
-    csv_prefixes = generate_netbox_prefixes_csv(display_site, scope_id or "0", supernet_in, final_records)
+    csv_vlans = generate_netbox_vlans_csv(display_site, computed_rows)
+    csv_prefixes = generate_netbox_prefixes_csv(display_site, scope_id or "0", supernet_in, computed_rows)
 
     c1, c2 = st.columns(2)
     with c1:

@@ -2,7 +2,6 @@ import ipaddress
 import re
 from typing import List, Dict, Any, Optional
 
-# Exact Branch Preset Ordering and Role/Description pairs
 BRANCH_VLAN_PRESET = [
     {"vid": 300, "role": "Corporate WiFi", "vlan_name": "Corporate WiFi", "desc": "VIN_Corp"},
     {"vid": 100, "role": "Workstations", "vlan_name": "Workstations", "desc": "Wired Workstations"},
@@ -16,7 +15,6 @@ BRANCH_VLAN_PRESET = [
     {"vid": 600, "role": "IoT", "vlan_name": "IoT", "desc": "IoT/Security"},
 ]
 
-# Data Center Preset
 DATACENTER_VLAN_PRESET = [
     {"vid": 10, "role": "OOB / IPMI / iLO", "vlan_name": "OOB / IPMI / iLO", "desc": "OOB-Mgmt"},
     {"vid": 20, "role": "In-Band Management", "vlan_name": "In-Band Management", "desc": "InBand-Mgmt"},
@@ -61,7 +59,6 @@ ROLE_TO_DESC_MAP = {
 }
 
 def lookup_role_description(role_str: str) -> str:
-    """Matches role string to standard description."""
     if not role_str:
         return ""
     clean = role_str.strip().lower()
@@ -105,7 +102,6 @@ def calculate_ip_range_str(net: ipaddress.IPv4Network) -> str:
     return f"{first_host} - {last_host}"
 
 def calculate_subnet_boundary_str(net: ipaddress.IPv4Network) -> str:
-    """Returns network_address - broadcast_address (e.g., 10.113.240.0 - 10.113.247.255)"""
     return f"{net.network_address} - {net.broadcast_address}"
 
 def compute_chained_rows(supernet_str: str, working_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -153,7 +149,7 @@ def evaluate_subnet_row(
 
     branch = format_branch_display(site_name) or "Site"
     clean_role = role.strip() if role else "Data"
-    desc = f"{branch} - VLAN {vid} ({clean_role})" if vid else f"{branch} - {clean_role}"
+    desc = f"{branch} {clean_role} -- VLAN {vid}" if vid else f"{branch} {clean_role}"
 
     if not clean_sub or "/" not in clean_sub:
         return {"usable_range": "-", "status": "⚪ Unassigned", "desc": desc}
@@ -165,7 +161,6 @@ def evaluate_subnet_row(
 
     usable_range = calculate_ip_range_str(net)
 
-    # 1. Direct Match in NetBox DB
     for exist_str in existing_prefixes:
         exist_clean = sanitize_cidr(exist_str)
         if exist_clean == clean_sub:
@@ -175,7 +170,6 @@ def evaluate_subnet_row(
                 "desc": desc
             }
 
-    # 2. Overlaps with existing DB prefixes
     for exist_str in existing_prefixes:
         exist_clean = sanitize_cidr(exist_str)
         if exist_clean == clean_supernet:
@@ -191,7 +185,6 @@ def evaluate_subnet_row(
         except ValueError:
             pass
 
-    # 3. Container boundary check
     if clean_supernet and "/" in clean_supernet:
         try:
             sup_net = ipaddress.ip_network(clean_supernet, strict=False)
@@ -247,28 +240,29 @@ def generate_netbox_site_csv(site_name: str) -> str:
 
 def generate_netbox_vlan_group_csv(site_name: str, scope_id: str) -> str:
     clean = format_branch_display(site_name)
-    slug = slugify(clean)
-    return f"name,slug,scope_type,scope_id,description\n\"{clean} VLANs\",\"{slug}-vlans\",\"dcim.site\",{scope_id or '0'},\"{clean} VLAN Group\""
+    slug = slugify(f"{clean} VLAN Group")
+    return f"name,slug,scope_type,scope_id\n\"{clean} VLAN Group\",\"{slug}\",\"dcim.site\",{scope_id or '0'}"
 
 def generate_netbox_vlans_csv(site_name: str, rows: List[Dict[str, Any]]) -> str:
     clean = format_branch_display(site_name)
-    lines = ["vid,name,status,group,description"]
+    lines = ["vid,name,status,site,group,description,role"]
     for r in rows:
         vid = r.get("VLAN ID")
         subnet = sanitize_cidr(str(r.get("Subnet (CIDR)") or "").strip())
         if not vid or not subnet or "/" not in subnet:
             continue
         vname = r.get("VLAN Name") or r.get("Role") or f"VLAN_{vid}"
-        desc = r.get("VLAN Description") or f"{clean} {vname}"
-        lines.append(f"{vid},\"{vname}\",active,\"{clean} VLANs\",\"{desc}\"")
+        desc = r.get("VLAN Description") or lookup_role_description(str(r.get("Role") or ""))
+        role_val = r.get("Role") or vname
+        lines.append(f"{vid},\"{vname}\",active,\"{clean}\",\"{clean} VLAN Group\",\"{desc}\",\"{role_val}\"")
     return "\n".join(lines)
 
 def generate_netbox_prefixes_csv(site_name: str, scope_id: str, supernet_str: str, rows: List[Dict[str, Any]]) -> str:
     clean = format_branch_display(site_name)
     clean_supernet = sanitize_cidr(supernet_str)
-    lines = ["prefix,status,scope_type,scope_id,vlan_group,vlan,description"]
+    lines = ["prefix,status,scope_type,scope_id,vlan_group,vlan,role,description"]
     
-    # 1. Top-Level Site Supernet (Matches standard: active, scope_id, VLAN Group, "Site Subnet - <Start> - <End>")
+    # 1. Top-Level Supernet Container
     if clean_supernet and "/" in clean_supernet:
         try:
             sup_net = ipaddress.ip_network(clean_supernet, strict=False)
@@ -277,16 +271,16 @@ def generate_netbox_prefixes_csv(site_name: str, scope_id: str, supernet_str: st
         except ValueError:
             supernet_desc = f"Site Subnet - {clean_supernet}"
             
-        lines.append(f"\"{clean_supernet}\",active,\"dcim.site\",{scope_id or '0'},\"{clean} VLAN Group\",,\"{supernet_desc}\"")
+        lines.append(f"\"{clean_supernet}\",active,\"dcim.site\",{scope_id or '0'},\"{clean} VLAN Group\",,,,\"{supernet_desc}\"")
 
-    # 2. Subnets
+    # 2. Member Subnets
     for r in rows:
         subnet = sanitize_cidr(str(r.get("Subnet (CIDR)") or "").strip())
         vid = r.get("VLAN ID")
         if not subnet or "/" not in subnet or not vid or subnet == clean_supernet:
             continue
-        vname = r.get("VLAN Name") or r.get("Role") or f"VLAN_{vid}"
-        desc = r.get("Prefix Description") or f"{clean} - VLAN {vid} ({vname})"
-        lines.append(f"\"{subnet}\",active,\"dcim.site\",{scope_id or '0'},\"{clean} VLAN Group\",{vid},\"{desc}\"")
+        role_val = r.get("Role") or r.get("VLAN Name") or ""
+        desc = f"{clean} {role_val} -- VLAN {vid}"
+        lines.append(f"\"{subnet}\",active,\"dcim.site\",{scope_id or '0'},\"{clean} VLAN Group\",{vid},\"{role_val}\",\"{desc}\"")
         
     return "\n".join(lines)
