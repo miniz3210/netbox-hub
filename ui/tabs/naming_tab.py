@@ -48,7 +48,7 @@ def handle_csv_upload():
 
 def handle_csv_reset():
     clear_inventory_records()
-    st.toast("🗑️ Inventory Cleared. Restored default examples.", icon="🧹")
+    st.toast("🗑️ Database Cleared. Restored default examples.", icon="🧹")
 
 def display_reference_box(category_key: str, default_lines: str, label: str, site_filter: str = ""):
     real_items = get_records_by_category(category_key, site_filter=site_filter)
@@ -100,6 +100,7 @@ def render_compact_toolbar():
                 **Export Instructions from NetBox:**
                 * **Devices / Servers / Switches:** Go to `Devices` ➔ `Devices` ➔ `Export` ➔ `All Data` (`netbox_devices.csv`){tick_devices}
                 * **Virtual Machines:** Go to `Virtualization` ➔ `Virtual Machines` ➔ `Export` ➔ `All Data` (`netbox_virtual machines.csv`){tick_vms}
+                * *Tip: You can upload CSVs or sync automatically using the PowerShell agent.*
                 """
             )
             c_up, c_rst = st.columns([3, 1])
