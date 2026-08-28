@@ -42,6 +42,10 @@ def _mount_native_tornado_api():
                 self.set_header("Access-Control-Allow-Headers", "content-type, x-hub-key")
                 self.set_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
 
+            def check_xsrf_cookie(self):
+                # Explicitly bypass Streamlit's default XSRF protection for this API endpoint
+                pass
+
             def options(self, *args, **kwargs):
                 self.set_status(204)
                 self.finish()
@@ -62,7 +66,6 @@ def _mount_native_tornado_api():
                         self.write({"success": False, "error": "Unauthorized: Invalid X-Hub-Key"})
                         return
 
-                    # Support both standard keys and PowerShell script keys (dcim_sites, ipam_vlans, etc.)
                     sites_data = payload.get("sites") or payload.get("dcim_sites") or []
                     vlans_data = payload.get("vlans") or payload.get("ipam_vlans") or []
                     prefixes_data = payload.get("prefixes") or payload.get("ipam_prefixes") or []
@@ -96,14 +99,7 @@ def _mount_native_tornado_api():
                         for p in (v.get("prefixes", []) or []):
                             pfx_str = p.get("prefix", "") if isinstance(p, dict) else str(p)
                             if pfx_str and "/" in pfx_str:
-                                ipam_records.append({
-                                    "prefix_or_subnet": pfx_str,
-                                    "vlan_id": vid,
-                                    "vlan_name": vname,
-                                    "role": role_str,
-                                    "site": site_str,
-                                    "description": desc
-                                })
+                                ipam_records.append({"prefix_or_subnet": pfx_str, "vlan_id": vid, "vlan_name": vname, "role": role_str, "site": site_str, "description": desc})
 
                     for p in prefixes_data:
                         pfx_str = p.get("prefix", "")
@@ -116,14 +112,7 @@ def _mount_native_tornado_api():
                         site_str = site_val.get("name", "") if isinstance(site_val, dict) else str(site_val or "")
                         desc = p.get("description", "")
                         if pfx_str and "/" in pfx_str:
-                            ipam_records.append({
-                                "prefix_or_subnet": pfx_str,
-                                "vlan_id": vid,
-                                "vlan_name": vname,
-                                "role": role_str,
-                                "site": site_str,
-                                "description": desc
-                            })
+                            ipam_records.append({"prefix_or_subnet": pfx_str, "vlan_id": vid, "vlan_name": vname, "role": role_str, "site": site_str, "description": desc})
 
                     if ipam_records:
                         imported["prefixes"] = save_ipam_records_batch(ipam_records, clear_first=True)
@@ -143,16 +132,7 @@ def _mount_native_tornado_api():
 
                         combined = f"{name} {role} {dtype} {desc}".lower()
                         cat = "hypervisor" if any(h in combined for h in ["esx", "hypervisor", "infhost", "vmhost", "esxi"]) else "device"
-
-                        inv_records.append({
-                            "category": cat,
-                            "name": name,
-                            "description": desc,
-                            "manufacturer": mfg,
-                            "model_or_role": dtype or role,
-                            "site": site,
-                            "cluster": cluster
-                        })
+                        inv_records.append({"category": cat, "name": name, "description": desc, "manufacturer": mfg, "model_or_role": dtype or role, "site": site, "cluster": cluster})
 
                     for vm in vms_data:
                         name = vm.get("name") or ""
@@ -162,16 +142,7 @@ def _mount_native_tornado_api():
                         site = (vm.get("site") or {}).get("name", "")
                         cluster = (vm.get("cluster") or {}).get("name", "")
                         desc = vm.get("description") or ""
-
-                        inv_records.append({
-                            "category": "vm",
-                            "name": name,
-                            "description": desc,
-                            "manufacturer": "Virtual Machine",
-                            "model_or_role": role or "VM",
-                            "site": site,
-                            "cluster": cluster
-                        })
+                        inv_records.append({"category": "vm", "name": name, "description": desc, "manufacturer": "Virtual Machine", "model_or_role": role or "VM", "site": site, "cluster": cluster})
 
                     if inv_records:
                         counts = save_records_batch(inv_records, clear_first=True)
@@ -188,24 +159,25 @@ def _mount_native_tornado_api():
             from streamlit.web.server.server import Server
             server = Server.get_current()
         except Exception:
-            try:
-                from streamlit.server.server import Server
-                server = Server.get_current()
-            except Exception:
-                pass
+            pass
 
         if server is not None:
             tornado_app = server._app
-            # Insert top-priority rules matching with and without trailing slash
-            tornado_app.wildcard_router.rules.insert(
-                0,
-                Rule(PathMatches(r"^/api/v1/sync/push/?$"), NetBoxSyncPushHandler)
-            )
-            tornado_app.wildcard_router.rules.insert(
-                0,
-                Rule(PathMatches(r"^/api/v1/health/?$"), NetBoxSyncPushHandler)
-            )
-            logger.info("Native Tornado REST handler registered for /api/v1/sync/push")
+            rule = Rule(PathMatches(r"/api/v1/.*"), NetBoxSyncPushHandler)
+
+            # Ensure we only mount once to avoid infinite router growth
+            already_mounted = False
+            for r in getattr(tornado_app, 'wildcard_router', getattr(tornado_app, 'default_router')).rules:
+                if getattr(r.target, '__name__', '') == 'NetBoxSyncPushHandler':
+                    already_mounted = True
+                    break
+
+            if not already_mounted:
+                if hasattr(tornado_app, 'wildcard_router'):
+                    tornado_app.wildcard_router.rules.insert(0, rule)
+                if hasattr(tornado_app, 'default_router'):
+                    tornado_app.default_router.rules.insert(0, rule)
+                logger.info("Native Tornado API Handler forcefully mounted at /api/v1/* (XSRF Bypassed)")
     except Exception as e:
         logger.warning("Could not mount native Tornado REST handler: %s", e)
 
