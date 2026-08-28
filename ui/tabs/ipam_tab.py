@@ -1,401 +1,425 @@
-import io
+import os
 import re
-import ipaddress
-import streamlit as st
+import sqlite3
 import pandas as pd
-import openpyxl
-from core.ipam_engine import (
-    STANDARD_VLAN_TEMPLATES,
-    compute_chained_rows,
-    slugify,
-    evaluate_subnet_row,
-    calculate_remaining_subnets,
-    calculate_ip_range_str,
-    format_branch_display,
-    generate_netbox_site_csv,
-    generate_netbox_vlan_group_csv,
-    generate_netbox_vlans_csv,
-    generate_netbox_prefixes_csv
-)
-from core.db_manager import (
-    save_ipam_records_batch, 
-    save_sites_batch,
-    clear_ipam_records, 
-    get_total_ipam_count,
-    get_total_sites_count,
-    lookup_scope_id,
-    lookup_site_supernet_from_db,
-    get_existing_prefix_strings
-)
+from typing import List, Dict, Any, Optional, Tuple
 
-def handle_ipam_file_upload():
-    uploaded_files = st.session_state.get("ipam_multi_uploader")
-    if not uploaded_files:
-        return
+DB_PATH = "data/netbox_hub.db"
 
-    if not isinstance(uploaded_files, list):
-        uploaded_files = [uploaded_files]
-
-    total_scopes = 0
-    total_prefixes = 0
-    errors = []
-
-    for file_obj in uploaded_files:
-        filename = file_obj.name.lower()
-        content = file_obj.getvalue()
-        
-        # 1. Multi-Sheet Excel (.xlsx)
-        if filename.endswith(".xlsx"):
-            try:
-                wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
-                scope_records = []
-                ipam_records = []
-
-                if "Scope" in wb.sheetnames:
-                    ws_scope = wb["Scope"]
-                    for r in range(2, ws_scope.max_row + 1):
-                        s_id = ws_scope.cell(row=r, column=1).value
-                        s_name = ws_scope.cell(row=r, column=5).value
-                        s_slug = ws_scope.cell(row=r, column=6).value
-                        if s_name:
-                            scope_records.append({"id": s_id, "name": s_name, "slug": s_slug})
-                    if scope_records:
-                        cnt = save_sites_batch(scope_records, clear_first=False)
-                        total_scopes += cnt
-
-                if "Prefixes" in wb.sheetnames:
-                    ws_pfx = wb["Prefixes"]
-                    for r in range(2, ws_pfx.max_row + 1):
-                        pfx_str = ws_pfx.cell(row=r, column=6).value
-                        scope_id_val = ws_pfx.cell(row=r, column=9).value
-                        vlan_val = ws_pfx.cell(row=r, column=12).value
-                        role_val = ws_pfx.cell(row=r, column=14).value
-                        desc_val = ws_pfx.cell(row=r, column=17).value
-                        if pfx_str and str(pfx_str).strip():
-                            ipam_records.append({
-                                "prefix_or_subnet": str(pfx_str).strip(),
-                                "scope_id": scope_id_val,
-                                "vlan_name": str(vlan_val or ""),
-                                "role": str(role_val or ""),
-                                "description": str(desc_val or "")
-                            })
-                    if ipam_records:
-                        cnt = save_ipam_records_batch(ipam_records, clear_first=False)
-                        total_prefixes += cnt
-            except Exception as e:
-                errors.append(f"• **{file_obj.name}**: {str(e)}")
-
-        # 2. CSV Files with Strict Validation
-        else:
-            try:
-                df = pd.read_csv(io.BytesIO(content))
-                cols = {str(c).lower().strip(): c for c in df.columns}
-
-                # Validation Guard A: Reject IP Addresses export
-                if "address" in cols and ("interface" in cols or "device" in cols or "assigned_object" in cols or "dns_name" in cols or "assigned" in cols or "nat" in cols):
-                    raise ValueError(f"This is a NetBox IP Addresses export (`netbox_IP addresses.csv`). Please upload `netbox_sites.csv` or `netbox_VLANs.csv`.")
-                if "address" in cols and not ("prefixes" in cols or "prefix" in cols or "subnet" in cols or "slug" in cols):
-                    raise ValueError(f"This is an individual host IP addresses export (`netbox_IP addresses.csv`). Please upload `netbox_sites.csv` or `netbox_VLANs.csv`.")
-
-                # Validation Guard B: Reject Device / VM export
-                if "device type" in cols or "serial" in cols or "asset tag" in cols or "vcpus" in cols:
-                    raise ValueError(f"This is a Device/VM export (`netbox_devices.csv`). Please upload it in the 'Naming' tab instead.")
-
-                # Case A: netbox_sites.csv
-                if "slug" in cols and ("name" in cols or "site" in cols) and "id" in cols:
-                    name_col = cols.get("name", cols.get("site"))
-                    id_col = cols.get("id")
-                    slug_col = cols.get("slug")
-                    scope_records = []
-                    for _, row in df.iterrows():
-                        s_name = str(row.get(name_col, "")).strip()
-                        s_id = row.get(id_col)
-                        s_slug = str(row.get(slug_col, "")).strip()
-                        if s_name and s_name.lower() != "nan":
-                            scope_records.append({"id": s_id, "name": s_name, "slug": s_slug})
-                    if scope_records:
-                        cnt = save_sites_batch(scope_records, clear_first=False)
-                        total_scopes += cnt
-
-                # Case B: netbox_VLANs.csv or prefix export
-                elif "prefixes" in cols or "prefix" in cols or "subnet" in cols or "vid" in cols or "q-in-q role" in cols:
-                    pfx_col = cols.get("prefixes", cols.get("prefix", cols.get("subnet")))
-                    vid_col = cols.get("vid", cols.get("vlan_id", cols.get("vlan", "")))
-                    vname_col = cols.get("name", cols.get("vlan_name", ""))
-                    role_col = cols.get("role", cols.get("vlan_role", ""))
-                    site_col = cols.get("site", cols.get("scope", ""))
-                    desc_col = cols.get("description", cols.get("comments", ""))
-
-                    ipam_records = []
-                    for _, row in df.iterrows():
-                        raw_prefixes = str(row.get(pfx_col, "")).strip() if pfx_col else ""
-                        if not raw_prefixes or raw_prefixes.lower() == "nan":
-                            continue
-
-                        found_cidrs = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}/\d{1,2}\b', raw_prefixes)
-                        vid = str(row.get(vid_col, "")).strip() if vid_col else ""
-                        vname = str(row.get(vname_col, "")).strip() if vname_col else ""
-                        role = str(row.get(role_col, "")).strip() if role_col else ""
-                        site_val = str(row.get(site_col, "")).strip() if site_col else ""
-                        desc = str(row.get(desc_col, "")).strip() if desc_col else ""
-
-                        for cidr in found_cidrs:
-                            ipam_records.append({
-                                "prefix_or_subnet": cidr,
-                                "vlan_id": vid if vid.isdigit() else None,
-                                "vlan_name": vname if vname.lower() != "nan" else "",
-                                "role": role if role.lower() != "nan" else "",
-                                "site": site_val if site_val.lower() != "nan" else "",
-                                "description": desc if desc.lower() != "nan" else ""
-                            })
-
-                    if ipam_records:
-                        cnt = save_ipam_records_batch(ipam_records, clear_first=False)
-                        total_prefixes += cnt
-                else:
-                    raise ValueError(f"Unrecognized CSV format. Expected `netbox_sites.csv` or `netbox_VLANs.csv`.")
-
-            except Exception as e:
-                errors.append(f"• **{file_obj.name}**: {str(e)}")
-
-    if errors:
-        for err in errors:
-            st.error(err)
-
-    if total_scopes > 0 or total_prefixes > 0:
-        st.toast(f"✅ Ingested: {total_scopes} Sites, {total_prefixes} Prefixes!", icon="🚀")
-
-def handle_ipam_db_reset():
-    clear_ipam_records()
-    if "ipam_persisted_rows" in st.session_state:
-        del st.session_state["ipam_persisted_rows"]
-    if "ipam_scope_in" in st.session_state:
-        del st.session_state["ipam_scope_in"]
-    st.toast("🗑️ Database Cleared. Restored default templates.", icon="🧹")
-
-def render_ipam_tab(active_model: str):
-    st.subheader("🌐 IPAM & Site Subnet Provisioning Engine")
-    st.caption("Plan site supernets, allocate non-overlapping VLAN subnets, and export ready-to-import NetBox CSV blocks.")
-
-    # 1. Ingestion Toolbar with Dynamic Checkmarks & Real-Time Sync
-    total_ipam_recs = get_total_ipam_count()
-    total_sites_recs = get_total_sites_count()
-    total_db_count = total_ipam_recs + total_sites_recs
-    status_tag = f"🟢 ({total_sites_recs} sites, {total_ipam_recs} prefixes in DB)" if total_db_count > 0 else "⚪ (Default Examples)"
-
-    tick_sites = " ✅" if total_sites_recs > 0 else ""
-    tick_vlans = " ✅" if total_ipam_recs > 0 else ""
-
-    with st.expander(f"📥 Ingest NetBox Sites & VLANs / Prefixes CSV {status_tag}", expanded=False):
-        st.markdown(
-            f"""
-            **Export Instructions from NetBox:**
-            * **Scope IDs & Site Names:** Go to `Organization` ➔ `Sites` ➔ `Export` ➔ `All Data` (`netbox_sites.csv`){tick_sites}
-            * **VLANs & In-Use Prefixes:** Go to `IPAM` ➔ `VLANs` ➔ `Export` ➔ `All Data` (`netbox_VLANs.csv`){tick_vlans}
-            * *Tip: You can select and upload both CSV files together.*
-            """
-        )
-        c_up, c_rst = st.columns([3, 1])
-        with c_up:
-            st.file_uploader(
-                "Upload NetBox CSVs (netbox_sites.csv, netbox_VLANs.csv) or Excel", 
-                type=["xlsx", "csv"], 
-                accept_multiple_files=True,
-                key="ipam_multi_uploader",
-                on_change=handle_ipam_file_upload,
-                label_visibility="collapsed"
-            )
-
-        with c_rst:
-            if total_db_count > 0:
-                st.button("🗑️ Clear DB", on_click=handle_ipam_db_reset, use_container_width=True, key="rst_ipam_csv_btn")
-            else:
-                st.caption("No custom data loaded.")
-
-    # 2. Site Inputs
-    top1, top2, top3 = st.columns([2, 1, 2])
-    with top1:
-        site_name = st.text_input(
-            "Branch / Site Name",
-            value="",
-            key="ipam_site_in",
-            placeholder="e.g. Bristol, AGE, Adelaide, Site-01",
-        ).strip()
-
-    auto_scope_id = lookup_scope_id(site_name) if site_name else None
-    auto_supernet = lookup_site_supernet_from_db(site_name) if site_name else None
-
-    if auto_scope_id is not None:
-        last_site = st.session_state.get("_last_synced_site", "")
-        if last_site != site_name:
-            st.session_state["ipam_scope_in"] = str(auto_scope_id)
-            st.session_state["_last_synced_site"] = site_name
-
-    display_site_name = format_branch_display(site_name)
-
-    with top2:
-        scope_id = st.text_input(
-            "Scope ID (NetBox Site ID)", 
-            value=st.session_state.get("ipam_scope_in", ""),
-            key="ipam_scope_in",
-            placeholder="e.g. 42",
-            help="Auto-discovered from uploaded netbox_sites.csv, or editable manually."
-        ).strip()
-        if auto_scope_id:
-            st.caption(f"🟢 Matched Scope ID: **`{auto_scope_id}`**")
-        else:
-            st.caption("⚪ Manual Scope ID mode")
-
-    with top3:
-        supernet_default = auto_supernet or ""
-        supernet_in = st.text_input(
-            "Site Supernet (CIDR)", 
-            value=supernet_default, 
-            key="ipam_super_in",
-            placeholder="e.g. 10.1.0.0/16",
-            help="Top-level container subnet for this branch site."
-        ).strip()
-        if supernet_in and "/" in supernet_in:
-            try:
-                sup_net = ipaddress.ip_network(supernet_in, strict=False)
-                sup_range = calculate_ip_range_str(sup_net)
-                st.caption(f"📍 Supernet Usable Range: **`{sup_range}`**")
-            except ValueError:
-                st.caption("⚠️ Invalid CIDR format")
-
-    existing_prefixes = get_existing_prefix_strings()
-
-    # 3. Base Row Template Structure with Dynamic Row Support
-    base_default = []
-    for v in STANDARD_VLAN_TEMPLATES:
-        base_default.append({
-            "VLAN ID": v["vid"],
-            "Role": v["role"],
-            "VLAN Name": v["role"],
-            "VLAN Description": "",
-            "Subnet (CIDR)": "",
-            "fallback_subnet": v.get("fallback_subnet", "")
-        })
-
-    if "ipam_persisted_rows" in st.session_state:
-        working_rows = [dict(r) for r in st.session_state["ipam_persisted_rows"]]
-    else:
-        working_rows = [dict(t) for t in base_default]
-
-    widget_state = st.session_state.get("ipam_data_editor", {})
-
-    deleted_indices = set(widget_state.get("deleted_rows", []))
-    if deleted_indices:
-        working_rows = [r for i, r in enumerate(working_rows) if i not in deleted_indices]
-
-    edited_changes = widget_state.get("edited_rows", {})
-    for row_idx_str, changes in edited_changes.items():
-        row_idx = int(row_idx_str)
-        if row_idx < len(working_rows):
-            working_rows[row_idx].update(changes)
-
-    added_changes = widget_state.get("added_rows", [])
-    for new_row in added_changes:
-        working_rows.append({
-            "VLAN ID": new_row.get("VLAN ID", None),
-            "Role": new_row.get("Role", ""),
-            "VLAN Name": new_row.get("VLAN Name", ""),
-            "VLAN Description": new_row.get("VLAN Description", ""),
-            "Subnet (CIDR)": new_row.get("Subnet (CIDR)", ""),
-            "fallback_subnet": ""
-        })
-
-    for r in working_rows:
-        for k in ["Role", "VLAN Name", "VLAN Description", "Subnet (CIDR)"]:
-            if k not in r or r[k] is None or str(r[k]).lower() == "none":
-                r[k] = ""
-        if r.get("VLAN ID") is not None and str(r.get("VLAN ID")).lower() == "none":
-            r["VLAN ID"] = None
-
-    computed_rows = compute_chained_rows(supernet_in, working_rows)
-    st.session_state["ipam_persisted_rows"] = computed_rows
-
-    df_init = pd.DataFrame(computed_rows)[[
-        "VLAN ID", "Role", "VLAN Name", "VLAN Description", "Suggest Subnet", "Subnet (CIDR)"
-    ]]
-
-    st.markdown("##### 📊 Subnet Allocation Editor (✏️ Click any cell to edit)")
-
-    edited_df = st.data_editor(
-        df_init,
-        use_container_width=True,
-        num_rows="dynamic",
-        key="ipam_data_editor",
-        column_config={
-            "VLAN ID": st.column_config.NumberColumn("VLAN ID", step=1, required=True),
-            "Role": st.column_config.TextColumn("Role", help="Type role (e.g. Guest, Corporate WiFi, Audio Visual). Auto-corrects on Enter."),
-            "VLAN Name": st.column_config.TextColumn("VLAN Name", help="VLAN Name. Auto-filled from Role or editable."),
-            "VLAN Description": st.column_config.TextColumn("VLAN Description", help="VLAN Description. Auto-looked up from Role or editable."),
-            "Suggest Subnet": st.column_config.TextColumn("Suggest Subnet", help="Calculated dynamically based on previous Subnet (CIDR) input.", disabled=True),
-            "Subnet (CIDR)": st.column_config.TextColumn("Subnet (CIDR)", help="Type subnet CIDR (e.g. 10.1.1.0/24) and hit Enter.")
-        }
-    )
-
-    # 4. Live Usable Ranges and Status Evaluation
-    final_records = computed_rows
-    allocated_subnets = []
+def init_db():
+    os.makedirs("data", exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
     
-    for r in final_records:
-        sub_str = str(r.get("Subnet (CIDR)", "") or "").strip()
-        allocated_subnets.append(sub_str)
-        eval_res = evaluate_subnet_row(
-            sub_str, 
-            r.get("VLAN ID"), 
-            r.get("Role", ""), 
-            site_name, 
-            supernet_in, 
-            existing_prefixes
+    # 1. Sites / Scope Table (Stores NetBox Site Name <-> Scope ID mapping)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS sites_records (
+            id INTEGER PRIMARY KEY,
+            name TEXT UNIQUE,
+            slug TEXT,
+            imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-        r["Usable Range"] = eval_res["usable_range"]
-        r["Status"] = eval_res["status"]
-        r["Prefix Description"] = eval_res["desc"]
+    """)
 
-    # Preview summary table and Remaining Capacity Matrix
-    c_prev, c_cap = st.columns([3, 1.2])
-    with c_prev:
-        st.markdown("##### 🔍 Live Usable IP Ranges & Collision Status")
-        st.dataframe(
-            pd.DataFrame(final_records)[["VLAN ID", "Role", "VLAN Name", "Subnet (CIDR)", "Usable Range", "Status", "Prefix Description"]], 
-            use_container_width=True, 
-            hide_index=True
+    # 2. Shared Inventory Records (Devices, Hypervisors, VMs for Naming Tab)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS inventory_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            category TEXT,
+            name TEXT,
+            description TEXT,
+            manufacturer TEXT,
+            model_or_role TEXT,
+            site TEXT,
+            cluster TEXT,
+            imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
+    """)
 
-    with c_cap:
-        st.markdown("##### 📈 Remaining Capacity")
-        cap_matrix = calculate_remaining_subnets(supernet_in, allocated_subnets)
-        cap_rows = [{"Subnet Size": k, "Available": f"{v} subnets"} for k, v in cap_matrix.items()]
-        st.dataframe(pd.DataFrame(cap_rows), use_container_width=True, hide_index=True)
+    # 3. Dedicated IPAM / Prefix Records (Used for overlap/collision checks)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS ipam_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            prefix_or_subnet TEXT,
+            vlan_id INTEGER,
+            vlan_name TEXT,
+            role TEXT,
+            site TEXT,
+            scope_id INTEGER,
+            description TEXT,
+            imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    
+    cursor.execute("PRAGMA table_info(ipam_records)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if "scope_id" not in columns:
+        try:
+            cursor.execute("ALTER TABLE ipam_records ADD COLUMN scope_id INTEGER")
+        except Exception:
+            pass
 
-    # 5. NetBox Bulk-Import CSV Generators
-    st.markdown("---")
-    st.markdown("### 📋 NetBox Bulk-Import CSV Generators")
+    conn.commit()
+    conn.close()
 
-    display_site = display_site_name or "Site"
-    csv_site = generate_netbox_site_csv(display_site)
-    csv_group = generate_netbox_vlan_group_csv(display_site, scope_id or "0")
-    csv_vlans = generate_netbox_vlans_csv(display_site, final_records)
-    csv_prefixes = generate_netbox_prefixes_csv(display_site, scope_id or "0", supernet_in, final_records)
+# ── SMART SITE / SCOPE ID LOOKUP ─────────────────────────────────────────
 
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("**1. Import Site (`dcim.site`)**")
-        st.code(csv_site, language="csv")
-        st.download_button("⬇️ Download Site CSV", csv_site, f"site_{slugify(display_site)}.csv", "text/csv", key="dl_site_csv")
+def save_sites_batch(sites: List[Dict[str, Any]], clear_first: bool = False) -> int:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    if clear_first:
+        cursor.execute("DELETE FROM sites_records")
+    
+    count = 0
+    for s in sites:
+        site_id = s.get("id") or s.get("ID")
+        name = str(s.get("name") or s.get("Name") or "").strip()
+        slug = str(s.get("slug") or s.get("Slug") or "").strip()
+        if name and name.lower() != "nan":
+            cursor.execute("""
+                INSERT OR REPLACE INTO sites_records (id, name, slug)
+                VALUES (?, ?, ?)
+            """, (int(site_id) if str(site_id).isdigit() else None, name, slug))
+            count += 1
+            
+    conn.commit()
+    conn.close()
+    return count
 
-        st.markdown("**3. Import VLANs (`ipam.vlan`)**")
-        st.code(csv_vlans, language="csv")
-        st.download_button("⬇️ Download VLANs CSV", csv_vlans, f"vlans_{slugify(display_site)}.csv", "text/csv", key="dl_vlans_csv")
+def lookup_scope_id(site_name: str) -> Optional[int]:
+    """Smart lookup for Scope ID prioritizing exact and whole-word matches over substrings."""
+    if not site_name:
+        return None
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    q = site_name.strip().lower()
+    
+    cursor.execute("SELECT id, name, slug FROM sites_records")
+    all_sites = cursor.fetchall()
+    conn.close()
 
-    with c2:
-        st.markdown("**2. Import VLAN Group (`ipam.vlangroup`)**")
-        st.code(csv_group, language="csv")
-        st.download_button("⬇️ Download VLAN Group CSV", csv_group, f"vlangroup_{slugify(display_site)}.csv", "text/csv", key="dl_group_csv")
+    if not all_sites:
+        return None
 
-        st.markdown("**4. Import Prefixes (`ipam.prefix`)**")
-        st.code(csv_prefixes, language="csv")
-        st.download_button("⬇️ Download Prefixes CSV", csv_prefixes, f"prefixes_{slugify(display_site)}.csv", "text/csv", key="dl_prefixes_csv")
+    # 1. Exact match on name or slug
+    for sid, sname, sslug in all_sites:
+        if (sname and sname.lower() == q) or (sslug and sslug.lower() == q):
+            return sid
+
+    # 2. Exact word boundary match (e.g. "UK" matches "UK", "Site UK", "UK Office", not "azure-uk-south")
+    word_pattern = re.compile(rf'\b{re.escape(q)}\b', re.IGNORECASE)
+    word_matches = []
+    for sid, sname, sslug in all_sites:
+        sname_str = sname or ""
+        sslug_str = (sslug or "").replace("-", " ")
+        if word_pattern.search(sname_str) or word_pattern.search(sslug_str):
+            is_cloud = any(c in sname_str.lower() or c in sslug_str.lower() for c in ["azure", "aws", "gcp", "cloud"])
+            word_matches.append((is_cloud, len(sname_str), sid))
+
+    if word_matches:
+        word_matches.sort(key=lambda x: (x[0], x[1]))
+        return word_matches[0][2]
+
+    # 3. Starts-with match
+    starts_matches = []
+    for sid, sname, sslug in all_sites:
+        sname_str = sname or ""
+        sslug_str = sslug or ""
+        if sname_str.lower().startswith(q) or sslug_str.lower().startswith(q):
+            is_cloud = any(c in sname_str.lower() or c in sslug_str.lower() for c in ["azure", "aws", "gcp", "cloud"])
+            starts_matches.append((is_cloud, len(sname_str), sid))
+
+    if starts_matches:
+        starts_matches.sort(key=lambda x: (x[0], x[1]))
+        return starts_matches[0][2]
+
+    # 4. Substring match (Only allowed for queries with >= 4 characters to prevent 2-3 letter code collisions)
+    if len(q) >= 4:
+        sub_matches = []
+        for sid, sname, sslug in all_sites:
+            sname_str = sname or ""
+            sslug_str = sslug or ""
+            if q in sname_str.lower() or q in sslug_str.lower():
+                is_cloud = any(c in sname_str.lower() or c in sslug_str.lower() for c in ["azure", "aws", "gcp", "cloud"])
+                sub_matches.append((is_cloud, len(sname_str), sid))
+        if sub_matches:
+            sub_matches.sort(key=lambda x: (x[0], x[1]))
+            return sub_matches[0][2]
+
+    return None
+
+def lookup_site_supernet_from_db(site_name: str) -> Optional[str]:
+    """Finds top-level container prefix for a site from stored IPAM records."""
+    if not site_name:
+        return None
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    clean = site_name.strip().lower()
+    
+    cursor.execute("""
+        SELECT prefix_or_subnet, description, role FROM ipam_records 
+        WHERE LOWER(site) LIKE ? OR LOWER(description) LIKE ?
+    """, (f"%{clean}%", f"%{clean}%"))
+    rows = cursor.fetchall()
+    conn.close()
+
+    candidates = []
+    for r in rows:
+        p_str = r[0]
+        desc = (r[1] or "").lower()
+        role = (r[2] or "").lower()
+        if p_str and "/" in p_str:
+            try:
+                cidr = int(p_str.split("/")[1])
+                is_supernet_role = "site subnet" in role or "site subnet" in desc
+                candidates.append((cidr, is_supernet_role, p_str))
+            except ValueError:
+                pass
+
+    if candidates:
+        candidates.sort(key=lambda x: (not x[1], x[0]))
+        return candidates[0][2]
+    return None
+
+def get_all_sites() -> List[Dict[str, Any]]:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM sites_records ORDER BY name ASC")
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+# ── INVENTORY RECORDS (Naming Tab) ──────────────────────────────────────
+
+def save_records_batch(records: List[Dict[str, Any]], clear_first: bool = False) -> Dict[str, int]:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    if clear_first:
+        cursor.execute("DELETE FROM inventory_records")
+
+    counts = {"device": 0, "hypervisor": 0, "vm": 0}
+    for r in records:
+        cat = r.get("category", "device")
+        cursor.execute("""
+            INSERT INTO inventory_records (category, name, description, manufacturer, model_or_role, site, cluster)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            cat,
+            r.get("name", "").strip(),
+            r.get("description", "").strip(),
+            r.get("manufacturer", "").strip(),
+            r.get("model_or_role", "").strip(),
+            r.get("site", "").strip(),
+            r.get("cluster", "").strip()
+        ))
+        counts[cat] = counts.get(cat, 0) + 1
+
+    conn.commit()
+    conn.close()
+    return counts
+
+def save_universal_csv(file_bytes, filename: str = "", clear_first: bool = False) -> Dict[str, int]:
+    """Parses and validates NetBox Devices and Virtual Machines export CSVs."""
+    df = pd.read_csv(file_bytes)
+    cols = {str(c).lower().strip(): c for c in df.columns}
+
+    if "vid" in cols or "q-in-q role" in cols or "q-in-q svlan" in cols or "prefixes" in cols:
+        raise ValueError("Invalid file uploaded to Naming. This is a NetBox VLANs export (`netbox_VLANs.csv`). Please upload `netbox_devices.csv` or `netbox_virtual machines.csv`.")
+
+    if "asns" in cols or "facility" in cols or "time zone" in cols:
+        raise ValueError("Invalid file uploaded to Naming. This is a NetBox Sites export (`netbox_sites.csv`). Please upload `netbox_devices.csv` or `netbox_virtual machines.csv`.")
+
+    name_col = cols.get("name")
+    if not name_col:
+        raise ValueError("Invalid CSV: missing 'Name' column. Please export official data from NetBox.")
+
+    fname_lower = filename.lower()
+    is_vm_export = False
+    if "vcpus" in cols or "memory" in cols or "disk" in cols:
+        is_vm_export = True
+    elif "virtual" in fname_lower or "vm" in fname_lower:
+        is_vm_export = True
+    elif "device type" not in cols and "rack" not in cols and "serial" not in cols and "cluster" in cols:
+        is_vm_export = True
+
+    role_col = cols.get("role", cols.get("device role", cols.get("role name", "")))
+    type_col = cols.get("device type", cols.get("type", cols.get("device_type", "")))
+    mfg_col = cols.get("manufacturer", cols.get("make", ""))
+    site_col = cols.get("site", cols.get("location", ""))
+    desc_col = cols.get("description", cols.get("comments", ""))
+    cluster_col = cols.get("cluster", "")
+
+    records = []
+    for _, row in df.iterrows():
+        name = str(row.get(name_col, "")).strip()
+        if not name or name.lower() == "nan":
+            continue
+
+        role = str(row.get(role_col, "")).strip() if role_col else ""
+        dtype = str(row.get(type_col, "")).strip() if type_col else ""
+        mfg = str(row.get(mfg_col, "")).strip() if mfg_col else ""
+        site = str(row.get(site_col, "")).strip() if site_col else ""
+        desc = str(row.get(desc_col, "")).strip() if desc_col else ""
+        cluster = str(row.get(cluster_col, "")).strip() if cluster_col else ""
+
+        for k in [role, dtype, mfg, site, desc, cluster]:
+            if k.lower() == "nan": 
+                k = ""
+
+        if is_vm_export:
+            cat = "vm"
+        else:
+            combined = f"{name} {role} {dtype} {desc}".lower()
+            if any(h in combined for h in ["esx", "hypervisor", "infhost", "vmhost", "esxi"]):
+                cat = "hypervisor"
+            else:
+                cat = "device"
+
+        records.append({
+            "category": cat,
+            "name": name,
+            "description": desc if desc.lower() != "nan" else "",
+            "manufacturer": mfg if mfg.lower() != "nan" else "",
+            "model_or_role": dtype or role,
+            "site": site if site.lower() != "nan" else "",
+            "cluster": cluster if cluster.lower() != "nan" else ""
+        })
+
+    return save_records_batch(records, clear_first=clear_first)
+
+def get_records_by_category(category: str, site_filter: str = "") -> List[Dict[str, Any]]:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    clean_filter = site_filter.strip().lower()
+    if clean_filter:
+        pattern = f"%{clean_filter}%"
+        cursor.execute("""
+            SELECT * FROM inventory_records 
+            WHERE category = ? AND (LOWER(site) LIKE ? OR LOWER(name) LIKE ?)
+            ORDER BY id ASC
+        """, (category, pattern, pattern))
+        rows = cursor.fetchall()
+        if rows:
+            conn.close()
+            return [dict(r) for r in rows]
+
+    cursor.execute("SELECT * FROM inventory_records WHERE category = ? ORDER BY id ASC", (category,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+# ── DEDICATED IPAM & PREFIXES ───────────────────────────────────────────
+
+def save_ipam_records_batch(records: List[Dict[str, Any]], clear_first: bool = False) -> int:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    if clear_first:
+        cursor.execute("DELETE FROM ipam_records")
+
+    count = 0
+    for r in records:
+        raw_prefix = str(r.get("prefix_or_subnet") or r.get("prefix") or r.get("subnet") or r.get("address") or r.get("Prefixes") or "").strip()
+        if not raw_prefix or raw_prefix.lower() == "nan":
+            continue
+        
+        cidrs = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}/\d{1,2}\b', raw_prefix)
+        if not cidrs and "/" in raw_prefix:
+            cidrs = [raw_prefix]
+
+        for cidr in cidrs:
+            cursor.execute("""
+                INSERT INTO ipam_records (prefix_or_subnet, vlan_id, vlan_name, role, site, scope_id, description)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                cidr,
+                int(r.get("vlan_id") or r.get("vid") or r.get("VID") or 0) if str(r.get("vlan_id") or r.get("vid") or r.get("VID") or "").isdigit() else None,
+                str(r.get("vlan_name") or r.get("name") or r.get("Name") or "").strip(),
+                str(r.get("role") or r.get("Role") or "").strip(),
+                str(r.get("site") or r.get("Site") or "").strip(),
+                int(r.get("scope_id")) if str(r.get("scope_id") or "").isdigit() else None,
+                str(r.get("description") or r.get("desc") or r.get("Description") or "").strip()
+            ))
+            count += 1
+
+    conn.commit()
+    conn.close()
+    return count
+
+def get_existing_prefix_strings() -> List[str]:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT DISTINCT prefix_or_subnet FROM ipam_records WHERE prefix_or_subnet != ''")
+    rows = cursor.fetchall()
+    conn.close()
+    return [r[0] for r in rows if r[0] and "/" in r[0]]
+
+def clear_all_records() -> int:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM inventory_records")
+    cursor.execute("DELETE FROM sites_records")
+    cursor.execute("DELETE FROM ipam_records")
+    deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
+
+def clear_inventory_records() -> int:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM inventory_records")
+    deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
+
+def clear_ipam_records() -> int:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM ipam_records")
+    cursor.execute("DELETE FROM sites_records")
+    deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
+
+def get_total_record_count() -> int:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM inventory_records")
+    total = cursor.fetchone()[0]
+    conn.close()
+    return total
+
+def get_total_ipam_count() -> int:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM ipam_records")
+    total = cursor.fetchone()[0]
+    conn.close()
+    return total
+
+def get_total_sites_count() -> int:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM sites_records")
+    total = cursor.fetchone()[0]
+    conn.close()
+    return total

@@ -51,7 +51,6 @@ def init_db():
         )
     """)
     
-    # Schema Migration: Add missing scope_id column to existing legacy databases
     cursor.execute("PRAGMA table_info(ipam_records)")
     columns = [col[1] for col in cursor.fetchall()]
     if "scope_id" not in columns:
@@ -63,7 +62,7 @@ def init_db():
     conn.commit()
     conn.close()
 
-# ── SITE / SCOPE ID LOOKUP (Excel E1 XLOOKUP equivalent) ─────────────────
+# ── SMART SITE / SCOPE ID LOOKUP ─────────────────────────────────────────
 
 def save_sites_batch(sites: List[Dict[str, Any]], clear_first: bool = False) -> int:
     init_db()
@@ -89,25 +88,67 @@ def save_sites_batch(sites: List[Dict[str, Any]], clear_first: bool = False) -> 
     return count
 
 def lookup_scope_id(site_name: str) -> Optional[int]:
-    """Looks up Scope integer ID matching the site name or slug."""
+    """Smart lookup for Scope ID prioritizing exact and whole-word matches over substrings."""
     if not site_name:
         return None
     init_db()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    clean = site_name.strip()
+    q = site_name.strip().lower()
     
-    cursor.execute("SELECT id FROM sites_records WHERE LOWER(name) = LOWER(?) LIMIT 1", (clean,))
-    row = cursor.fetchone()
-    if not row or row[0] is None:
-        cursor.execute("SELECT id FROM sites_records WHERE LOWER(slug) = LOWER(?) LIMIT 1", (clean,))
-        row = cursor.fetchone()
-    if not row or row[0] is None:
-        cursor.execute("SELECT id FROM sites_records WHERE LOWER(name) LIKE LOWER(?) LIMIT 1", (f"%{clean}%",))
-        row = cursor.fetchone()
-        
+    cursor.execute("SELECT id, name, slug FROM sites_records")
+    all_sites = cursor.fetchall()
     conn.close()
-    return row[0] if (row and row[0] is not None) else None
+
+    if not all_sites:
+        return None
+
+    # 1. Exact match on name or slug
+    for sid, sname, sslug in all_sites:
+        if (sname and sname.lower() == q) or (sslug and sslug.lower() == q):
+            return sid
+
+    # 2. Exact word boundary match (e.g. "UK" matches "UK", "Site UK", "UK Office", not "azure-uk-south")
+    word_pattern = re.compile(rf'\b{re.escape(q)}\b', re.IGNORECASE)
+    word_matches = []
+    for sid, sname, sslug in all_sites:
+        sname_str = sname or ""
+        sslug_str = (sslug or "").replace("-", " ")
+        if word_pattern.search(sname_str) or word_pattern.search(sslug_str):
+            is_cloud = any(c in sname_str.lower() or c in sslug_str.lower() for c in ["azure", "aws", "gcp", "cloud"])
+            word_matches.append((is_cloud, len(sname_str), sid))
+
+    if word_matches:
+        word_matches.sort(key=lambda x: (x[0], x[1]))
+        return word_matches[0][2]
+
+    # 3. Starts-with match
+    starts_matches = []
+    for sid, sname, sslug in all_sites:
+        sname_str = sname or ""
+        sslug_str = sslug or ""
+        if sname_str.lower().startswith(q) or sslug_str.lower().startswith(q):
+            is_cloud = any(c in sname_str.lower() or c in sslug_str.lower() for c in ["azure", "aws", "gcp", "cloud"])
+            starts_matches.append((is_cloud, len(sname_str), sid))
+
+    if starts_matches:
+        starts_matches.sort(key=lambda x: (x[0], x[1]))
+        return starts_matches[0][2]
+
+    # 4. Substring match (Only allowed for queries with >= 4 characters to prevent 2-3 letter code collisions)
+    if len(q) >= 4:
+        sub_matches = []
+        for sid, sname, sslug in all_sites:
+            sname_str = sname or ""
+            sslug_str = sslug or ""
+            if q in sname_str.lower() or q in sslug_str.lower():
+                is_cloud = any(c in sname_str.lower() or c in sslug_str.lower() for c in ["azure", "aws", "gcp", "cloud"])
+                sub_matches.append((is_cloud, len(sname_str), sid))
+        if sub_matches:
+            sub_matches.sort(key=lambda x: (x[0], x[1]))
+            return sub_matches[0][2]
+
+    return None
 
 def lookup_site_supernet_from_db(site_name: str) -> Optional[str]:
     """Finds top-level container prefix for a site from stored IPAM records."""
@@ -188,7 +229,6 @@ def save_universal_csv(file_bytes, filename: str = "", clear_first: bool = False
     df = pd.read_csv(file_bytes)
     cols = {str(c).lower().strip(): c for c in df.columns}
 
-    # 1. Validation guards: Reject VLANs and Sites exports explicitly
     if "vid" in cols or "q-in-q role" in cols or "q-in-q svlan" in cols or "prefixes" in cols:
         raise ValueError("Invalid file uploaded to Naming. This is a NetBox VLANs export (`netbox_VLANs.csv`). Please upload `netbox_devices.csv` or `netbox_virtual machines.csv`.")
 
@@ -199,7 +239,6 @@ def save_universal_csv(file_bytes, filename: str = "", clear_first: bool = False
     if not name_col:
         raise ValueError("Invalid CSV: missing 'Name' column. Please export official data from NetBox.")
 
-    # 2. Strict file-type determination (Devices vs Virtual Machines)
     fname_lower = filename.lower()
     is_vm_export = False
     if "vcpus" in cols or "memory" in cols or "disk" in cols:
