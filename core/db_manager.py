@@ -431,3 +431,32 @@ def get_total_sites_count() -> int:
     total = cursor.fetchone()[0]
     conn.close()
     return total
+
+def lookup_vlan_description_from_db(role_name: str) -> Optional[str]:
+    """Look up standard VLAN description from ingested database based on Role name."""
+    if not role_name:
+        return None
+    clean_role = role_name.strip()
+    try:
+        with sqlite3.connect(DATABASE_PATH) as conn:
+            cursor = conn.cursor()
+            # 1. Exact match on role
+            cursor.execute(
+                "SELECT description FROM ipam_records WHERE LOWER(role) = LOWER(?) AND description != '' LIMIT 1",
+                (clean_role,)
+            )
+            row = cursor.fetchone()
+            if row and row[0]:
+                return row[0]
+
+            # 2. Match on VLAN name if role was stored under vlan_name
+            cursor.execute(
+                "SELECT description FROM ipam_records WHERE LOWER(vlan_name) = LOWER(?) AND description != '' LIMIT 1",
+                (clean_role,)
+            )
+            row = cursor.fetchone()
+            if row and row[0]:
+                return row[0]
+    except Exception:
+        pass
+    return None

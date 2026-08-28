@@ -1,6 +1,7 @@
 import ipaddress
 import re
 from typing import List, Dict, Any, Optional
+from core.db_manager import lookup_vlan_description_from_db
 
 BRANCH_VLAN_PRESET = [
     {"vid": 300, "role": "Corporate WiFi", "vlan_name": "Corporate WiFi", "desc": "VIN_Corp"},
@@ -59,15 +60,24 @@ ROLE_TO_DESC_MAP = {
 }
 
 def lookup_role_description(role_str: str) -> str:
+    """1. Queries the SQLite DB for description. 2. Falls back to dictionary."""
     if not role_str:
         return ""
-    clean = role_str.strip().lower()
-    if clean in ROLE_TO_DESC_MAP:
-        return ROLE_TO_DESC_MAP[clean]
+    clean = role_str.strip()
+
+    # 1. Database Lookup
+    db_desc = lookup_vlan_description_from_db(clean)
+    if db_desc:
+        return db_desc
+
+    # 2. Dictionary Fallback
+    lower_role = clean.lower()
+    if lower_role in ROLE_TO_DESC_MAP:
+        return ROLE_TO_DESC_MAP[lower_role]
     for key, desc in ROLE_TO_DESC_MAP.items():
-        if key in clean:
+        if key in lower_role:
             return desc
-    return role_str.strip()
+    return clean
 
 def slugify(text: str) -> str:
     if not text:
@@ -241,7 +251,8 @@ def generate_netbox_site_csv(site_name: str) -> str:
 def generate_netbox_vlan_group_csv(site_name: str, scope_id: str) -> str:
     clean = format_branch_display(site_name)
     slug = slugify(f"{clean} VLAN Group")
-    return f"name,slug,scope_type,scope_id\n\"{clean} VLAN Group\",\"{slug}\",\"dcim.site\",{scope_id or '0'}"
+    scope_val = scope_id if scope_id else "<SCOPE_ID>"
+    return f"name,slug,scope_type,scope_id\n\"{clean} VLAN Group\",\"{slug}\",\"dcim.site\",{scope_val}"
 
 def generate_netbox_vlans_csv(site_name: str, rows: List[Dict[str, Any]]) -> str:
     clean = format_branch_display(site_name)
@@ -260,6 +271,7 @@ def generate_netbox_vlans_csv(site_name: str, rows: List[Dict[str, Any]]) -> str
 def generate_netbox_prefixes_csv(site_name: str, scope_id: str, supernet_str: str, rows: List[Dict[str, Any]]) -> str:
     clean = format_branch_display(site_name)
     clean_supernet = sanitize_cidr(supernet_str)
+    scope_val = scope_id if scope_id else "<SCOPE_ID>"
     lines = ["prefix,status,scope_type,scope_id,vlan_group,vlan,role,description"]
     
     # 1. Top-Level Supernet Container
@@ -271,7 +283,7 @@ def generate_netbox_prefixes_csv(site_name: str, scope_id: str, supernet_str: st
         except ValueError:
             supernet_desc = f"Site Subnet - {clean_supernet}"
             
-        lines.append(f"\"{clean_supernet}\",active,\"dcim.site\",{scope_id or '0'},\"{clean} VLAN Group\",,,,\"{supernet_desc}\"")
+        lines.append(f"\"{clean_supernet}\",active,\"dcim.site\",{scope_val},\"{clean} VLAN Group\",,,,\"{supernet_desc}\"")
 
     # 2. Member Subnets
     for r in rows:
@@ -281,6 +293,6 @@ def generate_netbox_prefixes_csv(site_name: str, scope_id: str, supernet_str: st
             continue
         role_val = r.get("Role") or r.get("VLAN Name") or ""
         desc = f"{clean} {role_val} -- VLAN {vid}"
-        lines.append(f"\"{subnet}\",active,\"dcim.site\",{scope_id or '0'},\"{clean} VLAN Group\",{vid},\"{role_val}\",\"{desc}\"")
+        lines.append(f"\"{subnet}\",active,\"dcim.site\",{scope_val},\"{clean} VLAN Group\",{vid},\"{role_val}\",\"{desc}\"")
         
     return "\n".join(lines)

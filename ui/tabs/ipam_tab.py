@@ -493,9 +493,9 @@ def render_ipam_tab(active_model: str):
         key="ipam_data_editor_live",
         column_config={
             "VLAN ID": st.column_config.NumberColumn("VLAN ID", step=1, required=True),
-            "Role": st.column_config.TextColumn("Role", help="VLAN Role. Auto-sets VLAN Name & Description."),
+            "Role": st.column_config.TextColumn("Role", help="VLAN Role. Auto-sets VLAN Name & Description via DB lookup."),
             "VLAN Name": st.column_config.TextColumn("VLAN Name", help="VLAN Name in NetBox. Defaults to Role, or editable."),
-            "VLAN Description": st.column_config.TextColumn("VLAN Description", help="VLAN Description. Auto-looked up from Role, or editable."),
+            "VLAN Description": st.column_config.TextColumn("VLAN Description", help="VLAN Description. Auto-looked up from DB or editable."),
             "Suggest Subnet": st.column_config.TextColumn("Suggest Subnet", help="Calculated next available network IP ID.", disabled=True),
             "Subnet (CIDR)": st.column_config.TextColumn("Subnet (CIDR)", help="Type subnet CIDR (e.g. 10.113.252.0/23) and hit Enter."),
             "Usable Range": st.column_config.TextColumn("Usable Range", help="Calculated usable host IP range.", disabled=True),
@@ -504,15 +504,22 @@ def render_ipam_tab(active_model: str):
         }
     )
 
-    # 4. NetBox Bulk-Import CSV Copy Cards
+    # 4. NetBox Bulk-Import CSV Copy Cards & Scope ID Notification
     st.markdown("---")
     st.markdown("### 📋 NetBox Bulk-Import CSV Generators")
 
+    if not scope_id:
+        st.warning(
+            "⚠️ **Notice: Scope ID (NetBox Site ID) is empty.** NetBox requires a valid Site `scope_id` to import VLAN Groups and Prefixes. "
+            "If this is a newly created site, please first import `site.csv` into NetBox, export your latest `netbox_sites.csv` from NetBox and upload it above, or manually type the created Site ID into the **Scope ID** box.",
+            icon="⚠️"
+        )
+
     display_site = display_site_name or "Site"
     csv_site = generate_netbox_site_csv(display_site)
-    csv_group = generate_netbox_vlan_group_csv(display_site, scope_id or "0")
+    csv_group = generate_netbox_vlan_group_csv(display_site, scope_id)
     csv_vlans = generate_netbox_vlans_csv(display_site, computed_rows)
-    csv_prefixes = generate_netbox_prefixes_csv(display_site, scope_id or "0", supernet_in, computed_rows)
+    csv_prefixes = generate_netbox_prefixes_csv(display_site, scope_id, supernet_in, computed_rows)
 
     c1, c2 = st.columns(2)
     with c1:
