@@ -15,5 +15,8 @@ OFFICIAL_GITHUB_OWNER = OWNER
 OFFICIAL_GITHUB_REPO = REPO
 OFFICIAL_GITHUB_BRANCH = BRANCH
 
-# Data Storage
+# Data Storage & Rules Paths
 DATABASE_PATH = "data/netbox_hub.db"
+RULES_FILE = "data/naming_rules.yaml"
+LOCAL_CACHE_DIR = "data/catalog_cache"
+CUSTOM_TEMPLATES_DIR = "data/custom_templates"
