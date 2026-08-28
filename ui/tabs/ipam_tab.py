@@ -444,9 +444,11 @@ def render_ipam_tab(active_model: str):
     computed_rows = compute_chained_rows(supernet_in, working_rows)
     st.session_state["ipam_persisted_rows"] = computed_rows
 
-    df_init = pd.DataFrame(computed_rows)[[
-        "VLAN ID", "Role", "VLAN Name", "VLAN Description", "Suggest Subnet", "Subnet (CIDR)"
-    ]]
+    TABLE_COLS = ["VLAN ID", "Role", "VLAN Name", "VLAN Description", "Suggest Subnet", "Subnet (CIDR)"]
+    if computed_rows:
+        df_init = pd.DataFrame(computed_rows)[TABLE_COLS]
+    else:
+        df_init = pd.DataFrame(columns=TABLE_COLS)
 
     edited_df = st.data_editor(
         df_init,
@@ -485,8 +487,14 @@ def render_ipam_tab(active_model: str):
     c_prev, c_cap = st.columns([3, 1.2])
     with c_prev:
         st.markdown("##### 🔍 Live Usable IP Ranges & Collision Status")
+        PREV_COLS = ["VLAN ID", "Role", "VLAN Name", "Subnet (CIDR)", "Usable Range", "Status", "Prefix Description"]
+        if final_records:
+            df_prev = pd.DataFrame(final_records)[PREV_COLS]
+        else:
+            df_prev = pd.DataFrame(columns=PREV_COLS)
+            
         st.dataframe(
-            pd.DataFrame(final_records)[["VLAN ID", "Role", "VLAN Name", "Subnet (CIDR)", "Usable Range", "Status", "Prefix Description"]], 
+            df_prev, 
             width="stretch", 
             hide_index=True
         )
