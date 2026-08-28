@@ -2,30 +2,32 @@ import ipaddress
 import re
 from typing import List, Dict, Any, Optional
 
+# Standard Branch Preset: VLAN Name matches Role exactly
 BRANCH_VLAN_PRESET = [
-    {"vid": 300, "role": "Corporate WiFi", "vlan_name": "VIN_Corp", "desc": "Corporate WiFi"},
-    {"vid": 100, "role": "Workstations", "vlan_name": "Wired Workstations", "desc": "Wired Workstations"},
-    {"vid": 5, "role": "Management", "vlan_name": "Management", "desc": "Management"},
-    {"vid": 700, "role": "Printers", "vlan_name": "Printers", "desc": "Printers"},
-    {"vid": 800, "role": "Audio Visual", "vlan_name": "AV equipment", "desc": "AV equipment"},
-    {"vid": 200, "role": "Guests", "vlan_name": "VIN_Guest", "desc": "VIN_Guest"},
-    {"vid": 400, "role": "Mobiles", "vlan_name": "VIN_Mobi", "desc": "VIN_Mobi"},
-    {"vid": 90, "role": "Routing", "vlan_name": "Routing interface VLANs", "desc": "Routing interface VLANs"},
-    {"vid": 500, "role": "OT", "vlan_name": "OT", "desc": "OT"},
-    {"vid": 600, "role": "IoT", "vlan_name": "IoT/Security", "desc": "IoT/Security"},
+    {"vid": 300, "role": "Corporate WiFi", "vlan_name": "Corporate WiFi", "desc": "Corporate wireless clients and laptops"},
+    {"vid": 100, "role": "Workstations", "vlan_name": "Workstations", "desc": "Primary wired office workstations and endpoints"},
+    {"vid": 5, "role": "Management", "vlan_name": "Management", "desc": "Management interfaces for network hardware"},
+    {"vid": 700, "role": "Printers", "vlan_name": "Printers", "desc": "Network printers and multi-function devices"},
+    {"vid": 800, "role": "Audio Visual", "vlan_name": "Audio Visual", "desc": "Video conferencing and digital media systems"},
+    {"vid": 200, "role": "Guests", "vlan_name": "Guests", "desc": "Isolated guest wireless network"},
+    {"vid": 400, "role": "Mobiles", "vlan_name": "Mobiles", "desc": "Mobile devices and personal smart phones"},
+    {"vid": 90, "role": "Routing", "vlan_name": "Routing", "desc": "Inter-router and transit routing interfaces"},
+    {"vid": 500, "role": "OT", "vlan_name": "OT", "desc": "Operational Technology & Industrial automation"},
+    {"vid": 600, "role": "IoT", "vlan_name": "IoT", "desc": "Physical security cameras, access control, and smart IoT"},
 ]
 
+# Standard Data Center Preset: VLAN Name matches Role exactly
 DATACENTER_VLAN_PRESET = [
-    {"vid": 10, "role": "OOB / IPMI / iLO", "vlan_name": "OOB-Mgmt", "desc": "Out-of-Band server lights-out management (iLO/iDRAC)"},
-    {"vid": 20, "role": "In-Band Management", "vlan_name": "InBand-Mgmt", "desc": "ESXi hypervisors and core switch management"},
+    {"vid": 10, "role": "OOB / IPMI / iLO", "vlan_name": "OOB / IPMI / iLO", "desc": "Out-of-Band server lights-out management (iLO/iDRAC)"},
+    {"vid": 20, "role": "In-Band Management", "vlan_name": "In-Band Management", "desc": "ESXi hypervisors and core switch management"},
     {"vid": 30, "role": "vMotion", "vlan_name": "vMotion", "desc": "Hypervisor live migration network"},
-    {"vid": 40, "role": "Storage / iSCSI-A", "vlan_name": "Storage-A", "desc": "Primary SAN / IP Storage traffic"},
-    {"vid": 50, "role": "Storage / iSCSI-B", "vlan_name": "Storage-B", "desc": "Secondary redundant SAN / IP Storage traffic"},
-    {"vid": 100, "role": "Production App / Web", "vlan_name": "Prod-App", "desc": "Production application server workloads"},
-    {"vid": 200, "role": "Production Database", "vlan_name": "Prod-DB", "desc": "Production database clusters"},
-    {"vid": 300, "role": "DMZ / Perimeter", "vlan_name": "DMZ", "desc": "External-facing reverse proxies and DMZ hosts"},
-    {"vid": 400, "role": "Core Infrastructure", "vlan_name": "Core-Infra", "desc": "DNS, Active Directory, NTP, and monitoring services"},
-    {"vid": 500, "role": "Backup / Recovery", "vlan_name": "Backup", "desc": "Dedicated data protection and backup traffic"},
+    {"vid": 40, "role": "Storage / iSCSI-A", "vlan_name": "Storage / iSCSI-A", "desc": "Primary SAN / IP Storage traffic"},
+    {"vid": 50, "role": "Storage / iSCSI-B", "vlan_name": "Storage / iSCSI-B", "desc": "Secondary redundant SAN / IP Storage traffic"},
+    {"vid": 100, "role": "Production App / Web", "vlan_name": "Production App / Web", "desc": "Production application server workloads"},
+    {"vid": 200, "role": "Production Database", "vlan_name": "Production Database", "desc": "Production database clusters"},
+    {"vid": 300, "role": "DMZ / Perimeter", "vlan_name": "DMZ / Perimeter", "desc": "External-facing reverse proxies and DMZ hosts"},
+    {"vid": 400, "role": "Core Infrastructure", "vlan_name": "Core Infrastructure", "desc": "DNS, Active Directory, NTP, and monitoring services"},
+    {"vid": 500, "role": "Backup / Recovery", "vlan_name": "Backup / Recovery", "desc": "Dedicated data protection and backup traffic"},
 ]
 
 VLAN_PRESETS = {
@@ -33,6 +35,40 @@ VLAN_PRESETS = {
     "🏢 Branch Office VLAN Preset": BRANCH_VLAN_PRESET,
     "🏛️ Data Center VLAN Preset": DATACENTER_VLAN_PRESET
 }
+
+ROLE_DESCRIPTIONS = {
+    "corporate wifi": "Corporate wireless clients and laptops",
+    "workstations": "Primary wired office workstations and endpoints",
+    "management": "Management interfaces for network hardware",
+    "printers": "Network printers and multi-function devices",
+    "audio visual": "Video conferencing and digital media systems",
+    "audio": "Video conferencing and digital media systems",
+    "guests": "Isolated guest wireless network",
+    "mobiles": "Mobile devices and personal smart phones",
+    "routing": "Inter-router and transit routing interfaces",
+    "ot": "Operational Technology & Industrial automation",
+    "iot": "Physical security cameras, access control, and smart IoT",
+    "data": "Primary wired office endpoints",
+    "voice": "VoIP telephony network",
+    "security": "Physical security cameras and access control",
+    "cctv": "Physical security cameras and access control",
+    "server": "Local branch infrastructure servers",
+    "dmz": "External-facing reverse proxies and DMZ hosts",
+    "vmotion": "Hypervisor live migration network",
+    "storage": "Dedicated storage network traffic",
+}
+
+def lookup_role_description(role_str: str) -> str:
+    """Smart lookup for description based on role keywords."""
+    if not role_str:
+        return ""
+    clean = role_str.strip().lower()
+    if clean in ROLE_DESCRIPTIONS:
+        return ROLE_DESCRIPTIONS[clean]
+    for key, desc in ROLE_DESCRIPTIONS.items():
+        if key in clean:
+            return desc
+    return f"{role_str.strip()} Network"
 
 def slugify(text: str) -> str:
     if not text:
@@ -43,6 +79,7 @@ def slugify(text: str) -> str:
     return text.strip('-')
 
 def format_branch_display(name: str) -> str:
+    """Capitalizes the first letter of words in the branch name."""
     if not name:
         return ""
     clean = name.strip()
@@ -51,6 +88,7 @@ def format_branch_display(name: str) -> str:
     return " ".join([word.capitalize() for word in clean.split()])
 
 def sanitize_cidr(cidr_raw: str) -> str:
+    """Auto-corrects typos like 10.113.240.0.23 -> 10.113.240.0/23."""
     if not cidr_raw:
         return ""
     s = str(cidr_raw).strip()
@@ -67,7 +105,7 @@ def calculate_ip_range_str(net: ipaddress.IPv4Network) -> str:
     return f"{first_host} - {last_host}"
 
 def compute_chained_rows(supernet_str: str, working_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Calculates suggested contiguous /24 network IPs without touching or resetting user inputs."""
+    """Accurately calculates suggested network IDs based on allocated subnets."""
     clean_supernet = sanitize_cidr(supernet_str)
     current_base = None
     if clean_supernet and "/" in clean_supernet:
@@ -88,7 +126,7 @@ def compute_chained_rows(supernet_str: str, working_rows: List[Dict[str, Any]]) 
 
         row["Suggest Subnet"] = suggested_ip_only
 
-        # Increment to next /24
+        # Compute next available IP boundary
         active_sub = user_subnet if (user_subnet and "/" in user_subnet) else (f"{suggested_ip_only}/24" if suggested_ip_only else "")
         if active_sub and "/" in active_sub:
             try:
