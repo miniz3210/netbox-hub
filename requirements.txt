@@ -5,6 +5,8 @@ openpyxl
 Flask
 flask-cors
 python-dotenv
+tornado
+pyyaml
 # google-genai
 # groq
 # openai
