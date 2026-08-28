@@ -1,307 +1,231 @@
 import ipaddress
 import re
-from typing import Dict, List, Any, Optional
-
-ROLE_LOOKUP_TABLE = {
-    "corporate wifi": {"canonical_role": "Corporate WiFi", "vlan_name": "Corporate WiFi", "vlan_desc": "VIN_Corp", "fallback": None},
-    "workstations": {"canonical_role": "Workstations", "vlan_name": "Workstations", "vlan_desc": "Wired Workstations", "fallback": None},
-    "management": {"canonical_role": "Management", "vlan_name": "Management", "vlan_desc": "Management", "fallback": None},
-    "printers": {"canonical_role": "Printers", "vlan_name": "Printers", "vlan_desc": "Printers", "fallback": None},
-    "audio visual": {"canonical_role": "Audio Visual", "vlan_name": "Audio Visual", "vlan_desc": "AV equipment", "fallback": None},
-    "guests": {"canonical_role": "Guests", "vlan_name": "Guests", "vlan_desc": "VIN_Guest", "fallback": "172.16.x.x"},
-    "mobiles": {"canonical_role": "Mobiles", "vlan_name": "Mobiles", "vlan_desc": "VIN_Mobi", "fallback": "172.18.x.x"},
-    "routing": {"canonical_role": "Routing", "vlan_name": "Routing", "vlan_desc": "Routing interface VLANs", "fallback": None},
-    "ot": {"canonical_role": "OT", "vlan_name": "OT", "vlan_desc": "OT", "fallback": None},
-    "iot": {"canonical_role": "IoT", "vlan_name": "IoT", "vlan_desc": "IoT/Security", "fallback": None},
-}
-
-ROLE_ALIASES = {
-    "corp": "corporate wifi",
-    "corp wifi": "corporate wifi",
-    "corporate": "corporate wifi",
-    "vin_corp": "corporate wifi",
-    "workstation": "workstations",
-    "wired": "workstations",
-    "wired workstations": "workstations",
-    "pc": "workstations",
-    "desktop": "workstations",
-    "mgmt": "management",
-    "printer": "printers",
-    "av": "audio visual",
-    "audiovisual": "audio visual",
-    "av equipment": "audio visual",
-    "guest": "guests",
-    "vin_guest": "guests",
-    "guest wifi": "guests",
-    "mobile": "mobiles",
-    "mobi": "mobiles",
-    "vin_mobi": "mobiles",
-    "mobi wifi": "mobiles",
-    "router": "routing",
-    "rtr": "routing",
-    "routing interface": "routing",
-    "iot/security": "iot",
-    "security": "iot",
-}
+from typing import List, Dict, Any, Optional
 
 STANDARD_VLAN_TEMPLATES = [
-    {"vid": 300, "role": "Corporate WiFi", "opt": False},
-    {"vid": 100, "role": "Workstations", "opt": False},
-    {"vid": 5, "role": "Management", "opt": False},
-    {"vid": 700, "role": "Printers", "opt": False},
-    {"vid": 800, "role": "Audio Visual", "opt": False},
-    {"vid": 200, "role": "Guests", "opt": False, "fallback_subnet": "172.16.x.x"},
-    {"vid": 400, "role": "Mobiles", "opt": False, "fallback_subnet": "172.18.x.x"},
-    {"vid": 90, "role": "Routing", "opt": True},
-    {"vid": 500, "role": "OT", "opt": True},
-    {"vid": 600, "role": "IoT", "opt": True}
+    {"vid": 1, "role": "Site Subnet", "prefix_len": 16, "fallback_subnet": ""},
+    {"vid": 10, "role": "In-Band Management", "prefix_len": 24, "fallback_subnet": ""},
+    {"vid": 20, "role": "Data", "prefix_len": 24, "fallback_subnet": ""},
+    {"vid": 30, "role": "Voice", "prefix_len": 24, "fallback_subnet": ""},
+    {"vid": 40, "role": "Corporate WiFi", "prefix_len": 24, "fallback_subnet": ""},
+    {"vid": 50, "role": "Guest WiFi", "prefix_len": 24, "fallback_subnet": ""},
+    {"vid": 60, "role": "Printers", "prefix_len": 24, "fallback_subnet": ""},
+    {"vid": 70, "role": "Security / CCTV", "prefix_len": 24, "fallback_subnet": ""},
+    {"vid": 80, "role": "Building Management", "prefix_len": 24, "fallback_subnet": ""},
+    {"vid": 90, "role": "Audio Visual", "prefix_len": 24, "fallback_subnet": ""},
+    {"vid": 100, "role": "Server / DMZ", "prefix_len": 24, "fallback_subnet": ""},
 ]
 
-def format_branch_display(site_text: str) -> str:
-    """Auto-capitalizes/uppercases branch site name (e.g. bristol -> Bristol, age -> AGE)."""
-    clean = str(site_text or "").strip()
-    if not clean:
-        return ""
-    if len(clean) <= 4:
-        return clean.upper()
-    return clean.title()
-
-def resolve_role_details(user_role_input: str) -> Dict[str, Any]:
-    clean = re.sub(r"[^a-zA-Z0-9/_\s-]", "", str(user_role_input or "")).strip().lower()
-    if not clean:
-        return {"canonical_role": "", "vlan_name": "", "vlan_desc": "", "fallback": None}
-    
-    if clean in ROLE_LOOKUP_TABLE:
-        return ROLE_LOOKUP_TABLE[clean]
-    
-    if clean in ROLE_ALIASES:
-        target = ROLE_ALIASES[clean]
-        return ROLE_LOOKUP_TABLE[target]
-    
-    for alias, target in ROLE_ALIASES.items():
-        if alias in clean or clean in alias:
-            return ROLE_LOOKUP_TABLE[target]
-            
-    for key, val in ROLE_LOOKUP_TABLE.items():
-        if key in clean or clean in key:
-            return val
-            
-    return {
-        "canonical_role": str(user_role_input).strip(),
-        "vlan_name": str(user_role_input).strip(),
-        "vlan_desc": str(user_role_input).strip(),
-        "fallback": None
-    }
+ROLE_DESCRIPTIONS = {
+    "site subnet": "Top-level site container subnet",
+    "in-band management": "Management interfaces for network hardware",
+    "data": "Primary wired office endpoints",
+    "voice": "VoIP telephony network",
+    "corporate wifi": "Corporate wireless clients",
+    "guest wifi": "Isolated guest internet access",
+    "printers": "Network printers and multi-function devices",
+    "security / cctv": "Physical security cameras and access control",
+    "building management": "HVAC and BMS controllers",
+    "audio visual": "Video conferencing and digital signage",
+    "server / dmz": "Local branch infrastructure servers",
+}
 
 def slugify(text: str) -> str:
-    s = str(text).strip().lower()
-    s = s.replace(" - ", "-").replace(" ", "-")
-    return re.sub(r"[^\w-]", "", s)
+    if not text:
+        return ""
+    text = text.lower().strip()
+    text = re.sub(r'[\s_]+', '-', text)
+    text = re.sub(r'[^a-z0-9-]', '', text)
+    return text.strip('-')
 
-def calculate_ip_range_str(network: ipaddress.IPv4Network) -> str:
-    return f"{network.network_address} - {network.broadcast_address}"
+def format_branch_display(name: str) -> str:
+    if not name:
+        return ""
+    return name.strip()
 
-def check_prefix_collision(target_net: ipaddress.IPv4Network, existing_prefixes: List[str]) -> bool:
-    for p in existing_prefixes:
+def calculate_ip_range_str(net: ipaddress.IPv4Network) -> str:
+    if net.num_addresses <= 2:
+        return f"{net.network_address} - {net.broadcast_address}"
+    first_host = net.network_address + 1
+    last_host = net.broadcast_address - 1
+    return f"{first_host} - {last_host}"
+
+def compute_chained_rows(supernet_str: str, working_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Calculates suggested contiguous non-overlapping subnets based on supernet and prior row assignments."""
+    current_base = None
+    if supernet_str and "/" in supernet_str:
         try:
-            ex_net = ipaddress.ip_network(p.strip(), strict=False)
-            if target_net.overlaps(ex_net):
-                return True
-        except ValueError:
-            continue
-    return False
-
-def calculate_remaining_subnets(supernet_str: str, allocated_subnets: List[str]) -> Dict[str, int]:
-    try:
-        sup_net = ipaddress.ip_network(supernet_str.strip(), strict=False)
-    except ValueError:
-        return {f"/{c}": 0 for c in range(23, 30)}
-
-    total_ips = sup_net.num_addresses
-    used_ips = 0
-    
-    for sub in allocated_subnets:
-        clean = str(sub).strip()
-        if "/" in clean and "x" not in clean.lower():
-            try:
-                n = ipaddress.ip_network(clean, strict=False)
-                if n.subnet_of(sup_net):
-                    used_ips += n.num_addresses
-            except ValueError:
-                continue
-
-    remain_ips = max(0, total_ips - used_ips)
-    capacity = {}
-    for cidr in range(23, 30):
-        block_size = 2 ** (32 - cidr)
-        capacity[f"/{cidr}"] = remain_ips // block_size
-        
-    return capacity
-
-def compute_chained_rows(
-    supernet_str: str, 
-    rows_data: List[Dict[str, Any]]
-) -> List[Dict[str, Any]]:
-    try:
-        clean_sup = supernet_str.strip()
-        sup_net = ipaddress.ip_network(clean_sup, strict=False)
-        base_ip = str(sup_net.network_address)
-    except Exception:
-        sup_net = None
-        base_ip = ""
-
-    processed = []
-
-    for idx, r in enumerate(rows_data):
-        role_raw = r.get("Role", "")
-        role_info = resolve_role_details(role_raw)
-        
-        canonical_role = role_info["canonical_role"] or str(role_raw).strip()
-        
-        custom_name = str(r.get("VLAN Name") or "").strip()
-        custom_desc = str(r.get("VLAN Description") or "").strip()
-        
-        vlan_name = custom_name if (custom_name and custom_name.lower() != "none") else (role_info["vlan_name"] or canonical_role)
-        vlan_desc = custom_desc if (custom_desc and custom_desc.lower() != "none") else (role_info["vlan_desc"] or canonical_role)
-        fallback = role_info["fallback"] or r.get("fallback_subnet")
-
-        user_subnet = str(r.get("Subnet (CIDR)") or r.get("Subnet") or "").strip()
-        if user_subnet.lower() in ("nan", "none", "null", "—", "-"):
-            user_subnet = ""
-
-        suggest = ""
-        if fallback:
-            suggest = fallback
-        elif idx == 0:
-            suggest = base_ip
-        else:
-            prev_row = processed[idx - 1]
-            prev_sub = prev_row.get("Subnet (CIDR)", "").strip()
-            if prev_sub and "x" not in prev_sub.lower():
-                try:
-                    clean_prev = prev_sub if "/" in prev_sub else f"{prev_sub}/24"
-                    prev_net = ipaddress.ip_network(clean_prev, strict=False)
-                    next_int = int(prev_net.broadcast_address) + 1
-                    suggest = str(ipaddress.IPv4Address(next_int))
-                except Exception:
-                    suggest = ""
-            else:
-                suggest = ""
-
-        processed.append({
-            "VLAN ID": r.get("VLAN ID") if r.get("VLAN ID") not in (None, "None", "") else None,
-            "VLAN Name": vlan_name,
-            "Role": canonical_role,
-            "VLAN Description": vlan_desc,
-            "Suggest Subnet": suggest,
-            "Subnet (CIDR)": user_subnet,
-            "fallback_subnet": fallback or ""
-        })
-        
-    return processed
-
-def evaluate_subnet_row(
-    subnet_input: Any,
-    vlan_id: Any = None,
-    vlan_role: str = "",
-    site_name: str = "",
-    supernet_str: str = "",
-    existing_prefixes: Optional[List[str]] = None
-) -> Dict[str, Any]:
-    try:
-        clean = "" if subnet_input is None else str(subnet_input).strip()
-    except Exception:
-        clean = ""
-
-    vid_str = str(vlan_id) if vlan_id not in (None, "", "nan", "None") else ""
-    role_text = str(vlan_role or "").strip()
-    site_display = format_branch_display(site_name)
-    desc = f"{site_display} {role_text} -- VLAN {vid_str}".strip() if vid_str else f"{site_display} {role_text}".strip()
-
-    if not clean or clean.lower() in ("nan", "none", "null", "<na>", "—", "-"):
-        return {"usable_range": "—", "status": "Unassigned", "desc": desc, "in_use": False}
-
-    if "x" in clean.lower():
-        return {"usable_range": "RFC1918 Custom Pool", "status": "Special Pool", "desc": desc, "in_use": False}
-
-    if "/" not in clean and clean.count(".") == 3:
-        clean = f"{clean}/24"
-
-    if "/" not in clean:
-        return {"usable_range": "—", "status": "Pending Input", "desc": desc, "in_use": False}
-
-    try:
-        net = ipaddress.ip_network(clean, strict=False)
-        range_str = calculate_ip_range_str(net)
-        is_in_use = check_prefix_collision(net, existing_prefixes or [])
-
-        status = "OK"
-        if is_in_use:
-            status = "⚠️ [IN-USE]"
-            range_str += " ⚠️ [IN-USE]"
-        elif supernet_str:
-            try:
-                sup = ipaddress.ip_network(supernet_str.strip(), strict=False)
-                if not net.subnet_of(sup):
-                    status = "Outside Supernet"
-            except ValueError:
-                pass
-
-        return {
-            "usable_range": range_str,
-            "status": status,
-            "desc": desc,
-            "in_use": is_in_use,
-            "net": net
-        }
-    except (ValueError, TypeError):
-        return {"usable_range": "Invalid CIDR", "status": "Syntax Error", "desc": desc, "in_use": False}
-
-def generate_netbox_site_csv(site_name: str) -> str:
-    display = format_branch_display(site_name) or "Site"
-    return f"name,slug,status\n{display},{slugify(display)},active"
-
-def generate_netbox_vlan_group_csv(site_name: str, scope_id: str) -> str:
-    display = format_branch_display(site_name) or "Site"
-    group_name = f"{display} VLAN Group"
-    slug = f"{slugify(display)}-vlan-group"
-    return f"name,slug,scope_type,scope_id\n{group_name},{slug},dcim.site,{scope_id}"
-
-def generate_netbox_vlans_csv(site_name: str, records: List[Dict[str, Any]]) -> str:
-    display = format_branch_display(site_name) or "Site"
-    group_name = f"{display} VLAN Group"
-    lines = ["vid,name,status,site,group,description,role"]
-    for r in records:
-        vid = r.get("VLAN ID") or r.get("vid", "")
-        if not vid or str(vid).lower() == "none":
-            continue
-        name = r.get("VLAN Name") or r.get("name", "")
-        desc = r.get("VLAN Description") or r.get("Description") or r.get("desc", name)
-        role = r.get("Role") or r.get("role", name)
-        lines.append(f"{vid},{name},active,{display},{group_name},{desc},{role}")
-    return "\n".join(lines)
-
-def generate_netbox_prefixes_csv(site_name: str, scope_id: str, supernet_str: str, records: List[Dict[str, Any]]) -> str:
-    display = format_branch_display(site_name) or "Site"
-    group_name = f"{display} VLAN Group"
-    lines = ["prefix,status,scope_type,scope_id,vlan_group,vlan,role,description"]
-    
-    if supernet_str:
-        try:
-            s_net = ipaddress.ip_network(supernet_str.strip(), strict=False)
-            desc = f"{display} Subnet - {calculate_ip_range_str(s_net)}"
-            lines.append(f"{s_net},active,dcim.site,{scope_id},\"{group_name}\",,,\"{desc}\"")
+            sup_net = ipaddress.ip_network(supernet_str, strict=False)
+            current_base = sup_net.network_address
         except ValueError:
             pass
 
-    for r in records:
-        vid = r.get("VLAN ID") or r.get("vid", "")
-        role = r.get("Role") or r.get("role", "")
-        desc = r.get("Prefix Description") or r.get("desc") or f"{display} {role} -- VLAN {vid}"
-        sub = str(r.get("Subnet (CIDR)") or r.get("Subnet") or r.get("assigned_subnet", "")).strip()
+    out = []
+    for r in working_rows:
+        row = dict(r)
+        role = str(row.get("Role") or "").strip()
+        vname = str(row.get("VLAN Name") or "").strip()
+        vdesc = str(row.get("VLAN Description") or "").strip()
         
-        vid_str = str(vid) if vid and str(vid).lower() != "none" else ""
-        if "/" in sub:
-            lines.append(f"{sub},active,dcim.site,{scope_id},\"{group_name}\",{vid_str},\"{role}\",\"{desc}\"")
-            
+        if not vname and role:
+            row["VLAN Name"] = role
+        if not vdesc and role:
+            row["VLAN Description"] = ROLE_DESCRIPTIONS.get(role.lower(), f"{role} Network")
+
+        suggested = ""
+        user_subnet = str(row.get("Subnet (CIDR)") or "").strip()
+
+        if current_base is not None:
+            # First row or site container
+            if str(row.get("VLAN ID")) == "1" or role.lower() == "site subnet":
+                suggested = supernet_str
+            else:
+                suggested = f"{current_base}/24"
+
+        row["Suggest Subnet"] = suggested
+
+        # Advance pointer for next subnet
+        active_sub = user_subnet or suggested
+        if active_sub and "/" in active_sub:
+            try:
+                active_net = ipaddress.ip_network(active_sub, strict=False)
+                if str(row.get("VLAN ID")) != "1" and role.lower() != "site subnet":
+                    current_base = active_net.broadcast_address + 1
+            except ValueError:
+                pass
+
+        out.append(row)
+    return out
+
+def evaluate_subnet_row(
+    subnet_str: str, 
+    vid: Optional[int], 
+    role: str, 
+    site_name: str, 
+    supernet_str: str, 
+    existing_prefixes: List[str]
+) -> Dict[str, str]:
+    if not subnet_str or "/" not in subnet_str:
+        return {"usable_range": "-", "status": "⚪ Unassigned", "desc": ""}
+
+    try:
+        net = ipaddress.ip_network(subnet_str, strict=False)
+    except ValueError:
+        return {"usable_range": "Invalid CIDR", "status": "❌ Invalid CIDR", "desc": ""}
+
+    usable_range = calculate_ip_range_str(net)
+    
+    # Description Generator
+    branch = format_branch_display(site_name) or "Site"
+    clean_role = role.strip() if role else "Data"
+    if str(vid) == "1" or clean_role.lower() == "site subnet":
+        desc = f"{branch} - Site Supernet"
+    else:
+        desc = f"{branch} - VLAN {vid} ({clean_role})" if vid else f"{branch} - {clean_role}"
+
+    # Supernet container boundary check
+    if supernet_str and "/" in supernet_str:
+        try:
+            sup_net = ipaddress.ip_network(supernet_str, strict=False)
+            if not net.subnet_of(sup_net) and net != sup_net:
+                return {
+                    "usable_range": usable_range,
+                    "status": "⚠️ Outside Supernet",
+                    "desc": desc
+                }
+        except ValueError:
+            pass
+
+    # Global DB collision / overlap check
+    for exist_str in existing_prefixes:
+        if exist_str == subnet_str:
+            continue
+        try:
+            exist_net = ipaddress.ip_network(exist_str, strict=False)
+            if net.overlaps(exist_net) and net != exist_net:
+                # Allow standard site container containing its own subnets
+                if not (net.subnet_of(exist_net) and exist_net.prefixlen < 24):
+                    return {
+                        "usable_range": usable_range,
+                        "status": f"🚨 Overlaps {exist_str}",
+                        "desc": desc
+                    }
+        except ValueError:
+            pass
+
+    return {"usable_range": usable_range, "status": "🟢 Available", "desc": desc}
+
+def calculate_remaining_subnets(supernet_str: str, allocated_subnets: List[str]) -> Dict[str, int]:
+    result = {"/24": 0, "/25": 0, "/26": 0, "/27": 0, "/28": 0}
+    if not supernet_str or "/" not in supernet_str:
+        return result
+
+    try:
+        sup_net = ipaddress.ip_network(supernet_str, strict=False)
+    except ValueError:
+        return result
+
+    valid_allocations = []
+    for s in allocated_subnets:
+        if s and "/" in s and s != supernet_str:
+            try:
+                sub = ipaddress.ip_network(s, strict=False)
+                if sub.subnet_of(sup_net):
+                    valid_allocations.append(sub)
+            except ValueError:
+                pass
+
+    total_ips = sup_net.num_addresses
+    used_ips = sum(n.num_addresses for n in valid_allocations)
+    free_ips = max(0, total_ips - used_ips)
+
+    for prefix in [24, 25, 26, 27, 28]:
+        size = 2 ** (32 - prefix)
+        result[f"/{prefix}"] = free_ips // size
+
+    return result
+
+# ── BULK NETBOX CSV GENERATORS ──────────────────────────────────────────
+
+def generate_netbox_site_csv(site_name: str) -> str:
+    clean = format_branch_display(site_name)
+    slug = slugify(clean)
+    return f"name,slug,status\n\"{clean}\",\"{slug}\",active"
+
+def generate_netbox_vlan_group_csv(site_name: str, scope_id: str) -> str:
+    clean = format_branch_display(site_name)
+    slug = slugify(clean)
+    return f"name,slug,scope_type,scope_id,description\n\"{clean} VLANs\",\"{slug}-vlans\",\"dcim.site\",{scope_id or '0'},\"Standard VLAN Group for {clean}\""
+
+def generate_netbox_vlans_csv(site_name: str, rows: List[Dict[str, Any]]) -> str:
+    clean = format_branch_display(site_name)
+    slug = slugify(clean)
+    lines = ["vid,name,status,group,description"]
+    for r in rows:
+        vid = r.get("VLAN ID")
+        if not vid or str(vid) == "1":
+            continue
+        vname = r.get("VLAN Name") or r.get("Role") or f"VLAN_{vid}"
+        desc = r.get("VLAN Description") or f"{clean} {vname}"
+        lines.append(f"{vid},\"{vname}\",active,\"{clean} VLANs\",\"{desc}\"")
+    return "\n".join(lines)
+
+def generate_netbox_prefixes_csv(site_name: str, scope_id: str, supernet_str: str, rows: List[Dict[str, Any]]) -> str:
+    clean = format_branch_display(site_name)
+    lines = ["prefix,status,scope_type,scope_id,vlan_group,vlan,description"]
+    
+    # 1. Top-Level Site Container
+    if supernet_str and "/" in supernet_str:
+        lines.append(f"\"{supernet_str}\",container,\"dcim.site\",{scope_id or '0'},,,\"{clean} - Site Supernet\"")
+
+    # 2. Subnets
+    for r in rows:
+        subnet = str(r.get("Subnet (CIDR)") or "").strip()
+        vid = r.get("VLAN ID")
+        if not subnet or "/" not in subnet or str(vid) == "1" or subnet == supernet_str:
+            continue
+        vname = r.get("VLAN Name") or r.get("Role") or f"VLAN_{vid}"
+        desc = r.get("Prefix Description") or f"{clean} - VLAN {vid} ({vname})"
+        lines.append(f"\"{subnet}\",active,\"dcim.site\",{scope_id or '0'},\"{clean} VLANs\",{vid},\"{desc}\"")
+        
     return "\n".join(lines)
