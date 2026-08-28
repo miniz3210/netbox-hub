@@ -5,7 +5,7 @@ import streamlit as st
 import pandas as pd
 import openpyxl
 from core.ipam_engine import (
-    STANDARD_VLAN_TEMPLATES,
+    VLAN_PRESETS,
     compute_chained_rows,
     slugify,
     evaluate_subnet_row,
@@ -255,11 +255,30 @@ def handle_ipam_db_reset():
         del st.session_state["ipam_scope_in"]
     st.toast("🗑️ Database Cleared. Restored default templates.", icon="🧹")
 
+def on_preset_change():
+    selected = st.session_state.get("ipam_preset_selector")
+    template_list = VLAN_PRESETS.get(selected, [])
+    
+    if not template_list:
+        st.session_state["ipam_persisted_rows"] = []
+    else:
+        new_rows = []
+        for t in template_list:
+            new_rows.append({
+                "VLAN ID": t["vid"],
+                "Role": t["role"],
+                "VLAN Name": t.get("vlan_name", t["role"]),
+                "VLAN Description": t.get("desc", ""),
+                "Subnet (CIDR)": "",
+                "fallback_subnet": ""
+            })
+        st.session_state["ipam_persisted_rows"] = new_rows
+
 def render_ipam_tab(active_model: str):
     st.subheader("🌐 IPAM & Site Subnet Provisioning Engine")
     st.caption("Plan site supernets, allocate non-overlapping VLAN subnets, and export ready-to-import NetBox CSV blocks.")
 
-    # Ingestion Toolbar
+    # 1. Ingestion Toolbar
     total_ipam_recs = get_total_ipam_count()
     total_sites_recs = get_total_sites_count()
     total_db_count = total_ipam_recs + total_sites_recs
@@ -290,7 +309,7 @@ def render_ipam_tab(active_model: str):
                 key="dl_ps1_ipam"
             )
         with c_ref:
-            if st.button("🔄 Refresh", key="ref_ipam_btn", use_container_width=True):
+            if st.button("🔄 Refresh", key="ref_ipam_btn", width="stretch"):
                 st.rerun()
 
         st.markdown(
@@ -313,11 +332,11 @@ def render_ipam_tab(active_model: str):
 
         with c_rst:
             if total_db_count > 0:
-                st.button("🗑️ Clear DB", on_click=handle_ipam_db_reset, use_container_width=True, key="rst_ipam_csv_btn")
+                st.button("🗑️ Clear DB", on_click=handle_ipam_db_reset, width="stretch", key="rst_ipam_csv_btn")
             else:
                 st.caption("No custom data loaded.")
 
-    # Site Inputs
+    # 2. Site Inputs
     top1, top2, top3 = st.columns([2, 1, 2])
     with top1:
         site_name = st.text_input(
@@ -372,22 +391,25 @@ def render_ipam_tab(active_model: str):
 
     existing_prefixes = get_existing_prefix_strings()
 
-    # Base Row Template Structure
-    base_default = []
-    for v in STANDARD_VLAN_TEMPLATES:
-        base_default.append({
-            "VLAN ID": v["vid"],
-            "Role": v["role"],
-            "VLAN Name": v["role"],
-            "VLAN Description": "",
-            "Subnet (CIDR)": "",
-            "fallback_subnet": v.get("fallback_subnet", "")
-        })
+    # 3. Preset Selection & Dynamic Allocation Editor
+    st.markdown("---")
+    c_title, c_preset = st.columns([2.5, 1.5])
+    with c_title:
+        st.markdown("##### 📊 Subnet Allocation Editor (✏️ Click any cell to edit)")
+    with c_preset:
+        st.selectbox(
+            "Load Standard Preset",
+            options=list(VLAN_PRESETS.keys()),
+            index=0,
+            key="ipam_preset_selector",
+            on_change=on_preset_change,
+            help="Quickly load pre-defined standard VLAN structures or start blank."
+        )
 
-    if "ipam_persisted_rows" in st.session_state:
-        working_rows = [dict(r) for r in st.session_state["ipam_persisted_rows"]]
-    else:
-        working_rows = [dict(t) for t in base_default]
+    if "ipam_persisted_rows" not in st.session_state:
+        st.session_state["ipam_persisted_rows"] = []
+
+    working_rows = [dict(r) for r in st.session_state["ipam_persisted_rows"]]
 
     widget_state = st.session_state.get("ipam_data_editor", {})
 
@@ -426,9 +448,6 @@ def render_ipam_tab(active_model: str):
         "VLAN ID", "Role", "VLAN Name", "VLAN Description", "Suggest Subnet", "Subnet (CIDR)"
     ]]
 
-    st.markdown("##### 📊 Subnet Allocation Editor (✏️ Click any cell to edit)")
-
-    # Upgraded width parameter to eliminate deprecation warnings
     edited_df = st.data_editor(
         df_init,
         width="stretch",
@@ -436,15 +455,15 @@ def render_ipam_tab(active_model: str):
         key="ipam_data_editor",
         column_config={
             "VLAN ID": st.column_config.NumberColumn("VLAN ID", step=1, required=True),
-            "Role": st.column_config.TextColumn("Role", help="Type role (e.g. Guest, Corporate WiFi, Audio Visual). Auto-corrects on Enter."),
-            "VLAN Name": st.column_config.TextColumn("VLAN Name", help="VLAN Name. Auto-filled from Role or editable."),
-            "VLAN Description": st.column_config.TextColumn("VLAN Description", help="VLAN Description. Auto-looked up from Role or editable."),
+            "Role": st.column_config.TextColumn("Role", help="Type role (e.g. Corporate WiFi, Workstations). Auto-corrects on Enter."),
+            "VLAN Name": st.column_config.TextColumn("VLAN Name", help="VLAN Name in NetBox (e.g. VIN_Corp, Wired Workstations)."),
+            "VLAN Description": st.column_config.TextColumn("VLAN Description", help="VLAN Description."),
             "Suggest Subnet": st.column_config.TextColumn("Suggest Subnet", help="Calculated dynamically based on previous Subnet (CIDR) input.", disabled=True),
-            "Subnet (CIDR)": st.column_config.TextColumn("Subnet (CIDR)", help="Type subnet CIDR (e.g. 10.1.1.0/24) and hit Enter.")
+            "Subnet (CIDR)": st.column_config.TextColumn("Subnet (CIDR)", help="Type subnet CIDR (e.g. 10.27.0.0/24) and hit Enter.")
         }
     )
 
-    # Status Evaluation
+    # 4. Live Usable Ranges & Status Evaluation
     final_records = computed_rows
     allocated_subnets = []
     
@@ -478,7 +497,7 @@ def render_ipam_tab(active_model: str):
         cap_rows = [{"Subnet Size": k, "Available": f"{v} subnets"} for k, v in cap_matrix.items()]
         st.dataframe(pd.DataFrame(cap_rows), width="stretch", hide_index=True)
 
-    # NetBox Bulk-Import CSV Generators
+    # 5. NetBox Bulk-Import CSV Generators
     st.markdown("---")
     st.markdown("### 📋 NetBox Bulk-Import CSV Generators")
 

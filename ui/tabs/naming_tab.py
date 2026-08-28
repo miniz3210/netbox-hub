@@ -118,7 +118,7 @@ def render_compact_toolbar():
                     key="dl_ps1_naming"
                 )
             with c_ref:
-                if st.button("🔄 Refresh", key="ref_naming_btn", use_container_width=True):
+                if st.button("🔄 Refresh", key="ref_naming_btn", width="stretch"):
                     st.rerun()
 
             st.markdown(
@@ -140,7 +140,7 @@ def render_compact_toolbar():
                 )
             with c_rst:
                 if total_recs > 0:
-                    st.button("🗑️ Clear DB", on_click=handle_csv_reset, use_container_width=True, key="rst_csv_btn")
+                    st.button("🗑️ Clear DB", on_click=handle_csv_reset, width="stretch", key="rst_csv_btn")
                 else:
                     st.caption("No custom data loaded.")
 
