@@ -8,13 +8,17 @@ ENV PYTHONUNBUFFERED=1 \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
+    nginx \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY nginx.conf /etc/nginx/nginx.conf
 COPY . .
+
+RUN chmod +x /app/entrypoint.sh
 
 EXPOSE 8501
 
-CMD ["python", "server.py"]
+CMD ["/app/entrypoint.sh"]
