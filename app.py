@@ -110,4 +110,4 @@ for (_label, renderer), tab in zip(TABS, tab_objs):
             renderer()
         except Exception as exc:
             logger.exception("Tab '%s' crashed", _label)
-            st.error(f"❌ Tab '%s' failed: %s", _label, exc)
+            st.error(f"❌ Tab '{_label}' failed: {exc}")
