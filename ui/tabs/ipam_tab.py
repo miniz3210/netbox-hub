@@ -337,7 +337,7 @@ def render_ipam_tab(active_model: str):
             else:
                 st.caption("No custom data loaded.")
 
-    # 2. Site Inputs and Compact Remaining Capacity
+    # 2. Site Inputs Placeholder Setup
     top1, top2, top3 = st.columns([2, 1, 2.2])
     with top1:
         site_name = st.text_input(
@@ -374,10 +374,6 @@ def render_ipam_tab(active_model: str):
         else:
             st.caption("⚪ Manual Scope ID mode")
 
-    allocated_subnets = []
-    if "ipam_persisted_rows" in st.session_state:
-        allocated_subnets = [str(r.get("Subnet (CIDR)", "") or "").strip() for r in st.session_state["ipam_persisted_rows"]]
-
     with top3:
         supernet_in = st.text_input(
             "Site Supernet (CIDR)", 
@@ -387,20 +383,12 @@ def render_ipam_tab(active_model: str):
             help="Top-level container subnet for this branch site."
         ).strip()
         
-        if supernet_in and "/" in supernet_in:
-            try:
-                sup_net = ipaddress.ip_network(supernet_in, strict=False)
-                sup_range = calculate_ip_range_str(sup_net)
-                cap_matrix = calculate_remaining_subnets(supernet_in, allocated_subnets)
-                cap_str = f"**Available:** `{cap_matrix['/24']}x /24` | `{cap_matrix['/25']}x /25` | `{cap_matrix['/26']}x /26` | `{cap_matrix['/27']}x /27`"
-                st.markdown(f"📍 **Site Subnet:** `{sup_range}`")
-                st.caption(cap_str)
-            except ValueError:
-                st.caption("⚠️ Invalid CIDR format")
+        # Placeholder for dynamic site subnet & remaining capacity display
+        cap_placeholder = st.empty()
 
     existing_prefixes = get_existing_prefix_strings()
 
-    # 3. Preset Selection & Unified Data Editor
+    # 3. Preset Selection & Real-Time Sync
     st.markdown("---")
     c_title, c_preset = st.columns([2.5, 1.5])
     with c_title:
@@ -418,7 +406,7 @@ def render_ipam_tab(active_model: str):
     if "ipam_persisted_rows" not in st.session_state:
         st.session_state["ipam_persisted_rows"] = []
 
-    # Delta edit tracking before next compute cycle
+    # Delta edit tracking from data_editor
     raw_rows = [dict(r) for r in st.session_state["ipam_persisted_rows"]]
     editor_state = st.session_state.get("ipam_data_editor_live", {})
     
@@ -449,9 +437,12 @@ def render_ipam_tab(active_model: str):
     computed_rows = compute_chained_rows(supernet_in, raw_rows)
     st.session_state["ipam_persisted_rows"] = computed_rows
 
-    # Calculate status, usable range, and prefix description inline for the same table
+    # Extract all allocated subnets and evaluate rows
+    allocated_subnets = []
     for r in computed_rows:
         sub_str = str(r.get("Subnet (CIDR)", "") or "").strip()
+        if sub_str:
+            allocated_subnets.append(sub_str)
         eval_res = evaluate_subnet_row(
             sub_str, 
             r.get("VLAN ID"), 
@@ -463,6 +454,19 @@ def render_ipam_tab(active_model: str):
         r["Usable Range"] = eval_res["usable_range"]
         r["Status"] = eval_res["status"]
         r["Prefix Description"] = eval_res["desc"]
+
+    # Render dynamic site subnet & real-time available capacity under Site Supernet input
+    with cap_placeholder.container():
+        if supernet_in and "/" in supernet_in:
+            try:
+                sup_net = ipaddress.ip_network(supernet_in, strict=False)
+                sup_range = calculate_ip_range_str(sup_net)
+                cap_matrix = calculate_remaining_subnets(supernet_in, allocated_subnets)
+                cap_str = f"**Available:** `{cap_matrix['/24']}x /24` | `{cap_matrix['/25']}x /25` | `{cap_matrix['/26']}x /26` | `{cap_matrix['/27']}x /27`"
+                st.markdown(f"📍 **Site Subnet:** `{sup_range}`")
+                st.caption(cap_str)
+            except ValueError:
+                st.caption("⚠️ Invalid CIDR format")
 
     TABLE_COLS = [
         "VLAN ID", "Role", "VLAN Name", "VLAN Description", 
