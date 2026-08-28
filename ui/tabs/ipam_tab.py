@@ -205,9 +205,9 @@ def handle_ipam_file_upload():
                     pfx_col = cols.get("prefixes", cols.get("prefix", cols.get("subnet")))
                     vid_col = cols.get("vid", cols.get("vlan_id", cols.get("vlan", "")))
                     vname_col = cols.get("name", cols.get("vlan_name", ""))
-                    role_col = cols.get("role", cols.get("vlan_role", ""))
-                    site_col = cols.get("site", cols.get("scope", ""))
-                    desc_col = cols.get("description", cols.get("comments", ""))
+                    role_val = str(row.get(role_col, "")).strip() if role_col else ""
+                    site_val = str(row.get(site_col, "")).strip() if site_col else ""
+                    desc = str(row.get(desc_col, "")).strip() if desc_col else ""
 
                     ipam_records = []
                     for _, row in df.iterrows():
@@ -218,18 +218,18 @@ def handle_ipam_file_upload():
                         found_cidrs = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}/\d{1,2}\b', raw_prefixes)
                         vid = str(row.get(vid_col, "")).strip() if vid_col else ""
                         vname = str(row.get(vname_col, "")).strip() if vname_col else ""
-                        role_val = str(row.get(role_col, "")).strip() if role_col else ""
-                        site_val = str(row.get(site_col, "")).strip() if site_col else ""
-                        desc = str(row.get(desc_col, "")).strip() if desc_col else ""
+                        role_str = str(row.get("role", "")).strip()
+                        site_str = str(row.get("site", "")).strip()
+                        desc_str = str(row.get("description", "")).strip()
 
                         for cidr in found_cidrs:
                             ipam_records.append({
                                 "prefix_or_subnet": cidr,
                                 "vlan_id": vid if vid.isdigit() else None,
                                 "vlan_name": vname if vname.lower() != "nan" else "",
-                                "role": role_val if role_val.lower() != "nan" else "",
-                                "site": site_val if site_val.lower() != "nan" else "",
-                                "description": desc if desc.lower() != "nan" else ""
+                                "role": role_str if role_str.lower() != "nan" else "",
+                                "site": site_str if site_str.lower() != "nan" else "",
+                                "description": desc_str if desc_str.lower() != "nan" else ""
                             })
 
                     if ipam_records:
@@ -259,9 +259,7 @@ def on_preset_change():
     selected = st.session_state.get("ipam_preset_selector")
     template_list = VLAN_PRESETS.get(selected, [])
     
-    if "ipam_data_editor" in st.session_state:
-        del st.session_state["ipam_data_editor"]
-
+    # Generate fresh rows for the selected preset
     if not template_list:
         st.session_state["ipam_persisted_rows"] = []
     else:
@@ -272,8 +270,7 @@ def on_preset_change():
                 "Role": t["role"],
                 "VLAN Name": t.get("vlan_name", t["role"]),
                 "VLAN Description": t.get("desc", ""),
-                "Subnet (CIDR)": "",
-                "fallback_subnet": ""
+                "Subnet (CIDR)": ""
             })
         st.session_state["ipam_persisted_rows"] = new_rows
 
@@ -394,7 +391,7 @@ def render_ipam_tab(active_model: str):
 
     existing_prefixes = get_existing_prefix_strings()
 
-    # 3. Preset Selection & Allocation Editor
+    # 3. Preset Selection & Safe Data Editor
     st.markdown("---")
     c_title, c_preset = st.columns([2.5, 1.5])
     with c_title:
@@ -412,40 +409,9 @@ def render_ipam_tab(active_model: str):
     if "ipam_persisted_rows" not in st.session_state:
         st.session_state["ipam_persisted_rows"] = []
 
-    working_rows = [dict(r) for r in st.session_state["ipam_persisted_rows"]]
-
-    widget_state = st.session_state.get("ipam_data_editor", {})
-
-    deleted_indices = set(widget_state.get("deleted_rows", []))
-    if deleted_indices:
-        working_rows = [r for i, r in enumerate(working_rows) if i not in deleted_indices]
-
-    edited_changes = widget_state.get("edited_rows", {})
-    for row_idx_str, changes in edited_changes.items():
-        row_idx = int(row_idx_str)
-        if row_idx < len(working_rows):
-            working_rows[row_idx].update(changes)
-
-    added_changes = widget_state.get("added_rows", [])
-    for new_row in added_changes:
-        working_rows.append({
-            "VLAN ID": new_row.get("VLAN ID", None),
-            "Role": new_row.get("Role", ""),
-            "VLAN Name": new_row.get("VLAN Name", ""),
-            "VLAN Description": new_row.get("VLAN Description", ""),
-            "Subnet (CIDR)": new_row.get("Subnet (CIDR)", ""),
-            "fallback_subnet": ""
-        })
-
-    for r in working_rows:
-        for k in ["Role", "VLAN Name", "VLAN Description", "Subnet (CIDR)"]:
-            if k not in r or r[k] is None or str(r[k]).lower() == "none":
-                r[k] = ""
-        if r.get("VLAN ID") is not None and str(r.get("VLAN ID")).lower() == "none":
-            r["VLAN ID"] = None
-
-    computed_rows = compute_chained_rows(supernet_in, working_rows)
-    st.session_state["ipam_persisted_rows"] = computed_rows
+    # Calculate suggestions dynamically
+    raw_rows = st.session_state["ipam_persisted_rows"]
+    computed_rows = compute_chained_rows(supernet_in, raw_rows)
 
     TABLE_COLS = ["VLAN ID", "Role", "VLAN Name", "VLAN Description", "Suggest Subnet", "Subnet (CIDR)"]
     if computed_rows:
@@ -453,26 +419,40 @@ def render_ipam_tab(active_model: str):
     else:
         df_init = pd.DataFrame(columns=TABLE_COLS)
 
+    # Render table and capture user edits directly
     edited_df = st.data_editor(
         df_init,
         width="stretch",
         num_rows="dynamic",
-        key="ipam_data_editor",
+        key="ipam_data_editor_live",
         column_config={
             "VLAN ID": st.column_config.NumberColumn("VLAN ID", step=1, required=True),
-            "Role": st.column_config.TextColumn("Role", help="Type role (e.g. Corporate WiFi, Workstations). Auto-corrects on Enter."),
+            "Role": st.column_config.TextColumn("Role", help="Role of the VLAN."),
             "VLAN Name": st.column_config.TextColumn("VLAN Name", help="VLAN Name in NetBox (e.g. VIN_Corp, Wired Workstations)."),
             "VLAN Description": st.column_config.TextColumn("VLAN Description", help="VLAN Description."),
-            "Suggest Subnet": st.column_config.TextColumn("Suggest Subnet", help="Calculated next available network IP ID (without subnet mask).", disabled=True),
+            "Suggest Subnet": st.column_config.TextColumn("Suggest Subnet", help="Calculated next available network IP ID.", disabled=True),
             "Subnet (CIDR)": st.column_config.TextColumn("Subnet (CIDR)", help="Type subnet CIDR (e.g. 10.113.66.0/24) and hit Enter.")
         }
     )
 
+    # Synchronize persisted state with the user's latest table content
+    current_records = edited_df.to_dict(orient="records")
+    st.session_state["ipam_persisted_rows"] = [
+        {
+            "VLAN ID": r.get("VLAN ID"),
+            "Role": str(r.get("Role") or ""),
+            "VLAN Name": str(r.get("VLAN Name") or ""),
+            "VLAN Description": str(r.get("VLAN Description") or ""),
+            "Subnet (CIDR)": str(r.get("Subnet (CIDR)") or "")
+        }
+        for r in current_records
+    ]
+
     # 4. Live Usable Ranges & Status Evaluation
-    final_records = computed_rows
+    final_records = []
     allocated_subnets = []
     
-    for r in final_records:
+    for r in current_records:
         sub_str = str(r.get("Subnet (CIDR)", "") or "").strip()
         allocated_subnets.append(sub_str)
         eval_res = evaluate_subnet_row(
@@ -483,9 +463,11 @@ def render_ipam_tab(active_model: str):
             supernet_in, 
             existing_prefixes
         )
-        r["Usable Range"] = eval_res["usable_range"]
-        r["Status"] = eval_res["status"]
-        r["Prefix Description"] = eval_res["desc"]
+        row_eval = dict(r)
+        row_eval["Usable Range"] = eval_res["usable_range"]
+        row_eval["Status"] = eval_res["status"]
+        row_eval["Prefix Description"] = eval_res["desc"]
+        final_records.append(row_eval)
 
     c_prev, c_cap = st.columns([3, 1.2])
     with c_prev:
@@ -508,7 +490,7 @@ def render_ipam_tab(active_model: str):
         cap_rows = [{"Subnet Size": k, "Available": f"{v} subnets"} for k, v in cap_matrix.items()]
         st.dataframe(pd.DataFrame(cap_rows), width="stretch", hide_index=True)
 
-    # 5. NetBox Bulk-Import CSV Copy Cards (Buttons Removed)
+    # 5. NetBox Bulk-Import CSV Copy Cards
     st.markdown("---")
     st.markdown("### 📋 NetBox Bulk-Import CSV Generators")
 
