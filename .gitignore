@@ -1,42 +1,10 @@
 cat << 'EOF' > .gitignore
-# Environment & Secrets
 .env
-.env.*
-!.env.example
-.streamlit/secrets.toml
-*.pem
-*.key
-
-# Local Databases & Persistent Storage
-data/
-*.db
-*.sqlite
-*.sqlite3
-
-# User Uploaded / Exported Data (CSVs & Workbooks)
-*.csv
-*.xlsx
-*.xls
-
-# Python & Virtual Environments
 __pycache__/
-*.py[cod]
-*$py.class
-.venv/
-venv/
-env/
-ENV/
-
-# Output Artifacts & Archives
+*.pyc
 output_yamls/
-*.zip
-*.tar.gz
 netbox_devicetypes.zip
 netbox_all_assets.zip
-
-# Logs & Runtime Cache
-*.log
-.DS_Store
-.vscode/
-.idea/
+.venv/
+venv/
 EOF

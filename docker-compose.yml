@@ -8,5 +8,7 @@ services:
       - "8501:8501"
     environment:
       - PYTHONUNBUFFERED=1
+      - ENABLE_REST_API=1
+      - HUB_SYNC_KEY=netbox-hub-secret-sync-key
     env_file:
       - ./netbox-hub/.env
