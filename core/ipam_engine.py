@@ -2,9 +2,8 @@ import ipaddress
 import re
 from typing import List, Dict, Any, Optional
 
-# 1. Exact Branch Preset Ordering (Corporate WiFi #1)
 BRANCH_VLAN_PRESET = [
-    {"vid": 300, "role": "Corporate WiFi", "vlan_name": "VIN_Corp", "desc": "VIN_Corp"},
+    {"vid": 300, "role": "Corporate WiFi", "vlan_name": "VIN_Corp", "desc": "Corporate WiFi"},
     {"vid": 100, "role": "Workstations", "vlan_name": "Wired Workstations", "desc": "Wired Workstations"},
     {"vid": 5, "role": "Management", "vlan_name": "Management", "desc": "Management"},
     {"vid": 700, "role": "Printers", "vlan_name": "Printers", "desc": "Printers"},
@@ -16,7 +15,6 @@ BRANCH_VLAN_PRESET = [
     {"vid": 600, "role": "IoT", "vlan_name": "IoT/Security", "desc": "IoT/Security"},
 ]
 
-# 2. Data Center Preset
 DATACENTER_VLAN_PRESET = [
     {"vid": 10, "role": "OOB / IPMI / iLO", "vlan_name": "OOB-Mgmt", "desc": "Out-of-Band server lights-out management (iLO/iDRAC)"},
     {"vid": 20, "role": "In-Band Management", "vlan_name": "InBand-Mgmt", "desc": "ESXi hypervisors and core switch management"},
@@ -36,19 +34,6 @@ VLAN_PRESETS = {
     "🏛️ Data Center VLAN Preset": DATACENTER_VLAN_PRESET
 }
 
-ROLE_DESCRIPTIONS = {
-    "corporate wifi": "VIN_Corp",
-    "workstations": "Wired Workstations",
-    "management": "Management",
-    "printers": "Printers",
-    "audio visual": "AV equipment",
-    "guests": "VIN_Guest",
-    "mobiles": "VIN_Mobi",
-    "routing": "Routing interface VLANs",
-    "ot": "OT",
-    "iot": "IoT/Security",
-}
-
 def slugify(text: str) -> str:
     if not text:
         return ""
@@ -58,7 +43,6 @@ def slugify(text: str) -> str:
     return text.strip('-')
 
 def format_branch_display(name: str) -> str:
-    """Capitalizes the first letter of words in the branch name."""
     if not name:
         return ""
     clean = name.strip()
@@ -67,7 +51,6 @@ def format_branch_display(name: str) -> str:
     return " ".join([word.capitalize() for word in clean.split()])
 
 def sanitize_cidr(cidr_raw: str) -> str:
-    """Auto-corrects typos like 10.113.240.0.23 -> 10.113.240.0/23."""
     if not cidr_raw:
         return ""
     s = str(cidr_raw).strip()
@@ -84,6 +67,7 @@ def calculate_ip_range_str(net: ipaddress.IPv4Network) -> str:
     return f"{first_host} - {last_host}"
 
 def compute_chained_rows(supernet_str: str, working_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Calculates suggested contiguous /24 network IPs without touching or resetting user inputs."""
     clean_supernet = sanitize_cidr(supernet_str)
     current_base = None
     if clean_supernet and "/" in clean_supernet:
@@ -96,24 +80,15 @@ def compute_chained_rows(supernet_str: str, working_rows: List[Dict[str, Any]]) 
     out = []
     for r in working_rows:
         row = dict(r)
-        role = str(row.get("Role") or "").strip()
-        vname = str(row.get("VLAN Name") or "").strip()
-        vdesc = str(row.get("VLAN Description") or "").strip()
-        
-        if not vname and role:
-            row["VLAN Name"] = role
-        if not vdesc and role:
-            row["VLAN Description"] = ROLE_DESCRIPTIONS.get(role.lower(), f"{role} Network")
-
-        suggested_ip_only = ""
         user_subnet = sanitize_cidr(str(row.get("Subnet (CIDR)") or "").strip())
 
+        suggested_ip_only = ""
         if current_base is not None:
-            # Display network IP ID only without subnet mask (e.g. 10.113.66.0)
             suggested_ip_only = str(current_base)
 
         row["Suggest Subnet"] = suggested_ip_only
 
+        # Increment to next /24
         active_sub = user_subnet if (user_subnet and "/" in user_subnet) else (f"{suggested_ip_only}/24" if suggested_ip_only else "")
         if active_sub and "/" in active_sub:
             try:
@@ -150,7 +125,7 @@ def evaluate_subnet_row(
 
     usable_range = calculate_ip_range_str(net)
 
-    # 1. Direct Match in NetBox Database
+    # 1. Direct Match in NetBox DB
     for exist_str in existing_prefixes:
         exist_clean = sanitize_cidr(exist_str)
         if exist_clean == clean_sub:
@@ -160,7 +135,7 @@ def evaluate_subnet_row(
                 "desc": desc
             }
 
-    # 2. Check Overlaps with any existing DB prefixes
+    # 2. Overlaps with existing DB prefixes
     for exist_str in existing_prefixes:
         exist_clean = sanitize_cidr(exist_str)
         if exist_clean == clean_supernet:
@@ -176,7 +151,7 @@ def evaluate_subnet_row(
         except ValueError:
             pass
 
-    # 3. Check container boundary
+    # 3. Container boundary check
     if clean_supernet and "/" in clean_supernet:
         try:
             sup_net = ipaddress.ip_network(clean_supernet, strict=False)
@@ -223,8 +198,6 @@ def calculate_remaining_subnets(supernet_str: str, allocated_subnets: List[str])
 
     return result
 
-# ── BULK NETBOX CSV GENERATORS ──────────────────────────────────────────
-
 def generate_netbox_site_csv(site_name: str) -> str:
     clean = format_branch_display(site_name)
     slug = slugify(clean)
@@ -236,13 +209,11 @@ def generate_netbox_vlan_group_csv(site_name: str, scope_id: str) -> str:
     return f"name,slug,scope_type,scope_id,description\n\"{clean} VLANs\",\"{slug}-vlans\",\"dcim.site\",{scope_id or '0'},\"{clean} VLAN Group\""
 
 def generate_netbox_vlans_csv(site_name: str, rows: List[Dict[str, Any]]) -> str:
-    """Only export VLANs that have an assigned subnet / IP address."""
     clean = format_branch_display(site_name)
     lines = ["vid,name,status,group,description"]
     for r in rows:
         vid = r.get("VLAN ID")
         subnet = sanitize_cidr(str(r.get("Subnet (CIDR)") or "").strip())
-        # Only export VLAN if an IP address / subnet has been assigned
         if not vid or not subnet or "/" not in subnet:
             continue
         vname = r.get("VLAN Name") or r.get("Role") or f"VLAN_{vid}"
@@ -255,11 +226,9 @@ def generate_netbox_prefixes_csv(site_name: str, scope_id: str, supernet_str: st
     clean_supernet = sanitize_cidr(supernet_str)
     lines = ["prefix,status,scope_type,scope_id,vlan_group,vlan,description"]
     
-    # 1. Top-Level Site Supernet Container
     if clean_supernet and "/" in clean_supernet:
         lines.append(f"\"{clean_supernet}\",container,\"dcim.site\",{scope_id or '0'},,,\"{clean} - Site Supernet\"")
 
-    # 2. Member VLAN Subnets (Only where Subnet CIDR is assigned)
     for r in rows:
         subnet = sanitize_cidr(str(r.get("Subnet (CIDR)") or "").strip())
         vid = r.get("VLAN ID")
