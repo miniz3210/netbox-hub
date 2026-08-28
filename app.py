@@ -1,18 +1,20 @@
 """
 NetBox Universal Library Hub - Main Application
-Streamlit entry point with Native Tornado REST Ingest Endpoint.
+Streamlit UI definition.
 """
 
-import os
-import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import streamlit as st
 from dotenv import load_dotenv
 
 from config.constants import APP_VERSION
 from config.settings import AVAILABLE_MODELS
+from core.catalog import get_repo_catalog
+from core.db_manager import init_db
+from core.exceptions import GitHubCatalogError
+from ui.components import render_sidebar
 
 st.set_page_config(
     page_title="NetBox Universal Library Hub",
@@ -28,166 +30,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger("netbox-hub")
-
-# ── Native Tornado REST Ingest Handler ──────────────────────────────────────
-def _mount_native_tornado_api():
-    try:
-        import tornado.web
-        from core.db_manager import save_sites_batch, save_ipam_records_batch, save_records_batch
-
-        class NetBoxSyncPushHandler(tornado.web.RequestHandler):
-            def check_xsrf_cookie(self):
-                # Completely bypass Streamlit XSRF checks for the API
-                pass
-
-            def set_default_headers(self):
-                self.set_header("Access-Control-Allow-Origin", "*")
-                self.set_header("Access-Control-Allow-Headers", "content-type, x-hub-key, authorization")
-                self.set_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
-
-            def options(self, *args, **kwargs):
-                self.set_status(204)
-                self.finish()
-
-            def get(self, *args, **kwargs):
-                self.write({"status": "online", "version": APP_VERSION, "endpoint": "/api/v1/sync/push"})
-
-            def post(self, *args, **kwargs):
-                try:
-                    hub_secret = os.getenv("HUB_SYNC_KEY", "netbox-hub-secret-sync-key")
-                    auth_header = self.request.headers.get("X-Hub-Key", "")
-                    
-                    body = self.request.body.decode('utf-8')
-                    payload = json.loads(body) if body else {}
-                    
-                    if hub_secret and auth_header != hub_secret and payload.get("sync_key") != hub_secret:
-                        self.set_status(401)
-                        self.write({"success": False, "error": "Unauthorized: Invalid X-Hub-Key"})
-                        return
-
-                    sites_data = payload.get("sites") or payload.get("dcim_sites") or []
-                    vlans_data = payload.get("vlans") or payload.get("ipam_vlans") or []
-                    prefixes_data = payload.get("prefixes") or payload.get("ipam_prefixes") or []
-                    devices_data = payload.get("devices") or payload.get("dcim_devices") or []
-                    vms_data = payload.get("vms") or payload.get("virtualization_virtual_machines") or []
-
-                    imported = {"sites": 0, "prefixes": 0, "devices": 0, "vms": 0}
-
-                    # 1. Sites
-                    if sites_data:
-                        site_records = []
-                        for s in sites_data:
-                            s_id = s.get("id")
-                            s_name = s.get("name")
-                            s_slug = s.get("slug")
-                            if s_id and s_name:
-                                site_records.append({"id": s_id, "name": s_name, "slug": s_slug})
-                        if site_records:
-                            imported["sites"] = save_sites_batch(site_records, clear_first=True)
-
-                    # 2. IPAM (VLANs & Prefixes)
-                    ipam_records = []
-                    for v in vlans_data:
-                        vid = v.get("vid")
-                        vname = v.get("name", "")
-                        role_val = v.get("role")
-                        role_str = role_val.get("name", "") if isinstance(role_val, dict) else str(role_val or "")
-                        site_val = v.get("site")
-                        site_str = site_val.get("name", "") if isinstance(site_val, dict) else str(site_val or "")
-                        desc = v.get("description", "")
-                        for p in (v.get("prefixes", []) or []):
-                            pfx_str = p.get("prefix", "") if isinstance(p, dict) else str(p)
-                            if pfx_str and "/" in pfx_str:
-                                ipam_records.append({"prefix_or_subnet": pfx_str, "vlan_id": vid, "vlan_name": vname, "role": role_str, "site": site_str, "description": desc})
-
-                    for p in prefixes_data:
-                        pfx_str = p.get("prefix", "")
-                        vlan_obj = p.get("vlan") or {}
-                        vid = vlan_obj.get("vid")
-                        vname = vlan_obj.get("name", "")
-                        role_val = p.get("role") or {}
-                        role_str = role_val.get("name", "") if isinstance(role_val, dict) else str(role_val or "")
-                        site_val = p.get("site") or {}
-                        site_str = site_val.get("name", "") if isinstance(site_val, dict) else str(site_val or "")
-                        desc = p.get("description", "")
-                        if pfx_str and "/" in pfx_str:
-                            ipam_records.append({"prefix_or_subnet": pfx_str, "vlan_id": vid, "vlan_name": vname, "role": role_str, "site": site_str, "description": desc})
-
-                    if ipam_records:
-                        imported["prefixes"] = save_ipam_records_batch(ipam_records, clear_first=True)
-
-                    # 3. Inventory (Devices & VMs)
-                    inv_records = []
-                    for d in devices_data:
-                        name = d.get("name") or ""
-                        if not name:
-                            continue
-                        dtype = (d.get("device_type") or {}).get("model", "")
-                        mfg = ((d.get("device_type") or {}).get("manufacturer") or {}).get("name", "")
-                        role = (d.get("role") or d.get("device_role") or {}).get("name", "")
-                        site = (d.get("site") or {}).get("name", "")
-                        cluster = (d.get("cluster") or {}).get("name", "")
-                        desc = d.get("description") or ""
-
-                        combined = f"{name} {role} {dtype} {desc}".lower()
-                        cat = "hypervisor" if any(h in combined for h in ["esx", "hypervisor", "infhost", "vmhost", "esxi"]) else "device"
-                        inv_records.append({"category": cat, "name": name, "description": desc, "manufacturer": mfg, "model_or_role": dtype or role, "site": site, "cluster": cluster})
-
-                    for vm in vms_data:
-                        name = vm.get("name") or ""
-                        if not name:
-                            continue
-                        role = (vm.get("role") or {}).get("name", "")
-                        site = (vm.get("site") or {}).get("name", "")
-                        cluster = (vm.get("cluster") or {}).get("name", "")
-                        desc = vm.get("description") or ""
-                        inv_records.append({"category": "vm", "name": name, "description": desc, "manufacturer": "Virtual Machine", "model_or_role": role or "VM", "site": site, "cluster": cluster})
-
-                    if inv_records:
-                        counts = save_records_batch(inv_records, clear_first=True)
-                        imported["devices"] = counts.get("device", 0) + counts.get("hypervisor", 0)
-                        imported["vms"] = counts.get("vm", 0)
-
-                    self.write({"success": True, "imported": imported})
-                except Exception as e:
-                    self.set_status(500)
-                    self.write({"success": False, "error": str(e)})
-
-        server = None
-        try:
-            from streamlit.web.server.server import Server
-            server = Server.get_current()
-        except Exception:
-            pass
-
-        if server is not None:
-            tornado_app = server._app
-            
-            # Attach directly at the top-level Host Handlers.
-            # This completely bypasses Streamlit's wildcard URL routing logic
-            # meaning it will never hit the 405 fallback page!
-            handler_tuple = (r"/api/v1/sync/push.*", NetBoxSyncPushHandler)
-            
-            is_mounted = False
-            for host_pattern, rules in tornado_app.handlers:
-                for rule in rules:
-                    if getattr(rule.target, '__name__', '') == 'NetBoxSyncPushHandler':
-                        is_mounted = True
-                        break
-
-            if not is_mounted:
-                tornado_app.add_handlers(r".*", [handler_tuple])
-                logger.info("Tornado API Handler fully bound to HOST /api/v1/sync/push.*")
-    except Exception as e:
-        logger.warning("Could not mount native Tornado REST handler: %s", e)
-
-_mount_native_tornado_api()
-
-# ── Application boot ───────────────────────────────────────────────────────
-from core.catalog import get_repo_catalog
-from core.db_manager import init_db
-from core.exceptions import GitHubCatalogError
-from ui.components import render_sidebar
 
 init_db()
 active_model = render_sidebar()
