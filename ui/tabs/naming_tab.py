@@ -11,8 +11,10 @@ from core.db_manager import (
     save_universal_csv, 
     get_records_by_category, 
     clear_inventory_records,
-    get_total_record_count
+    get_total_record_count,
+    get_sync_metadata
 )
+from ui.tabs.ipam_tab import POWERSHELL_AGENT_CODE
 
 def apply_case(text: str, mode: str) -> str:
     return text.upper() if mode == "UPPERCASE" else text.lower()
@@ -89,18 +91,40 @@ def render_compact_toolbar():
         total_recs = get_total_record_count()
         device_count = len(get_records_by_category("device")) + len(get_records_by_category("hypervisor"))
         vm_count = len(get_records_by_category("vm"))
+        meta = get_sync_metadata("naming")
         
         status_tag = f"🟢 ({total_recs} records in DB)" if total_recs > 0 else "⚪ (Default Examples)"
         tick_devices = " ✅" if device_count > 0 else ""
         tick_vms = " ✅" if vm_count > 0 else ""
 
         with st.expander(f"📥 Ingest NetBox Data (CSV) {status_tag}", expanded=False):
+            if total_recs > 0:
+                st.markdown(
+                    f"**DB Status:** `Source: {meta['source']}` | `Last Updated: {meta['updated_at']}`"
+                )
+
             st.markdown(
                 f"""
-                **Export Instructions from NetBox:**
+                **Option A: Automated Push via PowerShell Agent (Recommended):**
+                ```powershell
+                .\\Sync-NetBoxHub.ps1 -NetBoxUrl "[https://ipam.aw.ads](https://ipam.aw.ads)" -ApiToken "YOUR_NETBOX_TOKEN"
+                ```
+                """
+            )
+
+            st.download_button(
+                "⬇️ Download Sync-NetBoxHub.ps1 Agent",
+                POWERSHELL_AGENT_CODE,
+                file_name="Sync-NetBoxHub.ps1",
+                mime="text/plain",
+                key="dl_ps1_naming"
+            )
+
+            st.markdown(
+                f"""
+                **Option B: Manual CSV Export & Upload:**
                 * **Devices / Servers / Switches:** Go to `Devices` ➔ `Devices` ➔ `Export` ➔ `All Data` (`netbox_devices.csv`){tick_devices}
                 * **Virtual Machines:** Go to `Virtualization` ➔ `Virtual Machines` ➔ `Export` ➔ `All Data` (`netbox_virtual machines.csv`){tick_vms}
-                * *Tip: You can upload CSVs or sync automatically using the PowerShell agent.*
                 """
             )
             c_up, c_rst = st.columns([3, 1])
