@@ -128,6 +128,17 @@ try {
 }
 """
 
+def handle_site_change():
+    """Triggered on site name input change: automatically looks up and fills Scope ID & Supernet."""
+    entered_site = st.session_state.get("ipam_site_in", "").strip()
+    if entered_site:
+        matched_scope = lookup_scope_id(entered_site)
+        matched_super = lookup_site_supernet_from_db(entered_site)
+        if matched_scope is not None:
+            st.session_state["ipam_scope_in"] = str(matched_scope)
+        if matched_super is not None:
+            st.session_state["ipam_super_in"] = str(matched_super)
+
 def handle_ipam_file_upload():
     uploaded_files = st.session_state.get("ipam_multi_uploader")
     if not uploaded_files:
@@ -251,6 +262,10 @@ def handle_ipam_db_reset():
         del st.session_state["ipam_persisted_rows"]
     if "ipam_scope_in" in st.session_state:
         del st.session_state["ipam_scope_in"]
+    if "ipam_site_in" in st.session_state:
+        del st.session_state["ipam_site_in"]
+    if "ipam_super_in" in st.session_state:
+        del st.session_state["ipam_super_in"]
     st.toast("🗑️ Database Cleared. Restored default templates.", icon="🧹")
 
 def on_preset_change():
@@ -337,58 +352,53 @@ def render_ipam_tab(active_model: str):
             else:
                 st.caption("No custom data loaded.")
 
-    # 2. Site Inputs Placeholder Setup
+    # 2. Site Inputs and Dynamic Lookups
+    if "ipam_site_in" not in st.session_state:
+        st.session_state["ipam_site_in"] = ""
+    if "ipam_scope_in" not in st.session_state:
+        st.session_state["ipam_scope_in"] = ""
+    if "ipam_super_in" not in st.session_state:
+        st.session_state["ipam_super_in"] = ""
+
     top1, top2, top3 = st.columns([2, 1, 2.2])
     with top1:
-        site_name = st.text_input(
+        st.text_input(
             "Branch / Site Name",
-            value="",
             key="ipam_site_in",
             placeholder="e.g. Bristol, AGE, Adelaide, UK, Site-01",
-        ).strip()
+            on_change=handle_site_change
+        )
+        site_name = st.session_state["ipam_site_in"].strip()
 
     auto_scope_id = lookup_scope_id(site_name) if site_name else None
-    auto_supernet = lookup_site_supernet_from_db(site_name) if site_name else None
-
-    if site_name:
-        last_synced_site = st.session_state.get("_last_synced_site", "")
-        if last_synced_site != site_name:
-            st.session_state["_last_synced_site"] = site_name
-            if auto_scope_id is not None:
-                st.session_state["ipam_scope_in"] = str(auto_scope_id)
-            if auto_supernet is not None:
-                st.session_state["ipam_super_in"] = str(auto_supernet)
-
-    display_site_name = format_branch_display(site_name)
 
     with top2:
-        scope_id = st.text_input(
+        st.text_input(
             "Scope ID (NetBox Site ID)", 
-            value=st.session_state.get("ipam_scope_in", ""),
             key="ipam_scope_in",
             placeholder="e.g. 42",
             help="Auto-discovered from uploaded data/agent sync, or editable manually."
-        ).strip()
+        )
+        scope_id = st.session_state["ipam_scope_in"].strip()
         if auto_scope_id:
             st.caption(f"🟢 Matched Scope ID: **`{auto_scope_id}`**")
         else:
             st.caption("⚪ Manual Scope ID mode")
 
     with top3:
-        supernet_in = st.text_input(
+        st.text_input(
             "Site Supernet (CIDR)", 
-            value=st.session_state.get("ipam_super_in", auto_supernet or ""), 
             key="ipam_super_in",
             placeholder="e.g. 10.113.240.0/21",
             help="Top-level container subnet for this branch site."
-        ).strip()
-        
-        # Placeholder for dynamic site subnet & remaining capacity display
+        )
+        supernet_in = st.session_state["ipam_super_in"].strip()
         cap_placeholder = st.empty()
 
+    display_site_name = format_branch_display(site_name)
     existing_prefixes = get_existing_prefix_strings()
 
-    # 3. Preset Selection & Real-Time Sync
+    # 3. Preset Selection & Allocation Editor
     st.markdown("---")
     c_title, c_preset = st.columns([2.5, 1.5])
     with c_title:
@@ -406,7 +416,7 @@ def render_ipam_tab(active_model: str):
     if "ipam_persisted_rows" not in st.session_state:
         st.session_state["ipam_persisted_rows"] = []
 
-    # Delta edit tracking from data_editor
+    # Sync editor deltas
     raw_rows = [dict(r) for r in st.session_state["ipam_persisted_rows"]]
     editor_state = st.session_state.get("ipam_data_editor_live", {})
     
@@ -437,7 +447,6 @@ def render_ipam_tab(active_model: str):
     computed_rows = compute_chained_rows(supernet_in, raw_rows)
     st.session_state["ipam_persisted_rows"] = computed_rows
 
-    # Extract all allocated subnets and evaluate rows
     allocated_subnets = []
     for r in computed_rows:
         sub_str = str(r.get("Subnet (CIDR)", "") or "").strip()
@@ -455,7 +464,7 @@ def render_ipam_tab(active_model: str):
         r["Status"] = eval_res["status"]
         r["Prefix Description"] = eval_res["desc"]
 
-    # Render dynamic site subnet & real-time available capacity under Site Supernet input
+    # Real-time Available Subnets and Capacity
     with cap_placeholder.container():
         if supernet_in and "/" in supernet_in:
             try:
