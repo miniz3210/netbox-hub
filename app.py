@@ -33,18 +33,17 @@ logger = logging.getLogger("netbox-hub")
 def _mount_native_tornado_api():
     try:
         import tornado.web
-        from tornado.routing import PathMatches, Rule
         from core.db_manager import save_sites_batch, save_ipam_records_batch, save_records_batch
 
         class NetBoxSyncPushHandler(tornado.web.RequestHandler):
+            def check_xsrf_cookie(self):
+                # Completely bypass Streamlit XSRF checks for the API
+                pass
+
             def set_default_headers(self):
                 self.set_header("Access-Control-Allow-Origin", "*")
-                self.set_header("Access-Control-Allow-Headers", "content-type, x-hub-key")
+                self.set_header("Access-Control-Allow-Headers", "content-type, x-hub-key, authorization")
                 self.set_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
-
-            def check_xsrf_cookie(self):
-                # Explicitly bypass Streamlit's default XSRF protection for this API endpoint
-                pass
 
             def options(self, *args, **kwargs):
                 self.set_status(204)
@@ -163,21 +162,22 @@ def _mount_native_tornado_api():
 
         if server is not None:
             tornado_app = server._app
-            rule = Rule(PathMatches(r"/api/v1/.*"), NetBoxSyncPushHandler)
+            
+            # Attach directly at the top-level Host Handlers.
+            # This completely bypasses Streamlit's wildcard URL routing logic
+            # meaning it will never hit the 405 fallback page!
+            handler_tuple = (r"/api/v1/sync/push.*", NetBoxSyncPushHandler)
+            
+            is_mounted = False
+            for host_pattern, rules in tornado_app.handlers:
+                for rule in rules:
+                    if getattr(rule.target, '__name__', '') == 'NetBoxSyncPushHandler':
+                        is_mounted = True
+                        break
 
-            # Ensure we only mount once to avoid infinite router growth
-            already_mounted = False
-            for r in getattr(tornado_app, 'wildcard_router', getattr(tornado_app, 'default_router')).rules:
-                if getattr(r.target, '__name__', '') == 'NetBoxSyncPushHandler':
-                    already_mounted = True
-                    break
-
-            if not already_mounted:
-                if hasattr(tornado_app, 'wildcard_router'):
-                    tornado_app.wildcard_router.rules.insert(0, rule)
-                if hasattr(tornado_app, 'default_router'):
-                    tornado_app.default_router.rules.insert(0, rule)
-                logger.info("Native Tornado API Handler forcefully mounted at /api/v1/* (XSRF Bypassed)")
+            if not is_mounted:
+                tornado_app.add_handlers(r".*", [handler_tuple])
+                logger.info("Tornado API Handler fully bound to HOST /api/v1/sync/push.*")
     except Exception as e:
         logger.warning("Could not mount native Tornado REST handler: %s", e)
 
