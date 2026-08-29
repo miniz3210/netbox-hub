@@ -1,15 +1,14 @@
 #!/bin/bash
 set -e
 
-# 1. Start Flask API background daemon on port 5000
-python /app/api_service.py &
+mkdir -p /app/data/catalog_cache /app/.streamlit /opt/netbox-hub/data/catalog_cache
 
-# 2. Start Streamlit worker on port 8502
-streamlit run /app/app.py \
-    --server.port 8502 \
-    --server.address 127.0.0.1 \
-    --server.headless true \
-    --browser.gatherUsageStats false &
+echo "Starting Flask API Service..."
+python api_service.py &
 
-# 3. Start Nginx gateway on port 8501 (foreground)
-nginx -g 'daemon off;'
+echo "Starting Streamlit UI on port 8501..."
+exec streamlit run app.py \
+    --server.port 8501 \
+    --server.address 0.0.0.0 \
+    --server.enableCORS false \
+    --server.enableXsrfProtection false
