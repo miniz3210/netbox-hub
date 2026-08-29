@@ -138,7 +138,7 @@ tab_objs = st.tabs([label for label, _, _ in TABS])
 for (_label, _renderer, _needs_catalog), tab in zip(TABS, tab_objs):
     with tab:
         _render_tab(_label, _renderer, _needs_catalog)
-# --- V2.4.13 UI BADGE ---
+# --- V2.5.0 UI BADGE ---
 import streamlit as st
 st.markdown(
     """
@@ -160,7 +160,7 @@ st.markdown(
         pointer-events: none !important;
     }
     </style>
-    <div class="netbox-hub-version-badge">📦 NetBox Hub v2.4.13</div>
+    <div class="netbox-hub-version-badge">📦 NetBox Hub v2.5.0</div>
     """,
     unsafe_allow_html=True
 )

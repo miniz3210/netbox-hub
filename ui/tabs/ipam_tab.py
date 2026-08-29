@@ -19,9 +19,9 @@ from core.ipam_engine import (
     generate_netbox_prefixes_csv
 )
 from core.db_manager import (
-    save_ipam_records_batch, 
+    save_ipam_records_batch,
     save_sites_batch,
-    clear_ipam_records, 
+    clear_ipam_records,
     get_total_ipam_count,
     get_total_sites_count,
     lookup_scope_id,
@@ -29,6 +29,7 @@ from core.db_manager import (
     get_existing_prefix_strings,
     get_sync_metadata
 )
+from utils.formatters import to_title_case_preserve_acronyms
 
 POWERSHELL_AGENT_CODE = """<#
 .SYNOPSIS
@@ -398,6 +399,75 @@ def render_ipam_tab(active_model: str):
     display_site_name = format_branch_display(site_name)
     existing_prefixes = get_existing_prefix_strings()
 
+    # 2.5. AI IPAM & Subnet Assistant
+    with st.expander("🤖 AI IPAM & Subnet Assistant", expanded=False):
+        st.caption("Ask for subnet suggestions using natural language (e.g., 'I have a new office in UK with 50 devices, please suggest a subnet' or 'Suggest the next available /24 in 10.113.0.0/16')")
+        
+        # Initialize chat history
+        if "ipam_chat_history" not in st.session_state:
+            st.session_state["ipam_chat_history"] = []
+        
+        # Display chat messages
+        for message in st.session_state["ipam_chat_history"]:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+        
+        # Chat input
+        if prompt := st.chat_input("Ask for subnet suggestions..."):
+            # Add user message to chat history
+            st.session_state["ipam_chat_history"].append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
+            
+            # Generate AI response
+            with st.chat_message("assistant"):
+                with st.spinner("Thinking..."):
+                    try:
+                        from core.ai_client import call_ai
+                        from core.db_manager import get_total_sites_count, get_total_ipam_count
+                        
+                        # Prepare context for AI
+                        site_context = f"Current site: {site_name or 'Not specified'}"
+                        supernet_context = f"Site supernet: {supernet_in or 'Not specified'}"
+                        prefixes_context = f"Currently registered prefixes: {', '.join(existing_prefixes[:10])}{'...' if len(existing_prefixes) > 10 else ''}"
+                        stats_context = f"Database contains: {get_total_sites_count()} sites, {get_total_ipam_count()} prefixes"
+                        
+                        system_prompt = f"""You are an expert network architect specializing in IP address management and subnet planning.
+                        Your task is to analyze the user's request and suggest appropriate subnet allocations.
+                        
+                        Context:
+                        - {site_context}
+                        - {supernet_context}
+                        - {stats_context}
+                        - {prefixes_context}
+                        
+                        Guidelines:
+                        1. Suggest non-overlapping CIDR subnets within the site supernet when specified
+                        2. Consider standard subnet sizes (/24, /25, /26, etc.) based on device count
+                        3. Avoid suggesting subnets that conflict with existing prefixes
+                        4. Provide clear reasoning for your suggestions
+                        5. Format CIDR notation properly (e.g., 10.0.0.0/24)
+                        6. If insufficient information is provided, ask clarifying questions
+                        7. Be concise but thorough in your analysis"""
+                        
+                        full_prompt = f"""{system_prompt}
+                        
+                        User Request: {prompt}
+                        
+                        Please provide your subnet suggestion with explanation."""
+                        
+                        # Use the active model from sidebar
+                        ai_response = call_ai(full_prompt, active_model)
+                        
+                        st.markdown(ai_response)
+                        # Add assistant response to chat history
+                        st.session_state["ipam_chat_history"].append({"role": "assistant", "content": ai_response})
+                        
+                    except Exception as e:
+                        error_msg = f"❌ AI Assistant temporarily unavailable: {str(e)}"
+                        st.error(error_msg)
+                        st.session_state["ipam_chat_history"].append({"role": "assistant", "content": error_msg})
+
     # 3. Preset Selection & Allocation Editor
     st.markdown("---")
     c_title, c_preset = st.columns([2.5, 1.5])
@@ -432,15 +502,20 @@ def render_ipam_tab(active_model: str):
                 changes["VLAN Name"] = changes["Role"]
                 if "VLAN Description" not in changes:
                     changes["VLAN Description"] = lookup_role_description(changes["Role"])
+            # Apply Title Case formatting to Role and Description
+            if "Role" in changes:
+                changes["Role"] = to_title_case_preserve_acronyms(changes["Role"])
+            if "VLAN Description" in changes:
+                changes["VLAN Description"] = to_title_case_preserve_acronyms(changes["VLAN Description"])
             raw_rows[row_idx].update(changes)
 
     for new_r in editor_state.get("added_rows", []):
         r_name = new_r.get("Role", "")
         raw_rows.append({
             "VLAN ID": new_r.get("VLAN ID", None),
-            "Role": r_name,
+            "Role": to_title_case_preserve_acronyms(r_name),
             "VLAN Name": new_r.get("VLAN Name", r_name),
-            "VLAN Description": new_r.get("VLAN Description", lookup_role_description(r_name)),
+            "VLAN Description": to_title_case_preserve_acronyms(new_r.get("VLAN Description", lookup_role_description(r_name))),
             "Subnet (CIDR)": new_r.get("Subnet (CIDR)", "")
         })
 
