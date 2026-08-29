@@ -138,3 +138,29 @@ tab_objs = st.tabs([label for label, _, _ in TABS])
 for (_label, _renderer, _needs_catalog), tab in zip(TABS, tab_objs):
     with tab:
         _render_tab(_label, _renderer, _needs_catalog)
+# --- V2.4.13 UI BADGE ---
+import streamlit as st
+st.markdown(
+    """
+    <style>
+    .netbox-hub-version-badge {
+        position: fixed !important;
+        bottom: 12px !important;
+        left: 12px !important;
+        background: #1e293b !important;
+        color: #38bdf8 !important;
+        padding: 5px 12px !important;
+        border-radius: 6px !important;
+        font-size: 12px !important;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+        font-weight: 600 !important;
+        border: 1px solid #334155 !important;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3) !important;
+        z-index: 2147483647 !important;
+        pointer-events: none !important;
+    }
+    </style>
+    <div class="netbox-hub-version-badge">📦 NetBox Hub v2.4.13</div>
+    """,
+    unsafe_allow_html=True
+)
