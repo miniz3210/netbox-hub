@@ -55,7 +55,7 @@ def handle_csv_reset():
 def display_reference_box(category_key: str, default_lines: str, label: str, site_filter: str = ""):
     real_items = get_records_by_category(category_key, site_filter=site_filter)
     filter_hint = f" matching '{site_filter.upper()}'" if site_filter else ""
-    with st.expander(f"💡 Click to view reference {label} examples ({len(real_items) if real_items else 'Default'} records{filter_hint})"):
+    with st.expander(f"💡 Click to view reference {label} examples ({len(real_items) if real_items else 'Default'} records{filter_hint})", expanded=False):
         if real_items:
             st.markdown(f"##### 🟢 NetBox Ingested Data ({len(real_items)} records{filter_hint}):")
             formatted = []

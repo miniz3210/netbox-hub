@@ -1,4 +1,5 @@
 import re
+from config.constants import NETWORKING_ACRONYMS
 
 def normalize_manufacturer_name(name: str) -> str:
     """Normalizes common manufacturer abbreviations to their canonical vendor names."""
@@ -96,3 +97,43 @@ def normalize_vmnic_list(names: str) -> str:
         return ""
     parts = [normalize_vmnic(p.strip()) for p in names.split(",") if p.strip()]
     return ", ".join(parts)
+
+
+def to_title_case_preserve_acronyms(text: str) -> str:
+    """
+    Convert text to Title Case while preserving standard networking acronyms.
+    E.g., 'oob management' -> 'OOB Management', 'iot sensors' -> 'IoT Sensors'
+    """
+    if not text:
+        return ""
+    
+    # Split by common delimiters while preserving them
+    words = re.split(r'(\s+|/|-|_|\.)', text.strip())
+    
+    result = []
+    for word in words:
+        if not word or word.isspace() or word in ['/', '-', '_', '.']:
+            result.append(word)
+            continue
+        
+        # Check if the word (or word without punctuation) is a known acronym
+        word_clean = word.rstrip('.,;:')
+        if word_clean in NETWORKING_ACRONYMS:
+            result.append(word_clean + word[len(word_clean):])
+        elif word_clean.upper() in NETWORKING_ACRONYMS:
+            result.append(word_clean.upper() + word[len(word_clean):])
+        else:
+            # Standard title case
+            result.append(word.capitalize())
+    
+    return "".join(result)
+
+
+def format_role_description(role: str, description: str = "") -> tuple:
+    """
+    Format role and description to Title Case while preserving networking acronyms.
+    Returns (formatted_role, formatted_description).
+    """
+    formatted_role = to_title_case_preserve_acronyms(role) if role else ""
+    formatted_desc = to_title_case_preserve_acronyms(description) if description else ""
+    return formatted_role, formatted_desc
