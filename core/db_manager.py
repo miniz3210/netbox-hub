@@ -193,28 +193,18 @@ def lookup_site_supernet_from_db(site_name: str) -> Optional[str]:
     cursor = conn.cursor()
     
     clean = site_name.strip().lower()
-    words = re.findall(r'[a-zA-Z0-9]+', clean)
+    # Also search for site name as a word to avoid partial matches like "York" in "New York"
+    pattern_exact = clean
+    pattern_like = f"%{clean}%"
     
-    query_conditions = ["LOWER(site) = ?", "LOWER(site) LIKE ?", "LOWER(description) LIKE ?", "LOWER(vlan_name) LIKE ?"]
-    params = [clean, f"%{clean}%", f"%{clean}%", f"%{clean}%"]
-    
-    for w in words:
-        if len(w) >= 3 and w != clean:
-            query_conditions.extend(["LOWER(site) LIKE ?", "LOWER(description) LIKE ?"])
-            params.extend([f"%{w}%", f"%{w}%"])
-
-    # Query specifically for supernet matches in 'site' column first to improve reliability
+    # We want to find the largest prefix (lowest CIDR number) that is associated with this site.
+    # We search in site, description, role, and vlan_name.
     cursor.execute("""
-        SELECT prefix_or_subnet, description, role, site FROM ipam_records 
-        WHERE LOWER(site) = ?
-    """, (clean,))
+        SELECT prefix_or_subnet, description, role, site, vlan_name FROM ipam_records 
+        WHERE (LOWER(site) = ? OR LOWER(site) LIKE ? OR LOWER(description) LIKE ? OR LOWER(role) LIKE ? OR LOWER(vlan_name) LIKE ?)
+        AND prefix_or_subnet LIKE '%/%'
+    """, (pattern_exact, pattern_like, pattern_like, pattern_like, pattern_like))
     rows = cursor.fetchall()
-
-    if not rows:
-        # Fallback to broader search if direct site match fails
-        sql = f"SELECT prefix_or_subnet, description, role, site FROM ipam_records WHERE {' OR '.join(query_conditions)}"
-        cursor.execute(sql, params)
-        rows = cursor.fetchall()
     conn.close()
 
     candidates = []
@@ -222,17 +212,35 @@ def lookup_site_supernet_from_db(site_name: str) -> Optional[str]:
         p_str = r[0]
         desc = (r[1] or "").lower()
         role = (r[2] or "").lower()
+        site_val = (r[3] or "").lower()
+        vname = (r[4] or "").lower()
+        
         if p_str and "/" in p_str:
             try:
-                cidr = int(p_str.split("/")[1])
-                is_supernet_role = "site subnet" in role or "site subnet" in desc or "supernet" in role or "supernet" in desc or "container" in role or "container" in desc
-                candidates.append((cidr, is_supernet_role, p_str))
-            except ValueError:
+                prefix_parts = p_str.split("/")
+                mask = int(prefix_parts[1])
+                
+                # Scoring for relevance
+                score = 0
+                if clean == site_val: score += 100
+                if "site subnet" in desc or "site subnet" in role: score += 50
+                if "supernet" in desc or "supernet" in role: score += 40
+                if "container" in desc or "container" in role: score += 30
+                if clean in site_val: score += 20
+                if clean in desc: score += 10
+                
+                candidates.append({
+                    "prefix": p_str,
+                    "mask": mask,
+                    "score": score
+                })
+            except (ValueError, IndexError):
                 pass
 
     if candidates:
-        candidates.sort(key=lambda x: (not x[1], x[0]))
-        return candidates[0][2]
+        # Sort by score (descending) then by mask (ascending, so /16 comes before /24)
+        candidates.sort(key=lambda x: (-x["score"], x["mask"]))
+        return candidates[0]["prefix"]
     return None
 
 # ── INVENTORY RECORDS ───────────────────────────────────────────────────

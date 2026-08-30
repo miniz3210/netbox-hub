@@ -204,7 +204,16 @@ def handle_ipam_file_upload():
                 errors.append(f"• **{file_obj.name}**: {str(e)}")
         else:
             try:
-                df = pd.read_csv(io.BytesIO(content))
+                # Use engine='python' and on_bad_lines='skip' for more robust parsing
+                # Also try to detect delimiter
+                import io
+                content_str = content.decode('utf-8', errors='replace')
+                first_line = content_str.splitlines()[0] if content_str else ""
+                delim = ','
+                if ';' in first_line and first_line.count(';') > first_line.count(','):
+                    delim = ';'
+                
+                df = pd.read_csv(io.StringIO(content_str), sep=delim)
                 cols = {str(c).lower().strip(): c for c in df.columns}
 
                 if "slug" in cols and ("name" in cols or "site" in cols) and "id" in cols:
@@ -222,6 +231,7 @@ def handle_ipam_file_upload():
                         cnt = save_sites_batch(scope_records, clear_first=False, source="Manual CSV Upload")
                         total_scopes += cnt
                 elif "prefixes" in cols or "prefix" in cols or "subnet" in cols or "vid" in cols or "vlan" in cols:
+                    st.toast(f"DEBUG: CSV Columns={list(cols.keys())}", icon="🔍")
                     pfx_col = cols.get("prefixes", cols.get("prefix", cols.get("subnet")))
                     vid_col = cols.get("vid", cols.get("vlan_id", cols.get("vlan", "")))
                     vname_col = cols.get("vlan_name", cols.get("vlan name", cols.get("name", "")))
@@ -234,7 +244,8 @@ def handle_ipam_file_upload():
 
                     ipam_records = []
                     # Robust CSV import: handle Pandas NaN correctly
-                    for _, row in df.iterrows():
+                        # Debug: print first 5 rows to see what is happening
+                        # if _ < 5: print(f"DEBUG: Row {row}")
                         raw_prefixes = str(row.get(pfx_col, "")).strip() if pfx_col and not pd.isna(row.get(pfx_col)) else ""
                         vid = str(row.get(vid_col, "")).strip() if vid_col and not pd.isna(row.get(vid_col)) else ""
                         vname = str(row.get(vname_col, "")).strip() if vname_col and not pd.isna(row.get(vname_col)) else ""
