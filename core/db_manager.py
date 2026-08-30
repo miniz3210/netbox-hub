@@ -519,6 +519,15 @@ def get_total_prefixes_count() -> int:
     conn.close()
     return total
 
+def get_total_sites_count() -> int:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM sites_records")
+    total = cursor.fetchone()[0]
+    conn.close()
+    return total
+
 def get_max_scope_id() -> Optional[int]:
     init_db()
     conn = sqlite3.connect(DB_PATH)
