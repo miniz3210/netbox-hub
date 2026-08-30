@@ -425,10 +425,49 @@ def render_ipam_tab(active_model: str):
                     try:
                         from core.ai_client import call_ai
                         
-                        # Prepare context for AI
+                        # Prepare context for AI: combine DB + active UI table prefixes
+                        ui_prefixes = []
+                        for r in st.session_state.get("ipam_persisted_rows", []):
+                            sub = str(r.get("Subnet (CIDR)", "") or "").strip()
+                            if sub and "/" in sub:
+                                ui_prefixes.append(sub)
+
+                        combined_prefixes = list(dict.fromkeys(existing_prefixes + ui_prefixes))
+
+                        target_networks = []
+                        cidr_matches = re.findall(r"\b(?:\d{{1,3}}\.){{3}}\d{{1,3}}(?:/\d{{1,2}})?\b", prompt)
+                        if supernet_in:
+                            cidr_matches.append(supernet_in)
+
+                        for match in cidr_matches:
+                            try:
+                                net = ipaddress.ip_network(match, strict=False)
+                                target_networks.append(net)
+                            except Exception:
+                                pass
+
+                        relevant_prefixes = []
+                        if target_networks:
+                            for pref_str in combined_prefixes:
+                                try:
+                                    p_net = ipaddress.ip_network(pref_str, strict=False)
+                                    if any(p_net.overlaps(tn) for tn in target_networks):
+                                        relevant_prefixes.append(pref_str)
+                                except Exception:
+                                    continue
+
+                        if not relevant_prefixes:
+                            relevant_prefixes = combined_prefixes[:30]
+
+                        if relevant_prefixes:
+                            prefixes_context = f"Known in-use/registered prefixes: {', '.join(relevant_prefixes)}"
+                            if len(combined_prefixes) > len(relevant_prefixes):
+                                prefixes_context += f" (showing {len(relevant_prefixes)} relevant out of {len(combined_prefixes)} total known)"
+                        else:
+                            prefixes_context = "Known in-use/registered prefixes: None recorded in current database or active editor table"
+
                         site_context = f"Current site: {site_name or 'Not specified'}"
                         supernet_context = f"Site supernet: {supernet_in or 'Not specified'}"
-                        prefixes_context = f"Currently registered prefixes: {', '.join(existing_prefixes[:10])}{'...' if len(existing_prefixes) > 10 else ''}"
                         stats_context = f"Database contains: {get_total_sites_count()} sites, {get_total_ipam_count()} prefixes"
                         
                         system_prompt = f"""You are an expert network architect specializing in IP address management and subnet planning.
