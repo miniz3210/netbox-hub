@@ -449,14 +449,8 @@ def render_ipam_tab(active_model: str):
                         6. If insufficient information is provided, ask clarifying questions
                         7. Be concise but thorough in your analysis"""
                         
-                        full_prompt = f"""{system_prompt}
-                        
-                        User Request: {prompt}
-                        
-                        Please provide your subnet suggestion with explanation."""
-                        
                         # Use the active model from sidebar
-                        ai_response = call_ai(full_prompt, active_model)
+                        ai_response = call_ai(prompt, active_model, custom_system_msg=system_prompt)
                         
                         st.markdown(ai_response)
                         # Add assistant response to chat history

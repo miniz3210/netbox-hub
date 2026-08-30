@@ -60,6 +60,6 @@ Input Prompt:
 {prompt_text}
 Output ONLY raw JSON.
 """
-    raw_res = call_ai(extract_prompt, model_name)
+    raw_res = call_ai(extract_prompt, model_name, custom_system_msg="You are an expert JSON generator for network naming standards. Output ONLY valid, raw JSON.")
     clean_json = re.sub(r"^```(?:json)?|```$", "", raw_res.strip(), flags=re.IGNORECASE).strip()
     return json.loads(clean_json)
