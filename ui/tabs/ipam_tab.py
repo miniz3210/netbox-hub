@@ -224,7 +224,10 @@ def handle_ipam_file_upload():
                 elif "prefixes" in cols or "prefix" in cols or "subnet" in cols or "vid" in cols or "vlan" in cols:
                     pfx_col = cols.get("prefixes", cols.get("prefix", cols.get("subnet")))
                     vid_col = cols.get("vid", cols.get("vlan_id", cols.get("vlan", "")))
-                    vname_col = cols.get("name", cols.get("vlan_name", ""))
+                    vname_col = cols.get("vlan_name", cols.get("vlan name", cols.get("name", "")))
+                    site_col = cols.get("site", cols.get("site name", cols.get("location", cols.get("scope", ""))))
+                    role_col = cols.get("role", cols.get("role name", ""))
+                    desc_col = cols.get("description", cols.get("comments", cols.get("desc", "")))
 
                     is_vlan_file = "vlan" in filename or "vlans" in filename or ("vid" in cols and not ("prefixes" in filename or "prefix" in filename))
                     rec_type = "vlan" if is_vlan_file else "prefix"
@@ -232,13 +235,14 @@ def handle_ipam_file_upload():
                     ipam_records = []
                     for _, row in df.iterrows():
                         raw_prefixes = str(row.get(pfx_col, "")).strip() if pfx_col else ""
+                        vid = str(row.get(vid_col, "")).strip() if vid_col else ""
+                        vname = str(row.get(vname_col, "")).strip() if vname_col else ""
+                        role_str = str(row.get(role_col, "")).strip() if role_col else ""
+                        site_str = str(row.get(site_col, "")).strip() if site_col else ""
+                        desc_str = str(row.get(desc_col, "")).strip() if desc_col else ""
+
                         if not raw_prefixes or raw_prefixes.lower() == "nan":
                             if rec_type == "vlan":
-                                vid = str(row.get(vid_col, "")).strip() if vid_col else ""
-                                vname = str(row.get(vname_col, "")).strip() if vname_col else ""
-                                role_str = str(row.get("role", "")).strip()
-                                site_str = str(row.get("site", "")).strip()
-                                desc_str = str(row.get("description", "")).strip()
                                 if vid or vname:
                                     ipam_records.append({
                                         "prefix_or_subnet": "",
@@ -252,11 +256,6 @@ def handle_ipam_file_upload():
                             continue
 
                         found_cidrs = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}/\d{1,2}\b', raw_prefixes)
-                        vid = str(row.get(vid_col, "")).strip() if vid_col else ""
-                        vname = str(row.get(vname_col, "")).strip() if vname_col else ""
-                        role_str = str(row.get("role", "")).strip()
-                        site_str = str(row.get("site", "")).strip()
-                        desc_str = str(row.get("description", "")).strip()
 
                         if found_cidrs:
                             for cidr in found_cidrs:
@@ -556,29 +555,32 @@ def render_ipam_tab(active_model: str):
                                 requested_prefix_len=req_mask
                             )
 
+                        next_scope_id_val = (max_scope_id + 1) if max_scope_id is not None else 1
                         site_context = f"Current site: {site_name or 'Not specified'}"
                         supernet_context = f"Site supernet: {supernet_in or 'Not specified'}"
+                        scope_context = f"NetBox Scope IDs: Current max in DB is {max_scope_id or 'None'}, Next available Scope ID is {next_scope_id_val}"
                         stats_context = f"Database contains: {get_total_sites_count()} sites, {get_total_ipam_count()} prefixes"
                         
-                        system_prompt = f"""You are an expert network architect specializing in IP address management and subnet planning.
-Your task is to analyze the user's request and suggest appropriate subnet allocations.
+                        system_prompt = f"""You are an expert network architect specializing in IP address management, NetBox provisioning, and subnet planning.
+Analyze the user's request and respond accurately.
 
 Context:
 - {site_context}
 - {supernet_context}
+- {scope_context}
 - {stats_context}
 - {prefixes_context}
 
 {calc_analysis}
 
 Guidelines:
-1. Strictly follow the PRE-CALCULATED SUBNET AVAILABILITY ANALYSIS when present above. Never suggest a subnet marked OCCUPIED / OVERLAPS.
-2. Suggest non-overlapping CIDR subnets within the site supernet when specified.
-3. Note that subnets overlapping with larger or smaller blocks (e.g., 10.113.240.0/24 inside 10.113.240.0/23) are OCCUPIED and unavailable.
-4. Provide clear reasoning for your suggestions.
-5. Format CIDR notation properly (e.g., 10.113.242.0/24).
-6. If insufficient information is provided, ask clarifying questions.
-7. Be concise but thorough in your analysis."""
+1. If the user asks for Scope ID / NetBox Site ID recommendations (e.g., 'Suggest next available Scope ID'), answer directly with the next available Scope ID ({next_scope_id_val}).
+2. If the user asks for subnet suggestions, strictly follow the PRE-CALCULATED SUBNET AVAILABILITY ANALYSIS when present above. Never suggest a subnet marked OCCUPIED / OVERLAPS.
+3. Suggest non-overlapping CIDR subnets within the site supernet when specified.
+4. Note that subnets overlapping with larger or smaller blocks (e.g., 10.113.240.0/24 inside 10.113.240.0/23) are OCCUPIED and unavailable.
+5. Provide clear, direct reasoning for your suggestions.
+6. Format CIDR notation properly (e.g., 10.113.242.0/24).
+7. Be concise but thorough."""
                         
                         # Use the active model from sidebar
                         ai_response = call_ai(prompt, active_model, custom_system_msg=system_prompt)

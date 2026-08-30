@@ -191,12 +191,20 @@ def lookup_site_supernet_from_db(site_name: str) -> Optional[str]:
     init_db()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    clean = site_name.strip().lower()
     
-    cursor.execute("""
-        SELECT prefix_or_subnet, description, role FROM ipam_records 
-        WHERE LOWER(site) = ? OR LOWER(site) LIKE ? OR LOWER(description) LIKE ? OR LOWER(vlan_name) LIKE ?
-    """, (clean, f"%{clean}%", f"%{clean}%", f"%{clean}%"))
+    clean = site_name.strip().lower()
+    words = re.findall(r'[a-zA-Z0-9]+', clean)
+    
+    query_conditions = ["LOWER(site) = ?", "LOWER(site) LIKE ?", "LOWER(description) LIKE ?", "LOWER(vlan_name) LIKE ?"]
+    params = [clean, f"%{clean}%", f"%{clean}%", f"%{clean}%"]
+    
+    for w in words:
+        if len(w) >= 3 and w != clean:
+            query_conditions.extend(["LOWER(site) LIKE ?", "LOWER(description) LIKE ?"])
+            params.extend([f"%{w}%", f"%{w}%"])
+
+    sql = f"SELECT prefix_or_subnet, description, role, site FROM ipam_records WHERE {' OR '.join(query_conditions)}"
+    cursor.execute(sql, params)
     rows = cursor.fetchall()
     conn.close()
 
@@ -208,7 +216,7 @@ def lookup_site_supernet_from_db(site_name: str) -> Optional[str]:
         if p_str and "/" in p_str:
             try:
                 cidr = int(p_str.split("/")[1])
-                is_supernet_role = "site subnet" in role or "site subnet" in desc or "supernet" in role or "supernet" in desc
+                is_supernet_role = "site subnet" in role or "site subnet" in desc or "supernet" in role or "supernet" in desc or "container" in role or "container" in desc
                 candidates.append((cidr, is_supernet_role, p_str))
             except ValueError:
                 pass
