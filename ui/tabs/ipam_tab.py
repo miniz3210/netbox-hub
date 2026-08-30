@@ -233,13 +233,14 @@ def handle_ipam_file_upload():
                     rec_type = "vlan" if is_vlan_file else "prefix"
 
                     ipam_records = []
+                    # Robust CSV import: handle Pandas NaN correctly
                     for _, row in df.iterrows():
-                        raw_prefixes = str(row.get(pfx_col, "")).strip() if pfx_col else ""
-                        vid = str(row.get(vid_col, "")).strip() if vid_col else ""
-                        vname = str(row.get(vname_col, "")).strip() if vname_col else ""
-                        role_str = str(row.get(role_col, "")).strip() if role_col else ""
-                        site_str = str(row.get(site_col, "")).strip() if site_col else ""
-                        desc_str = str(row.get(desc_col, "")).strip() if desc_col else ""
+                        raw_prefixes = str(row.get(pfx_col, "")).strip() if pfx_col and not pd.isna(row.get(pfx_col)) else ""
+                        vid = str(row.get(vid_col, "")).strip() if vid_col and not pd.isna(row.get(vid_col)) else ""
+                        vname = str(row.get(vname_col, "")).strip() if vname_col and not pd.isna(row.get(vname_col)) else ""
+                        role_str = str(row.get(role_col, "")).strip() if role_col and not pd.isna(row.get(role_col)) else ""
+                        site_str = str(row.get(site_col, "")).strip() if site_col and not pd.isna(row.get(site_col)) else ""
+                        desc_str = str(row.get(desc_col, "")).strip() if desc_col and not pd.isna(row.get(desc_col)) else ""
 
                         if not raw_prefixes or raw_prefixes.lower() == "nan":
                             if rec_type == "vlan":
@@ -444,6 +445,7 @@ def render_ipam_tab(active_model: str):
 
     if site_name and auto_supernet and not st.session_state.get("ipam_super_in"):
         st.session_state["ipam_super_in"] = str(auto_supernet)
+        st.rerun()
 
     with top2:
         st.text_input(

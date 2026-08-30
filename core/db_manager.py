@@ -528,14 +528,16 @@ def get_max_scope_id() -> Optional[int]:
     conn.close()
     return int(row[0]) if row and row[0] is not None else None
 
-def get_total_sites_count() -> int:
+def get_site_summary() -> str:
     init_db()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM sites_records")
-    total = cursor.fetchone()[0]
+    cursor.execute("SELECT name, description FROM sites_records")
+    rows = cursor.fetchall()
     conn.close()
-    return total
+    if not rows:
+        return "No site data ingested."
+    return "\n".join([f"- {r[0]} ({r[1]})" for r in rows])
 
 def lookup_vlan_description_from_db(role_name: str) -> Optional[str]:
     """Look up standard VLAN description from ingested database based on Role name."""
