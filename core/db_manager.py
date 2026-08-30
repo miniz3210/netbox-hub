@@ -203,9 +203,18 @@ def lookup_site_supernet_from_db(site_name: str) -> Optional[str]:
             query_conditions.extend(["LOWER(site) LIKE ?", "LOWER(description) LIKE ?"])
             params.extend([f"%{w}%", f"%{w}%"])
 
-    sql = f"SELECT prefix_or_subnet, description, role, site FROM ipam_records WHERE {' OR '.join(query_conditions)}"
-    cursor.execute(sql, params)
+    # Query specifically for supernet matches in 'site' column first to improve reliability
+    cursor.execute("""
+        SELECT prefix_or_subnet, description, role, site FROM ipam_records 
+        WHERE LOWER(site) = ?
+    """, (clean,))
     rows = cursor.fetchall()
+
+    if not rows:
+        # Fallback to broader search if direct site match fails
+        sql = f"SELECT prefix_or_subnet, description, role, site FROM ipam_records WHERE {' OR '.join(query_conditions)}"
+        cursor.execute(sql, params)
+        rows = cursor.fetchall()
     conn.close()
 
     candidates = []
