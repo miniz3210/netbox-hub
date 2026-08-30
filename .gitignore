@@ -8,3 +8,5 @@ netbox_all_assets.zip
 .venv/
 venv/
 EOF
+data/netbox_hub.db
+data/catalog_cache/
