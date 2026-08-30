@@ -23,6 +23,8 @@ from core.db_manager import (
     save_ipam_records_batch,
     save_sites_batch,
     clear_ipam_records,
+    clear_sites_records,
+    clear_prefixes_records,
     get_total_ipam_count,
     get_total_sites_count,
     lookup_scope_id,
@@ -247,7 +249,7 @@ def handle_ipam_file_upload():
                         cnt = save_ipam_records_batch(ipam_records, clear_first=False, source="Manual CSV Upload")
                         total_prefixes += cnt
                 else:
-                    raise ValueError(f"Unrecognized CSV format. Expected `netbox_sites.csv` or `netbox_VLANs.csv`.")
+                    raise ValueError(f"Unrecognized CSV format. Expected `netbox_sites.csv`, `netbox_VLANs.csv`, or `netbox_prefixes.csv`.")
             except Exception as e:
                 errors.append(f"• **{file_obj.name}**: {str(e)}")
 
@@ -305,6 +307,7 @@ def render_ipam_tab(active_model: str):
     status_tag = f"🟢 ({total_sites_recs} sites, {total_ipam_recs} prefixes in DB)" if total_db_count > 0 else "⚪ (Default Examples)"
     tick_sites = " ✅" if total_sites_recs > 0 else ""
     tick_vlans = " ✅" if total_ipam_recs > 0 else ""
+    tick_prefixes = " ✅" if total_ipam_recs > 0 else ""
 
     with st.expander(f"📥 Ingest NetBox Sites & VLANs / Prefixes CSV {status_tag}", expanded=False):
         if total_db_count > 0:
@@ -334,13 +337,14 @@ def render_ipam_tab(active_model: str):
             f"""
             **Option B: Manual CSV Export & Upload:**
             * **Scope IDs & Site Names:** Go to `Organization` ➔ `Sites` ➔ `Export` ➔ `All Data` (`netbox_sites.csv`){tick_sites}
-            * **VLANs & In-Use Prefixes:** Go to `IPAM` ➔ `VLANs` ➔ `Export` ➔ `All Data` (`netbox_VLANs.csv`){tick_vlans}
+            * **VLANs:** Go to `IPAM` ➔ `VLANs` ➔ `Export` ➔ `All Data` (`netbox_VLANs.csv`){tick_vlans}
+            * **IP Prefixes:** Go to `IPAM` ➔ `Prefixes` ➔ `Export` ➔ `All Data` (`netbox_prefixes.csv`){tick_prefixes}
             """
         )
-        c_up, c_rst = st.columns([3, 1])
+        c_up, c_rst = st.columns([2.5, 1.5])
         with c_up:
             st.file_uploader(
-                "Upload NetBox CSVs (netbox_sites.csv, netbox_VLANs.csv) or Excel", 
+                "Upload NetBox CSVs (netbox_sites.csv, netbox_VLANs.csv, netbox_prefixes.csv) or Excel", 
                 type=["xlsx", "csv"], 
                 accept_multiple_files=True,
                 key="ipam_multi_uploader",
@@ -350,7 +354,20 @@ def render_ipam_tab(active_model: str):
 
         with c_rst:
             if total_db_count > 0:
-                st.button("🗑️ Clear DB", on_click=handle_ipam_db_reset, width="stretch", key="rst_ipam_csv_btn")
+                c1, c2 = st.columns(2)
+                with c1:
+                    with st.popover("🗑️ Clear 1 File", use_container_width=True):
+                        st.markdown("**Clear Specific Dataset:**")
+                        if st.button("Clear Sites (`netbox_sites.csv`)", key="btn_clr_sites", use_container_width=True):
+                            clear_sites_records()
+                            st.toast("🗑️ Cleared Sites table data.", icon="🧹")
+                            st.rerun()
+                        if st.button("Clear Prefixes & VLANs (`netbox_prefixes.csv` / `netbox_VLANs.csv`)", key="btn_clr_pfx", use_container_width=True):
+                            clear_prefixes_records()
+                            st.toast("🗑️ Cleared Prefixes & VLANs table data.", icon="🧹")
+                            st.rerun()
+                with c2:
+                    st.button("🗑️ Clear All DB", on_click=handle_ipam_db_reset, use_container_width=True, key="rst_ipam_csv_btn")
             else:
                 st.caption("No custom data loaded.")
 

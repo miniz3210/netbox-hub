@@ -393,6 +393,26 @@ def clear_inventory_records() -> int:
     conn.close()
     return deleted
 
+def clear_sites_records() -> int:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM sites_records")
+    deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
+
+def clear_prefixes_records() -> int:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM ipam_records")
+    deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
+
 def clear_ipam_records() -> int:
     init_db()
     conn = sqlite3.connect(DB_PATH)
