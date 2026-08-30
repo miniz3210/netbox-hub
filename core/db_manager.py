@@ -393,6 +393,26 @@ def get_existing_prefix_strings() -> List[str]:
     conn.close()
     return [r[0] for r in rows if r[0] and "/" in r[0]]
 
+def clear_device_records() -> int:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM inventory_records WHERE category IN ('device', 'hypervisor')")
+    deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
+
+def clear_vm_records() -> int:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM inventory_records WHERE category = 'vm'")
+    deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
+
 def clear_inventory_records() -> int:
     init_db()
     conn = sqlite3.connect(DB_PATH)

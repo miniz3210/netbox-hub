@@ -11,6 +11,8 @@ from core.db_manager import (
     save_universal_csv, 
     get_records_by_category, 
     clear_inventory_records,
+    clear_device_records,
+    clear_vm_records,
     get_total_record_count,
     get_sync_metadata
 )
@@ -78,71 +80,84 @@ def display_reference_box(category_key: str, default_lines: str, label: str, sit
             st.code(default_lines, language="text")
 
 def render_compact_toolbar():
-    top_c1, top_c2 = st.columns([1.2, 2.8])
-    with top_c1:
-        case_mode = st.radio(
-            "Casing",
-            ["UPPERCASE", "lowercase"],
-            index=0,
-            horizontal=True,
-            help="Render output in UPPERCASE or lowercase."
-        )
-    with top_c2:
-        total_recs = get_total_record_count()
-        device_count = len(get_records_by_category("device")) + len(get_records_by_category("hypervisor"))
-        vm_count = len(get_records_by_category("vm"))
-        meta = get_sync_metadata("naming")
-        
-        status_tag = f"🟢 ({total_recs} records in DB)" if total_recs > 0 else "⚪ (Default Examples)"
-        tick_devices = " ✅" if device_count > 0 else ""
-        tick_vms = " ✅" if vm_count > 0 else ""
+    total_recs = get_total_record_count()
+    device_count = len(get_records_by_category("device")) + len(get_records_by_category("hypervisor"))
+    vm_count = len(get_records_by_category("vm"))
+    meta = get_sync_metadata("naming")
+    
+    status_tag = f"🟢 ({total_recs} records in DB)" if total_recs > 0 else "⚪ (Default Examples)"
+    tick_devices = " ✅" if device_count > 0 else ""
+    tick_vms = " ✅" if vm_count > 0 else ""
 
-        with st.expander(f"📥 Ingest NetBox Data (CSV) {status_tag}", expanded=False):
-            if total_recs > 0:
-                st.markdown(
-                    f"**DB Status:** `Source: {meta['source']}` | `Last Updated: {meta['updated_at']}`"
-                )
+    with st.expander(f"📥 Ingest NetBox Data (CSV) {status_tag}", expanded=False):
+        if total_recs > 0:
+            st.markdown(
+                f"**DB Status:** `Source: {meta['source']}` | `Last Updated: {meta['updated_at']}`"
+            )
 
-            st.markdown("**Option A: Automated Push via PowerShell Agent (Recommended):**")
-            st.code('.\\Sync-NetBoxHub.ps1 -NetBoxUrl "https://xxxx" -ApiToken "xxxx" -HubUrl "xxxx"', language="powershell")
+        st.markdown("**Option A: Automated Push via PowerShell Agent (Recommended):**")
+        st.code('.\\Sync-NetBoxHub.ps1 -NetBoxUrl "https://xxxx" -ApiToken "xxxx" -HubUrl "xxxx"', language="powershell")
 
-            st.caption("💡 *Press **Refresh** after the upload is completed in PowerShell to reload the local data.*")
+        st.caption("💡 *Press **Refresh** after the upload is completed in PowerShell to reload the local data.*")
 
-            c_dl, c_ref = st.columns([2, 1])
-            with c_dl:
-                st.download_button(
-                    "⬇️ Download Sync-NetBoxHub.ps1 Agent",
-                    POWERSHELL_AGENT_CODE,
-                    file_name="Sync-NetBoxHub.ps1",
-                    mime="text/plain",
-                    key="dl_ps1_naming"
-                )
-            with c_ref:
-                if st.button("🔄 Refresh", key="ref_naming_btn", width="stretch"):
+        c_dl, c_ref = st.columns([2, 1])
+        with c_dl:
+            st.download_button(
+                "⬇️ Download Sync-NetBoxHub.ps1 Agent",
+                POWERSHELL_AGENT_CODE,
+                file_name="Sync-NetBoxHub.ps1",
+                mime="text/plain",
+                key="dl_ps1_naming"
+            )
+        with c_ref:
+            if st.button("🔄 Refresh", key="ref_naming_btn", width="stretch"):
+                st.rerun()
+
+        st.markdown("**Option B: Manual CSV Export & Upload:**")
+
+        col_l1, col_r1 = st.columns([12, 1])
+        with col_l1:
+            st.markdown(f"* **Devices / Servers / Switches:** Go to `Devices` ➔ `Devices` ➔ `Export` ➔ `All Data` (`netbox_devices.csv`){tick_devices}")
+        with col_r1:
+            if device_count > 0:
+                if st.button("🗑️", key="btn_clr_dev_inline", help="Clear netbox_devices.csv data"):
+                    clear_device_records()
+                    st.toast("🗑️ Cleared netbox_devices.csv data.", icon="🧹")
                     st.rerun()
 
-            st.markdown(
-                f"""
-                **Option B: Manual CSV Export & Upload:**
-                * **Devices / Servers / Switches:** Go to `Devices` ➔ `Devices` ➔ `Export` ➔ `All Data` (`netbox_devices.csv`){tick_devices}
-                * **Virtual Machines:** Go to `Virtualization` ➔ `Virtual Machines` ➔ `Export` ➔ `All Data` (`netbox_virtual machines.csv`){tick_vms}
-                """
+        col_l2, col_r2 = st.columns([12, 1])
+        with col_l2:
+            st.markdown(f"* **Virtual Machines:** Go to `Virtualization` ➔ `Virtual Machines` ➔ `Export` ➔ `All Data` (`netbox_virtual machines.csv`){tick_vms}")
+        with col_r2:
+            if vm_count > 0:
+                if st.button("🗑️", key="btn_clr_vm_inline", help="Clear netbox_virtual machines.csv data"):
+                    clear_vm_records()
+                    st.toast("🗑️ Cleared netbox_virtual machines.csv data.", icon="🧹")
+                    st.rerun()
+
+        c_up, c_rst = st.columns([3, 1])
+        with c_up:
+            st.file_uploader(
+                "Upload NetBox CSV Export",
+                type=["csv"],
+                accept_multiple_files=True,
+                key="global_netbox_csv",
+                on_change=handle_csv_upload,
+                label_visibility="collapsed"
             )
-            c_up, c_rst = st.columns([3, 1])
-            with c_up:
-                st.file_uploader(
-                    "Upload NetBox CSV Export",
-                    type=["csv"],
-                    accept_multiple_files=True,
-                    key="global_netbox_csv",
-                    on_change=handle_csv_upload,
-                    label_visibility="collapsed"
-                )
-            with c_rst:
-                if total_recs > 0:
-                    st.button("🗑️ Clear DB", on_click=handle_csv_reset, width="stretch", key="rst_csv_btn")
-                else:
-                    st.caption("No custom data loaded.")
+        with c_rst:
+            if total_recs > 0:
+                st.button("🗑️ Clear All DB", on_click=handle_csv_reset, width="stretch", key="rst_csv_btn")
+            else:
+                st.caption("No custom data loaded.")
+
+    case_mode = st.radio(
+        "Casing",
+        ["UPPERCASE", "lowercase"],
+        index=0,
+        horizontal=True,
+        help="Render output in UPPERCASE or lowercase."
+    )
 
     return case_mode
 
