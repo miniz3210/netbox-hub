@@ -241,6 +241,73 @@ def calculate_remaining_subnets(supernet_str: str, allocated_subnets: List[str])
 
     return result
 
+def get_subnet_availability_analysis(
+    supernet_str: str, 
+    known_prefixes: List[str], 
+    requested_prefix_len: int = 24, 
+    max_candidates: int = 16
+) -> str:
+    """
+    Computes exact mathematical CIDR availability and overlap status for subnets inside a supernet.
+    Returns a clear pre-calculated breakdown for AI context and prompt grounding.
+    """
+    clean_sup = sanitize_cidr(supernet_str)
+    if not clean_sup or "/" not in clean_sup:
+        return ""
+    
+    try:
+        sup_net = ipaddress.ip_network(clean_sup, strict=False)
+    except ValueError:
+        return ""
+
+    if requested_prefix_len <= sup_net.prefixlen:
+        return f"Requested /{requested_prefix_len} block is equal to or larger than parent supernet {clean_sup}."
+
+    known_nets = []
+    for p in known_prefixes:
+        clean_p = sanitize_cidr(p)
+        if clean_p and "/" in clean_p and clean_p != clean_sup:
+            try:
+                known_nets.append(ipaddress.ip_network(clean_p, strict=False))
+            except ValueError:
+                pass
+
+    try:
+        candidate_subnets = list(sup_net.subnets(new_prefix=requested_prefix_len))
+    except Exception:
+        return ""
+
+    analysis_lines = [
+        f"PRE-CALCULATED SUBNET AVAILABILITY ANALYSIS for target /{requested_prefix_len} inside {clean_sup}:"
+    ]
+    
+    first_available = None
+    count = 0
+
+    for cand in candidate_subnets:
+        if count >= max_candidates:
+            analysis_lines.append(f"... ({len(candidate_subnets)} total /{requested_prefix_len} subnets exist in {clean_sup})")
+            break
+        
+        overlapping = [k for k in known_nets if cand.overlaps(k)]
+        if overlapping:
+            overlap_strs = ", ".join(str(o) for o in overlapping)
+            analysis_lines.append(f"  ❌ {cand}: OCCUPIED / OVERLAPS ({overlap_strs})")
+        else:
+            if first_available is None:
+                first_available = cand
+                analysis_lines.append(f"  ✅ {cand}: NEXT AVAILABLE FREE SUBNET")
+            else:
+                analysis_lines.append(f"  ✅ {cand}: AVAILABLE")
+        count += 1
+
+    if first_available:
+        analysis_lines.insert(1, f"-> NEXT AVAILABLE /{requested_prefix_len} SUBNET: {first_available}")
+    else:
+        analysis_lines.insert(1, f"-> NO AVAILABLE /{requested_prefix_len} SUBNETS REMAINING IN {clean_sup}")
+
+    return "\n".join(analysis_lines)
+
 # ── BULK NETBOX CSV GENERATORS ──────────────────────────────────────────
 
 def generate_netbox_site_csv(site_name: str) -> str:
