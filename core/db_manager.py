@@ -57,9 +57,16 @@ def init_db():
             site TEXT,
             scope_id INTEGER,
             description TEXT,
+            record_type TEXT DEFAULT 'prefix',
             imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # Column migration check for existing DBs
+    cursor.execute("PRAGMA table_info(ipam_records)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if "record_type" not in columns:
+        cursor.execute("ALTER TABLE ipam_records ADD COLUMN record_type TEXT DEFAULT 'prefix'")
 
     conn.commit()
     conn.close()
@@ -353,18 +360,22 @@ def save_ipam_records_batch(records: List[Dict[str, Any]], clear_first: bool = F
         if not cidrs and "/" in raw_prefix:
             cidrs = [raw_prefix]
 
+        v_id = int(r.get("vlan_id") or r.get("vid") or r.get("VID") or 0) if str(r.get("vlan_id") or r.get("vid") or r.get("VID") or "").isdigit() else None
+        rec_type = str(r.get("record_type") or ("vlan" if v_id or r.get("vlan_name") else "prefix")).strip().lower()
+
         for cidr in cidrs:
             cursor.execute("""
-                INSERT INTO ipam_records (prefix_or_subnet, vlan_id, vlan_name, role, site, scope_id, description)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO ipam_records (prefix_or_subnet, vlan_id, vlan_name, role, site, scope_id, description, record_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 cidr,
-                int(r.get("vlan_id") or r.get("vid") or r.get("VID") or 0) if str(r.get("vlan_id") or r.get("vid") or r.get("VID") or "").isdigit() else None,
+                v_id,
                 str(r.get("vlan_name") or r.get("name") or r.get("Name") or "").strip(),
                 str(r.get("role") or r.get("Role") or "").strip(),
                 str(r.get("site") or r.get("Site") or "").strip(),
                 int(r.get("scope_id")) if str(r.get("scope_id") or "").isdigit() else None,
-                str(r.get("description") or r.get("desc") or r.get("Description") or "").strip()
+                str(r.get("description") or r.get("desc") or r.get("Description") or "").strip(),
+                rec_type
             ))
             count += 1
 
@@ -403,11 +414,21 @@ def clear_sites_records() -> int:
     conn.close()
     return deleted
 
+def clear_vlans_records() -> int:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM ipam_records WHERE record_type = 'vlan'")
+    deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
+
 def clear_prefixes_records() -> int:
     init_db()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM ipam_records")
+    cursor.execute("DELETE FROM ipam_records WHERE record_type = 'prefix'")
     deleted = cursor.rowcount
     conn.commit()
     conn.close()
@@ -439,6 +460,24 @@ def get_total_ipam_count() -> int:
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM ipam_records")
+    total = cursor.fetchone()[0]
+    conn.close()
+    return total
+
+def get_total_vlans_count() -> int:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM ipam_records WHERE record_type = 'vlan'")
+    total = cursor.fetchone()[0]
+    conn.close()
+    return total
+
+def get_total_prefixes_count() -> int:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM ipam_records WHERE record_type = 'prefix'")
     total = cursor.fetchone()[0]
     conn.close()
     return total

@@ -24,9 +24,12 @@ from core.db_manager import (
     save_sites_batch,
     clear_ipam_records,
     clear_sites_records,
+    clear_vlans_records,
     clear_prefixes_records,
     get_total_ipam_count,
     get_total_sites_count,
+    get_total_vlans_count,
+    get_total_prefixes_count,
     lookup_scope_id,
     lookup_site_supernet_from_db,
     get_existing_prefix_strings,
@@ -217,15 +220,34 @@ def handle_ipam_file_upload():
                     if scope_records:
                         cnt = save_sites_batch(scope_records, clear_first=False, source="Manual CSV Upload")
                         total_scopes += cnt
-                elif "prefixes" in cols or "prefix" in cols or "subnet" in cols or "vid" in cols:
+                elif "prefixes" in cols or "prefix" in cols or "subnet" in cols or "vid" in cols or "vlan" in cols:
                     pfx_col = cols.get("prefixes", cols.get("prefix", cols.get("subnet")))
                     vid_col = cols.get("vid", cols.get("vlan_id", cols.get("vlan", "")))
                     vname_col = cols.get("name", cols.get("vlan_name", ""))
+
+                    is_vlan_file = "vlan" in filename or "vlans" in filename or ("vid" in cols and not ("prefixes" in filename or "prefix" in filename))
+                    rec_type = "vlan" if is_vlan_file else "prefix"
 
                     ipam_records = []
                     for _, row in df.iterrows():
                         raw_prefixes = str(row.get(pfx_col, "")).strip() if pfx_col else ""
                         if not raw_prefixes or raw_prefixes.lower() == "nan":
+                            if rec_type == "vlan":
+                                vid = str(row.get(vid_col, "")).strip() if vid_col else ""
+                                vname = str(row.get(vname_col, "")).strip() if vname_col else ""
+                                role_str = str(row.get("role", "")).strip()
+                                site_str = str(row.get("site", "")).strip()
+                                desc_str = str(row.get("description", "")).strip()
+                                if vid or vname:
+                                    ipam_records.append({
+                                        "prefix_or_subnet": "",
+                                        "vlan_id": vid if vid.isdigit() else None,
+                                        "vlan_name": vname if vname.lower() != "nan" else "",
+                                        "role": role_str if role_str.lower() != "nan" else "",
+                                        "site": site_str if site_str.lower() != "nan" else "",
+                                        "description": desc_str if desc_str.lower() != "nan" else "",
+                                        "record_type": "vlan"
+                                    })
                             continue
 
                         found_cidrs = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}/\d{1,2}\b', raw_prefixes)
@@ -235,14 +257,26 @@ def handle_ipam_file_upload():
                         site_str = str(row.get("site", "")).strip()
                         desc_str = str(row.get("description", "")).strip()
 
-                        for cidr in found_cidrs:
+                        if found_cidrs:
+                            for cidr in found_cidrs:
+                                ipam_records.append({
+                                    "prefix_or_subnet": cidr,
+                                    "vlan_id": vid if vid.isdigit() else None,
+                                    "vlan_name": vname if vname.lower() != "nan" else "",
+                                    "role": role_str if role_str.lower() != "nan" else "",
+                                    "site": site_str if site_str.lower() != "nan" else "",
+                                    "description": desc_str if desc_str.lower() != "nan" else "",
+                                    "record_type": rec_type
+                                })
+                        elif "/" in raw_prefixes:
                             ipam_records.append({
-                                "prefix_or_subnet": cidr,
+                                "prefix_or_subnet": raw_prefixes,
                                 "vlan_id": vid if vid.isdigit() else None,
                                 "vlan_name": vname if vname.lower() != "nan" else "",
                                 "role": role_str if role_str.lower() != "nan" else "",
                                 "site": site_str if site_str.lower() != "nan" else "",
-                                "description": desc_str if desc_str.lower() != "nan" else ""
+                                "description": desc_str if desc_str.lower() != "nan" else "",
+                                "record_type": rec_type
                             })
 
                     if ipam_records:
@@ -301,13 +335,15 @@ def render_ipam_tab(active_model: str):
     # 1. Ingestion Toolbar
     total_ipam_recs = get_total_ipam_count()
     total_sites_recs = get_total_sites_count()
+    total_vlans_recs = get_total_vlans_count()
+    total_prefixes_recs = get_total_prefixes_count()
     total_db_count = total_ipam_recs + total_sites_recs
     meta = get_sync_metadata("ipam")
 
-    status_tag = f"🟢 ({total_sites_recs} sites, {total_ipam_recs} prefixes in DB)" if total_db_count > 0 else "⚪ (Default Examples)"
+    status_tag = f"🟢 ({total_sites_recs} sites, {total_vlans_recs} VLANs, {total_prefixes_recs} prefixes in DB)" if total_db_count > 0 else "⚪ (Default Examples)"
     tick_sites = " ✅" if total_sites_recs > 0 else ""
-    tick_vlans = " ✅" if total_ipam_recs > 0 else ""
-    tick_prefixes = " ✅" if total_ipam_recs > 0 else ""
+    tick_vlans = " ✅" if total_vlans_recs > 0 else ""
+    tick_prefixes = " ✅" if total_prefixes_recs > 0 else ""
 
     with st.expander(f"📥 Ingest NetBox Sites & VLANs / Prefixes CSV {status_tag}", expanded=False):
         if total_db_count > 0:
@@ -333,15 +369,39 @@ def render_ipam_tab(active_model: str):
             if st.button("🔄 Refresh", key="ref_ipam_btn", width="stretch"):
                 st.rerun()
 
-        st.markdown(
-            f"""
-            **Option B: Manual CSV Export & Upload:**
-            * **Scope IDs & Site Names:** Go to `Organization` ➔ `Sites` ➔ `Export` ➔ `All Data` (`netbox_sites.csv`){tick_sites}
-            * **VLANs:** Go to `IPAM` ➔ `VLANs` ➔ `Export` ➔ `All Data` (`netbox_VLANs.csv`){tick_vlans}
-            * **IP Prefixes:** Go to `IPAM` ➔ `Prefixes` ➔ `Export` ➔ `All Data` (`netbox_prefixes.csv`){tick_prefixes}
-            """
-        )
-        c_up, c_rst = st.columns([2.5, 1.5])
+        st.markdown("**Option B: Manual CSV Export & Upload:**")
+
+        col_l1, col_r1 = st.columns([12, 1])
+        with col_l1:
+            st.markdown(f"* **Scope IDs & Site Names:** Go to `Organization` ➔ `Sites` ➔ `Export` ➔ `All Data` (`netbox_sites.csv`){tick_sites}")
+        with col_r1:
+            if total_sites_recs > 0:
+                if st.button("🗑️", key="btn_clr_sites_inline", help="Clear netbox_sites.csv data"):
+                    clear_sites_records()
+                    st.toast("🗑️ Cleared netbox_sites.csv data.", icon="🧹")
+                    st.rerun()
+
+        col_l2, col_r2 = st.columns([12, 1])
+        with col_l2:
+            st.markdown(f"* **VLANs:** Go to `IPAM` ➔ `VLANs` ➔ `Export` ➔ `All Data` (`netbox_VLANs.csv`){tick_vlans}")
+        with col_r2:
+            if total_vlans_recs > 0:
+                if st.button("🗑️", key="btn_clr_vlans_inline", help="Clear netbox_VLANs.csv data"):
+                    clear_vlans_records()
+                    st.toast("🗑️ Cleared netbox_VLANs.csv data.", icon="🧹")
+                    st.rerun()
+
+        col_l3, col_r3 = st.columns([12, 1])
+        with col_l3:
+            st.markdown(f"* **IP Prefixes:** Go to `IPAM` ➔ `Prefixes` ➔ `Export` ➔ `All Data` (`netbox_prefixes.csv`){tick_prefixes}")
+        with col_r3:
+            if total_prefixes_recs > 0:
+                if st.button("🗑️", key="btn_clr_prefixes_inline", help="Clear netbox_prefixes.csv data"):
+                    clear_prefixes_records()
+                    st.toast("🗑️ Cleared netbox_prefixes.csv data.", icon="🧹")
+                    st.rerun()
+
+        c_up, c_rst = st.columns([3, 1])
         with c_up:
             st.file_uploader(
                 "Upload NetBox CSVs (netbox_sites.csv, netbox_VLANs.csv, netbox_prefixes.csv) or Excel", 
@@ -354,20 +414,7 @@ def render_ipam_tab(active_model: str):
 
         with c_rst:
             if total_db_count > 0:
-                c1, c2 = st.columns(2)
-                with c1:
-                    with st.popover("🗑️ Clear 1 File", use_container_width=True):
-                        st.markdown("**Clear Specific Dataset:**")
-                        if st.button("Clear Sites (`netbox_sites.csv`)", key="btn_clr_sites", use_container_width=True):
-                            clear_sites_records()
-                            st.toast("🗑️ Cleared Sites table data.", icon="🧹")
-                            st.rerun()
-                        if st.button("Clear Prefixes & VLANs (`netbox_prefixes.csv` / `netbox_VLANs.csv`)", key="btn_clr_pfx", use_container_width=True):
-                            clear_prefixes_records()
-                            st.toast("🗑️ Cleared Prefixes & VLANs table data.", icon="🧹")
-                            st.rerun()
-                with c2:
-                    st.button("🗑️ Clear All DB", on_click=handle_ipam_db_reset, use_container_width=True, key="rst_ipam_csv_btn")
+                st.button("🗑️ Clear All DB", on_click=handle_ipam_db_reset, width="stretch", key="rst_ipam_csv_btn")
             else:
                 st.caption("No custom data loaded.")
 
