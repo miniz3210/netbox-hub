@@ -424,7 +424,6 @@ def render_ipam_tab(active_model: str):
                 with st.spinner("Thinking..."):
                     try:
                         from core.ai_client import call_ai
-                        from core.db_manager import get_total_sites_count, get_total_ipam_count
                         
                         # Prepare context for AI
                         site_context = f"Current site: {site_name or 'Not specified'}"
