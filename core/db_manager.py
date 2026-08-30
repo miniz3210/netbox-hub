@@ -195,8 +195,8 @@ def lookup_site_supernet_from_db(site_name: str) -> Optional[str]:
     
     cursor.execute("""
         SELECT prefix_or_subnet, description, role FROM ipam_records 
-        WHERE LOWER(site) LIKE ? OR LOWER(description) LIKE ?
-    """, (f"%{clean}%", f"%{clean}%"))
+        WHERE LOWER(site) = ? OR LOWER(site) LIKE ? OR LOWER(description) LIKE ? OR LOWER(vlan_name) LIKE ?
+    """, (clean, f"%{clean}%", f"%{clean}%", f"%{clean}%"))
     rows = cursor.fetchall()
     conn.close()
 
@@ -208,7 +208,7 @@ def lookup_site_supernet_from_db(site_name: str) -> Optional[str]:
         if p_str and "/" in p_str:
             try:
                 cidr = int(p_str.split("/")[1])
-                is_supernet_role = "site subnet" in role or "site subnet" in desc
+                is_supernet_role = "site subnet" in role or "site subnet" in desc or "supernet" in role or "supernet" in desc
                 candidates.append((cidr, is_supernet_role, p_str))
             except ValueError:
                 pass
@@ -501,6 +501,15 @@ def get_total_prefixes_count() -> int:
     total = cursor.fetchone()[0]
     conn.close()
     return total
+
+def get_max_scope_id() -> Optional[int]:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT MAX(id) FROM sites_records")
+    row = cursor.fetchone()
+    conn.close()
+    return int(row[0]) if row and row[0] is not None else None
 
 def get_total_sites_count() -> int:
     init_db()

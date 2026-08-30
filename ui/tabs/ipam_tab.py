@@ -30,6 +30,7 @@ from core.db_manager import (
     get_total_sites_count,
     get_total_vlans_count,
     get_total_prefixes_count,
+    get_max_scope_id,
     lookup_scope_id,
     lookup_site_supernet_from_db,
     get_existing_prefix_strings,
@@ -426,6 +427,9 @@ def render_ipam_tab(active_model: str):
     if "ipam_super_in" not in st.session_state:
         st.session_state["ipam_super_in"] = ""
 
+    max_scope_id = get_max_scope_id()
+    scope_eg = f"e.g. {max_scope_id + 1}" if max_scope_id is not None else "e.g. 42"
+
     top1, top2, top3 = st.columns([2, 1, 2.2])
     with top1:
         st.text_input(
@@ -437,12 +441,16 @@ def render_ipam_tab(active_model: str):
         site_name = st.session_state["ipam_site_in"].strip()
 
     auto_scope_id = lookup_scope_id(site_name) if site_name else None
+    auto_supernet = lookup_site_supernet_from_db(site_name) if site_name else None
+
+    if site_name and auto_supernet and not st.session_state.get("ipam_super_in"):
+        st.session_state["ipam_super_in"] = str(auto_supernet)
 
     with top2:
         st.text_input(
             "Scope ID (NetBox Site ID)", 
             key="ipam_scope_in",
-            placeholder="e.g. 42",
+            placeholder=scope_eg,
             help="Auto-discovered from uploaded data/agent sync, or editable manually."
         )
         scope_id = st.session_state["ipam_scope_in"].strip()
@@ -455,7 +463,7 @@ def render_ipam_tab(active_model: str):
         st.text_input(
             "Site Supernet (CIDR)", 
             key="ipam_super_in",
-            placeholder="e.g. 10.113.240.0/21",
+            placeholder="e.g. 10.x.x.0/24",
             help="Top-level container subnet for this branch site."
         )
         supernet_in = st.session_state["ipam_super_in"].strip()
@@ -700,11 +708,7 @@ Guidelines:
     st.markdown("### 📋 NetBox Bulk-Import CSV Generators")
 
     if not scope_id:
-        st.warning(
-            "⚠️ **Notice: Scope ID (NetBox Site ID) is empty.** NetBox requires a valid Site `scope_id` to import VLAN Groups and Prefixes. "
-            "If this is a newly created site, please first import `site.csv` into NetBox, export your latest `netbox_sites.csv` from NetBox and upload it above, or manually type the created Site ID into the **Scope ID** box.",
-            icon="⚠️"
-        )
+        st.warning("⚠️ **Notice:** Scope ID is empty. Export NetBox Sites CSV to discover Scope ID, or enter it manually.", icon="⚠️")
 
     display_site = display_site_name or "Site"
     csv_site = generate_netbox_site_csv(display_site)
