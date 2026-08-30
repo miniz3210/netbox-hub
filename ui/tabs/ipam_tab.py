@@ -10,6 +10,7 @@ from core.ipam_engine import (
     slugify,
     evaluate_subnet_row,
     calculate_remaining_subnets,
+    get_subnet_availability_analysis,
     calculate_ip_range_str,
     format_branch_display,
     lookup_role_description,
@@ -435,7 +436,7 @@ def render_ipam_tab(active_model: str):
                         combined_prefixes = list(dict.fromkeys(existing_prefixes + ui_prefixes))
 
                         target_networks = []
-                        cidr_matches = re.findall(r"\b(?:\d{{1,3}}\.){{3}}\d{{1,3}}(?:/\d{{1,2}})?\b", prompt)
+                        cidr_matches = re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?\b", prompt)
                         if supernet_in:
                             cidr_matches.append(supernet_in)
 
@@ -466,27 +467,46 @@ def render_ipam_tab(active_model: str):
                         else:
                             prefixes_context = "Known in-use/registered prefixes: None recorded in current database or active editor table"
 
+                        # Extract requested mask (e.g., /24) from user prompt if specified
+                        mask_match = re.search(r"/(\d{1,2})", prompt)
+                        req_mask = int(mask_match.group(1)) if mask_match else 24
+
+                        # Determine target supernet for pre-calculation
+                        calc_supernet = supernet_in
+                        if not calc_supernet and target_networks:
+                            calc_supernet = str(target_networks[0])
+
+                        calc_analysis = ""
+                        if calc_supernet and "/" in calc_supernet:
+                            calc_analysis = get_subnet_availability_analysis(
+                                calc_supernet,
+                                combined_prefixes,
+                                requested_prefix_len=req_mask
+                            )
+
                         site_context = f"Current site: {site_name or 'Not specified'}"
                         supernet_context = f"Site supernet: {supernet_in or 'Not specified'}"
                         stats_context = f"Database contains: {get_total_sites_count()} sites, {get_total_ipam_count()} prefixes"
                         
                         system_prompt = f"""You are an expert network architect specializing in IP address management and subnet planning.
-                        Your task is to analyze the user's request and suggest appropriate subnet allocations.
-                        
-                        Context:
-                        - {site_context}
-                        - {supernet_context}
-                        - {stats_context}
-                        - {prefixes_context}
-                        
-                        Guidelines:
-                        1. Suggest non-overlapping CIDR subnets within the site supernet when specified
-                        2. Consider standard subnet sizes (/24, /25, /26, etc.) based on device count
-                        3. Avoid suggesting subnets that conflict with existing prefixes
-                        4. Provide clear reasoning for your suggestions
-                        5. Format CIDR notation properly (e.g., 10.0.0.0/24)
-                        6. If insufficient information is provided, ask clarifying questions
-                        7. Be concise but thorough in your analysis"""
+Your task is to analyze the user's request and suggest appropriate subnet allocations.
+
+Context:
+- {site_context}
+- {supernet_context}
+- {stats_context}
+- {prefixes_context}
+
+{calc_analysis}
+
+Guidelines:
+1. Strictly follow the PRE-CALCULATED SUBNET AVAILABILITY ANALYSIS when present above. Never suggest a subnet marked OCCUPIED / OVERLAPS.
+2. Suggest non-overlapping CIDR subnets within the site supernet when specified.
+3. Note that subnets overlapping with larger or smaller blocks (e.g., 10.113.240.0/24 inside 10.113.240.0/23) are OCCUPIED and unavailable.
+4. Provide clear reasoning for your suggestions.
+5. Format CIDR notation properly (e.g., 10.113.242.0/24).
+6. If insufficient information is provided, ask clarifying questions.
+7. Be concise but thorough in your analysis."""
                         
                         # Use the active model from sidebar
                         ai_response = call_ai(prompt, active_model, custom_system_msg=system_prompt)
