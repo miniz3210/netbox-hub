@@ -46,18 +46,6 @@ if "catalog" not in st.session_state:
 catalog: Optional[Dict[str, Any]] = st.session_state.get("catalog")
 
 
-def _catalog_required(_renderer: Callable) -> Callable:
-    """Decorator that guards a tab renderer with a catalog availability check."""
-
-    def _wrap():
-        if catalog is None:
-            st.info("🔒 This tab requires the GitHub catalog. Please retry later.")
-            return
-        _renderer(catalog, active_model)
-
-    return _wrap
-
-
 def _device_tab(catalog, active_model):
     from ui.tabs.device_tab import render_device_tab as _fn
 
@@ -88,19 +76,19 @@ def _batch_tab(catalog, active_model):
     _fn(catalog, active_model)
 
 
-def _ipam_tab():
+def _ipam_tab(active_model):
     from ui.tabs.ipam_tab import render_ipam_tab as _fn
 
     _fn(active_model)
 
 
-def _naming_tab():
+def _naming_tab(active_model):
     from ui.tabs.naming_tab import render_naming_tab as _fn
 
     _fn(active_model)
 
 
-def _standards_tab():
+def _standards_tab(active_model):
     from ui.tabs.standards_tab import render_standards_tab as _fn
 
     _fn(active_model)
@@ -128,39 +116,43 @@ def _render_tab(label: str, renderer: Callable, requires_catalog: bool) -> None:
                 return
             renderer(catalog, active_model)
         else:
-            renderer()
+            renderer(active_model)
     except Exception as exc:
         logger.exception("Tab '%s' crashed", label)
         st.error(f"❌ Tab '{label}' failed: {exc}")
+
+
+def _render_version_badge() -> None:
+    """Render floating version badge in bottom left."""
+    st.markdown(
+        f"""
+        <style>
+        .netbox-hub-version-badge {{
+            position: fixed !important;
+            bottom: 12px !important;
+            left: 12px !important;
+            background: #1e293b !important;
+            color: #38bdf8 !important;
+            padding: 5px 12px !important;
+            border-radius: 6px !important;
+            font-size: 12px !important;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+            font-weight: 600 !important;
+            border: 1px solid #334155 !important;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3) !important;
+            z-index: 2147483647 !important;
+            pointer-events: none !important;
+        }}
+        </style>
+        <div class="netbox-hub-version-badge">📦 NetBox Hub v{APP_VERSION}</div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 tab_objs = st.tabs([label for label, _, _ in TABS])
 for (_label, _renderer, _needs_catalog), tab in zip(TABS, tab_objs):
     with tab:
         _render_tab(_label, _renderer, _needs_catalog)
-# --- V2.5.0 UI BADGE ---
-import streamlit as st
-st.markdown(
-    """
-    <style>
-    .netbox-hub-version-badge {
-        position: fixed !important;
-        bottom: 12px !important;
-        left: 12px !important;
-        background: #1e293b !important;
-        color: #38bdf8 !important;
-        padding: 5px 12px !important;
-        border-radius: 6px !important;
-        font-size: 12px !important;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
-        font-weight: 600 !important;
-        border: 1px solid #334155 !important;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3) !important;
-        z-index: 2147483647 !important;
-        pointer-events: none !important;
-    }
-    </style>
-    <div class="netbox-hub-version-badge">📦 NetBox Hub v2.5.0</div>
-    """,
-    unsafe_allow_html=True
-)
+
+_render_version_badge()
