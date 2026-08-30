@@ -244,8 +244,7 @@ def handle_ipam_file_upload():
 
                     ipam_records = []
                     # Robust CSV import: handle Pandas NaN correctly
-                        # Debug: print first 5 rows to see what is happening
-                        # if _ < 5: print(f"DEBUG: Row {row}")
+                    for _, row in df.iterrows():
                         raw_prefixes = str(row.get(pfx_col, "")).strip() if pfx_col and not pd.isna(row.get(pfx_col)) else ""
                         vid = str(row.get(vid_col, "")).strip() if vid_col and not pd.isna(row.get(vid_col)) else ""
                         vname = str(row.get(vname_col, "")).strip() if vname_col and not pd.isna(row.get(vname_col)) else ""
