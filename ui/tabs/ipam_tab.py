@@ -317,9 +317,9 @@ def handle_ipam_file_upload():
 
         if total_scopes > 0 or total_prefixes > 0:
             st.toast(f"✅ Ingested: {total_scopes} Sites, {total_prefixes} Prefixes!", icon="🚀")
-                        st.session_state["ipam_multi_uploader"] = None
             st.session_state["ipam_multi_uploader"] = []
             st.rerun()
+
 
 def handle_ipam_db_reset():
     clear_ipam_records()
@@ -332,7 +332,6 @@ def handle_ipam_db_reset():
     if "ipam_super_in" in st.session_state:
         del st.session_state["ipam_super_in"]
     st.toast("🗑️ Database Cleared. Restored default templates.", icon="🧹")
-                        st.session_state["ipam_multi_uploader"] = None
 
 def on_preset_change():
     selected = st.session_state.get("ipam_preset_selector")
@@ -407,7 +406,7 @@ def render_ipam_tab(active_model: str):
                 if st.button("🗑️", key="btn_clr_sites_inline", help="Clear netbox_sites.csv data"):
                     clear_sites_records()
                     st.toast("🗑️ Cleared netbox_sites.csv data.", icon="🧹")
-                        st.session_state["ipam_multi_uploader"] = None
+                    st.session_state["ipam_multi_uploader"] = None
                     st.rerun()
 
         col_l2, col_r2 = st.columns([12, 1])
@@ -418,7 +417,7 @@ def render_ipam_tab(active_model: str):
                 if st.button("🗑️", key="btn_clr_vlans_inline", help="Clear netbox_VLANs.csv data"):
                     clear_vlans_records()
                     st.toast("🗑️ Cleared netbox_VLANs.csv data.", icon="🧹")
-                        st.session_state["ipam_multi_uploader"] = None
+                    st.session_state["ipam_multi_uploader"] = None
                     st.rerun()
 
         col_l3, col_r3 = st.columns([12, 1])
@@ -429,19 +428,19 @@ def render_ipam_tab(active_model: str):
                 if st.button("🗑️", key="btn_clr_prefixes_inline", help="Clear netbox_prefixes.csv data"):
                     clear_prefixes_records()
                     st.toast("🗑️ Cleared netbox_prefixes.csv data.", icon="🧹")
-                        st.session_state["ipam_multi_uploader"] = None
+                    st.session_state["ipam_multi_uploader"] = None
                     st.rerun()
 
         c_up, c_rst = st.columns([3, 1])
         with c_up:
-        st.file_uploader(
-            "Upload NetBox CSVs (netbox_sites.csv, netbox_VLANs.csv, netbox_prefixes.csv) or Excel", 
-            type=["xlsx", "csv"], 
-            accept_multiple_files=True,
-            key="ipam_multi_uploader",
-            on_change=handle_ipam_file_upload,
-            label_visibility="collapsed"
-        )
+            st.file_uploader(
+                "Upload NetBox CSVs (netbox_sites.csv, netbox_VLANs.csv, netbox_prefixes.csv) or Excel", 
+                type=["xlsx", "csv"], 
+                accept_multiple_files=True,
+                key="ipam_multi_uploader",
+                on_change=handle_ipam_file_upload,
+                label_visibility="collapsed"
+            )
         if st.session_state.get("ipam_multi_uploader"):
             st.session_state["ipam_multi_uploader"] = None
 
