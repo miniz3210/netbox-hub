@@ -245,7 +245,7 @@ def render_naming_tab(active_model):
                 "Switch Port-Channel (Logical)", "Switch Access Port (Endpoint)", "Firewall Security Zone Interface"
             ], key="p_cat_sel")
             
-            if "Switch Uplink" in p_cat:
+            if p_cat == "Switch Uplink (Inter-Switch)":
                 l_dev = st.text_input("Local Device Hostname", value=final_device_name, placeholder="e.g. SWUSNYC01-0", key="up_ld").strip()
                 l_port_raw = st.text_input("Local Port", value="", placeholder="e.g. Gi1/0/48, Te1/0/1", key="up_lp")
                 r_dev = st.text_input("Remote Device Hostname", value="", placeholder="e.g. SWUSNYC02-0", key="up_rd").strip()
@@ -261,17 +261,30 @@ def render_naming_tab(active_model):
                 st.caption(f"On Remote Device (`{r_dev}`):")
                 st.code(f"to {l_dev}_{l_port_short}{role_suffix}", language="text")
             
-            elif "Switch LAG" in p_cat:
-                st.markdown("Placeholder for LAG Member Port formatter.")
+            elif p_cat == "Switch LAG Member Port (LACP)":
+                st.markdown("### ⚙️ LAG Member Port Formatter")
+                lag_id = st.text_input("LAG ID (e.g. Po1)", value="Po1", key="lag_id")
+                port = st.text_input("Physical Port (e.g. Gi1/0/1)", value="", key="lag_port")
+                st.code(f"channel-group {lag_id.replace('Po', '')} mode active", language="text")
+                st.code(f"interface {normalize_port_shortname(port)}", language="text")
+                st.code(f" description LAG Member: {lag_id}", language="text")
             
-            elif "Port-Channel" in p_cat:
-                st.markdown("Placeholder for Port-Channel formatter.")
+            elif p_cat == "Switch Port-Channel (Logical)":
+                st.markdown("### 🏗️ Port-Channel Formatter")
+                pc_id = st.text_input("Port-Channel ID (e.g. Po1)", value="Po1", key="pc_id")
+                st.code(f"interface {pc_id}", language="text")
+                st.code(f" description Uplink to ...", language="text")
             
-            elif "Access Port" in p_cat:
-                st.markdown("Placeholder for Access Port formatter.")
+            elif p_cat == "Switch Access Port (Endpoint)":
+                st.markdown("### 💻 Access Port Formatter")
+                vlan = st.text_input("Access VLAN", value="10", key="ac_vlan")
+                st.code(f"switchport mode access", language="text")
+                st.code(f"switchport access vlan {vlan}", language="text")
             
-            elif "Firewall" in p_cat:
-                st.markdown("Placeholder for Firewall Interface formatter.")
+            elif p_cat == "Firewall Security Zone Interface":
+                st.markdown("### 🛡️ Firewall Interface Formatter")
+                zone = st.text_input("Security Zone", value="TRUST", key="fw_zone")
+                st.code(f"nameif {zone.lower()}", language="text")
 
     # Hosts & VMs
     elif "2. Hosts" in naming_cat:
