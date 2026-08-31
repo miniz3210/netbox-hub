@@ -584,3 +584,11 @@ def lookup_vlan_description_from_db(role_name: str) -> Optional[str]:
     except Exception:
         pass
     return None
+def get_all_site_names() -> List[str]:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM sites_records")
+    rows = cursor.fetchall()
+    conn.close()
+    return [r[0] for r in rows if r[0]]

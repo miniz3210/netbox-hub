@@ -19,7 +19,7 @@ from core.ipam_engine import (
     generate_netbox_vlans_csv,
     generate_netbox_prefixes_csv
 )
-from core.db_manager import (
+from core.db_manager import (get_all_site_names,
     save_ipam_records_batch,
     save_sites_batch,
     clear_ipam_records,
@@ -34,7 +34,8 @@ from core.db_manager import (
     lookup_scope_id,
     lookup_site_supernet_from_db,
     get_existing_prefix_strings,
-    get_sync_metadata
+    get_sync_metadata,
+    get_site_summary
 )
 from utils.formatters import to_title_case_preserve_acronyms
 
@@ -310,8 +311,11 @@ def handle_ipam_file_upload():
         for err in errors:
             st.error(err)
 
-    if total_scopes > 0 or total_prefixes > 0:
+        if total_scopes > 0 or total_prefixes > 0:
         st.toast(f"✅ Ingested: {total_scopes} Sites, {total_prefixes} Prefixes!", icon="🚀")
+        st.session_state["ipam_multi_uploader"] = []
+        st.rerun()
+; st.session_state["ipam_multi_uploader"] = None; st.rerun()
 
 def handle_ipam_db_reset():
     clear_ipam_records()
@@ -492,7 +496,7 @@ def render_ipam_tab(active_model: str):
     existing_prefixes = get_existing_prefix_strings()
 
     # 2.5. AI IPAM & Subnet Assistant
-    with st.expander("🤖 AI IPAM & Subnet Assistant", expanded=False):
+    with st.expander("🤖 AI Assistant", expanded=False):
         st.caption("Ask for subnet suggestions using natural language (e.g., 'I have a new office in UK with 50 devices, please suggest a subnet' or 'Suggest the next available /24 in 10.113.0.0/16')")
         
         # Initialize chat history
@@ -525,6 +529,7 @@ def render_ipam_tab(active_model: str):
                                 ui_prefixes.append(sub)
 
                         combined_prefixes = list(dict.fromkeys(existing_prefixes + ui_prefixes))
+                        site_summary = get_site_summary()
 
                         target_networks = []
                         cidr_matches = re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?\b", prompt)
