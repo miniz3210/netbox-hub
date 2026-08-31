@@ -242,7 +242,7 @@ def handle_ipam_file_upload():
                         total_scopes += cnt
                 elif "prefixes" in cols or "prefix" in cols or "subnet" in cols or "vid" in cols or "vlan" in cols:
                     st.toast(f"DEBUG: CSV Columns={list(cols.keys())}", icon="🔍")
-                        st.session_state["ipam_multi_uploader"] = None
+                    st.session_state["ipam_multi_uploader"] = None
                     pfx_col = cols.get("prefixes", cols.get("prefix", cols.get("subnet")))
                     vid_col = cols.get("vid", cols.get("vlan_id", cols.get("vlan", "")))
                     vname_col = cols.get("vlan_name", cols.get("vlan name", cols.get("name", "")))
@@ -304,6 +304,8 @@ def handle_ipam_file_upload():
                     if ipam_records:
                         cnt = save_ipam_records_batch(ipam_records, clear_first=False, source="Manual CSV Upload")
                         total_prefixes += cnt
+                    
+                    st.session_state["ipam_multi_uploader"] = None
                 else:
                     raise ValueError(f"Unrecognized CSV format. Found columns: {list(cols.keys())}. Expected `netbox_sites.csv` columns (slug, name, id) or `netbox_prefixes.csv`/`netbox_VLANs.csv` columns (prefix, vlan, vid).")
             except Exception as e:
