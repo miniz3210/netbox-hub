@@ -296,7 +296,7 @@ def handle_ipam_file_upload():
                         cnt = save_ipam_records_batch(ipam_records, clear_first=False, source="Manual CSV Upload")
                         total_prefixes += cnt
                 else:
-                    raise ValueError(f"Unrecognized CSV format. Expected `netbox_sites.csv`, `netbox_VLANs.csv`, or `netbox_prefixes.csv`.")
+                    raise ValueError(f"Unrecognized CSV format. Found columns: {list(cols.keys())}. Expected `netbox_sites.csv` columns (slug, name, id) or `netbox_prefixes.csv`/`netbox_VLANs.csv` columns (prefix, vlan, vid).")
             except Exception as e:
                 errors.append(f"• **{file_obj.name}**: {str(e)}")
 
