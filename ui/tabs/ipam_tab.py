@@ -312,10 +312,9 @@ def handle_ipam_file_upload():
             st.error(err)
 
         if total_scopes > 0 or total_prefixes > 0:
-        st.toast(f"✅ Ingested: {total_scopes} Sites, {total_prefixes} Prefixes!", icon="🚀")
-        st.session_state["ipam_multi_uploader"] = []
-        st.rerun()
-; st.session_state["ipam_multi_uploader"] = None; st.rerun()
+            st.toast(f"✅ Ingested: {total_scopes} Sites, {total_prefixes} Prefixes!", icon="🚀")
+            st.session_state["ipam_multi_uploader"] = []
+            st.rerun()
 
 def handle_ipam_db_reset():
     clear_ipam_records()
