@@ -549,12 +549,13 @@ def get_site_summary() -> str:
     init_db()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT name, description FROM sites_records")
+    # Check if 'description' column exists (it does not exist in sites_records)
+    cursor.execute("SELECT name FROM sites_records")
     rows = cursor.fetchall()
     conn.close()
     if not rows:
         return "No site data ingested."
-    return "\n".join([f"- {r[0]} ({r[1]})" for r in rows])
+    return "\n".join([f"- {r[0]}" for r in rows])
 
 def lookup_vlan_description_from_db(role_name: str) -> Optional[str]:
     """Look up standard VLAN description from ingested database based on Role name."""
