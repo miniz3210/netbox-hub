@@ -149,7 +149,8 @@ def handle_site_change():
             st.session_state["ipam_super_in"] = str(matched_super)
 
 def handle_ipam_file_upload():
-    uploaded_files = st.session_state.get("ipam_multi_uploader")
+    uploader_key_val = st.session_state.get("uploader_key", 0)
+    uploaded_files = st.session_state.get(f"ipam_multi_uploader_{uploader_key_val}")
     if not uploaded_files:
         return
 
@@ -406,7 +407,6 @@ def render_ipam_tab(active_model: str):
                 if st.button("🗑️", key="btn_clr_sites_inline", help="Clear netbox_sites.csv data"):
                     clear_sites_records()
                     st.toast("🗑️ Cleared netbox_sites.csv data.", icon="🧹")
-                    st.session_state["ipam_multi_uploader"] = None
                     st.rerun()
 
         col_l2, col_r2 = st.columns([12, 1])
@@ -437,13 +437,10 @@ def render_ipam_tab(active_model: str):
                 "Upload NetBox CSVs (netbox_sites.csv, netbox_VLANs.csv, netbox_prefixes.csv) or Excel", 
                 type=["xlsx", "csv"], 
                 accept_multiple_files=True,
-                key="ipam_multi_uploader",
+                key=f"ipam_multi_uploader_{st.session_state.get('uploader_key', 0)}",
                 on_change=handle_ipam_file_upload,
                 label_visibility="collapsed"
             )
-        if st.session_state.get("ipam_multi_uploader"):
-            st.session_state["ipam_multi_uploader"] = None
-
 
         with c_rst:
             if total_db_count > 0:
