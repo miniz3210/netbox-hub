@@ -217,9 +217,9 @@ def handle_ipam_file_upload():
                 df = pd.read_csv(io.StringIO(content_str), sep=delim)
                 cols = {str(c).lower().strip(): c for c in df.columns}
                 st.toast(f"DEBUG: CSV Columns={list(cols.keys())}", icon="🔍")
-                        st.session_state["ipam_multi_uploader"] = None
 
                 # Robust site format detection: distinguish from prefixes/VLANs
+
                 is_site_file = ("name" in cols or "site" in cols or "location" in cols) and not ("prefix" in cols or "prefixes" in cols or "vid" in cols or "vlan" in cols)
                 if is_site_file:
                     name_col = cols.get("name", cols.get("site", cols.get("location")))
