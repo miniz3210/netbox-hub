@@ -245,7 +245,7 @@ def render_naming_tab(active_model):
                 "Switch Port-Channel (Logical)", "Switch Access Port (Endpoint)", "Firewall Security Zone Interface"
             ], key="p_cat_sel")
             
-            if p_cat == "Switch Uplink (Inter-Switch)":
+            if "Switch Uplink" in p_cat:
                 l_dev = st.text_input("Local Device Hostname", value=final_device_name, placeholder="e.g. SWUSNYC01-0", key="up_ld").strip()
                 l_port_raw = st.text_input("Local Port", value="", placeholder="e.g. Gi1/0/48, Te1/0/1", key="up_lp")
                 r_dev = st.text_input("Remote Device Hostname", value="", placeholder="e.g. SWUSNYC02-0", key="up_rd").strip()
@@ -260,6 +260,18 @@ def render_naming_tab(active_model):
                 st.code(f"to {r_dev}_{r_port_short}{role_suffix}", language="text")
                 st.caption(f"On Remote Device (`{r_dev}`):")
                 st.code(f"to {l_dev}_{l_port_short}{role_suffix}", language="text")
+            
+            elif "Switch LAG" in p_cat:
+                st.markdown("Placeholder for LAG Member Port formatter.")
+            
+            elif "Port-Channel" in p_cat:
+                st.markdown("Placeholder for Port-Channel formatter.")
+            
+            elif "Access Port" in p_cat:
+                st.markdown("Placeholder for Access Port formatter.")
+            
+            elif "Firewall" in p_cat:
+                st.markdown("Placeholder for Firewall Interface formatter.")
 
     # Hosts & VMs
     elif "2. Hosts" in naming_cat:
