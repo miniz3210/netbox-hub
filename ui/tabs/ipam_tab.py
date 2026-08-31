@@ -591,7 +591,9 @@ def render_ipam_tab(active_model: str):
                             )
 
                         next_scope_id_val = (max_scope_id + 1) if max_scope_id is not None else 1
-                        site_context = f"Current site: {site_name or 'Not specified'}"
+                        all_sites = get_all_site_names()
+                        sites_list_str = ", ".join(all_sites) if all_sites else "None recorded"
+                        site_context = f"Current site: {site_name or 'Not specified'}\nAll sites in DB: {sites_list_str}"
                         supernet_context = f"Site supernet: {supernet_in or 'Not specified'}"
                         scope_context = f"NetBox Scope IDs: Current max in DB is {max_scope_id or 'None'}, Next available Scope ID is {next_scope_id_val}"
                         stats_context = f"Database contains: {get_total_sites_count()} sites, {get_total_ipam_count()} prefixes"
@@ -615,7 +617,8 @@ Guidelines:
 4. Note that subnets overlapping with larger or smaller blocks (e.g., 10.113.240.0/24 inside 10.113.240.0/23) are OCCUPIED and unavailable.
 5. Provide clear, direct reasoning for your suggestions.
 6. Format CIDR notation properly (e.g., 10.113.242.0/24).
-7. Be concise but thorough."""
+7. Be concise but thorough.
+8. If the user asks about sites (e.g., 'how many sites are in UK?'), analyze the "All sites in DB" list provided in context to identify and count matching sites."""
                         
                         # Use the active model from sidebar
                         ai_response = call_ai(prompt, active_model, custom_system_msg=system_prompt)
