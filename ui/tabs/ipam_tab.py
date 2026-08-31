@@ -215,18 +215,20 @@ def handle_ipam_file_upload():
                 
                 df = pd.read_csv(io.StringIO(content_str), sep=delim)
                 cols = {str(c).lower().strip(): c for c in df.columns}
+                st.toast(f"DEBUG: CSV Columns={list(cols.keys())}", icon="🔍")
 
-                if "slug" in cols and ("name" in cols or "site" in cols) and "id" in cols:
-                    name_col = cols.get("name", cols.get("site"))
+                # Robust site format detection: does not strictly require "id"
+                if "slug" in cols and ("name" in cols or "site" in cols or "location" in cols):
+                    name_col = cols.get("name", cols.get("site", cols.get("location")))
                     id_col = cols.get("id")
                     slug_col = cols.get("slug")
                     scope_records = []
-                    for _, row in df.iterrows():
+                    for idx, row in df.iterrows():
                         s_name = str(row.get(name_col, "")).strip()
-                        s_id = row.get(id_col)
+                        s_id = row.get(id_col) if id_col and not pd.isna(row.get(id_col)) else (idx + 1)
                         s_slug = str(row.get(slug_col, "")).strip()
                         if s_name and s_name.lower() != "nan":
-                            scope_records.append({"id": s_id, "name": s_name, "slug": s_slug})
+                            scope_records.append({"id": int(s_id) if str(s_id).isdigit() else s_id, "name": s_name, "slug": s_slug})
                     if scope_records:
                         cnt = save_sites_batch(scope_records, clear_first=False, source="Manual CSV Upload")
                         total_scopes += cnt
