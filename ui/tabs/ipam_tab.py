@@ -217,8 +217,9 @@ def handle_ipam_file_upload():
                 cols = {str(c).lower().strip(): c for c in df.columns}
                 st.toast(f"DEBUG: CSV Columns={list(cols.keys())}", icon="🔍")
 
-                # Robust site format detection: does not strictly require "id"
-                if "slug" in cols and ("name" in cols or "site" in cols or "location" in cols):
+                # Robust site format detection: distinguish from prefixes/VLANs
+                is_site_file = ("name" in cols or "site" in cols or "location" in cols) and not ("prefix" in cols or "prefixes" in cols or "vid" in cols or "vlan" in cols)
+                if is_site_file:
                     name_col = cols.get("name", cols.get("site", cols.get("location")))
                     id_col = cols.get("id")
                     slug_col = cols.get("slug")
@@ -227,6 +228,11 @@ def handle_ipam_file_upload():
                         s_name = str(row.get(name_col, "")).strip()
                         s_id = row.get(id_col) if id_col and not pd.isna(row.get(id_col)) else (idx + 1)
                         s_slug = str(row.get(slug_col, "")).strip()
+                        
+                        # Generate slug if missing
+                        if not s_slug and s_name:
+                            s_slug = slugify(s_name)
+                            
                         if s_name and s_name.lower() != "nan":
                             scope_records.append({"id": int(s_id) if str(s_id).isdigit() else s_id, "name": s_name, "slug": s_slug})
                     if scope_records:
