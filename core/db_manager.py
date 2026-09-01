@@ -604,12 +604,34 @@ def get_all_site_names() -> List[str]:
     conn.close()
     return [r[0] for r in rows if r[0]]
 
-def get_records_by_site(site_name: str) -> List[Dict[str, Any]]:
+def get_full_site_inventory_summary(site_name: str) -> str:
     init_db()
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM ipam_records WHERE LOWER(site) = LOWER(?)", (site_name,))
-    rows = cursor.fetchall()
+    
+    clean = site_name.strip().lower()
+    
+    # Get IPAM
+    cursor.execute("SELECT prefix_or_subnet, vlan_name, role FROM ipam_records WHERE LOWER(site) = ?", (clean,))
+    ipam_rows = cursor.fetchall()
+    
+    # Get Inventory
+    cursor.execute("SELECT name, category, model_or_role FROM inventory_records WHERE LOWER(site) = ?", (clean,))
+    inv_rows = cursor.fetchall()
+    
     conn.close()
-    return [dict(r) for r in rows]
+    
+    summary = [f"### Inventory for {site_name}:"]
+    
+    summary.append("\n**IP Prefixes/VLANs:**")
+    if not ipam_rows: summary.append("- None")
+    for r in ipam_rows:
+        summary.append(f"- {r['prefix_or_subnet']} | {r['vlan_name']} | {r['role']}")
+        
+    summary.append("\n**Devices/VMs:**")
+    if not inv_rows: summary.append("- None")
+    for r in inv_rows:
+        summary.append(f"- {r['name']} ({r['category']}) | {r['model_or_role']}")
+        
+    return "\n".join(summary)
