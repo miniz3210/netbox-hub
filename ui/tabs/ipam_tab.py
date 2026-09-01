@@ -38,7 +38,8 @@ from core.db_manager import (get_all_site_names,
     get_existing_prefix_strings,
     get_sync_metadata,
     get_site_summary,
-    get_ipam_records_by_site
+    get_ipam_records_by_site,
+    get_full_site_inventory_summary
 )
 
 from utils.formatters import to_title_case_preserve_acronyms
