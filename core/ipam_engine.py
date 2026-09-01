@@ -31,6 +31,7 @@ DATACENTER_VLAN_PRESET = [
 
 VLAN_PRESETS = {
     "-- Custom / Empty --": [],
+    "Load From DB (Existing Site)": [],
     "🏢 Branch Office VLAN Preset": BRANCH_VLAN_PRESET,
     "🏛️ Data Center VLAN Preset": DATACENTER_VLAN_PRESET
 }
