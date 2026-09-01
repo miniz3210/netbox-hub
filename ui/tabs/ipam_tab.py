@@ -342,7 +342,7 @@ def on_preset_change():
     selected = st.session_state.get("ipam_preset_selector")
     site_name = st.session_state.get("ipam_site_in", "").strip()
 
-    if selected == "🗄️ Load From DB (Existing Site)" and site_name:
+    if selected == "Load From DB (Existing Site)" and site_name:
         records = get_ipam_records_by_site(site_name)
         
         # Determine if it's a Branch or DC to apply sorting
@@ -358,11 +358,11 @@ def on_preset_change():
         # Sort records by order in preset, then by vlan_id
         records.sort(key=lambda r: (order_map.get(r.get('vlan_id'), 999), r.get('vlan_id', 0)))
         
-        # Use a dictionary to de-duplicate based on vlan_id
+        # Use a dictionary to de-duplicate based on vlan_id (and keep first one found)
         unique_records = {}
         for r in records:
             vid = r.get("vlan_id")
-            if vid not in unique_records:
+            if vid is not None and vid not in unique_records:
                 unique_records[vid] = r
                 
         new_rows = []
