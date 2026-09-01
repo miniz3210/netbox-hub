@@ -1,10 +1,10 @@
 import streamlit as st
 from config.constants import APP_VERSION
 from config.settings import AVAILABLE_MODELS, OPENROUTER_BASE_URL
-from core.ai_client import test_model_connection
+from core.ai_client import test_model_connection, fetch_free_models
 
-# Exact matching models from your Groq limits, Google Gemini 3.6, and OmniRoute prefix
-VERIFIED_TEST_MODELS = [
+# Default fallback models
+DEFAULT_TEST_MODELS = [
     "openai/ox-alpha",
     "groq/qwen/qwen3.8-27b",
     "groq/qwen/qwen3.6-27b",
@@ -27,9 +27,21 @@ def render_sidebar() -> str:
             help="Configured environment presets."
         )
 
-        # 2. Filter candidate models to exclude any already in Preset Models
+        # 2. Load and cache free models list
+        if "free_models_cache" not in st.session_state:
+            st.session_state["free_models_cache"] = None
+        
+        # Use cached models or fetch new ones
+        if st.session_state["free_models_cache"] is None:
+            fetched_models = fetch_free_models()
+            test_models = fetched_models if fetched_models else DEFAULT_TEST_MODELS
+            st.session_state["free_models_cache"] = test_models
+        else:
+            test_models = st.session_state["free_models_cache"]
+        
+        # Filter candidate models to exclude any already in Preset Models
         filtered_suggestions = [
-            m for m in VERIFIED_TEST_MODELS 
+            m for m in test_models 
             if m not in AVAILABLE_MODELS
         ]
 
@@ -40,11 +52,12 @@ def render_sidebar() -> str:
                 "Quick-Select Test Model",
                 options=["-- None (Use Preset / Manual) --"] + filtered_suggestions,
                 index=0,
-                help="Select verified active models from your Groq limits or Google Gemini."
+                help="Select free models available from API."
             )
         with col2:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("🔄", key="btn_refresh_models", help="Refresh model list"):
+                st.session_state["free_models_cache"] = None
                 st.rerun()
 
         # 3. Custom Manual Input

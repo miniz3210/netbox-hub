@@ -9,6 +9,64 @@ from core.exceptions import AIProviderError
 
 logger = logging.getLogger("netbox-hub")
 
+def fetch_free_models() -> list[str]:
+    """Fetch list of free models suitable for NetBox YAML generation from OmniRoute/OpenRouter API."""
+    base = OPENROUTER_BASE_URL.rstrip("/")
+    endpoint = f"{base}/models" if base.endswith("/v1") else f"{base}/v1/models"
+    clean_token = OPENROUTER_API_KEY.replace("Bearer ", "").strip()
+    headers = {
+        "Authorization": f"Bearer {clean_token}",
+        "Content-Type": "application/json"
+    }
+    
+    # Model patterns suitable for structured YAML generation
+    suitable_patterns = [
+        "gemini",
+        "qwen",
+        "gpt",
+        "llama",
+        "mistral",
+        "deepseek",
+        "claude"
+    ]
+    
+    # Exclude models unsuitable for structured output
+    exclude_patterns = [
+        "vision",
+        "image",
+        "whisper",
+        "tts",
+        "stt",
+        "embedding",
+        "moderation"
+    ]
+    
+    try:
+        resp = requests.get(endpoint, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            models = data.get("data", [])
+            free_models = []
+            for m in models:
+                model_id = m.get("id", "").lower()
+                pricing = m.get("pricing", {})
+                is_free = pricing.get("prompt") in ["0", 0, 0.0]
+                
+                # Check if model is suitable for YAML generation
+                is_suitable = any(pattern in model_id for pattern in suitable_patterns)
+                is_excluded = any(pattern in model_id for pattern in exclude_patterns)
+                
+                if is_free and is_suitable and not is_excluded:
+                    free_models.append(m["id"])
+            
+            return free_models
+        else:
+            logger.warning(f"Failed to fetch models: HTTP {resp.status_code}")
+            return []
+    except Exception as e:
+        logger.error(f"Error fetching free models: {e}")
+        return []
+
 def test_model_connection(model_name: str) -> Tuple[bool, int, str]:
     """Tests model health through OmniRoute using full request structure."""
     base = OPENROUTER_BASE_URL.rstrip("/")
