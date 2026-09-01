@@ -582,7 +582,9 @@ def render_ipam_tab(active_model: str):
                         
                         # Added comprehensive inventory lookup if a site is specified in prompt
                         full_site_inventory = ""
-                        for s_name in get_all_site_names():
+                        # get_all_site_names is imported
+                        all_sites = get_all_site_names()
+                        for s_name in all_sites:
                             if s_name.lower() in prompt.lower():
                                 full_site_inventory = get_full_site_inventory_summary(s_name)
                                 break

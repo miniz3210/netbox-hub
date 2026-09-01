@@ -85,15 +85,22 @@ def render_compact_toolbar():
     vm_count = len(get_records_by_category("vm"))
     meta = get_sync_metadata("naming")
     
-    status_tag = f"🟢 ({total_recs} records in DB)" if total_recs > 0 else "⚪ (Default Examples)"
-    tick_devices = " ✅" if device_count > 0 else ""
-    tick_vms = " ✅" if vm_count > 0 else ""
+        # Metadata
+        meta_files = get_file_sync_metadata()
+        
+        status_tag = f"🟢 ({device_count} Devices, {vm_count} VMs in DB)" if total_recs > 0 else "⚪ (Default Examples)"
+        tick_devices = " ✅" if device_count > 0 else ""
+        tick_vms = " ✅" if vm_count > 0 else ""
 
-    with st.expander(f"📥 Ingest NetBox Data (CSV) {status_tag}", expanded=False):
-        if total_recs > 0:
-            st.markdown(
-                f"**DB Status:** `Source: {meta['source']}` | `Last Updated: {meta['updated_at']}`"
-            )
+        with st.expander(f"📥 Ingest NetBox Data (CSV) {status_tag}", expanded=False):
+            if total_recs > 0:
+                st.markdown(
+                    f"**DB Status (Last Updated):**\n"
+                    f"- Sites: `{meta_files.get('sites_records', 'Never')}`\n"
+                    f"- IPAM: `{meta_files.get('ipam_records', 'Never')}`\n"
+                    f"- Inventory: `{meta_files.get('inventory_records', 'Never')}`"
+                )
+
 
         st.markdown("**Option A: Automated Push via PowerShell Agent (Recommended):**")
         st.code('.\\Sync-NetBoxHub.ps1 -NetBoxUrl "https://xxxx" -ApiToken "xxxx" -HubUrl "xxxx"', language="powershell")
