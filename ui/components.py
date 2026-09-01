@@ -34,12 +34,18 @@ def render_sidebar() -> str:
         ]
 
         # Quick-Select Test Model Pull-Down Menu
-        quick_pick = st.selectbox(
-            "Quick-Select Test Model",
-            options=["-- None (Use Preset / Manual) --"] + filtered_suggestions,
-            index=0,
-            help="Select verified active models from your Groq limits or Google Gemini."
-        )
+        col1, col2 = st.columns([4, 1])
+        with col1:
+            quick_pick = st.selectbox(
+                "Quick-Select Test Model",
+                options=["-- None (Use Preset / Manual) --"] + filtered_suggestions,
+                index=0,
+                help="Select verified active models from your Groq limits or Google Gemini."
+            )
+        with col2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🔄", key="btn_refresh_models", help="Refresh model list"):
+                st.rerun()
 
         # 3. Custom Manual Input
         default_manual = "" if quick_pick.startswith("--") else quick_pick
