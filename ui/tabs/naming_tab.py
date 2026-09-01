@@ -84,10 +84,6 @@ def render_compact_toolbar():
     total_recs = get_total_record_count()
     device_count = len(get_records_by_category("device")) + len(get_records_by_category("hypervisor"))
     vm_count = len(get_records_by_category("vm"))
-    meta = get_sync_metadata("naming")
-    
-    # Metadata
-    meta_files = get_file_sync_metadata()
     
     status_tag = f"🟢 ({device_count} Devices, {vm_count} VMs in DB)" if total_recs > 0 else "⚪ (Default Examples)"
     tick_devices = " ✅" if device_count > 0 else ""
@@ -95,13 +91,15 @@ def render_compact_toolbar():
 
     with st.expander(f"📥 Ingest NetBox Data (CSV) {status_tag}", expanded=False):
         if total_recs > 0:
-            st.markdown(
-                f"**DB Status (Last Updated):**\n"
-                f"- Sites: `{meta_files.get('sites_records', 'Never')}`\n"
-                f"- IPAM: `{meta_files.get('ipam_records', 'Never')}`\n"
-                f"- Inventory: `{meta_files.get('inventory_records', 'Never')}`"
-            )
-
+            # Get metadata for devices and VMs
+            meta_devices = get_sync_metadata("netbox_devices")
+            meta_vms = get_sync_metadata("netbox_virtual_machines")
+            
+            # Use the most recent source that's not "None"
+            sources = [m['source'] for m in [meta_devices, meta_vms] if m['source'] != "None"]
+            display_source = sources[0] if sources else "Manual CSV Upload"
+            
+            st.markdown(f"**DB Status:** `Source: {display_source}`")
 
         st.markdown("**Option A: Automated Push via PowerShell Agent (Recommended):**")
         st.code('.\\Sync-NetBoxHub.ps1 -NetBoxUrl "https://xxxx" -ApiToken "xxxx" -HubUrl "xxxx"', language="powershell")
@@ -123,9 +121,16 @@ def render_compact_toolbar():
 
         st.markdown("**Option B: Manual CSV Export & Upload:**")
 
+        # Get timestamps for each file
+        meta_devices = get_sync_metadata("netbox_devices")
+        meta_vms = get_sync_metadata("netbox_virtual_machines")
+        
+        devices_timestamp = f" `{meta_devices['updated_at']}`" if meta_devices['updated_at'] != "Never" else ""
+        vms_timestamp = f" `{meta_vms['updated_at']}`" if meta_vms['updated_at'] != "Never" else ""
+
         col_l1, col_r1 = st.columns([12, 1])
         with col_l1:
-            st.markdown(f"* **Devices / Servers / Switches:** Go to `Devices` ➔ `Devices` ➔ `Export` ➔ `All Data` (`netbox_devices.csv`){tick_devices}")
+            st.markdown(f"* **Devices / Servers / Switches:** Go to `Devices` ➔ `Devices` ➔ `Export` ➔ `All Data` (`netbox_devices.csv`){tick_devices}{devices_timestamp}")
         with col_r1:
             if device_count > 0:
                 if st.button("🗑️", key="btn_clr_dev_inline", help="Clear netbox_devices.csv data"):
@@ -135,7 +140,7 @@ def render_compact_toolbar():
 
         col_l2, col_r2 = st.columns([12, 1])
         with col_l2:
-            st.markdown(f"* **Virtual Machines:** Go to `Virtualization` ➔ `Virtual Machines` ➔ `Export` ➔ `All Data` (`netbox_virtual machines.csv`){tick_vms}")
+            st.markdown(f"* **Virtual Machines:** Go to `Virtualization` ➔ `Virtual Machines` ➔ `Export` ➔ `All Data` (`netbox_virtual_machines.csv`){tick_vms}{vms_timestamp}")
         with col_r2:
             if vm_count > 0:
                 if st.button("🗑️", key="btn_clr_vm_inline", help="Clear netbox_virtual machines.csv data"):
