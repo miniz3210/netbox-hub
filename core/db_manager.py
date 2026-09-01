@@ -119,7 +119,7 @@ def save_sites_batch(sites: List[Dict[str, Any]], clear_first: bool = False, sou
             
     conn.commit()
     conn.close()
-    set_sync_metadata("ipam", source)
+    set_sync_metadata("netbox_sites", source)
     return count
 
 def lookup_scope_id(site_name: str) -> Optional[int]:
@@ -376,6 +376,9 @@ def save_ipam_records_batch(records: List[Dict[str, Any]], clear_first: bool = F
         cursor.execute("DELETE FROM ipam_records")
 
     count = 0
+    has_vlans = False
+    has_prefixes = False
+    
     for r in records:
         raw_prefix = str(r.get("prefix_or_subnet") or r.get("prefix") or r.get("subnet") or r.get("address") or r.get("Prefixes") or "").strip()
         if not raw_prefix or raw_prefix.lower() == "nan":
@@ -387,6 +390,11 @@ def save_ipam_records_batch(records: List[Dict[str, Any]], clear_first: bool = F
 
         v_id = int(r.get("vlan_id") or r.get("vid") or r.get("VID") or 0) if str(r.get("vlan_id") or r.get("vid") or r.get("VID") or "").isdigit() else None
         rec_type = str(r.get("record_type") or ("vlan" if v_id or r.get("vlan_name") else "prefix")).strip().lower()
+        
+        if rec_type == "vlan":
+            has_vlans = True
+        else:
+            has_prefixes = True
 
         for cidr in cidrs:
             cursor.execute("""
@@ -406,7 +414,13 @@ def save_ipam_records_batch(records: List[Dict[str, Any]], clear_first: bool = F
 
     conn.commit()
     conn.close()
-    set_sync_metadata("ipam", source)
+    
+    # Set metadata based on what was imported
+    if has_vlans:
+        set_sync_metadata("netbox_VLANs", source)
+    if has_prefixes:
+        set_sync_metadata("netbox_prefixes", source)
+    
     return count
 
 def get_existing_prefix_strings() -> List[str]:
