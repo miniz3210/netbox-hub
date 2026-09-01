@@ -417,14 +417,16 @@ def render_ipam_tab(active_model: str):
 
     with st.expander(f"📥 Ingest NetBox Sites & VLANs / Prefixes CSV {status_tag}", expanded=False):
         if total_db_count > 0:
+            # Get the most recent source from any of the files
             meta_sites = get_sync_metadata("netbox_sites")
             meta_vlans = get_sync_metadata("netbox_VLANs")
             meta_prefixes = get_sync_metadata("netbox_prefixes")
             
-            st.markdown("**DB Status (Last Updated):**")
-            st.markdown(f"- `netbox_sites.csv`: {meta_sites['updated_at']}")
-            st.markdown(f"- `netbox_VLANs.csv`: {meta_vlans['updated_at']}")
-            st.markdown(f"- `netbox_prefixes.csv`: {meta_prefixes['updated_at']}")
+            # Use the most recent source that's not "None"
+            sources = [m['source'] for m in [meta_sites, meta_vlans, meta_prefixes] if m['source'] != "None"]
+            display_source = sources[0] if sources else "Manual CSV Upload"
+            
+            st.markdown(f"**DB Status:** `Source: {display_source}`")
 
         st.markdown("**Option A: Automated Push via PowerShell Agent (Recommended):**")
         st.code('.\\Sync-NetBoxHub.ps1 -NetBoxUrl "https://xxxx" -ApiToken "xxxx" -HubUrl "xxxx"', language="powershell")
@@ -446,9 +448,17 @@ def render_ipam_tab(active_model: str):
 
         st.markdown("**Option B: Manual CSV Export & Upload:**")
 
+        meta_sites = get_sync_metadata("netbox_sites")
+        meta_vlans = get_sync_metadata("netbox_VLANs")
+        meta_prefixes = get_sync_metadata("netbox_prefixes")
+        
+        sites_timestamp = f" `{meta_sites['updated_at']}`" if meta_sites['updated_at'] != "Never" else ""
+        vlans_timestamp = f" `{meta_vlans['updated_at']}`" if meta_vlans['updated_at'] != "Never" else ""
+        prefixes_timestamp = f" `{meta_prefixes['updated_at']}`" if meta_prefixes['updated_at'] != "Never" else ""
+
         col_l1, col_r1 = st.columns([12, 1])
         with col_l1:
-            st.markdown(f"* **Scope IDs & Site Names:** Go to `Organization` ➔ `Sites` ➔ `Export` ➔ `All Data` (`netbox_sites.csv`){tick_sites}")
+            st.markdown(f"* **Scope IDs & Site Names:** Go to `Organization` ➔ `Sites` ➔ `Export` ➔ `All Data` (`netbox_sites.csv`){tick_sites}{sites_timestamp}")
         with col_r1:
             if total_sites_recs > 0:
                 if st.button("🗑️", key="btn_clr_sites_inline", help="Clear netbox_sites.csv data"):
@@ -458,7 +468,7 @@ def render_ipam_tab(active_model: str):
 
         col_l2, col_r2 = st.columns([12, 1])
         with col_l2:
-            st.markdown(f"* **VLANs:** Go to `IPAM` ➔ `VLANs` ➔ `Export` ➔ `All Data` (`netbox_VLANs.csv`){tick_vlans}")
+            st.markdown(f"* **VLANs:** Go to `IPAM` ➔ `VLANs` ➔ `Export` ➔ `All Data` (`netbox_VLANs.csv`){tick_vlans}{vlans_timestamp}")
         with col_r2:
             if total_vlans_recs > 0:
                 if st.button("🗑️", key="btn_clr_vlans_inline", help="Clear netbox_VLANs.csv data"):
@@ -469,7 +479,7 @@ def render_ipam_tab(active_model: str):
 
         col_l3, col_r3 = st.columns([12, 1])
         with col_l3:
-            st.markdown(f"* **IP Prefixes:** Go to `IPAM` ➔ `Prefixes` ➔ `Export` ➔ `All Data` (`netbox_prefixes.csv`){tick_prefixes}")
+            st.markdown(f"* **IP Prefixes:** Go to `IPAM` ➔ `Prefixes` ➔ `Export` ➔ `All Data` (`netbox_prefixes.csv`){tick_prefixes}{prefixes_timestamp}")
         with col_r3:
             if total_prefixes_recs > 0:
                 if st.button("🗑️", key="btn_clr_prefixes_inline", help="Clear netbox_prefixes.csv data"):
