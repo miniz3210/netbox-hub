@@ -700,6 +700,8 @@ Guidelines:
     display_site_name = format_branch_display(site_name)
 
     # 3. Preset Selection & Allocation Editor
+    st.markdown("---")
+    c_title, c_preset = st.columns([2.5, 1.5])
     with c_title:
         st.markdown("##### 📊 Subnet Allocation & Live Status (✏️ Click any cell to edit)")
     with c_preset:
