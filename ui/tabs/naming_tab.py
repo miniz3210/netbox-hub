@@ -189,85 +189,44 @@ def render_compact_toolbar(active_model):
                 with st.spinner("Thinking..."):
                     try:
                         from core.ai_client import call_ai
+                        from core.ai_helper import build_comprehensive_naming_context
                         
-                        # Get all devices and VMs from database
-                        all_devices = get_records_by_category("device")
-                        all_hypervisors = get_records_by_category("hypervisor")
-                        all_vms = get_records_by_category("vm")
+                        # Build comprehensive context with all database data
+                        comprehensive_context = build_comprehensive_naming_context(prompt)
                         
-                        # Build comprehensive inventory summary
-                        device_list = []
-                        for d in all_devices[:50]:  # Limit to avoid token overload
-                            device_list.append(f"- {d.get('name', 'N/A')} (Site: {d.get('site', 'N/A')}, Role: {d.get('model_or_role', 'N/A')}, Manufacturer: {d.get('manufacturer', 'N/A')})")
-                        
-                        hypervisor_list = []
-                        for h in all_hypervisors[:50]:
-                            hypervisor_list.append(f"- {h.get('name', 'N/A')} (Site: {h.get('site', 'N/A')}, Role: {h.get('model_or_role', 'N/A')})")
-                        
-                        vm_list = []
-                        for v in all_vms[:50]:
-                            vm_list.append(f"- {v.get('name', 'N/A')} (Site: {v.get('site', 'N/A')}, Cluster: {v.get('cluster', 'N/A')})")
-                        
-                        devices_context = "\n".join(device_list) if device_list else "No devices in database"
-                        hypervisors_context = "\n".join(hypervisor_list) if hypervisor_list else "No hypervisors in database"
-                        vms_context = "\n".join(vm_list) if vm_list else "No VMs in database"
-                        
-                        total_device_count = len(all_devices)
-                        total_hypervisor_count = len(all_hypervisors)
-                        total_vm_count = len(all_vms)
-                        
-                        # Extract site filter from prompt if present
-                        site_filter_words = ["in", "at", "for", "from"]
-                        site_name = None
-                        words = prompt.lower().split()
-                        for i, word in enumerate(words):
-                            if word in site_filter_words and i + 1 < len(words):
-                                site_name = words[i + 1].upper()
-                                break
-                        
-                        # Get site-specific data if site mentioned
-                        site_specific_context = ""
-                        if site_name:
-                            site_devices = get_records_by_category("device", site_filter=site_name)
-                            site_hypervisors = get_records_by_category("hypervisor", site_filter=site_name)
-                            site_vms = get_records_by_category("vm", site_filter=site_name)
-                            
-                            if site_devices or site_hypervisors or site_vms:
-                                site_specific_context = f"\n\nSite '{site_name}' Inventory:\n"
-                                if site_devices:
-                                    site_specific_context += f"Devices ({len(site_devices)}):\n" + "\n".join([f"- {d.get('name')} ({d.get('model_or_role', 'N/A')})" for d in site_devices[:30]])
-                                if site_hypervisors:
-                                    site_specific_context += f"\n\nHypervisors ({len(site_hypervisors)}):\n" + "\n".join([f"- {h.get('name')} ({h.get('model_or_role', 'N/A')})" for h in site_hypervisors[:30]])
-                                if site_vms:
-                                    site_specific_context += f"\n\nVMs ({len(site_vms)}):\n" + "\n".join([f"- {v.get('name')} (Cluster: {v.get('cluster', 'N/A')})" for v in site_vms[:30]])
-                        
-                        system_prompt = f"""You are an expert in infrastructure naming conventions and inventory management.
-Analyze the user's request and provide accurate information based on the actual database inventory.
+                        system_prompt = f"""You are an expert in infrastructure naming conventions, inventory management, and NetBox administration.
+You have DIRECT ACCESS to the complete inventory database. Analyze the user's request and respond accurately using the ACTUAL DATABASE DATA provided below.
 
-IMPORTANT: You have DIRECT ACCESS to the complete inventory database. Use the data provided below to answer questions accurately.
+=== COMPLETE DATABASE CONTEXT ===
+{comprehensive_context}
 
-Database Inventory Summary:
-- Total Devices: {total_device_count}
-- Total Hypervisors: {total_hypervisor_count}
-- Total VMs: {total_vm_count}
-
-Devices in Database (showing up to 50):
-{devices_context}
-
-Hypervisors in Database (showing up to 50):
-{hypervisors_context}
-
-VMs in Database (showing up to 50):
-{vms_context}
-{site_specific_context}
-
-Guidelines:
-1. Answer questions about devices, VMs, and hypervisors using the ACTUAL DATA provided above
-2. When asked to "list devices in [site]", provide the actual list from the database
-3. When asked about naming conventions, reference the actual hostnames in the database
-4. Be specific and accurate - use the real device names, not examples
-5. If asked about a site not in the database, state clearly that no devices are found for that site
-6. Provide clear, actionable information based on the real inventory"""
+=== IMPORTANT GUIDELINES ===
+1. **Answer ALL questions using the ACTUAL DATA above** - You have complete database access
+2. When asked to list devices, VMs, or inventory:
+   - Reference the inventory sections above
+   - Provide actual device names, roles, manufacturers, sites
+   - Show real data, not generic examples
+3. When asked about specific sites:
+   - Use the "Inventory for Site" section if available
+   - List actual devices/VMs at that site with their details
+4. When asked about VLANs at a site:
+   - Explain that VLAN data is in the IPAM tab, but you can see the devices/VMs at the site
+5. For naming convention questions:
+   - Analyze the actual hostnames in the database
+   - Identify patterns and standards being used
+   - Suggest improvements based on real examples
+6. When counting items (e.g., "how many devices in AGE"):
+   - Provide exact counts from the data above
+   - List the actual device names
+7. Format responses clearly:
+   - Use bullet points for lists
+   - Include device names, roles, manufacturers, sites
+   - Show actual counts and statistics
+8. If no data exists for a query, clearly state "No records found in database for [query]"
+9. Be specific and data-driven - always reference actual inventory items
+10. For naming suggestions, consider:
+    - Site codes, device types, sequence numbers
+    - Consistency with existing naming patterns in the database"""
                         
                         # Use the active model passed as parameter
                         ai_response = call_ai(prompt, active_model, custom_system_msg=system_prompt)
