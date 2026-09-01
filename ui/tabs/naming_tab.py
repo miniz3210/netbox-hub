@@ -80,7 +80,7 @@ def display_reference_box(category_key: str, default_lines: str, label: str, sit
             st.markdown("##### 🟡 Default Examples:")
             st.code(default_lines, language="text")
 
-def render_compact_toolbar():
+def render_compact_toolbar(active_model):
     total_recs = get_total_record_count()
     device_count = len(get_records_by_category("device")) + len(get_records_by_category("hypervisor"))
     vm_count = len(get_records_by_category("vm"))
@@ -208,7 +208,7 @@ Guidelines:
 3. Explain your reasoning briefly
 4. Format should be clear and actionable"""
                         
-                        # Use the active model
+                        # Use the active model passed as parameter
                         ai_response = call_ai(prompt, active_model, custom_system_msg=system_prompt)
                         
                         st.markdown(ai_response)
@@ -220,22 +220,18 @@ Guidelines:
                         st.error(error_msg)
                         st.session_state["naming_chat_history"].append({"role": "assistant", "content": error_msg})
 
-    st.markdown("**Casing:** " + " | ".join([
-        f"**{opt}**" if st.session_state.get("naming_case_mode", "UPPERCASE") == opt else opt 
-        for opt in ["UPPERCASE", "lowercase"]
-    ]))
+    # Casing selector with radio buttons on same line
+    case_mode = st.radio(
+        "Casing",
+        ["UPPERCASE", "lowercase"],
+        index=0 if st.session_state.get("naming_case_mode", "UPPERCASE") == "UPPERCASE" else 1,
+        horizontal=True,
+        key="naming_case_radio",
+        help="Render output in UPPERCASE or lowercase."
+    )
     
-    case_col1, case_col2 = st.columns(2)
-    with case_col1:
-        if st.button("UPPERCASE", key="btn_uppercase", use_container_width=True):
-            st.session_state["naming_case_mode"] = "UPPERCASE"
-            st.rerun()
-    with case_col2:
-        if st.button("lowercase", key="btn_lowercase", use_container_width=True):
-            st.session_state["naming_case_mode"] = "lowercase"
-            st.rerun()
-    
-    case_mode = st.session_state.get("naming_case_mode", "UPPERCASE")
+    # Store the selection
+    st.session_state["naming_case_mode"] = case_mode
 
     return case_mode
 
@@ -256,7 +252,7 @@ def render_naming_tab(active_model):
 
     # Network & Security Devices
     if "1. Network" in naming_cat:
-        case_mode = render_compact_toolbar()
+        case_mode = render_compact_toolbar(active_model)
 
         st.markdown("##### 📍 Location & Site Code Assistant")
         loc_col1, loc_col2 = st.columns([2, 1])
@@ -366,7 +362,7 @@ def render_naming_tab(active_model):
 
     # Hosts & VMs
     elif "2. Hosts" in naming_cat:
-        case_mode = render_compact_toolbar()
+        case_mode = render_compact_toolbar(active_model)
 
         col_a, col_b = st.columns(2)
         with col_a:
