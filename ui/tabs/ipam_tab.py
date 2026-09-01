@@ -417,9 +417,14 @@ def render_ipam_tab(active_model: str):
 
     with st.expander(f"📥 Ingest NetBox Sites & VLANs / Prefixes CSV {status_tag}", expanded=False):
         if total_db_count > 0:
-            st.markdown(
-                f"**DB Status:** `Source: {meta['source']}` | `Last Updated: {meta['updated_at']}`"
-            )
+            meta_sites = get_sync_metadata("netbox_sites")
+            meta_vlans = get_sync_metadata("netbox_VLANs")
+            meta_prefixes = get_sync_metadata("netbox_prefixes")
+            
+            st.markdown("**DB Status (Last Updated):**")
+            st.markdown(f"- `netbox_sites.csv`: {meta_sites['updated_at']}")
+            st.markdown(f"- `netbox_VLANs.csv`: {meta_vlans['updated_at']}")
+            st.markdown(f"- `netbox_prefixes.csv`: {meta_prefixes['updated_at']}")
 
         st.markdown("**Option A: Automated Push via PowerShell Agent (Recommended):**")
         st.code('.\\Sync-NetBoxHub.ps1 -NetBoxUrl "https://xxxx" -ApiToken "xxxx" -HubUrl "xxxx"', language="powershell")
