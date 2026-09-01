@@ -522,7 +522,7 @@ def render_ipam_tab(active_model: str):
 
     # 2.5. AI IPAM & Subnet Assistant
     with st.expander("🤖 AI Assistant", expanded=False):
-        st.caption("Ask for subnet suggestions using natural language (e.g., 'I have a new office in UK with 50 devices, please suggest a subnet' or 'Suggest the next available /24 in 10.113.0.0/16')")
+        st.caption("Ask for subnet suggestions using natural language (e.g., 'Show me VLANs in Weybridge' or 'Suggest the next available /24 in 10.113.0.0/16')")
         
         # Initialize chat history
         if "ipam_chat_history" not in st.session_state:
@@ -545,6 +545,10 @@ def render_ipam_tab(active_model: str):
                 with st.spinner("Thinking..."):
                     try:
                         from core.ai_client import call_ai
+                        from core.ai_helper import build_comprehensive_ipam_context
+                        
+                        # Build comprehensive context with all database data
+                        comprehensive_context = build_comprehensive_ipam_context(prompt, site_filter=site_name)
                         
                         # Prepare context for AI: combine DB + active UI table prefixes
                         ui_prefixes = []
@@ -554,17 +558,12 @@ def render_ipam_tab(active_model: str):
                                 ui_prefixes.append(sub)
 
                         combined_prefixes = list(dict.fromkeys(existing_prefixes + ui_prefixes))
-                        site_summary = get_site_summary()
-                        
-                        # Added comprehensive inventory lookup if a site is specified in prompt
-                        full_site_inventory = ""
-                        # get_all_site_names is imported
-                        all_sites = get_all_site_names()
-                        for s_name in all_sites:
-                            if s_name.lower() in prompt.lower():
-                                full_site_inventory = get_full_site_inventory_summary(s_name)
-                                break
 
+                        # Extract requested mask (e.g., /24) from user prompt if specified
+                        mask_match = re.search(r"/(\d{1,2})", prompt)
+                        req_mask = int(mask_match.group(1)) if mask_match else 24
+
+                        # Determine target supernet for pre-calculation
                         target_networks = []
                         cidr_matches = re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?\b", prompt)
                         if supernet_in:
@@ -577,31 +576,6 @@ def render_ipam_tab(active_model: str):
                             except Exception:
                                 pass
 
-                        relevant_prefixes = []
-                        if target_networks:
-                            for pref_str in combined_prefixes:
-                                try:
-                                    p_net = ipaddress.ip_network(pref_str, strict=False)
-                                    if any(p_net.overlaps(tn) for tn in target_networks):
-                                        relevant_prefixes.append(pref_str)
-                                except Exception:
-                                    continue
-
-                        if not relevant_prefixes:
-                            relevant_prefixes = combined_prefixes[:30]
-
-                        if relevant_prefixes:
-                            prefixes_context = f"Known in-use/registered prefixes: {', '.join(relevant_prefixes)}"
-                            if len(combined_prefixes) > len(relevant_prefixes):
-                                prefixes_context += f" (showing {len(relevant_prefixes)} relevant out of {len(combined_prefixes)} total known)"
-                        else:
-                            prefixes_context = "Known in-use/registered prefixes: None recorded in current database or active editor table"
-
-                        # Extract requested mask (e.g., /24) from user prompt if specified
-                        mask_match = re.search(r"/(\d{1,2})", prompt)
-                        req_mask = int(mask_match.group(1)) if mask_match else 24
-
-                        # Determine target supernet for pre-calculation
                         calc_supernet = supernet_in
                         if not calc_supernet and target_networks:
                             calc_supernet = str(target_networks[0])
@@ -615,35 +589,43 @@ def render_ipam_tab(active_model: str):
                             )
 
                         next_scope_id_val = (max_scope_id + 1) if max_scope_id is not None else 1
-                        all_sites = get_all_site_names()
-                        sites_list_str = ", ".join(all_sites) if all_sites else "None recorded"
-                        site_context = f"Current site: {site_name or 'Not specified'}\nAll sites in DB: {sites_list_str}"
-                        supernet_context = f"Site supernet: {supernet_in or 'Not specified'}"
-                        scope_context = f"NetBox Scope IDs: Current max in DB is {max_scope_id or 'None'}, Next available Scope ID is {next_scope_id_val}"
-                        stats_context = f"Database contains: {get_total_sites_count()} sites, {get_total_ipam_count()} prefixes"
                         
                         system_prompt = f"""You are an expert network architect specializing in IP address management, NetBox provisioning, and subnet planning.
-Analyze the user's request and respond accurately.
+You have DIRECT ACCESS to the complete IPAM database. Analyze the user's request and respond accurately using the ACTUAL DATABASE DATA provided below.
 
-Context:
-- {site_context}
-- {supernet_context}
-- {scope_context}
-- {stats_context}
-- {prefixes_context}
-- {full_site_inventory}
+=== COMPLETE DATABASE CONTEXT ===
+{comprehensive_context}
+
+=== CURRENT UI STATE ===
+- Current Site Input: {site_name or 'Not specified'}
+- Current Supernet Input: {supernet_in or 'Not specified'}
+- Next Available Scope ID: {next_scope_id_val}
+- Max Scope ID in DB: {max_scope_id or 'None'}
 
 {calc_analysis}
 
-Guidelines:
-1. If the user asks for Scope ID / NetBox Site ID recommendations (e.g., 'Suggest next available Scope ID'), answer directly with the next available Scope ID ({next_scope_id_val}).
-2. If the user asks for subnet suggestions, strictly follow the PRE-CALCULATED SUBNET AVAILABILITY ANALYSIS when present above. Never suggest a subnet marked OCCUPIED / OVERLAPS.
-3. Suggest non-overlapping CIDR subnets within the site supernet when specified.
-4. Note that subnets overlapping with larger or smaller blocks (e.g., 10.113.240.0/24 inside 10.113.240.0/23) are OCCUPIED and unavailable.
-5. Provide clear, direct reasoning for your suggestions.
-6. Format CIDR notation properly (e.g., 10.113.242.0/24).
-7. Be concise but thorough.
-8. If the user asks about sites (e.g., 'how many sites are in UK?'), analyze the "All sites in DB" list provided in context to identify and count matching sites."""
+=== IMPORTANT GUIDELINES ===
+1. **Answer ALL questions using the ACTUAL DATA above** - You have complete database access
+2. When asked about VLANs, prefixes, or subnets for a site:
+   - Reference the "VLANs and Prefixes for Site" section above
+   - List the REAL VLAN IDs, names, subnets, roles, and descriptions
+   - Be specific with actual data, not generic examples
+3. When asked about devices or inventory:
+   - Reference the "Inventory for Site" section if available
+   - Provide actual device names, counts, and details
+4. For subnet suggestions:
+   - Follow the PRE-CALCULATED SUBNET AVAILABILITY ANALYSIS
+   - Never suggest subnets marked as OCCUPIED or OVERLAPS
+   - Explain why suggestions are available
+5. For Scope ID questions:
+   - Use the "Next Available Scope ID" value
+6. Format responses clearly:
+   - Use bullet points for lists
+   - Include VLAN IDs, names, and subnets
+   - Show actual counts and statistics
+7. If no data exists for a query, clearly state "No records found in database"
+8. Be concise but comprehensive - show all relevant data
+9. When counting items (e.g., "how many VLANs"), provide the exact number from the data above"""
                         
                         # Use the active model from sidebar
                         ai_response = call_ai(prompt, active_model, custom_system_msg=system_prompt)
