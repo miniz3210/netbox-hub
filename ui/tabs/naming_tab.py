@@ -203,8 +203,8 @@ def render_compact_toolbar(active_model):
                             
                             # Build comprehensive context with all database data
                             comprehensive_context = build_comprehensive_naming_context(prompt)
-                        
-                        system_prompt = f"""You are an expert in infrastructure naming conventions, inventory management, and NetBox administration.
+                            
+                            system_prompt = f"""You are an expert in infrastructure naming conventions, inventory management, and NetBox administration.
 You have DIRECT ACCESS to the complete inventory database. Analyze the user's request and respond accurately using the ACTUAL DATABASE DATA provided below.
 
 === COMPLETE DATABASE CONTEXT ===
@@ -237,18 +237,18 @@ You have DIRECT ACCESS to the complete inventory database. Analyze the user's re
 10. For naming suggestions, consider:
     - Site codes, device types, sequence numbers
     - Consistency with existing naming patterns in the database"""
-                        
-                        # Use the active model passed as parameter
-                        ai_response = call_ai(prompt, active_model, custom_system_msg=system_prompt)
-                        
-                        st.markdown(ai_response)
-                        # Add assistant response to chat history
-                        st.session_state["naming_chat_history"].append({"role": "assistant", "content": ai_response})
-                        
-                    except Exception as e:
-                        error_msg = f"❌ AI Assistant temporarily unavailable: {str(e)}"
-                        st.error(error_msg)
-                        st.session_state["naming_chat_history"].append({"role": "assistant", "content": error_msg})
+                            
+                            # Use the active model passed as parameter
+                            ai_response = call_ai(prompt, active_model, custom_system_msg=system_prompt)
+                            
+                            st.markdown(ai_response)
+                            # Add assistant response to chat history
+                            st.session_state["naming_chat_history"].append({"role": "assistant", "content": ai_response})
+                            
+                        except Exception as e:
+                            error_msg = f"❌ AI Assistant temporarily unavailable: {str(e)}"
+                            st.error(error_msg)
+                            st.session_state["naming_chat_history"].append({"role": "assistant", "content": error_msg})
 
     # Casing selector with radio buttons on same line
     case_mode = st.radio(
