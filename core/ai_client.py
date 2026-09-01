@@ -19,18 +19,19 @@ def fetch_free_models() -> list[str]:
         "Content-Type": "application/json"
     }
     
-    # Model patterns suitable for structured YAML generation
+    # Model patterns suitable for structured YAML generation (text-only, instruction-following models)
     suitable_patterns = [
         "gemini",
         "qwen",
-        "gpt",
-        "llama",
+        "gpt-oss",
+        "llama-3",
         "mistral",
         "deepseek",
-        "claude"
+        "groq/",
+        "allam"
     ]
     
-    # Exclude models unsuitable for structured output
+    # Exclude models unsuitable for structured output or too expensive/premium
     exclude_patterns = [
         "vision",
         "image",
@@ -38,7 +39,13 @@ def fetch_free_models() -> list[str]:
         "tts",
         "stt",
         "embedding",
-        "moderation"
+        "moderation",
+        "claude",  # Claude models are typically not free
+        "gpt-4",   # GPT-4 models are not free
+        "o1",      # o1 models are not free
+        "thinking", # Thinking/reasoning models are not free
+        "auto/",   # Auto routing is not truly free
+        "preview"  # Preview models may not be stable
     ]
     
     try:
@@ -56,9 +63,15 @@ def fetch_free_models() -> list[str]:
                 model_id_lower = model_id.lower()
                 pricing = m.get("pricing", {})
                 prompt_price = pricing.get("prompt", None)
+                completion_price = pricing.get("completion", None)
                 
-                # Check pricing - handle string and numeric
-                is_free = prompt_price in ["0", 0, 0.0, "0.0"] or prompt_price is None or float(prompt_price) == 0.0
+                # Strictly check that BOTH prompt and completion are free (0 or "0")
+                try:
+                    prompt_free = prompt_price is not None and float(prompt_price) == 0.0
+                    completion_free = completion_price is not None and float(completion_price) == 0.0
+                    is_free = prompt_free and completion_free
+                except (ValueError, TypeError):
+                    is_free = False
                 
                 # Check if model is suitable for YAML generation
                 is_suitable = any(pattern in model_id_lower for pattern in suitable_patterns)
@@ -66,10 +79,10 @@ def fetch_free_models() -> list[str]:
                 
                 if is_free and is_suitable and not is_excluded:
                     free_models.append(model_id)
-                    logger.debug(f"Added free model: {model_id}")
+                    logger.debug(f"Added free model: {model_id} (prompt: {prompt_price}, completion: {completion_price})")
             
             logger.info(f"Filtered free models count: {len(free_models)}")
-            return free_models
+            return sorted(free_models)  # Sort for easier browsing
         else:
             logger.warning(f"Failed to fetch models: HTTP {resp.status_code}, response: {resp.text[:200]}")
             return []
