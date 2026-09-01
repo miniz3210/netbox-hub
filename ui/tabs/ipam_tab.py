@@ -342,6 +342,21 @@ def on_preset_change():
 
     if selected == "Load From DB (Existing Site)" and site_name:
         records = get_ipam_records_by_site(site_name)
+        
+        # Determine if it's a Branch or DC to apply sorting
+        # A simple heuristic: check which preset has more matching VLAN IDs
+        branch_vids = {p['vid'] for p in BRANCH_VLAN_PRESET}
+        dc_vids = {p['vid'] for p in DATACENTER_VLAN_PRESET}
+        
+        match_branch = sum(1 for r in records if r.get('vlan_id') in branch_vids)
+        match_dc = sum(1 for r in records if r.get('vlan_id') in dc_vids)
+        
+        target_preset = BRANCH_VLAN_PRESET if match_branch >= match_dc else DATACENTER_VLAN_PRESET
+        order_map = {p['vid']: i for i, p in enumerate(target_preset)}
+        
+        # Sort records by order in preset, then by vlan_id
+        records.sort(key=lambda r: (order_map.get(r.get('vlan_id'), 999), r.get('vlan_id', 0)))
+        
         new_rows = []
         for r in records:
             new_rows.append({
