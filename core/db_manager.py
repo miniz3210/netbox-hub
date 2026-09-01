@@ -253,6 +253,9 @@ def save_records_batch(records: List[Dict[str, Any]], clear_first: bool = False,
         cursor.execute("DELETE FROM inventory_records")
 
     counts = {"device": 0, "hypervisor": 0, "vm": 0}
+    has_devices = False
+    has_vms = False
+    
     for r in records:
         cat = r.get("category", "device")
         cursor.execute("""
@@ -268,10 +271,21 @@ def save_records_batch(records: List[Dict[str, Any]], clear_first: bool = False,
             r.get("cluster", "").strip()
         ))
         counts[cat] = counts.get(cat, 0) + 1
+        
+        if cat in ("device", "hypervisor"):
+            has_devices = True
+        elif cat == "vm":
+            has_vms = True
 
     conn.commit()
     conn.close()
-    set_sync_metadata("naming", source)
+    
+    # Set metadata based on what was imported
+    if has_devices:
+        set_sync_metadata("netbox_devices", source)
+    if has_vms:
+        set_sync_metadata("netbox_virtual_machines", source)
+    
     return counts
 
 def save_universal_csv(file_bytes, filename: str = "", clear_first: bool = False) -> Dict[str, int]:
