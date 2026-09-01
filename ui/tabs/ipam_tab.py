@@ -6,6 +6,8 @@ import pandas as pd
 import openpyxl
 from core.ipam_engine import (
     VLAN_PRESETS,
+    BRANCH_VLAN_PRESET,
+    DATACENTER_VLAN_PRESET,
     compute_chained_rows,
     slugify,
     evaluate_subnet_row,
