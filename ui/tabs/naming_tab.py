@@ -164,13 +164,78 @@ def render_compact_toolbar():
             else:
                 st.caption("No custom data loaded.")
 
-    case_mode = st.radio(
-        "Casing",
-        ["UPPERCASE", "lowercase"],
-        index=0,
-        horizontal=True,
-        help="Render output in UPPERCASE or lowercase."
-    )
+    # AI Assistant
+    with st.expander("🤖 AI Assistant", expanded=False):
+        st.caption("Ask for naming suggestions and verification (e.g., 'Suggest a hostname for a switch in NYC' or 'Verify this hostname: SWUSNYC01-0')")
+        
+        # Initialize chat history
+        if "naming_chat_history" not in st.session_state:
+            st.session_state["naming_chat_history"] = []
+        
+        # Display chat messages
+        for message in st.session_state["naming_chat_history"]:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+        
+        # Chat input
+        if prompt := st.chat_input("Ask for naming suggestions..."):
+            # Add user message to chat history
+            st.session_state["naming_chat_history"].append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
+            
+            # Generate AI response
+            with st.chat_message("assistant"):
+                with st.spinner("Thinking..."):
+                    try:
+                        from core.ai_client import call_ai
+                        
+                        # Get context from database
+                        device_count = len(get_records_by_category("device")) + len(get_records_by_category("hypervisor"))
+                        vm_count = len(get_records_by_category("vm"))
+                        
+                        system_prompt = f"""You are an expert in infrastructure naming conventions and standards.
+Analyze the user's request and provide naming suggestions or verification.
+
+Context:
+- Database contains: {device_count} devices and {vm_count} VMs
+- You should follow standard naming conventions for network devices, servers, and VMs
+- Consider location codes, device types, and sequence numbers
+
+Guidelines:
+1. Provide clear, concise naming suggestions that follow industry best practices
+2. When verifying hostnames, check for consistency and standard compliance
+3. Explain your reasoning briefly
+4. Format should be clear and actionable"""
+                        
+                        # Use the active model
+                        ai_response = call_ai(prompt, active_model, custom_system_msg=system_prompt)
+                        
+                        st.markdown(ai_response)
+                        # Add assistant response to chat history
+                        st.session_state["naming_chat_history"].append({"role": "assistant", "content": ai_response})
+                        
+                    except Exception as e:
+                        error_msg = f"❌ AI Assistant temporarily unavailable: {str(e)}"
+                        st.error(error_msg)
+                        st.session_state["naming_chat_history"].append({"role": "assistant", "content": error_msg})
+
+    st.markdown("**Casing:** " + " | ".join([
+        f"**{opt}**" if st.session_state.get("naming_case_mode", "UPPERCASE") == opt else opt 
+        for opt in ["UPPERCASE", "lowercase"]
+    ]))
+    
+    case_col1, case_col2 = st.columns(2)
+    with case_col1:
+        if st.button("UPPERCASE", key="btn_uppercase", use_container_width=True):
+            st.session_state["naming_case_mode"] = "UPPERCASE"
+            st.rerun()
+    with case_col2:
+        if st.button("lowercase", key="btn_lowercase", use_container_width=True):
+            st.session_state["naming_case_mode"] = "lowercase"
+            st.rerun()
+    
+    case_mode = st.session_state.get("naming_case_mode", "UPPERCASE")
 
     return case_mode
 
