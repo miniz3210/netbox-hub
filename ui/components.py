@@ -3,18 +3,6 @@ from config.constants import APP_VERSION
 from config.settings import AVAILABLE_MODELS, OPENROUTER_BASE_URL
 from core.ai_client import test_model_connection, fetch_free_models
 
-# Default fallback models
-DEFAULT_TEST_MODELS = [
-    "openai/ox-alpha",
-    "groq/qwen/qwen3.8-27b",
-    "groq/qwen/qwen3.6-27b",
-    "groq/openai/gpt-oss-20b",
-    "groq/openai/gpt-oss-120b",
-    "groq/allam-2-7b",
-    "gemini/gemini-3.6-flash",
-    "gemini/gemini-3-flash-preview"
-]
-
 def render_sidebar() -> str:
     with st.sidebar:
         st.header("⚙️ AI Engine Selection")
@@ -27,17 +15,12 @@ def render_sidebar() -> str:
             help="Configured environment presets."
         )
 
-        # 2. Load and cache free models list
+        # 2. Load and cache free models list (only when user clicks refresh)
         if "free_models_cache" not in st.session_state:
-            st.session_state["free_models_cache"] = None
+            st.session_state["free_models_cache"] = []
         
-        # Use cached models or fetch new ones
-        if st.session_state["free_models_cache"] is None:
-            fetched_models = fetch_free_models()
-            test_models = fetched_models if fetched_models else DEFAULT_TEST_MODELS
-            st.session_state["free_models_cache"] = test_models
-        else:
-            test_models = st.session_state["free_models_cache"]
+        # Use cached models (empty by default until refresh is clicked)
+        test_models = st.session_state["free_models_cache"]
         
         # Filter candidate models to exclude any already in Preset Models
         filtered_suggestions = [
@@ -50,14 +33,17 @@ def render_sidebar() -> str:
         with col1:
             quick_pick = st.selectbox(
                 "Quick-Select Test Model",
-                options=["-- None (Use Preset / Manual) --"] + filtered_suggestions,
+                options=["-- Click refresh to load models --"] + filtered_suggestions,
                 index=0,
-                help="Select free models available from API."
+                help="Click the refresh button to load free models from API.",
+                disabled=len(filtered_suggestions) == 0
             )
         with col2:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("🔄", key="btn_refresh_models", help="Refresh model list"):
-                st.session_state["free_models_cache"] = None
+                with st.spinner("Loading free models..."):
+                    fetched_models = fetch_free_models()
+                    st.session_state["free_models_cache"] = fetched_models
                 st.rerun()
 
         # 3. Custom Manual Input
