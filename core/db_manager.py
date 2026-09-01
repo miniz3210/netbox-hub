@@ -536,6 +536,24 @@ def get_total_sites_count() -> int:
     conn.close()
     return total
 
+def get_file_sync_metadata() -> Dict[str, str]:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM sites_records")
+    sites = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM ipam_records")
+    ipam = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM inventory_records")
+    inventory = cursor.fetchone()[0]
+    conn.close()
+    return {
+        "sites_records": str(sites) if sites > 0 else "Never",
+        "ipam_records": str(ipam) if ipam > 0 else "Never",
+        "inventory_records": str(inventory) if inventory > 0 else "Never",
+    }
+
+
 def get_max_scope_id() -> Optional[int]:
     init_db()
     conn = sqlite3.connect(DB_PATH)
