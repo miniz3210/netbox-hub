@@ -43,28 +43,38 @@ def fetch_free_models() -> list[str]:
     
     try:
         resp = requests.get(endpoint, headers=headers, timeout=10)
+        logger.info(f"Fetching models from {endpoint}, status: {resp.status_code}")
+        
         if resp.status_code == 200:
             data = resp.json()
             models = data.get("data", [])
+            logger.info(f"Total models received: {len(models)}")
+            
             free_models = []
             for m in models:
-                model_id = m.get("id", "").lower()
+                model_id = m.get("id", "")
+                model_id_lower = model_id.lower()
                 pricing = m.get("pricing", {})
-                is_free = pricing.get("prompt") in ["0", 0, 0.0]
+                prompt_price = pricing.get("prompt", None)
+                
+                # Check pricing - handle string and numeric
+                is_free = prompt_price in ["0", 0, 0.0, "0.0"] or prompt_price is None or float(prompt_price) == 0.0
                 
                 # Check if model is suitable for YAML generation
-                is_suitable = any(pattern in model_id for pattern in suitable_patterns)
-                is_excluded = any(pattern in model_id for pattern in exclude_patterns)
+                is_suitable = any(pattern in model_id_lower for pattern in suitable_patterns)
+                is_excluded = any(pattern in model_id_lower for pattern in exclude_patterns)
                 
                 if is_free and is_suitable and not is_excluded:
-                    free_models.append(m["id"])
+                    free_models.append(model_id)
+                    logger.debug(f"Added free model: {model_id}")
             
+            logger.info(f"Filtered free models count: {len(free_models)}")
             return free_models
         else:
-            logger.warning(f"Failed to fetch models: HTTP {resp.status_code}")
+            logger.warning(f"Failed to fetch models: HTTP {resp.status_code}, response: {resp.text[:200]}")
             return []
     except Exception as e:
-        logger.error(f"Error fetching free models: {e}")
+        logger.error(f"Error fetching free models: {e}", exc_info=True)
         return []
 
 def test_model_connection(model_name: str) -> Tuple[bool, int, str]:
