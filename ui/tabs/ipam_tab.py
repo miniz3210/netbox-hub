@@ -577,7 +577,14 @@ def render_ipam_tab(active_model: str):
                                 ui_prefixes.append(sub)
 
                         combined_prefixes = list(dict.fromkeys(existing_prefixes + ui_prefixes))
-                        site_summary = get_site_summary, get_records_by_site()
+                        site_summary = get_site_summary()
+                        
+                        # Added comprehensive inventory lookup if a site is specified in prompt
+                        full_site_inventory = ""
+                        for s_name in get_all_site_names():
+                            if s_name.lower() in prompt.lower():
+                                full_site_inventory = get_full_site_inventory_summary(s_name)
+                                break
 
                         target_networks = []
                         cidr_matches = re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?\b", prompt)
@@ -645,6 +652,7 @@ Context:
 - {scope_context}
 - {stats_context}
 - {prefixes_context}
+- {full_site_inventory}
 
 {calc_analysis}
 
