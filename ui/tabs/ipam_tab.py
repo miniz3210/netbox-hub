@@ -35,8 +35,10 @@ from core.db_manager import (get_all_site_names,
     lookup_site_supernet_from_db,
     get_existing_prefix_strings,
     get_sync_metadata,
-    get_site_summary
+    get_site_summary,
+    get_ipam_records_by_site
 )
+
 from utils.formatters import to_title_case_preserve_acronyms
 
 POWERSHELL_AGENT_CODE = """<#
@@ -336,6 +338,22 @@ def handle_ipam_db_reset():
 
 def on_preset_change():
     selected = st.session_state.get("ipam_preset_selector")
+    site_name = st.session_state.get("ipam_site_in", "").strip()
+
+    if selected == "Load From DB (Existing Site)" and site_name:
+        records = get_ipam_records_by_site(site_name)
+        new_rows = []
+        for r in records:
+            new_rows.append({
+                "VLAN ID": r.get("vlan_id"),
+                "Role": r.get("role", ""),
+                "VLAN Name": r.get("vlan_name", ""),
+                "VLAN Description": r.get("description", ""),
+                "Subnet (CIDR)": r.get("prefix_or_subnet", "")
+            })
+        st.session_state["ipam_persisted_rows"] = new_rows
+        return
+
     template_list = VLAN_PRESETS.get(selected, [])
     
     if "ipam_data_editor_live" in st.session_state:
@@ -536,7 +554,7 @@ def render_ipam_tab(active_model: str):
                                 ui_prefixes.append(sub)
 
                         combined_prefixes = list(dict.fromkeys(existing_prefixes + ui_prefixes))
-                        site_summary = get_site_summary()
+                        site_summary = get_site_summary, get_records_by_site()
 
                         target_networks = []
                         cidr_matches = re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?\b", prompt)
