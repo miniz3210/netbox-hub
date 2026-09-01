@@ -24,14 +24,17 @@ def fetch_free_models() -> list[str]:
         "gemini",
         "qwen",
         "gpt-oss",
+        "gpt-20b",
+        "gpt-120b",
         "llama-3",
         "mistral",
         "deepseek",
         "groq/",
-        "allam"
+        "allam",
+        "ox-alpha"
     ]
     
-    # Exclude models unsuitable for structured output or too expensive/premium
+    # Exclude models unsuitable for structured output or premium
     exclude_patterns = [
         "vision",
         "image",
@@ -40,12 +43,12 @@ def fetch_free_models() -> list[str]:
         "stt",
         "embedding",
         "moderation",
-        "claude",  # Claude models are typically not free
-        "gpt-4",   # GPT-4 models are not free
-        "o1",      # o1 models are not free
-        "thinking", # Thinking/reasoning models are not free
-        "auto/",   # Auto routing is not truly free
-        "preview"  # Preview models may not be stable
+        "claude-opus",
+        "claude-sonnet",
+        "gpt-4o",
+        "o1-",
+        "thinking",
+        "preview"
     ]
     
     try:
@@ -62,14 +65,24 @@ def fetch_free_models() -> list[str]:
                 model_id = m.get("id", "")
                 model_id_lower = model_id.lower()
                 pricing = m.get("pricing", {})
+                
+                # Log first few models to understand pricing structure
+                if len(free_models) < 3:
+                    logger.info(f"Sample model: {model_id} | Pricing: {pricing}")
+                
                 prompt_price = pricing.get("prompt", None)
                 completion_price = pricing.get("completion", None)
                 
-                # Strictly check that BOTH prompt and completion are free (0 or "0")
+                # Check if pricing indicates free (handle various formats)
+                is_free = False
                 try:
-                    prompt_free = prompt_price is not None and float(prompt_price) == 0.0
-                    completion_free = completion_price is not None and float(completion_price) == 0.0
-                    is_free = prompt_free and completion_free
+                    # Check if prompt price is 0 (string or number)
+                    if prompt_price is not None:
+                        prompt_val = float(str(prompt_price).replace("$", "").strip())
+                        is_free = prompt_val == 0.0
+                    else:
+                        # If no pricing info, might be free
+                        is_free = True
                 except (ValueError, TypeError):
                     is_free = False
                 
@@ -79,10 +92,10 @@ def fetch_free_models() -> list[str]:
                 
                 if is_free and is_suitable and not is_excluded:
                     free_models.append(model_id)
-                    logger.debug(f"Added free model: {model_id} (prompt: {prompt_price}, completion: {completion_price})")
+                    logger.info(f"✓ Added: {model_id} (prompt: {prompt_price})")
             
             logger.info(f"Filtered free models count: {len(free_models)}")
-            return sorted(free_models)  # Sort for easier browsing
+            return sorted(free_models)
         else:
             logger.warning(f"Failed to fetch models: HTTP {resp.status_code}, response: {resp.text[:200]}")
             return []
