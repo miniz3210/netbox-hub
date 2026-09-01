@@ -18,6 +18,8 @@ def render_sidebar() -> str:
         # 2. Load and cache free models list (only when user clicks refresh)
         if "free_models_cache" not in st.session_state:
             st.session_state["free_models_cache"] = []
+        if "models_loaded" not in st.session_state:
+            st.session_state["models_loaded"] = False
         
         # Use cached models (empty by default until refresh is clicked)
         test_models = st.session_state["free_models_cache"]
@@ -31,12 +33,18 @@ def render_sidebar() -> str:
         # Quick-Select Test Model Pull-Down Menu
         col1, col2 = st.columns([4, 1])
         with col1:
+            if not st.session_state["models_loaded"]:
+                placeholder = "-- Click refresh to load models --"
+            elif len(filtered_suggestions) == 0:
+                placeholder = "-- No free models available --"
+            else:
+                placeholder = "-- Select a model --"
+            
             quick_pick = st.selectbox(
                 "Quick-Select Test Model",
-                options=["-- Click refresh to load models --"] + filtered_suggestions,
+                options=[placeholder] + filtered_suggestions,
                 index=0,
-                help="Click the refresh button to load free models from API.",
-                disabled=len(filtered_suggestions) == 0
+                help="Click the refresh button to load free models from API."
             )
         with col2:
             st.markdown("<br>", unsafe_allow_html=True)
@@ -44,6 +52,11 @@ def render_sidebar() -> str:
                 with st.spinner("Loading free models..."):
                     fetched_models = fetch_free_models()
                     st.session_state["free_models_cache"] = fetched_models
+                    st.session_state["models_loaded"] = True
+                    if len(fetched_models) == 0:
+                        st.warning("No free models found. Check logs for details.")
+                    else:
+                        st.success(f"Loaded {len(fetched_models)} free models")
                 st.rerun()
 
         # 3. Custom Manual Input
