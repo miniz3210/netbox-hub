@@ -170,39 +170,39 @@ def render_compact_toolbar(active_model):
     with col_ai:
         # AI Assistant
         with st.expander("🤖 AI Assistant", expanded=False):
-        st.caption("Ask for naming suggestions and verification (e.g., 'List all devices in AGE' or 'What devices are in Bristol?')")
-        
-        # Initialize chat history
-        if "naming_chat_history" not in st.session_state:
-            st.session_state["naming_chat_history"] = []
-        
-        # Clear button
-        if len(st.session_state["naming_chat_history"]) > 0:
-            if st.button("🗑️ Clear Chat", key="clear_naming_chat"):
-                st.session_state["naming_chat_history"] = []
-                st.rerun()
-        
-        # Display chat messages
-        for message in st.session_state["naming_chat_history"]:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
-        
-        # Chat input
-        if prompt := st.chat_input("Ask about devices and naming..."):
-            # Add user message to chat history
-            st.session_state["naming_chat_history"].append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
-                st.markdown(prompt)
+            st.caption("Ask for naming suggestions and verification (e.g., 'List all devices in AGE' or 'What devices are in Bristol?')")
             
-            # Generate AI response
-            with st.chat_message("assistant"):
-                with st.spinner("Thinking..."):
-                    try:
-                        from core.ai_client import call_ai
-                        from core.ai_helper import build_comprehensive_naming_context
-                        
-                        # Build comprehensive context with all database data
-                        comprehensive_context = build_comprehensive_naming_context(prompt)
+            # Initialize chat history
+            if "naming_chat_history" not in st.session_state:
+                st.session_state["naming_chat_history"] = []
+            
+            # Clear button
+            if len(st.session_state["naming_chat_history"]) > 0:
+                if st.button("🗑️ Clear Chat", key="clear_naming_chat"):
+                    st.session_state["naming_chat_history"] = []
+                    st.rerun()
+            
+            # Display chat messages
+            for message in st.session_state["naming_chat_history"]:
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
+            
+            # Chat input
+            if prompt := st.chat_input("Ask about devices and naming..."):
+                # Add user message to chat history
+                st.session_state["naming_chat_history"].append({"role": "user", "content": prompt})
+                with st.chat_message("user"):
+                    st.markdown(prompt)
+                
+                # Generate AI response
+                with st.chat_message("assistant"):
+                    with st.spinner("Thinking..."):
+                        try:
+                            from core.ai_client import call_ai
+                            from core.ai_helper import build_comprehensive_naming_context
+                            
+                            # Build comprehensive context with all database data
+                            comprehensive_context = build_comprehensive_naming_context(prompt)
                         
                         system_prompt = f"""You are an expert in infrastructure naming conventions, inventory management, and NetBox administration.
 You have DIRECT ACCESS to the complete inventory database. Analyze the user's request and respond accurately using the ACTUAL DATABASE DATA provided below.
