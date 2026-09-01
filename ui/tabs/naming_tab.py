@@ -14,7 +14,8 @@ from core.db_manager import (
     clear_device_records,
     clear_vm_records,
     get_total_record_count,
-    get_sync_metadata
+    get_sync_metadata,
+    get_file_sync_metadata
 )
 from ui.tabs.ipam_tab import POWERSHELL_AGENT_CODE
 
