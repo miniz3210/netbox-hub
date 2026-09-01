@@ -557,6 +557,16 @@ def get_site_summary() -> str:
         return "No site data ingested."
     return "\n".join([f"- {r[0]}" for r in rows])
 
+def get_ipam_records_by_site(site_name: str) -> List[Dict[str, Any]]:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM ipam_records WHERE site = ? OR site LIKE ?", (site_name, f"%{site_name}%"))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
 def lookup_vlan_description_from_db(role_name: str) -> Optional[str]:
     """Look up standard VLAN description from ingested database based on Role name."""
     if not role_name:
@@ -593,3 +603,13 @@ def get_all_site_names() -> List[str]:
     rows = cursor.fetchall()
     conn.close()
     return [r[0] for r in rows if r[0]]
+
+def get_records_by_site(site_name: str) -> List[Dict[str, Any]]:
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM ipam_records WHERE LOWER(site) = LOWER(?)", (site_name,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
