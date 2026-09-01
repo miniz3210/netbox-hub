@@ -88,89 +88,99 @@ def render_compact_toolbar(active_model):
     status_tag = f"🟢 ({device_count} Devices, {vm_count} VMs in DB)" if total_recs > 0 else "⚪ (Default Examples)"
     tick_devices = " ✅" if device_count > 0 else ""
     tick_vms = " ✅" if vm_count > 0 else ""
+    
+    col_ingest, col_ai = st.columns(2)
+    
+    with col_ingest:
+        with st.expander(f"📥 Ingest NetBox Data (CSV) {status_tag}", expanded=False):
+            if total_recs > 0:
+                # Get metadata for devices and VMs
+                meta_devices = get_sync_metadata("netbox_devices")
+                meta_vms = get_sync_metadata("netbox_virtual_machines")
+                
+                # Use the most recent source that's not "None"
+                sources = [m['source'] for m in [meta_devices, meta_vms] if m['source'] != "None"]
+                display_source = sources[0] if sources else "Manual CSV Upload"
+                
+                st.markdown(f"**DB Status:** `Source: {display_source}`")
 
-    with st.expander(f"📥 Ingest NetBox Data (CSV) {status_tag}", expanded=False):
-        if total_recs > 0:
-            # Get metadata for devices and VMs
+            st.markdown("**Option A: Automated Push via PowerShell Agent (Recommended):**")
+            st.code('.\\Sync-NetBoxHub.ps1 -NetBoxUrl "https://xxxx" -ApiToken "xxxx" -HubUrl "xxxx"', language="powershell")
+
+            st.caption("💡 *Press **Refresh** after the upload is completed in PowerShell to reload the local data.*")
+
+            c_dl, c_ref = st.columns([2, 1])
+            with c_dl:
+                st.download_button(
+                    "⬇️ Download Sync-NetBoxHub.ps1 Agent",
+                    POWERSHELL_AGENT_CODE,
+                    file_name="Sync-NetBoxHub.ps1",
+                    mime="text/plain",
+                    key="dl_ps1_naming"
+                )
+            with c_ref:
+                if st.button("🔄 Refresh", key="ref_naming_btn", use_container_width=True):
+                    st.rerun()
+
+            st.markdown("**Option B: Manual CSV Export & Upload:**")
+
+            # Get timestamps for each file
             meta_devices = get_sync_metadata("netbox_devices")
             meta_vms = get_sync_metadata("netbox_virtual_machines")
             
-            # Use the most recent source that's not "None"
-            sources = [m['source'] for m in [meta_devices, meta_vms] if m['source'] != "None"]
-            display_source = sources[0] if sources else "Manual CSV Upload"
-            
-            st.markdown(f"**DB Status:** `Source: {display_source}`")
+            devices_timestamp = f" `{meta_devices['updated_at']}`" if meta_devices['updated_at'] != "Never" else ""
+            vms_timestamp = f" `{meta_vms['updated_at']}`" if meta_vms['updated_at'] != "Never" else ""
 
-        st.markdown("**Option A: Automated Push via PowerShell Agent (Recommended):**")
-        st.code('.\\Sync-NetBoxHub.ps1 -NetBoxUrl "https://xxxx" -ApiToken "xxxx" -HubUrl "xxxx"', language="powershell")
+            col_l1, col_r1 = st.columns([12, 1])
+            with col_l1:
+                st.markdown(f"* **Devices / Servers / Switches:** Go to `Devices` ➔ `Devices` ➔ `Export` ➔ `All Data` (`netbox_devices.csv`){tick_devices}{devices_timestamp}")
+            with col_r1:
+                if device_count > 0:
+                    if st.button("🗑️", key="btn_clr_dev_inline", help="Clear netbox_devices.csv data"):
+                        clear_device_records()
+                        st.toast("🗑️ Cleared netbox_devices.csv data.", icon="🧹")
+                        st.rerun()
 
-        st.caption("💡 *Press **Refresh** after the upload is completed in PowerShell to reload the local data.*")
+            col_l2, col_r2 = st.columns([12, 1])
+            with col_l2:
+                st.markdown(f"* **Virtual Machines:** Go to `Virtualization` ➔ `Virtual Machines` ➔ `Export` ➔ `All Data` (`netbox_virtual_machines.csv`){tick_vms}{vms_timestamp}")
+            with col_r2:
+                if vm_count > 0:
+                    if st.button("🗑️", key="btn_clr_vm_inline", help="Clear netbox_virtual machines.csv data"):
+                        clear_vm_records()
+                        st.toast("🗑️ Cleared netbox_virtual machines.csv data.", icon="🧹")
+                        st.rerun()
 
-        c_dl, c_ref = st.columns([2, 1])
-        with c_dl:
-            st.download_button(
-                "⬇️ Download Sync-NetBoxHub.ps1 Agent",
-                POWERSHELL_AGENT_CODE,
-                file_name="Sync-NetBoxHub.ps1",
-                mime="text/plain",
-                key="dl_ps1_naming"
-            )
-        with c_ref:
-            if st.button("🔄 Refresh", key="ref_naming_btn", width="stretch"):
-                st.rerun()
-
-        st.markdown("**Option B: Manual CSV Export & Upload:**")
-
-        # Get timestamps for each file
-        meta_devices = get_sync_metadata("netbox_devices")
-        meta_vms = get_sync_metadata("netbox_virtual_machines")
-        
-        devices_timestamp = f" `{meta_devices['updated_at']}`" if meta_devices['updated_at'] != "Never" else ""
-        vms_timestamp = f" `{meta_vms['updated_at']}`" if meta_vms['updated_at'] != "Never" else ""
-
-        col_l1, col_r1 = st.columns([12, 1])
-        with col_l1:
-            st.markdown(f"* **Devices / Servers / Switches:** Go to `Devices` ➔ `Devices` ➔ `Export` ➔ `All Data` (`netbox_devices.csv`){tick_devices}{devices_timestamp}")
-        with col_r1:
-            if device_count > 0:
-                if st.button("🗑️", key="btn_clr_dev_inline", help="Clear netbox_devices.csv data"):
-                    clear_device_records()
-                    st.toast("🗑️ Cleared netbox_devices.csv data.", icon="🧹")
-                    st.rerun()
-
-        col_l2, col_r2 = st.columns([12, 1])
-        with col_l2:
-            st.markdown(f"* **Virtual Machines:** Go to `Virtualization` ➔ `Virtual Machines` ➔ `Export` ➔ `All Data` (`netbox_virtual_machines.csv`){tick_vms}{vms_timestamp}")
-        with col_r2:
-            if vm_count > 0:
-                if st.button("🗑️", key="btn_clr_vm_inline", help="Clear netbox_virtual machines.csv data"):
-                    clear_vm_records()
-                    st.toast("🗑️ Cleared netbox_virtual machines.csv data.", icon="🧹")
-                    st.rerun()
-
-        c_up, c_rst = st.columns([3, 1])
-        with c_up:
-            st.file_uploader(
-                "Upload NetBox CSV Export",
-                type=["csv"],
-                accept_multiple_files=True,
-                key="global_netbox_csv",
-                on_change=handle_csv_upload,
-                label_visibility="collapsed"
-            )
-        with c_rst:
-            if total_recs > 0:
-                st.button("🗑️ Clear All DB", on_click=handle_csv_reset, width="stretch", key="rst_csv_btn")
-            else:
-                st.caption("No custom data loaded.")
-
-    # AI Assistant
-    with st.expander("🤖 AI Assistant", expanded=False):
+            c_up, c_rst = st.columns([3, 1])
+            with c_up:
+                st.file_uploader(
+                    "Upload NetBox CSV Export",
+                    type=["csv"],
+                    accept_multiple_files=True,
+                    key="global_netbox_csv",
+                    on_change=handle_csv_upload,
+                    label_visibility="collapsed"
+                )
+            with c_rst:
+                if total_recs > 0:
+                    st.button("🗑️ Clear All DB", on_click=handle_csv_reset, use_container_width=True, key="rst_csv_btn")
+                else:
+                    st.caption("No custom data loaded.")
+    
+    with col_ai:
+        # AI Assistant
+        with st.expander("🤖 AI Assistant", expanded=False):
         st.caption("Ask for naming suggestions and verification (e.g., 'List all devices in AGE' or 'What devices are in Bristol?')")
         
         # Initialize chat history
         if "naming_chat_history" not in st.session_state:
             st.session_state["naming_chat_history"] = []
+        
+        # Clear button
+        if len(st.session_state["naming_chat_history"]) > 0:
+            if st.button("🗑️ Clear Chat", key="clear_naming_chat"):
+                st.session_state["naming_chat_history"] = []
+                st.rerun()
         
         # Display chat messages
         for message in st.session_state["naming_chat_history"]:
@@ -257,6 +267,7 @@ You have DIRECT ACCESS to the complete inventory database. Analyze the user's re
 
 def render_naming_tab(active_model):
     st.subheader("🏷️ Standardized Infrastructure Naming Generator")
+    st.caption("Generate and validate standardized hostnames for network devices, servers, VMs, and ESXi configurations using AI-powered naming conventions aligned with your NetBox inventory data.")
     
     naming_cat = st.radio(
         "Select Asset Class",
