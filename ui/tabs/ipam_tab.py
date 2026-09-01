@@ -342,11 +342,10 @@ def on_preset_change():
     selected = st.session_state.get("ipam_preset_selector")
     site_name = st.session_state.get("ipam_site_in", "").strip()
 
-    if selected == "Load From DB (Existing Site)" and site_name:
+    if selected == "🗄️ Load From DB (Existing Site)" and site_name:
         records = get_ipam_records_by_site(site_name)
         
         # Determine if it's a Branch or DC to apply sorting
-        # A simple heuristic: check which preset has more matching VLAN IDs
         branch_vids = {p['vid'] for p in BRANCH_VLAN_PRESET}
         dc_vids = {p['vid'] for p in DATACENTER_VLAN_PRESET}
         
@@ -359,10 +358,17 @@ def on_preset_change():
         # Sort records by order in preset, then by vlan_id
         records.sort(key=lambda r: (order_map.get(r.get('vlan_id'), 999), r.get('vlan_id', 0)))
         
-        new_rows = []
+        # Use a dictionary to de-duplicate based on vlan_id
+        unique_records = {}
         for r in records:
+            vid = r.get("vlan_id")
+            if vid not in unique_records:
+                unique_records[vid] = r
+                
+        new_rows = []
+        for vid, r in unique_records.items():
             new_rows.append({
-                "VLAN ID": r.get("vlan_id"),
+                "VLAN ID": vid,
                 "Role": r.get("role", ""),
                 "VLAN Name": r.get("vlan_name", ""),
                 "VLAN Description": r.get("description", ""),
