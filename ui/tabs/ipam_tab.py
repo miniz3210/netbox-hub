@@ -342,7 +342,7 @@ def on_preset_change():
     selected = st.session_state.get("ipam_preset_selector")
     site_name = st.session_state.get("ipam_site_in", "").strip()
 
-    if selected == "Load From DB (Existing Site)" and site_name:
+    if selected == "🗄️ Load From DB (Existing Site)" and site_name:
         records = get_ipam_records_by_site(site_name)
         
         # Determine if it's a Branch or DC to apply sorting
