@@ -506,58 +506,13 @@ def render_ipam_tab(active_model: str):
                 st.caption("No custom data loaded.")
 
     # 2. Site Inputs and Dynamic Lookups
+    # 2. Site Inputs and Dynamic Lookups
     if "ipam_site_in" not in st.session_state:
         st.session_state["ipam_site_in"] = ""
     if "ipam_scope_in" not in st.session_state:
         st.session_state["ipam_scope_in"] = ""
     if "ipam_super_in" not in st.session_state:
         st.session_state["ipam_super_in"] = ""
-
-    max_scope_id = get_max_scope_id()
-    scope_eg = f"e.g. {max_scope_id + 1}" if max_scope_id is not None else "e.g. 42"
-
-    top1, top2, top3 = st.columns([2, 1, 2.2])
-    with top1:
-        st.text_input(
-            "Branch / Site Name",
-            key="ipam_site_in",
-            placeholder="e.g. Bristol, AGE, Adelaide, UK, Site-01",
-            on_change=handle_site_change
-        )
-        site_name = st.session_state["ipam_site_in"].strip()
-
-    auto_scope_id = lookup_scope_id(site_name) if site_name else None
-    auto_supernet = lookup_site_supernet_from_db(site_name) if site_name else None
-
-    if site_name and auto_supernet and not st.session_state.get("ipam_super_in"):
-        st.session_state["ipam_super_in"] = str(auto_supernet)
-        st.rerun()
-
-    with top2:
-        st.text_input(
-            "Scope ID (NetBox Site ID)", 
-            key="ipam_scope_in",
-            placeholder=scope_eg,
-            help="Auto-discovered from uploaded data/agent sync, or editable manually."
-        )
-        scope_id = st.session_state["ipam_scope_in"].strip()
-        if auto_scope_id:
-            st.caption(f"🟢 Matched Scope ID: **`{auto_scope_id}`**")
-        else:
-            st.caption("⚪ Manual Scope ID mode")
-
-    with top3:
-        st.text_input(
-            "Site Supernet (CIDR)", 
-            key="ipam_super_in",
-            placeholder="e.g. 10.x.x.0/24",
-            help="Top-level container subnet for this branch site."
-        )
-        supernet_in = st.session_state["ipam_super_in"].strip()
-        cap_placeholder = st.empty()
-
-    display_site_name = format_branch_display(site_name)
-    existing_prefixes = get_existing_prefix_strings()
 
     # 2.5. AI IPAM & Subnet Assistant
     with st.expander("🤖 AI Assistant", expanded=False):
@@ -696,7 +651,52 @@ Guidelines:
                         st.error(error_msg)
                         st.session_state["ipam_chat_history"].append({"role": "assistant", "content": error_msg})
 
-    # 3. Preset Selection & Allocation Editor
+    max_scope_id = get_max_scope_id()
+    scope_eg = f"e.g. {max_scope_id + 1}" if max_scope_id is not None else "e.g. 42"
+
+    top1, top2, top3 = st.columns([2, 1, 2.2])
+    with top1:
+        st.text_input(
+            "Branch / Site Name",
+            key="ipam_site_in",
+            placeholder="e.g. Bristol, AGE, Adelaide, UK, Site-01",
+            on_change=handle_site_change
+        )
+        site_name = st.session_state["ipam_site_in"].strip()
+
+    auto_scope_id = lookup_scope_id(site_name) if site_name else None
+    auto_supernet = lookup_site_supernet_from_db(site_name) if site_name else None
+
+    if site_name and auto_supernet and not st.session_state.get("ipam_super_in"):
+        st.session_state["ipam_super_in"] = str(auto_supernet)
+        st.rerun()
+
+    with top2:
+        st.text_input(
+            "Scope ID (NetBox Site ID)", 
+            key="ipam_scope_in",
+            placeholder=scope_eg,
+            help="Auto-discovered from uploaded data/agent sync, or editable manually."
+        )
+        scope_id = st.session_state["ipam_scope_in"].strip()
+        if auto_scope_id:
+            st.caption(f"🟢 Matched Scope ID: **`{auto_scope_id}`**")
+        else:
+            st.caption("⚪ Manual Scope ID mode")
+
+    with top3:
+        st.text_input(
+            "Site Supernet (CIDR)", 
+            key="ipam_super_in",
+            placeholder="e.g. 10.x.x.0/24",
+            help="Top-level container subnet for this branch site."
+        )
+        supernet_in = st.session_state["ipam_super_in"].strip()
+        cap_placeholder = st.empty()
+
+    display_site_name = format_branch_display(site_name)
+    existing_prefixes = get_existing_prefix_strings()
+
     st.markdown("---")
     c_title, c_preset = st.columns([2.5, 1.5])
     with c_title:
