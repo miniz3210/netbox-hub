@@ -1,7 +1,88 @@
+from typing import Callable
+
 import streamlit as st
 from config.constants import APP_VERSION
 from config.settings import AVAILABLE_MODELS, OPENROUTER_BASE_URL
-from core.ai_client import test_model_connection, fetch_free_models
+from core.ai_client import call_ai, test_model_connection, fetch_free_models
+
+CHAT_HEIGHT = 380
+
+def _clear_ai_chat(history_key: str, open_key: str) -> None:
+    st.session_state[history_key] = []
+    st.session_state[open_key] = True
+
+def _keep_ai_chat_open(open_key: str) -> None:
+    st.session_state[open_key] = True
+
+def render_ai_chat(
+    history_key: str,
+    caption: str,
+    placeholder: str,
+    active_model: str,
+    build_system_prompt: Callable[[str], str],
+    label: str = "🤖 AI Assistant",
+    height: int = CHAT_HEIGHT,
+) -> None:
+    """Render a self-contained AI chat panel.
+
+    The transcript lives in a fixed-height scrolling container and the input box is
+    rendered after it, so the input always stays at the bottom of the chat. Clearing
+    and submitting both run as widget callbacks, which fire before the panel is drawn
+    and therefore apply on the same run without an extra st.rerun().
+    """
+    open_key = f"{history_key}_open"
+    if history_key not in st.session_state:
+        st.session_state[history_key] = []
+    if open_key not in st.session_state:
+        st.session_state[open_key] = False
+
+    with st.expander(label, expanded=st.session_state[open_key]):
+        st.caption(caption)
+        history = st.session_state[history_key]
+
+        # Reserve the header row now, but render the button after this turn is
+        # processed so its disabled state reflects the messages just added.
+        _, c_clear = st.columns([3, 1])
+
+        transcript = st.container(height=height, border=True)
+        for message in history:
+            with transcript.chat_message(message["role"]):
+                st.markdown(message["content"])
+
+        prompt = st.chat_input(
+            placeholder,
+            key=f"{history_key}_input",
+            on_submit=_keep_ai_chat_open,
+            args=(open_key,),
+        )
+
+        if prompt:
+            history.append({"role": "user", "content": prompt})
+            with transcript.chat_message("user"):
+                st.markdown(prompt)
+
+            with transcript.chat_message("assistant"):
+                with st.spinner("Thinking..."):
+                    try:
+                        response = call_ai(
+                            prompt,
+                            active_model,
+                            custom_system_msg=build_system_prompt(prompt),
+                        )
+                    except Exception as exc:
+                        response = f"❌ AI Assistant temporarily unavailable: {exc}"
+                st.markdown(response)
+
+            history.append({"role": "assistant", "content": response})
+
+        c_clear.button(
+            "🗑️ Clear Chat",
+            key=f"{history_key}_clear",
+            on_click=_clear_ai_chat,
+            args=(history_key, open_key),
+            disabled=not history,
+            width="stretch",
+        )
 
 def render_sidebar() -> str:
     with st.sidebar:

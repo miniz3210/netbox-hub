@@ -43,6 +43,7 @@ from core.db_manager import (get_all_site_names,
 )
 
 from utils.formatters import to_title_case_preserve_acronyms
+from ui.components import render_ai_chat
 
 POWERSHELL_AGENT_CODE = """<#
 .SYNOPSIS
@@ -398,6 +399,88 @@ def on_preset_change():
             })
         st.session_state["ipam_persisted_rows"] = new_rows
 
+def build_ipam_system_prompt(prompt, site_name, supernet_in, existing_prefixes, max_scope_id):
+    """Build the grounded IPAM system prompt for the AI Assistant."""
+    from core.ai_helper import build_comprehensive_ipam_context
+
+    comprehensive_context = build_comprehensive_ipam_context(prompt, site_filter=site_name)
+
+    # Combine DB prefixes with the prefixes currently in the allocation editor
+    ui_prefixes = []
+    for r in st.session_state.get("ipam_persisted_rows", []):
+        sub = str(r.get("Subnet (CIDR)", "") or "").strip()
+        if sub and "/" in sub:
+            ui_prefixes.append(sub)
+
+    combined_prefixes = list(dict.fromkeys(existing_prefixes + ui_prefixes))
+
+    # Extract requested mask (e.g., /24) from user prompt if specified
+    mask_match = re.search(r"/(\d{1,2})", prompt)
+    req_mask = int(mask_match.group(1)) if mask_match else 24
+
+    # Determine target supernet for pre-calculation
+    target_networks = []
+    cidr_matches = re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?\b", prompt)
+    if supernet_in:
+        cidr_matches.append(supernet_in)
+
+    for match in cidr_matches:
+        try:
+            target_networks.append(ipaddress.ip_network(match, strict=False))
+        except Exception:
+            pass
+
+    calc_supernet = supernet_in
+    if not calc_supernet and target_networks:
+        calc_supernet = str(target_networks[0])
+
+    calc_analysis = ""
+    if calc_supernet and "/" in calc_supernet:
+        calc_analysis = get_subnet_availability_analysis(
+            calc_supernet,
+            combined_prefixes,
+            requested_prefix_len=req_mask
+        )
+
+    next_scope_id_val = (max_scope_id + 1) if max_scope_id is not None else 1
+
+    return f"""You are an expert network architect specializing in IP address management, NetBox provisioning, and subnet planning.
+You have DIRECT ACCESS to the complete IPAM database. Analyze the user's request and respond accurately using the ACTUAL DATABASE DATA provided below.
+
+=== COMPLETE DATABASE CONTEXT ===
+{comprehensive_context}
+
+=== CURRENT UI STATE ===
+- Current Site Input: {site_name or 'Not specified'}
+- Current Supernet Input: {supernet_in or 'Not specified'}
+- Next Available Scope ID: {next_scope_id_val}
+- Max Scope ID in DB: {max_scope_id or 'None'}
+
+{calc_analysis}
+
+=== IMPORTANT GUIDELINES ===
+1. **Answer ALL questions using the ACTUAL DATA above** - You have complete database access
+2. When asked about VLANs, prefixes, or subnets for a site:
+   - Reference the "VLANs and Prefixes for Site" section above
+   - List the REAL VLAN IDs, names, subnets, roles, and descriptions
+   - Be specific with actual data, not generic examples
+3. When asked about devices or inventory:
+   - Reference the "Inventory for Site" section if available
+   - Provide actual device names, counts, and details
+4. For subnet suggestions:
+   - Follow the PRE-CALCULATED SUBNET AVAILABILITY ANALYSIS
+   - Never suggest subnets marked as OCCUPIED or OVERLAPS
+   - Explain why suggestions are available
+5. For Scope ID questions:
+   - Use the "Next Available Scope ID" value
+6. Format responses clearly:
+   - Use bullet points for lists
+   - Include VLAN IDs, names, and subnets
+   - Show actual counts and statistics
+7. If no data exists for a query, clearly state "No records found in database"
+8. Be concise but comprehensive - show all relevant data
+9. When counting items (e.g., "how many VLANs"), provide the exact number from the data above"""
+
 def render_ipam_tab(active_model: str):
     st.subheader("🌐 IPAM & Site Subnet Provisioning Engine")
     st.caption("Plan site supernets, allocate non-overlapping VLAN subnets, and export ready-to-import NetBox CSV blocks.")
@@ -521,123 +604,15 @@ def render_ipam_tab(active_model: str):
     existing_prefixes = get_existing_prefix_strings()
 
     # 2.5. AI IPAM & Subnet Assistant
-    with st.expander("🤖 AI Assistant", expanded=False):
-        st.caption("Ask for subnet suggestions using natural language (e.g., 'Show me VLANs in Weybridge' or 'Suggest the next available /24 in 10.113.0.0/16')")
-        
-        # Initialize chat history
-        if "ipam_chat_history" not in st.session_state:
-            st.session_state["ipam_chat_history"] = []
-        
-        # Display chat messages
-        for message in st.session_state["ipam_chat_history"]:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
-        
-        # Chat input
-        if prompt := st.chat_input("Ask for subnet suggestions..."):
-            # Add user message to chat history
-            st.session_state["ipam_chat_history"].append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
-                st.markdown(prompt)
-            
-            # Generate AI response
-            with st.chat_message("assistant"):
-                with st.spinner("Thinking..."):
-                    try:
-                        from core.ai_client import call_ai
-                        from core.ai_helper import build_comprehensive_ipam_context
-                        
-                        # Build comprehensive context with all database data
-                        comprehensive_context = build_comprehensive_ipam_context(prompt, site_filter=site_name)
-                        
-                        # Prepare context for AI: combine DB + active UI table prefixes
-                        ui_prefixes = []
-                        for r in st.session_state.get("ipam_persisted_rows", []):
-                            sub = str(r.get("Subnet (CIDR)", "") or "").strip()
-                            if sub and "/" in sub:
-                                ui_prefixes.append(sub)
-
-                        combined_prefixes = list(dict.fromkeys(existing_prefixes + ui_prefixes))
-
-                        # Extract requested mask (e.g., /24) from user prompt if specified
-                        mask_match = re.search(r"/(\d{1,2})", prompt)
-                        req_mask = int(mask_match.group(1)) if mask_match else 24
-
-                        # Determine target supernet for pre-calculation
-                        target_networks = []
-                        cidr_matches = re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?\b", prompt)
-                        if supernet_in:
-                            cidr_matches.append(supernet_in)
-
-                        for match in cidr_matches:
-                            try:
-                                net = ipaddress.ip_network(match, strict=False)
-                                target_networks.append(net)
-                            except Exception:
-                                pass
-
-                        calc_supernet = supernet_in
-                        if not calc_supernet and target_networks:
-                            calc_supernet = str(target_networks[0])
-
-                        calc_analysis = ""
-                        if calc_supernet and "/" in calc_supernet:
-                            calc_analysis = get_subnet_availability_analysis(
-                                calc_supernet,
-                                combined_prefixes,
-                                requested_prefix_len=req_mask
-                            )
-
-                        next_scope_id_val = (max_scope_id + 1) if max_scope_id is not None else 1
-                        
-                        system_prompt = f"""You are an expert network architect specializing in IP address management, NetBox provisioning, and subnet planning.
-You have DIRECT ACCESS to the complete IPAM database. Analyze the user's request and respond accurately using the ACTUAL DATABASE DATA provided below.
-
-=== COMPLETE DATABASE CONTEXT ===
-{comprehensive_context}
-
-=== CURRENT UI STATE ===
-- Current Site Input: {site_name or 'Not specified'}
-- Current Supernet Input: {supernet_in or 'Not specified'}
-- Next Available Scope ID: {next_scope_id_val}
-- Max Scope ID in DB: {max_scope_id or 'None'}
-
-{calc_analysis}
-
-=== IMPORTANT GUIDELINES ===
-1. **Answer ALL questions using the ACTUAL DATA above** - You have complete database access
-2. When asked about VLANs, prefixes, or subnets for a site:
-   - Reference the "VLANs and Prefixes for Site" section above
-   - List the REAL VLAN IDs, names, subnets, roles, and descriptions
-   - Be specific with actual data, not generic examples
-3. When asked about devices or inventory:
-   - Reference the "Inventory for Site" section if available
-   - Provide actual device names, counts, and details
-4. For subnet suggestions:
-   - Follow the PRE-CALCULATED SUBNET AVAILABILITY ANALYSIS
-   - Never suggest subnets marked as OCCUPIED or OVERLAPS
-   - Explain why suggestions are available
-5. For Scope ID questions:
-   - Use the "Next Available Scope ID" value
-6. Format responses clearly:
-   - Use bullet points for lists
-   - Include VLAN IDs, names, and subnets
-   - Show actual counts and statistics
-7. If no data exists for a query, clearly state "No records found in database"
-8. Be concise but comprehensive - show all relevant data
-9. When counting items (e.g., "how many VLANs"), provide the exact number from the data above"""
-                        
-                        # Use the active model from sidebar
-                        ai_response = call_ai(prompt, active_model, custom_system_msg=system_prompt)
-                        
-                        st.markdown(ai_response)
-                        # Add assistant response to chat history
-                        st.session_state["ipam_chat_history"].append({"role": "assistant", "content": ai_response})
-                        
-                    except Exception as e:
-                        error_msg = f"❌ AI Assistant temporarily unavailable: {str(e)}"
-                        st.error(error_msg)
-                        st.session_state["ipam_chat_history"].append({"role": "assistant", "content": error_msg})
+    render_ai_chat(
+        history_key="ipam_chat_history",
+        caption="Ask for subnet suggestions using natural language (e.g., 'Show me VLANs in Weybridge' or 'Suggest the next available /24 in 10.113.0.0/16')",
+        placeholder="Ask for subnet suggestions...",
+        active_model=active_model,
+        build_system_prompt=lambda p: build_ipam_system_prompt(
+            p, site_name, supernet_in, existing_prefixes, max_scope_id
+        ),
+    )
 
     # Site input fields
     # Site input fields

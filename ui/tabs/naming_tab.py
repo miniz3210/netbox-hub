@@ -18,6 +18,47 @@ from core.db_manager import (
     get_file_sync_metadata
 )
 from ui.tabs.ipam_tab import POWERSHELL_AGENT_CODE
+from ui.components import render_ai_chat
+
+def build_naming_system_prompt(prompt: str) -> str:
+    """Build the grounded naming/inventory system prompt for the AI Assistant."""
+    from core.ai_helper import build_comprehensive_naming_context
+
+    comprehensive_context = build_comprehensive_naming_context(prompt)
+
+    return f"""You are an expert in infrastructure naming conventions, inventory management, and NetBox administration.
+You have DIRECT ACCESS to the complete inventory database. Analyze the user's request and respond accurately using the ACTUAL DATABASE DATA provided below.
+
+=== COMPLETE DATABASE CONTEXT ===
+{comprehensive_context}
+
+=== IMPORTANT GUIDELINES ===
+1. **Answer ALL questions using the ACTUAL DATA above** - You have complete database access
+2. When asked to list devices, VMs, or inventory:
+   - Reference the inventory sections above
+   - Provide actual device names, roles, manufacturers, sites
+   - Show real data, not generic examples
+3. When asked about specific sites:
+   - Use the "Inventory for Site" section if available
+   - List actual devices/VMs at that site with their details
+4. When asked about VLANs at a site:
+   - Explain that VLAN data is in the IPAM tab, but you can see the devices/VMs at the site
+5. For naming convention questions:
+   - Analyze the actual hostnames in the database
+   - Identify patterns and standards being used
+   - Suggest improvements based on real examples
+6. When counting items (e.g., "how many devices in AGE"):
+   - Provide exact counts from the data above
+   - List the actual device names
+7. Format responses clearly:
+   - Use bullet points for lists
+   - Include device names, roles, manufacturers, sites
+   - Show actual counts and statistics
+8. If no data exists for a query, clearly state "No records found in database for [query]"
+9. Be specific and data-driven - always reference actual inventory items
+10. For naming suggestions, consider:
+    - Site codes, device types, sequence numbers
+    - Consistency with existing naming patterns in the database"""
 
 def apply_case(text: str, mode: str) -> str:
     return text.upper() if mode == "UPPERCASE" else text.lower()
@@ -165,155 +206,13 @@ def render_compact_toolbar(active_model):
                 st.caption("No custom data loaded.")
     
     # AI Assistant
-    with st.expander("🤖 AI Assistant", expanded=False):
-        st.caption("Ask for naming suggestions and verification (e.g., 'List all devices in AGE' or 'What devices are in Bristol?')")
-        
-        # Initialize chat history
-        if "naming_chat_history" not in st.session_state:
-            st.session_state["naming_chat_history"] = []
-        
-        # Clear button
-        if len(st.session_state["naming_chat_history"]) > 0:
-            if st.button("🗑️ Clear Chat", key="clear_naming_chat"):
-                st.session_state["naming_chat_history"] = []
-                st.rerun()
-        
-        # Display chat messages
-        for message in st.session_state["naming_chat_history"]:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
-        
-        # Chat input
-        if prompt := st.chat_input("Ask about devices and naming..."):
-            # Add user message to chat history
-            st.session_state["naming_chat_history"].append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
-                st.markdown(prompt)
-            
-            # Generate AI response
-            with st.chat_message("assistant"):
-                with st.spinner("Thinking..."):
-                    try:
-                        from core.ai_client import call_ai
-                        from core.ai_helper import build_comprehensive_naming_context
-                        
-                        # Build comprehensive context with all database data
-                        comprehensive_context = build_comprehensive_naming_context(prompt)
-                        
-                        system_prompt = f"""You are an expert in infrastructure naming conventions, inventory management, and NetBox administration.
-You have DIRECT ACCESS to the complete inventory database. Analyze the user's request and respond accurately using the ACTUAL DATABASE DATA provided below.
-
-=== COMPLETE DATABASE CONTEXT ===
-{comprehensive_context}
-
-=== IMPORTANT GUIDELINES ===
-1. **Answer ALL questions using the ACTUAL DATA above** - You have complete database access
-2. When asked to list devices, VMs, or inventory:
-   - Reference the inventory sections above
-   - Provide actual device names, roles, manufacturers, sites
-   - Show real data, not generic examples
-3. When asked about specific sites:
-   - Use the "Inventory for Site" section if available
-   - List actual devices/VMs at that site with their details
-4. When asked about VLANs at a site:
-   - Explain that VLAN data is in the IPAM tab, but you can see the devices/VMs at the site
-5. For naming convention questions:
-   - Analyze the actual hostnames in the database
-   - Identify patterns and standards being used
-   - Suggest improvements based on real examples
-6. When counting items (e.g., "how many devices in AGE"):
-   - Provide exact counts from the data above
-   - List the actual device names
-7. Format responses clearly:
-   - Use bullet points for lists
-   - Include device names, roles, manufacturers, sites
-   - Show actual counts and statistics
-8. If no data exists for a query, clearly state "No records found in database for [query]"
-9. Be specific and data-driven - always reference actual inventory items
-10. For naming suggestions, consider:
-    - Site codes, device types, sequence numbers
-    - Consistency with existing naming patterns in the database"""
-                        
-                        # Use the active model passed as parameter
-                        ai_response = call_ai(prompt, active_model, custom_system_msg=system_prompt)
-                        
-                        st.markdown(ai_response)
-                        # Add assistant response to chat history
-                        st.session_state["naming_chat_history"].append({"role": "assistant", "content": ai_response})
-                        
-                    except Exception as e:
-                        error_msg = f"❌ AI Assistant temporarily unavailable: {str(e)}"
-                        st.error(error_msg)
-                        st.session_state["naming_chat_history"].append({"role": "assistant", "content": error_msg})
-                    st.rerun()
-            
-            # Display chat messages
-            for message in st.session_state["naming_chat_history"]:
-                with st.chat_message(message["role"]):
-                    st.markdown(message["content"])
-            
-            # Chat input
-            if prompt := st.chat_input("Ask about devices and naming..."):
-                # Add user message to chat history
-                st.session_state["naming_chat_history"].append({"role": "user", "content": prompt})
-                with st.chat_message("user"):
-                    st.markdown(prompt)
-                
-                # Generate AI response
-                with st.chat_message("assistant"):
-                    with st.spinner("Thinking..."):
-                        try:
-                            from core.ai_client import call_ai
-                            from core.ai_helper import build_comprehensive_naming_context
-                            
-                            # Build comprehensive context with all database data
-                            comprehensive_context = build_comprehensive_naming_context(prompt)
-                            
-                            system_prompt = f"""You are an expert in infrastructure naming conventions, inventory management, and NetBox administration.
-You have DIRECT ACCESS to the complete inventory database. Analyze the user's request and respond accurately using the ACTUAL DATABASE DATA provided below.
-
-=== COMPLETE DATABASE CONTEXT ===
-{comprehensive_context}
-
-=== IMPORTANT GUIDELINES ===
-1. **Answer ALL questions using the ACTUAL DATA above** - You have complete database access
-2. When asked to list devices, VMs, or inventory:
-   - Reference the inventory sections above
-   - Provide actual device names, roles, manufacturers, sites
-   - Show real data, not generic examples
-3. When asked about specific sites:
-   - Use the "Inventory for Site" section if available
-   - List actual devices/VMs at that site with their details
-4. When asked about VLANs at a site:
-   - Explain that VLAN data is in the IPAM tab, but you can see the devices/VMs at the site
-5. For naming convention questions:
-   - Analyze the actual hostnames in the database
-   - Identify patterns and standards being used
-   - Suggest improvements based on real examples
-6. When counting items (e.g., "how many devices in AGE"):
-   - Provide exact counts from the data above
-   - List the actual device names
-7. Format responses clearly:
-   - Use bullet points for lists
-   - Include device names, roles, manufacturers, sites
-   - Show actual counts and statistics
-8. If no data exists for a query, clearly state "No records found in database for [query]"
-9. Be specific and data-driven - always reference actual inventory items
-10. For naming suggestions, consider:
-    - Site codes, device types, sequence numbers
-    - Consistency with existing naming patterns in the database"""
-                            
-                            # Use the active model passed as parameter
-                            ai_response = call_ai(prompt, active_model, custom_system_msg=system_prompt)
-                            
-                            st.markdown(ai_response)
-                            # Add assistant response to chat history
-                            st.session_state["naming_chat_history"].append({"role": "assistant", "content": ai_response})
-                            
-                        except Exception as e:
-                            error_msg = f"❌ AI Assistant temporarily unavailable: {str(e)}"
-                            st.error(error_msg)
-                            st.session_state["naming_chat_history"].append({"role": "assistant", "content": error_msg})
+    render_ai_chat(
+        history_key="naming_chat_history",
+        caption="Ask for naming suggestions and verification (e.g., 'List all devices in AGE' or 'What devices are in Bristol?')",
+        placeholder="Ask about devices and naming...",
+        active_model=active_model,
+        build_system_prompt=build_naming_system_prompt,
+    )
 
     # Casing selector with radio buttons on same line
     case_mode = st.radio(
