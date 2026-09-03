@@ -43,7 +43,7 @@ from core.db_manager import (get_all_site_names,
 )
 
 from utils.formatters import to_title_case_preserve_acronyms
-from ui.components import render_ai_chat
+from ui.components import render_ai_chat, render_backup_uploader
 
 POWERSHELL_AGENT_CODE = """<#
 .SYNOPSIS
@@ -479,7 +479,11 @@ You have DIRECT ACCESS to the complete IPAM database. Analyze the user's request
    - Show actual counts and statistics
 7. If no data exists for a query, clearly state "No records found in database"
 8. Be concise but comprehensive - show all relevant data
-9. When counting items (e.g., "how many VLANs"), provide the exact number from the data above"""
+9. When counting items (e.g., "how many VLANs"), provide the exact number from the data above
+10. If a "NETBOX MASTER BACKUP" section is present it is the full NetBox export:
+   - Treat it as authoritative for any object type (sites, racks, devices, interfaces, IPs, VMs, clusters, tenants, circuits, VRFs)
+   - Use its "total in backup" figures when stating counts
+   - Quote the exact records listed rather than generalizing"""
 
 def render_ipam_tab(active_model: str):
     st.subheader("🌐 IPAM & Site Subnet Provisioning Engine")
@@ -498,7 +502,7 @@ def render_ipam_tab(active_model: str):
     tick_vlans = " ✅" if total_vlans_recs > 0 else ""
     tick_prefixes = " ✅" if total_prefixes_recs > 0 else ""
 
-    with st.expander(f"📥 Ingest NetBox Sites & VLANs / Prefixes CSV {status_tag}", expanded=False):
+    with st.expander(f"📥 Ingest NetBox Site Data (Backup / Agent / CSV) {status_tag}", expanded=False):
         if total_db_count > 0:
             # Get the most recent source from any of the files
             meta_sites = get_sync_metadata("netbox_sites")
@@ -511,7 +515,10 @@ def render_ipam_tab(active_model: str):
             
             st.markdown(f"**DB Status:** `Source: {display_source}`")
 
-        st.markdown("**Option A: Automated Push via PowerShell Agent (Recommended):**")
+        render_backup_uploader("ipam")
+        st.markdown("---")
+
+        st.markdown("**Option B: Automated Push via PowerShell Agent:**")
         st.code('.\\Sync-NetBoxHub.ps1 -NetBoxUrl "https://xxxx" -ApiToken "xxxx" -HubUrl "xxxx"', language="powershell")
 
         st.caption("💡 *Press **Refresh** after the upload is completed in PowerShell to reload the local data.*")
@@ -529,7 +536,8 @@ def render_ipam_tab(active_model: str):
             if st.button("🔄 Refresh", key="ref_ipam_btn", width="stretch"):
                 st.rerun()
 
-        st.markdown("**Option B: Manual CSV Export & Upload:**")
+        st.markdown("---")
+        st.markdown("**Option C: Manual CSV Export & Upload:**")
 
         meta_sites = get_sync_metadata("netbox_sites")
         meta_vlans = get_sync_metadata("netbox_VLANs")

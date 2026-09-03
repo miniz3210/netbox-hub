@@ -127,3 +127,19 @@ RULES_FILE = "naming_rules.json"
 ### 🛠️ Bug Fixes & Refinements
 * **Zero External Dependencies**: Removed all third-party YAML and Git module requirements from `catalog.py` and `device_tab.py`, eliminating `ModuleNotFoundError`.
 * **Standard Library I/O**: Switched catalog file indexing to standard Python `os` and `glob` streams.
+
+## Release v2.12 — NetBox Master Backup Upload & Full-Database AI Lookup
+
+### 🚀 New Features
+* **Option A: Upload Netbox_Backup**: The IPAM and Naming ingest panels now lead with a JSON uploader for the full `NetBox_Backup_<timestamp>.json` master export. The PowerShell agent moved to Option B and manual CSV upload to Option C.
+* **Upload Date & Enable Checkbox**: The uploaded backup is shown with its filename, upload timestamp and object count, plus a checkbox that includes or excludes it from AI Assistant lookups without deleting it, and a Remove Backup button.
+* **Whole-Database AI Access**: `core/backup_manager.py` flattens every object in the backup (sites, regions, racks, manufacturers, device types, roles, platforms, devices, interfaces, VRFs, VLANs, prefixes, IP addresses, clusters, VMs, tenants, circuit providers, circuits) into a searchable table so the AI Assistant can answer questions about any record, not just devices and prefixes.
+* **Relevance-Ranked Context**: Prompts are split into exact identifiers (hostnames, CIDRs, IPs, cluster names) and ranked keywords, then mapped onto the matching NetBox object types, with `total in backup` counts included so counting questions are answered exactly.
+* **Backup Populates Core Tables**: A backup upload also refreshes the Sites, IPAM and Inventory tables, so Scope ID lookup, supernet discovery, reference cards and CSV generators work straight from the backup.
+
+### 🛠️ Bug Fixes & Improvements
+* **VLANs Without Prefixes Retained**: `save_ipam_records_batch` no longer discards VLAN records that have no assigned prefix, so VLAN-only rows survive ingest.
+* **VLAN Site Inference**: VLANs scoped only by VLAN group (e.g. `Adelaide VLAN Group`) are matched back to their site.
+* **IP Ownership Resolution**: IP address records now surface the device or VM behind the assigned interface.
+* **Fixed Undefined DB Path**: `lookup_vlan_description_from_db` referenced an undefined `DATABASE_PATH` and always failed silently; it now uses `DB_PATH`.
+* **Repaired `.gitignore`**: Removed a stray `cat << 'EOF'` heredoc wrapper that made the first and last lines non-functional, and added the master backup JSON files.

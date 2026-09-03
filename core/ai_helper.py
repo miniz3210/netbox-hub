@@ -3,6 +3,7 @@ AI Assistant Helper Functions
 Provides comprehensive database context for AI queries
 """
 
+import re
 from typing import Dict, List, Any
 from core.db_manager import (
     get_all_site_names,
@@ -18,9 +19,186 @@ from core.db_manager import (
     get_full_site_inventory_summary,
     get_existing_prefix_strings
 )
+from core.backup_manager import (
+    OBJECT_LABELS,
+    count_backup_records,
+    get_backup_metadata,
+    get_backup_object_counts,
+    get_backup_records_by_type,
+    get_backup_site_names,
+    is_backup_active,
+    search_backup_records,
+)
 import sqlite3
 
 DB_PATH = "data/netbox_hub.db"
+
+# Terms that map a natural-language question onto backup object collections.
+BACKUP_TOPIC_HINTS: List[tuple] = [
+    ("dcim_devices", ("device", "devices", "switch", "switches", "firewall", "firewalls", "router", "routers", "access point", "appliance", "hardware", "serial", "asset tag")),
+    ("dcim_interfaces", ("interface", "interfaces", "port", "ports", "uplink", "uplinks", "lag", "trunk", "vmnic", "ethernet")),
+    ("dcim_racks", ("rack", "racks", "cabinet", "rack unit")),
+    ("dcim_device_types", ("device type", "device types", "model", "models", "part number", "chassis")),
+    ("dcim_device_roles", ("device role", "device roles", "roles")),
+    ("dcim_manufacturers", ("manufacturer", "manufacturers", "vendor", "vendors", "make")),
+    ("dcim_platforms", ("platform", "platforms", "os version", "firmware")),
+    ("dcim_regions", ("region", "regions", "country", "countries", "continent")),
+    ("dcim_sites", ("site", "sites", "branch", "branches", "office", "offices", "winery", "wineries", "location", "locations", "address", "timezone", "time zone")),
+    ("ipam_prefixes", ("prefix", "prefixes", "subnet", "subnets", "cidr", "supernet", "scope id", "network range")),
+    ("ipam_vlans", ("vlan", "vlans", "vid", "vlan group", "broadcast domain")),
+    ("ipam_ip_addresses", ("ip", "ip address", "ip addresses", "gateway", "dns name", "dhcp", "dns server", "host address")),
+    ("ipam_vrfs", ("vrf", "vrfs", "route distinguisher")),
+    ("virtualization_virtual_machines", ("vm", "vms", "virtual machine", "virtual machines", "guest", "vcpu", "vcpus", "memory")),
+    ("virtualization_clusters", ("cluster", "clusters", "vcenter")),
+    ("tenancy_tenants", ("tenant", "tenants", "tenancy", "business unit")),
+    ("circuits_circuits", ("circuit", "circuits", "wan link", "isp link", "commit rate")),
+    ("circuits_providers", ("provider", "providers", "carrier", "carriers", "isp")),
+]
+
+STOPWORDS = {
+    "the", "and", "for", "with", "what", "which", "where", "when", "who", "how",
+    "are", "is", "was", "were", "does", "did", "can", "you", "please", "show",
+    "list", "give", "tell", "about", "all", "any", "many", "much", "have", "has",
+    "from", "into", "that", "this", "these", "those", "there", "their", "them",
+    "our", "your", "its", "not", "but", "get", "find", "look", "lookup", "data",
+    "database", "netbox", "backup", "info", "information", "details", "detail",
+    "count", "total", "number", "site", "sites", "name", "names", "please",
+}
+
+
+def _split_terms(prompt: str, limit: int = 8) -> tuple:
+    """Split a prompt into specific identifiers and general keywords.
+
+    Identifiers (hostnames, CIDRs, IPs, VLAN IDs, asset tags) must match exactly;
+    keywords only rank results so a plain-English question still returns rows.
+    """
+    tokens = re.findall(r"[A-Za-z0-9][A-Za-z0-9._/:\-]{1,}", prompt or "")
+    identifiers: List[str] = []
+    keywords: List[str] = []
+
+    for token in tokens:
+        clean = token.strip(".,;:!?").lower()
+        if len(clean) < 3 or clean in STOPWORDS:
+            continue
+        is_identifier = (
+            any(ch.isdigit() for ch in clean)
+            or any(ch in "._/:-" for ch in clean)
+        )
+        bucket = identifiers if is_identifier else keywords
+        if clean not in bucket:
+            bucket.append(clean)
+
+    return identifiers[:limit], keywords[:limit]
+
+
+def _detect_backup_topics(prompt: str) -> List[str]:
+    """Map the prompt onto the most relevant backup object types.
+
+    Hints are matched on word boundaries so short hints like `vid` do not fire on
+    unrelated words (e.g. "providers").
+    """
+    prompt_lower = (prompt or "").lower()
+    topics: List[str] = []
+    for object_type, hints in BACKUP_TOPIC_HINTS:
+        for hint in hints:
+            if re.search(rf"\b{re.escape(hint.strip())}\b", prompt_lower):
+                topics.append(object_type)
+                break
+    return topics
+
+
+def build_backup_context(prompt: str, site_filter: str = None, max_rows: int = 60) -> str:
+    """Build AI context from the uploaded NetBox master backup (JSON).
+
+    Returns an empty string when no backup is uploaded or the operator disabled it.
+    """
+    if not is_backup_active():
+        return ""
+
+    meta = get_backup_metadata()
+    counts = get_backup_object_counts()
+
+    context: List[str] = []
+    context.append("=== NETBOX MASTER BACKUP (FULL DATABASE) ===")
+    context.append(f"Source File: {meta['filename']} | Uploaded: {meta['uploaded_at']} | Objects: {meta['record_count']}")
+
+    if counts:
+        inventory_line = ", ".join(
+            f"{OBJECT_LABELS.get(k, k.replace('_', ' ').title())}: {v}"
+            for k, v in counts.items()
+        )
+        context.append(f"Backup Contents: {inventory_line}")
+
+    backup_sites = get_backup_site_names()
+    if backup_sites:
+        context.append(f"Backup Sites ({len(backup_sites)}): {', '.join(backup_sites)}")
+
+    # Resolve a site from the prompt when the caller did not pass one.
+    target_site = (site_filter or "").strip()
+    if not target_site:
+        prompt_lower = (prompt or "").lower()
+        for site in backup_sites:
+            if site.lower() in prompt_lower:
+                target_site = site
+                break
+
+    topics = _detect_backup_topics(prompt)[:4]
+    identifiers, keywords = _split_terms(prompt)
+
+    # 1. Exact identifier hits across every object type (hostnames, IPs, CIDRs).
+    if identifiers:
+        matches = search_backup_records(identifiers, keywords, site=target_site, limit=max_rows)
+        if not matches and target_site:
+            matches = search_backup_records(identifiers, keywords, limit=max_rows)
+        if matches:
+            context.append(f"\n--- Objects Matching Your Query ({len(matches)}) ---")
+            for row in matches:
+                site_part = f" | Site: {row['site']}" if row["site"] else ""
+                context.append(f"- [{row['object_label']}] {row['name']}{site_part} | {row['summary']}")
+
+    # 2. Topic-scoped listings so counting and listing questions get real data.
+    if topics:
+        per_topic = max(10, max_rows // max(len(topics), 1))
+        for object_type in topics:
+            scoped_total = count_backup_records(object_type, site=target_site)
+            scope_site = target_site
+            if scoped_total == 0 and target_site:
+                scope_site = ""
+                scoped_total = count_backup_records(object_type)
+            rows = get_backup_records_by_type(
+                object_type, site=scope_site, limit=per_topic, keywords=keywords
+            )
+            if not rows:
+                continue
+            label = OBJECT_LABELS.get(object_type, object_type.replace("_", " ").title())
+            scope = f" at {scope_site}" if scope_site else ""
+            context.append(
+                f"\n--- {label} Records{scope} "
+                f"(total in backup{scope}: {scoped_total}; showing {len(rows)}) ---"
+            )
+            for row in rows:
+                site_part = f" | Site: {row['site']}" if row["site"] else ""
+                context.append(f"- {row['name']}{site_part} | {row['summary']}")
+
+    # 3. Keyword-ranked fallback when the question named no object type.
+    if not topics and not identifiers and keywords:
+        matches = search_backup_records([], keywords, site=target_site, limit=max_rows)
+        if matches:
+            context.append(f"\n--- Objects Matching Your Query ({len(matches)}) ---")
+            for row in matches:
+                site_part = f" | Site: {row['site']}" if row["site"] else ""
+                context.append(f"- [{row['object_label']}] {row['name']}{site_part} | {row['summary']}")
+
+    # 4. Site profile fallback so site questions always return something useful.
+    if target_site and not topics and not identifiers:
+        site_rows = search_backup_records([], [], site=target_site, limit=max_rows)
+        if site_rows:
+            context.append(f"\n--- Backup Objects for Site: {target_site} (showing {len(site_rows)}) ---")
+            for row in site_rows:
+                context.append(f"- [{row['object_label']}] {row['name']} | {row['summary']}")
+
+    return "\n".join(context)
+
 
 def get_all_ipam_records(limit: int = 100) -> List[Dict[str, Any]]:
     """Get all IPAM records (VLANs and Prefixes) from database."""
@@ -120,7 +298,12 @@ def build_comprehensive_ipam_context(prompt: str, site_filter: str = None) -> st
         if inventory_summary:
             context.append(f"\n=== Inventory for Site: {target_site} ===")
             context.append(inventory_summary)
-    
+
+    backup_context = build_backup_context(prompt, site_filter=target_site)
+    if backup_context:
+        context.append("")
+        context.append(backup_context)
+
     return "\n".join(context)
 
 def build_comprehensive_naming_context(prompt: str, site_filter: str = None) -> str:
@@ -190,5 +373,10 @@ def build_comprehensive_naming_context(prompt: str, site_filter: str = None) -> 
             context.append(f"\n=== All VMs (showing up to 50) ===")
             for v in all_vms[:50]:
                 context.append(f"- {v.get('name', 'N/A')} | Role: {v.get('model_or_role', 'N/A')} | Cluster: {v.get('cluster', 'N/A')} | Site: {v.get('site', 'N/A')}")
-    
+
+    backup_context = build_backup_context(prompt, site_filter=target_site)
+    if backup_context:
+        context.append("")
+        context.append(backup_context)
+
     return "\n".join(context)
