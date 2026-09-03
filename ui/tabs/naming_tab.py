@@ -17,7 +17,6 @@ from core.db_manager import (
     get_sync_metadata,
     get_file_sync_metadata
 )
-from ui.tabs.ipam_tab import POWERSHELL_AGENT_CODE
 from ui.components import render_ai_chat, render_backup_uploader
 
 def build_naming_system_prompt(prompt: str) -> str:
@@ -134,7 +133,7 @@ def render_compact_toolbar(active_model):
     tick_devices = " ✅" if device_count > 0 else ""
     tick_vms = " ✅" if vm_count > 0 else ""
     
-    with st.expander(f"📥 Ingest NetBox Data (Backup / Agent / CSV) {status_tag}", expanded=False):
+    with st.expander(f"📥 Ingest NetBox Data (Backup / CSV) {status_tag}", expanded=False):
         if total_recs > 0:
             # Get metadata for devices and VMs
             meta_devices = get_sync_metadata("netbox_devices")
@@ -149,26 +148,14 @@ def render_compact_toolbar(active_model):
         render_backup_uploader("naming")
         st.markdown("---")
 
-        st.markdown("**Option B: Automated Push via PowerShell Agent:**")
-        st.code('.\\Sync-NetBoxHub.ps1 -NetBoxUrl "https://xxxx" -ApiToken "xxxx" -HubUrl "xxxx"', language="powershell")
-
-        st.caption("💡 *Press **Refresh** after the upload is completed in PowerShell to reload the local data.*")
-
-        c_dl, c_ref = st.columns([2, 1])
-        with c_dl:
-            st.download_button(
-                "⬇️ Download Sync-NetBoxHub.ps1 Agent",
-                POWERSHELL_AGENT_CODE,
-                file_name="Sync-NetBoxHub.ps1",
-                mime="text/plain",
-                key="dl_ps1_naming"
-            )
-        with c_ref:
+        c_ref_row, c_ref_cap = st.columns([1, 3])
+        with c_ref_row:
             if st.button("🔄 Refresh", key="ref_naming_btn", use_container_width=True):
                 st.rerun()
+        with c_ref_cap:
+            st.caption("Reload the local database view.")
 
-        st.markdown("---")
-        st.markdown("**Option C: Manual CSV Export & Upload:**")
+        st.markdown("**Option B: Manual CSV Export & Upload:**")
 
         # Get timestamps for each file
         meta_devices = get_sync_metadata("netbox_devices")

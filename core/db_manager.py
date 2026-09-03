@@ -85,12 +85,50 @@ def set_sync_metadata(module: str, source: str):
     conn.commit()
     conn.close()
 
+def clear_sync_metadata(modules: List[str]) -> None:
+    """Drop the sync source/timestamp rows for the given modules.
+
+    Called whenever the underlying records are deleted so the UI stops showing a
+    stale "last update time" for data that is no longer in the database.
+    """
+    if not modules:
+        return
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    placeholders = ",".join("?" for _ in modules)
+    cursor.execute(f"DELETE FROM sync_metadata WHERE module IN ({placeholders})", tuple(modules))
+    conn.commit()
+    conn.close()
+
+# Per-file metadata modules mapped to the query that counts their records, so a
+# timestamp can never outlive the data it describes.
+_MODULE_RECORD_COUNTS: Dict[str, str] = {
+    "netbox_sites": "SELECT COUNT(*) FROM sites_records",
+    "netbox_VLANs": "SELECT COUNT(*) FROM ipam_records WHERE record_type = 'vlan'",
+    "netbox_prefixes": "SELECT COUNT(*) FROM ipam_records WHERE record_type = 'prefix'",
+    "netbox_devices": "SELECT COUNT(*) FROM inventory_records WHERE category IN ('device', 'hypervisor')",
+    "netbox_virtual_machines": "SELECT COUNT(*) FROM inventory_records WHERE category = 'vm'",
+    "ipam": "SELECT (SELECT COUNT(*) FROM ipam_records) + (SELECT COUNT(*) FROM sites_records)",
+    "naming": "SELECT COUNT(*) FROM inventory_records",
+}
+
 def get_sync_metadata(module: str) -> Dict[str, str]:
     init_db()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT source, updated_at FROM sync_metadata WHERE module = ?", (module,))
     row = cursor.fetchone()
+
+    if row and module in _MODULE_RECORD_COUNTS:
+        cursor.execute(_MODULE_RECORD_COUNTS[module])
+        if int(cursor.fetchone()[0] or 0) == 0:
+            # Records were removed without the timestamp being cleared (e.g. by an
+            # older build); drop the orphaned row so no stale date is displayed.
+            cursor.execute("DELETE FROM sync_metadata WHERE module = ?", (module,))
+            conn.commit()
+            row = None
+
     conn.close()
     if row:
         return {"source": row[0], "updated_at": row[1]}
@@ -460,6 +498,7 @@ def clear_device_records() -> int:
     deleted = cursor.rowcount
     conn.commit()
     conn.close()
+    clear_sync_metadata(["netbox_devices"])
     return deleted
 
 def clear_vm_records() -> int:
@@ -470,6 +509,7 @@ def clear_vm_records() -> int:
     deleted = cursor.rowcount
     conn.commit()
     conn.close()
+    clear_sync_metadata(["netbox_virtual_machines"])
     return deleted
 
 def clear_inventory_records() -> int:
@@ -477,10 +517,10 @@ def clear_inventory_records() -> int:
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("DELETE FROM inventory_records")
-    cursor.execute("DELETE FROM sync_metadata WHERE module = 'naming'")
     deleted = cursor.rowcount
     conn.commit()
     conn.close()
+    clear_sync_metadata(["naming", "netbox_devices", "netbox_virtual_machines"])
     return deleted
 
 def clear_sites_records() -> int:
@@ -491,6 +531,7 @@ def clear_sites_records() -> int:
     deleted = cursor.rowcount
     conn.commit()
     conn.close()
+    clear_sync_metadata(["netbox_sites"])
     return deleted
 
 def clear_vlans_records() -> int:
@@ -501,6 +542,7 @@ def clear_vlans_records() -> int:
     deleted = cursor.rowcount
     conn.commit()
     conn.close()
+    clear_sync_metadata(["netbox_VLANs"])
     return deleted
 
 def clear_prefixes_records() -> int:
@@ -511,6 +553,7 @@ def clear_prefixes_records() -> int:
     deleted = cursor.rowcount
     conn.commit()
     conn.close()
+    clear_sync_metadata(["netbox_prefixes"])
     return deleted
 
 def clear_ipam_records() -> int:
@@ -519,10 +562,10 @@ def clear_ipam_records() -> int:
     cursor = conn.cursor()
     cursor.execute("DELETE FROM ipam_records")
     cursor.execute("DELETE FROM sites_records")
-    cursor.execute("DELETE FROM sync_metadata WHERE module = 'ipam'")
     deleted = cursor.rowcount
     conn.commit()
     conn.close()
+    clear_sync_metadata(["ipam", "netbox_sites", "netbox_VLANs", "netbox_prefixes"])
     return deleted
 
 def get_total_record_count() -> int:
