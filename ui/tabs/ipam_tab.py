@@ -45,104 +45,6 @@ from core.db_manager import (get_all_site_names,
 from utils.formatters import to_title_case_preserve_acronyms
 from ui.components import render_ai_chat, render_backup_uploader
 
-POWERSHELL_AGENT_CODE = """<#
-.SYNOPSIS
-    NetBox Hub Sync Agent (Optimized Core Sync)
-#>
-[CmdletBinding()]
-param (
-    [Parameter(Mandatory = $true)]
-    [string]$NetBoxUrl,
-
-    [Parameter(Mandatory = $true)]
-    [Alias("NetBoxToken", "Token")]
-    [string]$ApiToken,
-
-    [Parameter(Mandatory = $true)]
-    [Alias("Destination", "Hub")]
-    [string]$HubUrl,
-
-    [string]$HubSyncKey = "netbox-hub-secret-sync-key",
-    [int]$PageSize = 2000
-)
-
-$NetBoxUrl = $NetBoxUrl.TrimEnd('/')
-$HubEndpoint = "$($HubUrl.TrimEnd('/'))/api/v1/sync/push"
-
-$BackupData = [ordered]@{ sync_key = $HubSyncKey }
-
-function Get-PaginatedData {
-    param([string]$Endpoint)
-    $Results = @()
-    $Url = "$NetBoxUrl/api/$Endpoint/?limit=$PageSize"
-    do {
-        Write-Host "Fetching: $Url"
-        try {
-            $rawJson = & curl.exe -k -s -L -H "Authorization: Token $ApiToken" -H "Accept: application/json" $Url
-            if (-not $rawJson) { break }
-            $Response = $rawJson | ConvertFrom-Json
-            if ($Response.results) {
-                $Results += $Response.results
-                Write-Host ("Retrieved {0} records" -f $Results.Count)
-            } else { break }
-            $Url = $Response.next
-        } catch { break }
-    } while ($Url)
-    return $Results
-}
-
-$Endpoints = @(
-    "dcim/sites",
-    "ipam/vlans",
-    "ipam/prefixes",
-    "dcim/devices",
-    "virtualization/virtual-machines"
-)
-
-Write-Host "`n=========================================" -ForegroundColor Cyan
-Write-Host "NETBOX CORE FAST SYNC & CLOUD HUB SYNC" -ForegroundColor Cyan
-Write-Host "=========================================`n" -ForegroundColor Cyan
-
-foreach ($Endpoint in $Endpoints) {
-    Write-Host "Exporting $Endpoint..." -ForegroundColor Yellow
-    $Key = $Endpoint.Replace("/", "_")
-    $BackupData[$Key] = Get-PaginatedData -Endpoint $Endpoint
-    Write-Host "Completed $Endpoint`n" -ForegroundColor Green
-}
-
-$PayloadJson = $BackupData | ConvertTo-Json -Depth 100 -Compress
-Write-Host "Payload size: $([Math]::Round(($PayloadJson.Length / 1MB), 2)) MB"
-Write-Host "Syncing with Cloud Hub: $HubEndpoint..." -ForegroundColor Yellow
-
-try {
-    $tempFile = [System.IO.Path]::GetTempFileName()
-    [System.IO.File]::WriteAllText($tempFile, $PayloadJson, [System.Text.Encoding]::UTF8)
-
-    $rawPush = & curl.exe -k -s -L -X POST `
-        -H "Content-Type: application/json" `
-        -H "X-Hub-Key: $HubSyncKey" `
-        --data-binary "@$tempFile" `
-        $HubEndpoint
-
-    Remove-Item -Path $tempFile -Force -ErrorAction SilentlyContinue
-    $PushResponse = $rawPush | ConvertFrom-Json
-
-    if ($PushResponse.success) {
-        Write-Host "`n=========================================" -ForegroundColor Green
-        Write-Host "CLOUD SYNC SUCCESSFUL!" -ForegroundColor Green
-        Write-Host "=========================================" -ForegroundColor Green
-        Write-Host "   • Sites Imported:    $($PushResponse.imported.sites)" -ForegroundColor White
-        Write-Host "   • Prefixes Imported: $($PushResponse.imported.prefixes)" -ForegroundColor White
-        Write-Host "   • Devices Imported:  $($PushResponse.imported.devices)" -ForegroundColor White
-        Write-Host "   • VMs Imported:      $($PushResponse.imported.vms)" -ForegroundColor White
-    } else {
-        Write-Host "❌ Error: $($PushResponse.error)" -ForegroundColor Red
-    }
-} catch {
-    Write-Host "❌ Push failed: $($_.Exception.Message)" -ForegroundColor Red
-}
-"""
-
 def handle_site_change():
     """Triggered on site name input change: automatically looks up and fills Scope ID & Supernet."""
     entered_site = st.session_state.get("ipam_site_in", "").strip()
@@ -502,7 +404,7 @@ def render_ipam_tab(active_model: str):
     tick_vlans = " ✅" if total_vlans_recs > 0 else ""
     tick_prefixes = " ✅" if total_prefixes_recs > 0 else ""
 
-    with st.expander(f"📥 Ingest NetBox Site Data (Backup / Agent / CSV) {status_tag}", expanded=False):
+    with st.expander(f"📥 Ingest NetBox Site Data (Backup / CSV) {status_tag}", expanded=False):
         if total_db_count > 0:
             # Get the most recent source from any of the files
             meta_sites = get_sync_metadata("netbox_sites")
@@ -518,26 +420,14 @@ def render_ipam_tab(active_model: str):
         render_backup_uploader("ipam")
         st.markdown("---")
 
-        st.markdown("**Option B: Automated Push via PowerShell Agent:**")
-        st.code('.\\Sync-NetBoxHub.ps1 -NetBoxUrl "https://xxxx" -ApiToken "xxxx" -HubUrl "xxxx"', language="powershell")
-
-        st.caption("💡 *Press **Refresh** after the upload is completed in PowerShell to reload the local data.*")
-
-        c_dl, c_ref = st.columns([2, 1])
-        with c_dl:
-            st.download_button(
-                "⬇️ Download Sync-NetBoxHub.ps1 Agent",
-                POWERSHELL_AGENT_CODE,
-                file_name="Sync-NetBoxHub.ps1",
-                mime="text/plain",
-                key="dl_ps1_ipam"
-            )
-        with c_ref:
+        c_ref_row, c_ref_cap = st.columns([1, 3])
+        with c_ref_row:
             if st.button("🔄 Refresh", key="ref_ipam_btn", width="stretch"):
                 st.rerun()
+        with c_ref_cap:
+            st.caption("Reload the local database view.")
 
-        st.markdown("---")
-        st.markdown("**Option C: Manual CSV Export & Upload:**")
+        st.markdown("**Option B: Manual CSV Export & Upload:**")
 
         meta_sites = get_sync_metadata("netbox_sites")
         meta_vlans = get_sync_metadata("netbox_VLANs")

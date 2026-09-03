@@ -143,3 +143,12 @@ RULES_FILE = "naming_rules.json"
 * **IP Ownership Resolution**: IP address records now surface the device or VM behind the assigned interface.
 * **Fixed Undefined DB Path**: `lookup_vlan_description_from_db` referenced an undefined `DATABASE_PATH` and always failed silently; it now uses `DB_PATH`.
 * **Repaired `.gitignore`**: Removed a stray `cat << 'EOF'` heredoc wrapper that made the first and last lines non-functional, and added the master backup JSON files.
+
+## Release v2.21 — Bundled Export Script, Agent Option Removed & Timestamp Reset
+
+### 🚀 New Features
+* **PowerShell Exporter Inside Option A**: The `netbox-export.ps1` script that produces `NetBox_Backup_<timestamp>.json` is now shown directly above the upload button as Step 1, with the run command, a download button and a collapsible full-script view. Step 2 is the JSON upload.
+
+### 🛠️ Improvements & Refinements
+* **Removed the PowerShell Agent Option**: The former "Option A/B: Automated Push via PowerShell Agent" block is gone from both the IPAM and Naming ingest panels, along with the embedded `POWERSHELL_AGENT_CODE` payload and its download button. Manual CSV upload is now Option B.
+* **Last Update Time Clears With the Data**: Removing records now also clears their sync timestamp, so the CSV rows no longer show a stale "last update time" for data that is no longer in the database. Added `clear_sync_metadata()` and wired it into `clear_sites_records`, `clear_vlans_records`, `clear_prefixes_records`, `clear_device_records`, `clear_vm_records`, `clear_inventory_records` and `clear_ipam_records`.
