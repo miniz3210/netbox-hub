@@ -323,7 +323,7 @@ def generate_prefix_import_line(
     role: str,
     description: str
 ) -> str:
-    """
+    '''
     Replicates Excel prefix import:
     =G1&H1&",active,dcim.site,"&$E$1&","""&$B$1&" VLAN Group"",,,""Site Subnet - "&I1&""""
     
@@ -337,7 +337,7 @@ def generate_prefix_import_line(
     
     Returns:
         CSV line for prefix import
-    """
+    '''
     vlan_group = f"{site_name} VLAN Group"
     role_str = f'"{role}"' if role else ""
     desc_str = f'"{description}"' if description else ""

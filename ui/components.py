@@ -4,6 +4,14 @@ import streamlit as st
 from config.constants import APP_VERSION
 from config.settings import AVAILABLE_MODELS, OPENROUTER_BASE_URL
 from core.ai_client import call_ai, test_model_connection, fetch_free_models
+from core.backup_manager import (
+    OBJECT_LABELS,
+    clear_backup_records,
+    get_backup_metadata,
+    get_backup_object_counts,
+    save_netbox_backup,
+    set_backup_enabled,
+)
 
 CHAT_HEIGHT = 380
 
@@ -83,6 +91,124 @@ def render_ai_chat(
             disabled=not history,
             width="stretch",
         )
+
+def _handle_backup_upload(uploader_key: str, scope_key: str) -> None:
+    uploaded = st.session_state.get(uploader_key)
+    result_key = f"backup_upload_result_{scope_key}"
+    error_key = f"backup_upload_error_{scope_key}"
+
+    if not uploaded:
+        return
+
+    files = uploaded if isinstance(uploaded, list) else [uploaded]
+    for file_obj in files:
+        try:
+            if hasattr(file_obj, "seek"):
+                file_obj.seek(0)
+            result = save_netbox_backup(file_obj, filename=file_obj.name)
+        except Exception as exc:
+            st.session_state[error_key] = f"**{file_obj.name}**: {exc}"
+            st.session_state[result_key] = None
+            return
+
+        st.session_state[error_key] = ""
+        st.session_state[result_key] = result
+        # Keep the enable checkbox in step with the freshly ingested file.
+        st.session_state[f"netbox_backup_enabled_{scope_key}"] = True
+
+
+def _handle_backup_toggle(checkbox_key: str) -> None:
+    set_backup_enabled(bool(st.session_state.get(checkbox_key)))
+
+
+def _handle_backup_clear(scope_key: str) -> None:
+    clear_backup_records()
+    st.session_state[f"backup_upload_result_{scope_key}"] = None
+    st.session_state[f"backup_upload_error_{scope_key}"] = ""
+    st.session_state.pop(f"netbox_backup_enabled_{scope_key}", None)
+
+
+def render_backup_uploader(scope_key: str) -> dict:
+    """Render the NetBox master backup (JSON) upload block.
+
+    Shows the upload date and an enable checkbox that controls whether the AI
+    Assistant is allowed to read the backup. Returns the backup metadata dict.
+    """
+    meta = get_backup_metadata()
+    uploader_key = f"netbox_backup_uploader_{scope_key}"
+    checkbox_key = f"netbox_backup_enabled_{scope_key}"
+    result_key = f"backup_upload_result_{scope_key}"
+    error_key = f"backup_upload_error_{scope_key}"
+
+    st.markdown("**Option A: Upload Netbox_Backup**")
+    st.caption(
+        "Upload the full `NetBox_Backup_<timestamp>.json` master export. "
+        "Every object (sites, devices, interfaces, VLANs, prefixes, IPs, VMs, "
+        "clusters, tenants, circuits) becomes searchable by the AI Assistant."
+    )
+
+    st.file_uploader(
+        "Upload NetBox master backup (JSON)",
+        type=["json"],
+        accept_multiple_files=False,
+        key=uploader_key,
+        on_change=_handle_backup_upload,
+        args=(uploader_key, scope_key),
+        label_visibility="collapsed",
+    )
+
+    error = st.session_state.get(error_key)
+    if error:
+        st.error(f"❌ {error}")
+
+    result = st.session_state.get(result_key)
+    if result:
+        st.success(
+            f"✅ Ingested {result['total']} NetBox objects "
+            f"({result['sites']} sites, {result['ipam']} IPAM records, "
+            f"{result['devices']} devices, {result['vms']} VMs)."
+        )
+        st.session_state[result_key] = None
+
+    if not meta["loaded"]:
+        st.caption("⚪ No backup file uploaded — AI Assistant uses CSV/agent data only.")
+        return meta
+
+    # The database holds the authoritative enabled flag; seed the widget from it.
+    if checkbox_key not in st.session_state:
+        st.session_state[checkbox_key] = meta["enabled"]
+
+    c_chk, c_clr = st.columns([3, 1])
+    with c_chk:
+        st.checkbox(
+            f"📦 `{meta['filename']}` — uploaded {meta['uploaded_at']} "
+            f"({meta['record_count']} objects)",
+            key=checkbox_key,
+            on_change=_handle_backup_toggle,
+            args=(checkbox_key,),
+            help="Tick to let the AI Assistant read this backup file. Untick to exclude it without deleting.",
+        )
+    with c_clr:
+        st.button(
+            "🗑️ Remove Backup",
+            key=f"btn_clear_backup_{scope_key}",
+            on_click=_handle_backup_clear,
+            args=(scope_key,),
+            width="stretch",
+        )
+
+    counts = get_backup_object_counts()
+    if counts:
+        with st.expander(f"📊 Backup contents ({len(counts)} object types)", expanded=False):
+            for object_type, count in counts.items():
+                label = OBJECT_LABELS.get(object_type, object_type.replace("_", " ").title())
+                st.markdown(f"* **{label}**: `{count}`")
+
+    if not meta["enabled"]:
+        st.warning("⚠️ Backup is uploaded but excluded from AI Assistant lookups.", icon="⚠️")
+
+    return meta
+
 
 def render_sidebar() -> str:
     with st.sidebar:

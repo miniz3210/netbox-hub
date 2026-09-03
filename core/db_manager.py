@@ -395,16 +395,22 @@ def save_ipam_records_batch(records: List[Dict[str, Any]], clear_first: bool = F
     
     for r in records:
         raw_prefix = str(r.get("prefix_or_subnet") or r.get("prefix") or r.get("subnet") or r.get("address") or r.get("Prefixes") or "").strip()
-        if not raw_prefix or raw_prefix.lower() == "nan":
-            continue
-        
+        if raw_prefix.lower() == "nan":
+            raw_prefix = ""
+
         cidrs = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}/\d{1,2}\b', raw_prefix)
         if not cidrs and "/" in raw_prefix:
             cidrs = [raw_prefix]
 
         v_id = int(r.get("vlan_id") or r.get("vid") or r.get("VID") or 0) if str(r.get("vlan_id") or r.get("vid") or r.get("VID") or "").isdigit() else None
         rec_type = str(r.get("record_type") or ("vlan" if v_id or r.get("vlan_name") else "prefix")).strip().lower()
-        
+
+        # VLANs are kept even without an assigned prefix; prefixes require a CIDR.
+        if not cidrs:
+            if rec_type != "vlan" or not (v_id or r.get("vlan_name")):
+                continue
+            cidrs = [""]
+
         if rec_type == "vlan":
             has_vlans = True
         else:
@@ -619,7 +625,7 @@ def lookup_vlan_description_from_db(role_name: str) -> Optional[str]:
         return None
     clean_role = role_name.strip()
     try:
-        with sqlite3.connect(DATABASE_PATH) as conn:
+        with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
             # 1. Exact match on role
             cursor.execute(

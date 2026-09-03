@@ -18,7 +18,7 @@ from core.db_manager import (
     get_file_sync_metadata
 )
 from ui.tabs.ipam_tab import POWERSHELL_AGENT_CODE
-from ui.components import render_ai_chat
+from ui.components import render_ai_chat, render_backup_uploader
 
 def build_naming_system_prompt(prompt: str) -> str:
     """Build the grounded naming/inventory system prompt for the AI Assistant."""
@@ -58,7 +58,11 @@ You have DIRECT ACCESS to the complete inventory database. Analyze the user's re
 9. Be specific and data-driven - always reference actual inventory items
 10. For naming suggestions, consider:
     - Site codes, device types, sequence numbers
-    - Consistency with existing naming patterns in the database"""
+    - Consistency with existing naming patterns in the database
+11. If a "NETBOX MASTER BACKUP" section is present it is the full NetBox export:
+    - Treat it as authoritative for any object type (sites, racks, devices, interfaces, IPs, VMs, clusters, tenants, circuits, VRFs)
+    - Use its "total in backup" figures when stating counts
+    - Quote the exact records listed rather than generalizing"""
 
 def apply_case(text: str, mode: str) -> str:
     return text.upper() if mode == "UPPERCASE" else text.lower()
@@ -130,7 +134,7 @@ def render_compact_toolbar(active_model):
     tick_devices = " ✅" if device_count > 0 else ""
     tick_vms = " ✅" if vm_count > 0 else ""
     
-    with st.expander(f"📥 Ingest NetBox Data (CSV) {status_tag}", expanded=False):
+    with st.expander(f"📥 Ingest NetBox Data (Backup / Agent / CSV) {status_tag}", expanded=False):
         if total_recs > 0:
             # Get metadata for devices and VMs
             meta_devices = get_sync_metadata("netbox_devices")
@@ -142,7 +146,10 @@ def render_compact_toolbar(active_model):
             
             st.markdown(f"**DB Status:** `Source: {display_source}`")
 
-        st.markdown("**Option A: Automated Push via PowerShell Agent (Recommended):**")
+        render_backup_uploader("naming")
+        st.markdown("---")
+
+        st.markdown("**Option B: Automated Push via PowerShell Agent:**")
         st.code('.\\Sync-NetBoxHub.ps1 -NetBoxUrl "https://xxxx" -ApiToken "xxxx" -HubUrl "xxxx"', language="powershell")
 
         st.caption("💡 *Press **Refresh** after the upload is completed in PowerShell to reload the local data.*")
@@ -160,7 +167,8 @@ def render_compact_toolbar(active_model):
             if st.button("🔄 Refresh", key="ref_naming_btn", use_container_width=True):
                 st.rerun()
 
-        st.markdown("**Option B: Manual CSV Export & Upload:**")
+        st.markdown("---")
+        st.markdown("**Option C: Manual CSV Export & Upload:**")
 
         # Get timestamps for each file
         meta_devices = get_sync_metadata("netbox_devices")
