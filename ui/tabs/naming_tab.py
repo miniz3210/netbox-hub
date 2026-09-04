@@ -17,6 +17,7 @@ from core.db_manager import (
     get_sync_metadata,
     get_file_sync_metadata
 )
+from core.session_manager import SessionStateManager as SSM
 from ui.components import render_ai_chat, render_backup_uploader
 
 def build_naming_system_prompt(prompt: str) -> str:
@@ -222,14 +223,14 @@ def render_compact_toolbar(active_model):
     case_mode = st.radio(
         "Casing",
         ["UPPERCASE", "lowercase"],
-        index=0 if st.session_state.get("naming_case_mode", "UPPERCASE") == "UPPERCASE" else 1,
+        index=0 if SSM.get_naming_case_mode() == "UPPERCASE" else 1,
         horizontal=True,
         key="naming_case_radio",
         help="Render output in UPPERCASE or lowercase."
     )
     
     # Store the selection
-    st.session_state["naming_case_mode"] = case_mode
+    SSM.set_naming_case_mode(case_mode)
 
     return case_mode
 
