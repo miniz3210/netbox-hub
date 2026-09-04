@@ -1,6 +1,7 @@
 """
 NetBox Universal Library Hub - Main Application
 Streamlit UI definition.
+Version 2.4.0
 """
 
 import logging
@@ -9,14 +10,15 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import streamlit as st
 from dotenv import load_dotenv
 
-from config.constants import APP_VERSION
+from config.constants import APP_VERSION, APP_NAME
 from core.catalog import get_repo_catalog
 from core.db_manager import init_db
 from core.exceptions import GitHubCatalogError
+from core.session_manager import SessionStateManager as SSM
 from ui.components import render_sidebar
 
 st.set_page_config(
-    page_title="NetBox Universal Library Hub",
+    page_title=f"{APP_NAME} v{APP_VERSION}",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -32,25 +34,26 @@ logger = logging.getLogger("netbox-hub")
 
 init_db()
 
-# Load naming rules on startup to ensure standards are always current
-if "naming_rules_loaded" not in st.session_state:
+# Load naming rules on startup using Session State Manager
+if not SSM.get_naming_rules_loaded():
     from config.naming_rules import load_naming_rules
-    st.session_state["naming_rules"] = load_naming_rules()
-    st.session_state["naming_rules_loaded"] = True
+    SSM.set_naming_rules(load_naming_rules())
+    SSM.set_naming_rules_loaded(True)
 
 active_model = render_sidebar()
 
 # Lazy-load catalog inside session state so it doesn't block the UI on first paint.
-if "catalog" not in st.session_state:
+catalog = SSM.get_catalog()
+if catalog is None:
     try:
         with st.spinner("Indexing NetBox devicetype-library from GitHub..."):
-            st.session_state["catalog"] = get_repo_catalog()
+            SSM.set_catalog(get_repo_catalog())
     except GitHubCatalogError as exc:
         logger.exception("GitHub catalog failed to load")
-        st.session_state["catalog"] = None
+        SSM.set_catalog(None)
         st.error(f"❌ Failed to load official GitHub catalog: {exc}")
-
-catalog: Optional[Dict[str, Any]] = st.session_state.get("catalog")
+    
+    catalog = SSM.get_catalog()
 
 
 def _device_tab(catalog, active_model):

@@ -68,6 +68,14 @@ def init_db():
     if "record_type" not in columns:
         cursor.execute("ALTER TABLE ipam_records ADD COLUMN record_type TEXT DEFAULT 'prefix'")
 
+    # Create indexes for performance optimization
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ipam_site ON ipam_records(site)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ipam_vlan_id ON ipam_records(vlan_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ipam_prefix ON ipam_records(prefix_or_subnet)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sites_slug ON sites_records(slug)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inventory_category ON inventory_records(category)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inventory_name ON inventory_records(name)")
+
     conn.commit()
     conn.close()
 
