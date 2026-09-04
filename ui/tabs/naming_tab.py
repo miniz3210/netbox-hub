@@ -327,12 +327,31 @@ def render_naming_tab(active_model):
                 st.code(f"to {l_dev}_{l_port_short}{role_suffix}", language="text")
             
             elif p_cat == "Switch LAG Member Port (LACP)":
-                st.markdown("### ⚙️ LAG Member Port Formatter")
-                lag_id = st.text_input("LAG ID (e.g. Po1)", value="Po1", key="lag_id")
-                port = st.text_input("Physical Port (e.g. Gi1/0/1)", value="", key="lag_port")
-                st.code(f"channel-group {lag_id.replace('Po', '')} mode active", language="text")
-                st.code(f"interface {normalize_port_shortname(port)}", language="text")
-                st.code(f" description LAG Member: {lag_id}", language="text")
+                l_dev_lag = st.text_input("Local Device Hostname", value=final_device_name, placeholder="e.g. SWUSNYC01-0", key="lag_ld").strip()
+                l_port_lag_raw = st.text_input("Local Physical Port", value="", placeholder="e.g. Gi1/0/1, Te1/1/1", key="lag_lp")
+                local_po = st.text_input("Local Port-Channel (LAG ID)", value="Po1", placeholder="e.g. Po1, Po10", key="lag_po").strip()
+                r_dev_lag = st.text_input("Remote Device Hostname", value="", placeholder="e.g. SWUSNYC02-0", key="lag_rd").strip()
+                r_port_lag_raw = st.text_input("Remote Port", value="", placeholder="e.g. Gi1/0/1, Po1", key="lag_rp")
+                link_role_lag = st.text_input("Role / Purpose", value="Trunk", placeholder="e.g. Trunk, Uplink", key="lag_lr").strip()
+
+                l_port_lag_short = normalize_port_shortname(l_port_lag_raw)
+                r_port_lag_short = normalize_port_shortname(r_port_lag_raw)
+                role_suffix_lag = f" [{link_role_lag}]" if link_role_lag else ""
+                
+                lag_desc = f"{l_port_lag_short} [{local_po}] -> {r_dev_lag}_{r_port_lag_short}{role_suffix_lag}" if r_dev_lag and r_port_lag_raw else f"LAG Member: {local_po}"
+
+                st.caption(f"Generated LAG Member Port Description:")
+                st.code(lag_desc, language="text")
+                
+                if st.button("🤖 AI Verify LAG Member Description", key="ai_chk_lag"):
+                    with st.spinner("Auditing against Standards..."):
+                        st.info(verify_and_suggest_with_ai(
+                            lag_desc, 
+                            active_model, 
+                            asset_type="Switch LAG Member Port Description", 
+                            category_key="device",
+                            site_filter=c_site
+                        ))
             
             elif p_cat == "Switch Port-Channel (Logical)":
                 st.markdown("### 🏗️ Port-Channel Formatter")
@@ -341,10 +360,30 @@ def render_naming_tab(active_model):
                 st.code(f" description Uplink to ...", language="text")
             
             elif p_cat == "Switch Access Port (Endpoint)":
-                st.markdown("### 💻 Access Port Formatter")
-                vlan = st.text_input("Access VLAN", value="10", key="ac_vlan")
-                st.code(f"switchport mode access", language="text")
-                st.code(f"switchport access vlan {vlan}", language="text")
+                access_vlan_id = st.text_input("Access VLAN ID", value="10", placeholder="e.g. 10, 100", key="ac_vlan").strip()
+                access_vlan_name = st.text_input("VLAN Name", value="", placeholder="e.g. Data, Voice, Guest", key="ac_vlan_name").strip()
+                endpoint_device = st.text_input("Connected Device/Host", value="", placeholder="e.g. PC-001, Printer-Lab", key="ac_device").strip()
+                endpoint_port = st.text_input("Endpoint Port (Optional)", value="", placeholder="e.g. eth0, NIC1", key="ac_port").strip()
+
+                vlan_display = f"VLAN{access_vlan_id}" if access_vlan_id else "VLAN"
+                if access_vlan_name:
+                    vlan_display = access_vlan_name
+                
+                device_part = f"{endpoint_device}_{endpoint_port}" if endpoint_device and endpoint_port else (endpoint_device if endpoint_device else "Endpoint")
+                access_desc = f"{vlan_display} - {device_part}"
+
+                st.caption(f"Generated Access Port Description:")
+                st.code(access_desc, language="text")
+                
+                if st.button("🤖 AI Verify Access Port Description", key="ai_chk_access"):
+                    with st.spinner("Auditing against Standards..."):
+                        st.info(verify_and_suggest_with_ai(
+                            access_desc, 
+                            active_model, 
+                            asset_type="Switch Access Port Description", 
+                            category_key="device",
+                            site_filter=c_site
+                        ))
             
             elif p_cat == "Firewall Security Zone Interface":
                 st.markdown("### 🛡️ Firewall Interface Formatter")
