@@ -260,7 +260,14 @@ def on_preset_change():
         order_map = {p['vid']: i for i, p in enumerate(target_preset)}
         
         # Sort records by order in preset, then by vlan_id (handle None values)
-        records.sort(key=lambda r: (order_map.get(r.get('vlan_id'), 999), r.get('vlan_id') or 0))
+        def sort_key(r):
+            vlan_id = r.get('vlan_id')
+            # If vlan_id is None, treat it as 9999 for sorting (put at end)
+            if vlan_id is None:
+                return (999, 9999)
+            return (order_map.get(vlan_id, 999), vlan_id)
+        
+        records.sort(key=sort_key)
         
         # Use a dictionary to de-duplicate based on vlan_id (and keep first one found)
         unique_records = {}
