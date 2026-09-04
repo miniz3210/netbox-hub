@@ -7,10 +7,9 @@ DEFAULT_RULES = {
     "branch_switch": "SW<Country><State><Site><Zone><Seq>-<StackID> / VS<Country><State><Site><Seq>-<StackID>",
     "branch_ap": "WAP<Country><State><Site><Seq>",
     "branch_security": "FW<Country><State><Site><Vendor><Seq> / ION<Country><State><Site><Seq>",
-    "switch_uplink_desc_local": "to <Remote_Device>_<Remote_Port_Short> [<Role>]",
-    "switch_uplink_desc_remote": "to <Local_Device>_<Local_Port_Short> [<Role>]",
-    "switch_lag_member": "<Local_Port_Short> [<Local_Po>] -> <Remote_Device>_<Remote_Port_Short> [<Role>]",
-    "switch_port_channel": "<Local_Po> -> <Remote_Device>_<Remote_Po> [<Trunk_Info>]",
+    "switch_uplink_desc": "Uplink from <Local_Device>_<Local_Port_Short> to <Remote_Device>_<Remote_Port_Short>",
+    "switch_lag_member": "LACP to <Remote_Device>",
+    "switch_port_channel": "<Local_Po> to <Remote_Device>_<Remote_Po> Trunk <Trunk_Info>",
     "switch_access_desc": "<VLAN_Name> - <Host/Device>_<Port>",
     "firewall_interface": "<Role/Zone>_<VLAN_ID>",
     "esxi_host": "<site><role/esx><seq>.<domain> (Valid domains: .eswine.adds for IT/Corp, .eswines.ot or .eswine.ot for OT/Industrial, .corp.local for Branch/Local, or shortname without domain)",
@@ -45,8 +44,8 @@ def export_rules_as_prompt(rules: Dict[str, str]) -> str:
 - Switch Hostname: {rules.get('branch_switch', '')}
 - Wireless AP Hostname: {rules.get('branch_ap', '')}
 - Firewall / Security Hostname: {rules.get('branch_security', '')}
-- Switch Uplink Description (Local): {rules.get('switch_uplink_desc_local', '')}
-- Switch Uplink Description (Remote): {rules.get('switch_uplink_desc_remote', '')}
+
+- Switch Uplink Description: {rules.get('switch_uplink_desc', '')}
 - Switch LAG Member Description: {rules.get('switch_lag_member', '')}
 - Switch Port Channel Description: {rules.get('switch_port_channel', '')}
 - Switch Access Port Description: {rules.get('switch_access_desc', '')}

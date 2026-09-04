@@ -315,30 +315,32 @@ def render_naming_tab(active_model):
                 l_port_raw = st.text_input("Local Port", value="", placeholder="e.g. Gi1/0/48, Te1/0/1", key="up_lp")
                 r_dev = st.text_input("Remote Device Hostname", value="", placeholder="e.g. SWUSNYC02-0", key="up_rd").strip()
                 r_port_raw = st.text_input("Remote Port", value="", placeholder="e.g. Gi1/0/48, Te1/0/1", key="up_rp")
-                link_role = st.text_input("Role / Purpose", value="Uplink", placeholder="e.g. Uplink", key="up_lr").strip()
 
                 l_port_short = normalize_port_shortname(l_port_raw)
                 r_port_short = normalize_port_shortname(r_port_raw)
-                role_suffix = f" [{link_role}]" if link_role else ""
+
+                uplink_desc_local = f"Uplink from {l_dev}_{l_port_short} to {r_dev}_{r_port_short}" if l_dev and l_port_raw and r_dev and r_port_raw else "Uplink from <Local> to <Remote>"
+                uplink_desc_remote = f"Uplink from {r_dev}_{r_port_short} to {l_dev}_{l_port_short}" if l_dev and l_port_raw and r_dev and r_port_raw else "Uplink from <Remote> to <Local>"
 
                 st.caption(f"On Local Device (`{l_dev or 'LOCAL'}`):")
-                st.code(f"to {r_dev}_{r_port_short}{role_suffix}", language="text")
-                st.caption(f"On Remote Device (`{r_dev}`):")
-                st.code(f"to {l_dev}_{l_port_short}{role_suffix}", language="text")
+                st.code(uplink_desc_local, language="text")
+                st.caption(f"On Remote Device (`{r_dev or 'REMOTE'}`):")
+                st.code(uplink_desc_remote, language="text")
+                
+                if st.button("🤖 AI Verify Uplink Description", key="ai_chk_uplink"):
+                    with st.spinner("Auditing against Standards..."):
+                        st.info(verify_and_suggest_with_ai(
+                            uplink_desc_local, 
+                            active_model, 
+                            asset_type="Switch Uplink Description", 
+                            category_key="device",
+                            site_filter=c_site
+                        ))
             
             elif p_cat == "Switch LAG Member Port (LACP)":
-                l_dev_lag = st.text_input("Local Device Hostname", value=final_device_name, placeholder="e.g. SWUSNYC01-0", key="lag_ld").strip()
-                l_port_lag_raw = st.text_input("Local Physical Port", value="", placeholder="e.g. Gi1/0/1, Te1/1/1", key="lag_lp")
-                local_po = st.text_input("Local Port-Channel (LAG ID)", value="Po1", placeholder="e.g. Po1, Po10", key="lag_po").strip()
                 r_dev_lag = st.text_input("Remote Device Hostname", value="", placeholder="e.g. SWUSNYC02-0", key="lag_rd").strip()
-                r_port_lag_raw = st.text_input("Remote Port", value="", placeholder="e.g. Gi1/0/1, Po1", key="lag_rp")
-                link_role_lag = st.text_input("Role / Purpose", value="Trunk", placeholder="e.g. Trunk, Uplink", key="lag_lr").strip()
 
-                l_port_lag_short = normalize_port_shortname(l_port_lag_raw)
-                r_port_lag_short = normalize_port_shortname(r_port_lag_raw)
-                role_suffix_lag = f" [{link_role_lag}]" if link_role_lag else ""
-                
-                lag_desc = f"{l_port_lag_short} [{local_po}] -> {r_dev_lag}_{r_port_lag_short}{role_suffix_lag}" if r_dev_lag and r_port_lag_raw else f"LAG Member: {local_po}"
+                lag_desc = f"LACP to {r_dev_lag}" if r_dev_lag else "LACP to <Remote_Device>"
 
                 st.caption(f"Generated LAG Member Port Description:")
                 st.code(lag_desc, language="text")
@@ -354,10 +356,26 @@ def render_naming_tab(active_model):
                         ))
             
             elif p_cat == "Switch Port-Channel (Logical)":
-                st.markdown("### 🏗️ Port-Channel Formatter")
-                pc_id = st.text_input("Port-Channel ID (e.g. Po1)", value="Po1", key="pc_id")
-                st.code(f"interface {pc_id}", language="text")
-                st.code(f" description Uplink to ...", language="text")
+                local_po_id = st.text_input("Local Port-Channel ID", value="Po1", placeholder="e.g. Po1, Po10", key="pc_local_id").strip()
+                r_dev_po = st.text_input("Remote Device Hostname", value="", placeholder="e.g. SWUSNYC02-0", key="pc_rd").strip()
+                remote_po_id = st.text_input("Remote Port-Channel ID", value="Po1", placeholder="e.g. Po1, Po10", key="pc_remote_id").strip()
+                trunk_info = st.text_input("Trunk Info (Optional)", value="", placeholder="e.g. VLANs 10,20,30", key="pc_trunk").strip()
+
+                trunk_suffix = f" {trunk_info}" if trunk_info else ""
+                po_desc = f"{local_po_id} to {r_dev_po}_{remote_po_id} Trunk{trunk_suffix}" if r_dev_po else f"{local_po_id} to <Remote_Device>_<Remote_Po> Trunk"
+
+                st.caption(f"Generated Port-Channel Description:")
+                st.code(po_desc, language="text")
+                
+                if st.button("🤖 AI Verify Port-Channel Description", key="ai_chk_po"):
+                    with st.spinner("Auditing against Standards..."):
+                        st.info(verify_and_suggest_with_ai(
+                            po_desc, 
+                            active_model, 
+                            asset_type="Switch Port-Channel Description", 
+                            category_key="device",
+                            site_filter=c_site
+                        ))
             
             elif p_cat == "Switch Access Port (Endpoint)":
                 access_vlan_id = st.text_input("Access VLAN ID", value="10", placeholder="e.g. 10, 100", key="ac_vlan").strip()
@@ -386,9 +404,23 @@ def render_naming_tab(active_model):
                         ))
             
             elif p_cat == "Firewall Security Zone Interface":
-                st.markdown("### 🛡️ Firewall Interface Formatter")
-                zone = st.text_input("Security Zone", value="TRUST", key="fw_zone")
-                st.code(f"nameif {zone.lower()}", language="text")
+                fw_role = st.text_input("Role / Zone", value="", placeholder="e.g. TRUST, UNTRUST, DMZ", key="fw_role").strip()
+                fw_vlan_id = st.text_input("VLAN ID", value="", placeholder="e.g. 10, 100", key="fw_vlan").strip()
+
+                fw_desc = f"{fw_role}_{fw_vlan_id}" if fw_role and fw_vlan_id else (f"{fw_role}_<VLAN_ID>" if fw_role else "<Role/Zone>_<VLAN_ID>")
+
+                st.caption(f"Generated Firewall Interface Description:")
+                st.code(fw_desc, language="text")
+                
+                if st.button("🤖 AI Verify Firewall Interface Description", key="ai_chk_fw"):
+                    with st.spinner("Auditing against Standards..."):
+                        st.info(verify_and_suggest_with_ai(
+                            fw_desc, 
+                            active_model, 
+                            asset_type="Firewall Interface Description", 
+                            category_key="device",
+                            site_filter=c_site
+                        ))
 
     # Hosts & VMs
     elif "2. Hosts" in naming_cat:
