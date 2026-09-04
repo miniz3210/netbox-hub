@@ -688,13 +688,17 @@ def render_ipam_tab(active_model: str):
         r["Usable Range"] = eval_res["usable_range"]
         r["Status"] = eval_res["status"]
         
-        # Check if data was loaded from DB and use DB description
+        # Check if data was loaded from DB
         loaded_from_db = st.session_state.get("ipam_loaded_from_db", False)
-        if loaded_from_db and "_db_prefix_desc" in r and r.get("_db_prefix_desc"):
-            # Use the description from DB
-            r["Prefix Description"] = r["_db_prefix_desc"]
+        if loaded_from_db:
+            # When loaded from DB, use DB description (even if empty)
+            # Do NOT generate if empty - keep it empty
+            if "_db_prefix_desc" in r:
+                r["Prefix Description"] = r.get("_db_prefix_desc", "")
+            else:
+                r["Prefix Description"] = ""
         else:
-            # Generate description normally
+            # Generate description normally for preset/manual entries
             r["Prefix Description"] = eval_res["desc"]
 
     # Real-time Available Subnets and Capacity
