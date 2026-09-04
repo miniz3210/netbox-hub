@@ -598,30 +598,30 @@ def render_ipam_tab(active_model: str):
 
     # 3. Preset Selection & Allocation Editor
     st.markdown("---")
-    c_title, c_preset, c_indicator = st.columns([2.2, 1.5, 0.5])
+    c_title, c_preset = st.columns([2.5, 1.5])
     with c_title:
         st.markdown("##### 📊 Subnet Allocation & Live Status (✏️ Click any cell to edit)")
     with c_preset:
+        # Check if site was found in DB
+        selected_preset = st.session_state.get("ipam_preset_selector", "")
+        site_found = st.session_state.get("ipam_site_found_in_db", False)
+        
+        # Add notification to label if Load From DB is selected and site was found
+        if selected_preset == "🗄️ Load From DB (Existing Site)" and site_found:
+            label_text = "Load Standard Preset ✅"
+            help_text = "Site data loaded successfully from database"
+        else:
+            label_text = "Load Standard Preset"
+            help_text = "Quickly load pre-defined standard VLAN structures or start blank."
+        
         st.selectbox(
-            "Load Standard Preset",
+            label_text,
             options=list(VLAN_PRESETS.keys()),
             index=0,
             key="ipam_preset_selector",
             on_change=on_preset_change,
-            help="Quickly load pre-defined standard VLAN structures or start blank."
+            help=help_text
         )
-    with c_indicator:
-        # Show checkbox indicator when "Load From DB" is selected and site was found
-        selected_preset = st.session_state.get("ipam_preset_selector", "")
-        site_found = st.session_state.get("ipam_site_found_in_db", False)
-        
-        if selected_preset == "🗄️ Load From DB (Existing Site)":
-            if site_found:
-                st.markdown("<br>", unsafe_allow_html=True)
-                st.checkbox("", value=True, disabled=True, key="db_found_indicator", help="✅ Site found in database")
-            else:
-                st.markdown("<br>", unsafe_allow_html=True)
-                st.caption("⚪ Not found")
 
     if "ipam_persisted_rows" not in st.session_state:
         st.session_state["ipam_persisted_rows"] = []

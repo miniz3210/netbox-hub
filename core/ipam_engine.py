@@ -4,29 +4,31 @@ from typing import List, Dict, Any, Optional
 from core.db_manager import lookup_vlan_description_from_db
 
 BRANCH_VLAN_PRESET = [
+    {"vid": 1, "role": "Corporate", "vlan_name": "IT Generic", "desc": "IT Generic (Servers, network devices and PCs)"},
     {"vid": 300, "role": "Corporate WiFi", "vlan_name": "Corporate WiFi", "desc": "VIN_Corp"},
     {"vid": 100, "role": "Workstations", "vlan_name": "Workstations", "desc": "Wired Workstations"},
     {"vid": 5, "role": "Management", "vlan_name": "Management", "desc": "Management"},
     {"vid": 700, "role": "Printers", "vlan_name": "Printers", "desc": "Printers"},
     {"vid": 800, "role": "Audio Visual", "vlan_name": "Audio Visual", "desc": "AV equipment"},
-    {"vid": 200, "role": "Guests", "vlan_name": "Guests", "desc": "VIN_Guest"},
+    {"vid": 200, "role": "Guests", "vlan_name": "Guest", "desc": "VIN_Guest"},
     {"vid": 400, "role": "Mobiles", "vlan_name": "Mobiles", "desc": "VIN_Mobi"},
-    {"vid": 90, "role": "Routing", "vlan_name": "Routing", "desc": "Routing interface VLANs"},
+    {"vid": 247, "role": "VOIP", "vlan_name": "IT VoIP", "desc": "IT for VoIP devices"},
+    {"vid": 10, "role": "Routing", "vlan_name": "IT Internet exit", "desc": "Routing interface VLANs"},
     {"vid": 500, "role": "OT", "vlan_name": "OT", "desc": "OT"},
     {"vid": 600, "role": "IoT", "vlan_name": "IoT", "desc": "IoT/Security"},
 ]
 
 DATACENTER_VLAN_PRESET = [
-    {"vid": 10, "role": "OOB / IPMI / iLO", "vlan_name": "OOB / IPMI / iLO", "desc": "OOB-Mgmt"},
-    {"vid": 20, "role": "In-Band Management", "vlan_name": "In-Band Management", "desc": "InBand-Mgmt"},
-    {"vid": 30, "role": "vMotion", "vlan_name": "vMotion", "desc": "vMotion"},
-    {"vid": 40, "role": "Storage / iSCSI-A", "vlan_name": "Storage / iSCSI-A", "desc": "Storage-A"},
-    {"vid": 50, "role": "Storage / iSCSI-B", "vlan_name": "Storage / iSCSI-B", "desc": "Storage-B"},
-    {"vid": 100, "role": "Production App / Web", "vlan_name": "Production App / Web", "desc": "Prod-App"},
-    {"vid": 200, "role": "Production Database", "vlan_name": "Production Database", "desc": "Prod-DB"},
-    {"vid": 300, "role": "DMZ / Perimeter", "vlan_name": "DMZ / Perimeter", "desc": "DMZ"},
-    {"vid": 400, "role": "Core Infrastructure", "vlan_name": "Core Infrastructure", "desc": "Core-Infra"},
-    {"vid": 500, "role": "Backup / Recovery", "vlan_name": "Backup / Recovery", "desc": "Backup"},
+    {"vid": 5, "role": "Management", "vlan_name": "Management", "desc": "Management"},
+    {"vid": 41, "role": "Infrastructure", "vlan_name": "IT vMotion", "desc": "vMotion for VMware"},
+    {"vid": 31, "role": "Backup", "vlan_name": "IT Backup", "desc": "To interconnect VMware with Synology NAS by iSCSI"},
+    {"vid": 50, "role": "Servers", "vlan_name": "Servers", "desc": "Server network"},
+    {"vid": 100, "role": "Workstations", "vlan_name": "Workstations", "desc": "Wired Workstations"},
+    {"vid": 300, "role": "Corporate WiFi", "vlan_name": "Corporate WiFi", "desc": "VIN_Corp"},
+    {"vid": 200, "role": "Guests", "vlan_name": "Guest", "desc": "VIN_Guest"},
+    {"vid": 11, "role": "DMZ", "vlan_name": "IT DMZ", "desc": "IT DMZ"},
+    {"vid": 500, "role": "OT", "vlan_name": "OT", "desc": "OT"},
+    {"vid": 40, "role": "OT", "vlan_name": "OT Transit", "desc": "OT Transit"},
 ]
 
 VLAN_PRESETS = {
