@@ -22,7 +22,14 @@ def build_inventory_context_for_ai(category: str, site_filter: str = "") -> str:
     return f"MATCHED NETBOX DATA CONTEXT{site_notice}:\n" + "\n".join(samples)
 
 def verify_and_suggest_with_ai(user_input_text: str, model_name: str, asset_type: str = "General Asset", category_key: str = "device", site_filter: str = "") -> str:
-    naming_context = export_rules_as_prompt(load_naming_rules())
+    # Load naming rules from session state if available (updated by Standards tab), otherwise from file
+    import streamlit as st
+    if "naming_rules" in st.session_state:
+        naming_rules = st.session_state["naming_rules"]
+        naming_context = export_rules_as_prompt(naming_rules)
+    else:
+        naming_context = export_rules_as_prompt(load_naming_rules())
+    
     inventory_context = build_inventory_context_for_ai(category_key, site_filter=site_filter)
 
     system_msg = f"""You are a Principal Infrastructure Architect and NetBox Standards Auditor.
