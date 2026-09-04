@@ -19,23 +19,7 @@ def fetch_free_models() -> list[str]:
         "Content-Type": "application/json"
     }
     
-    # Model patterns suitable for structured YAML generation (text-only, instruction-following models)
-    suitable_patterns = [
-        "gemini",
-        "qwen",
-        "gpt-oss",
-        "gpt-20b",
-        "gpt-120b",
-        "llama-3",
-        "llama-3.3",
-        "mistral",
-        "deepseek",
-        "groq/",
-        "allam",
-        "ox-alpha"
-    ]
-    
-    # Exclude models unsuitable for structured output or premium
+    # Exclude models unsuitable for text generation
     exclude_patterns = [
         "vision",
         "image",
@@ -44,11 +28,6 @@ def fetch_free_models() -> list[str]:
         "stt",
         "embedding",
         "moderation",
-        "claude-opus",
-        "claude-sonnet",
-        "gpt-4o",
-        "o1-",
-        "thinking"
     ]
     
     try:
@@ -60,55 +39,34 @@ def fetch_free_models() -> list[str]:
             models = data.get("data", [])
             logger.info(f"Total models received: {len(models)}")
             
-            free_models = []
+            available_models = []
             for m in models:
                 model_id = m.get("id", "")
+                if not model_id:
+                    continue
+                    
                 model_id_lower = model_id.lower()
-                pricing = m.get("pricing", {})
                 
-                # Log first few models to understand pricing structure
-                if len(free_models) < 5:
-                    logger.info(f"Sample model: {model_id} | Pricing: {pricing}")
+                # Log first few models to understand structure
+                if len(available_models) < 5:
+                    logger.info(f"Sample model: {model_id} | Pricing: {m.get('pricing', {})}")
                 
-                prompt_price = pricing.get("prompt", None)
-                completion_price = pricing.get("completion", None)
-                
-                # Check if pricing indicates free (handle various formats)
-                is_free = False
-                try:
-                    # Check if prompt price is 0 (string or number)
-                    if prompt_price is not None:
-                        # Handle string format like "0" or numeric 0
-                        if isinstance(prompt_price, str):
-                            prompt_val = float(prompt_price.replace("$", "").strip()) if prompt_price else 0.0
-                        else:
-                            prompt_val = float(prompt_price)
-                        is_free = prompt_val == 0.0
-                    else:
-                        # If no pricing info provided, consider it potentially free (OmniRoute pattern)
-                        # Most local/free models don't expose pricing fields
-                        is_free = True
-                except (ValueError, TypeError) as e:
-                    logger.debug(f"Pricing parse error for {model_id}: {e}")
-                    # If pricing can't be parsed, assume free (common for OmniRoute)
-                    is_free = True
-                
-                # Check if model is suitable for YAML generation
-                is_suitable = any(pattern in model_id_lower for pattern in suitable_patterns)
+                # Exclude unsuitable models
                 is_excluded = any(pattern in model_id_lower for pattern in exclude_patterns)
                 
-                if is_free and is_suitable and not is_excluded:
-                    free_models.append(model_id)
-                    logger.info(f"✓ Added: {model_id} (prompt: {prompt_price})")
+                if not is_excluded:
+                    available_models.append(model_id)
+                    if len(available_models) <= 10:
+                        logger.info(f"✓ Added: {model_id}")
             
-            logger.info(f"Filtered free models count: {len(free_models)}")
-            
-            # If no models found with filtering, return all models as fallback
-            if len(free_models) == 0:
-                logger.warning("No models matched free filter criteria, returning all available models")
-                all_model_ids = [m.get("id", "") for m in models if m.get("id")]
-                logger.info(f"Total available models (unfiltered): {len(all_model_ids)}")
-                return sorted(all_model_ids)
+            logger.info(f"Available models count: {len(available_models)}")
+            return sorted(available_models)
+        else:
+            logger.warning(f"Failed to fetch models: HTTP {resp.status_code}, response: {resp.text[:200]}")
+            return []
+    except Exception as e:
+        logger.error(f"Error fetching free models: {e}", exc_info=True)
+        return []
             
             return sorted(free_models)
         else:
