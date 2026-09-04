@@ -51,7 +51,7 @@ def parse_prompt_to_rules(prompt_text: str, model_name: str) -> Dict[str, str]:
 Analyze this natural language naming standard and return a valid JSON matching this schema:
 {{
   "branch_switch": "...", "branch_ap": "...", "branch_security": "...",
-  "switch_uplink_desc_local": "...", "switch_uplink_desc_remote": "...",
+  "switch_uplink_desc": "...",
   "switch_lag_member": "...", "switch_port_channel": "...", "switch_access_desc": "...",
   "firewall_interface": "...", "esxi_host": "...", "vm_host": "...",
   "esxi_uplink": "...", "esxi_portgroup": "...", "esxi_vmkernel": "...", "netbox_server_yaml": "..."

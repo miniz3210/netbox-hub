@@ -1,0 +1,17 @@
+{
+  "branch_switch": "SW{Country}{State}{Site}{Zone}{Seq}-{StackID}",
+  "branch_ap": "WAP{Country}{State}{Site}{Seq}",
+  "branch_security": "FW{Country}{State}{Site}{Vendor}{Seq}",
+  "switch_uplink_desc_local": "Uplink from {Local_Device}_{Local_Port_Short} to {Remote_Device}_{Remote_Port_Short}",
+  "switch_uplink_desc_remote": "Uplink from {Remote_Device}_{Remote_Port_Short} to {Local_Device}_{Local_Port_Short}",
+  "switch_lag_member": "LACP to {Remote_Device}",
+  "switch_port_channel": "{Local_Po} to {Remote_Device}_{Remote_Po} Trunk {Trunk_Info}",
+  "switch_access_desc": "{VLAN_Name} - {Host_Device}_{Port}",
+  "firewall_interface": "{Role_Zone}_{VLAN_ID}",
+  "esxi_host": "ESXI{Country}{State}{Site}{Seq}",
+  "vm_host": "VMHOST{Country}{State}{Site}{Seq}",
+  "esxi_uplink": "Uplink from {ESXi_Host}_{Local_Port} to {Switch}_{Port}",
+  "esxi_portgroup": "PG_{VLAN_Name}",
+  "esxi_vmkernel": "vmk{Number}",
+  "netbox_server_yaml": "{Hostname}.yaml"
+}
