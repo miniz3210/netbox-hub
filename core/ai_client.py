@@ -27,6 +27,7 @@ def fetch_free_models() -> list[str]:
         "gpt-20b",
         "gpt-120b",
         "llama-3",
+        "llama-3.3",
         "mistral",
         "deepseek",
         "groq/",
@@ -47,8 +48,7 @@ def fetch_free_models() -> list[str]:
         "claude-sonnet",
         "gpt-4o",
         "o1-",
-        "thinking",
-        "preview"
+        "thinking"
     ]
     
     try:
@@ -67,7 +67,7 @@ def fetch_free_models() -> list[str]:
                 pricing = m.get("pricing", {})
                 
                 # Log first few models to understand pricing structure
-                if len(free_models) < 3:
+                if len(free_models) < 5:
                     logger.info(f"Sample model: {model_id} | Pricing: {pricing}")
                 
                 prompt_price = pricing.get("prompt", None)
@@ -78,13 +78,20 @@ def fetch_free_models() -> list[str]:
                 try:
                     # Check if prompt price is 0 (string or number)
                     if prompt_price is not None:
-                        prompt_val = float(str(prompt_price).replace("$", "").strip())
+                        # Handle string format like "0" or numeric 0
+                        if isinstance(prompt_price, str):
+                            prompt_val = float(prompt_price.replace("$", "").strip()) if prompt_price else 0.0
+                        else:
+                            prompt_val = float(prompt_price)
                         is_free = prompt_val == 0.0
                     else:
-                        # If no pricing info, might be free
+                        # If no pricing info provided, consider it potentially free (OmniRoute pattern)
+                        # Most local/free models don't expose pricing fields
                         is_free = True
-                except (ValueError, TypeError):
-                    is_free = False
+                except (ValueError, TypeError) as e:
+                    logger.debug(f"Pricing parse error for {model_id}: {e}")
+                    # If pricing can't be parsed, assume free (common for OmniRoute)
+                    is_free = True
                 
                 # Check if model is suitable for YAML generation
                 is_suitable = any(pattern in model_id_lower for pattern in suitable_patterns)
@@ -95,6 +102,14 @@ def fetch_free_models() -> list[str]:
                     logger.info(f"✓ Added: {model_id} (prompt: {prompt_price})")
             
             logger.info(f"Filtered free models count: {len(free_models)}")
+            
+            # If no models found with filtering, return all models as fallback
+            if len(free_models) == 0:
+                logger.warning("No models matched free filter criteria, returning all available models")
+                all_model_ids = [m.get("id", "") for m in models if m.get("id")]
+                logger.info(f"Total available models (unfiltered): {len(all_model_ids)}")
+                return sorted(all_model_ids)
+            
             return sorted(free_models)
         else:
             logger.warning(f"Failed to fetch models: HTTP {resp.status_code}, response: {resp.text[:200]}")

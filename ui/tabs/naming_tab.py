@@ -99,9 +99,18 @@ def handle_csv_reset():
     clear_inventory_records()
     st.toast("🗑️ Database Cleared. Restored default examples.", icon="🧹")
 
-def display_reference_box(category_key: str, default_lines: str, label: str, site_filter: str = ""):
+def display_reference_box(category_key: str, default_lines: str, label: str, site_filter: str = "", name_filter: str = ""):
     real_items = get_records_by_category(category_key, site_filter=site_filter)
+    
+    # Apply additional name-based filtering if provided (e.g., WAP, FW, SW prefix)
+    if name_filter and real_items:
+        name_filter_upper = name_filter.upper()
+        real_items = [r for r in real_items if r.get('name', '').upper().startswith(name_filter_upper)]
+    
     filter_hint = f" matching '{site_filter.upper()}'" if site_filter else ""
+    if name_filter:
+        filter_hint += f" (prefix: {name_filter})"
+    
     with st.expander(f"💡 Click to view reference {label} examples ({len(real_items) if real_items else 'Default'} records{filter_hint})", expanded=False):
         if real_items:
             st.markdown(f"##### 🟢 NetBox Ingested Data ({len(real_items)} records{filter_hint}):")
@@ -228,6 +237,15 @@ def render_naming_tab(active_model):
     st.subheader("🏷️ Standardized Infrastructure Naming Generator")
     st.caption("Generate and validate standardized hostnames for network devices, servers, VMs, and ESXi configurations using AI-powered naming conventions aligned with your NetBox inventory data.")
     
+    # Reload naming rules from session state (updated by Standards tab)
+    if "naming_rules" in st.session_state:
+        # Naming rules are already loaded in session state from app.py or Standards tab
+        pass
+    else:
+        # Fallback: load from file if not in session state
+        from config.naming_rules import load_naming_rules
+        st.session_state["naming_rules"] = load_naming_rules()
+    
     # Call toolbar which includes Ingest and AI Assistant
     case_mode = render_compact_toolbar(active_model)
     
@@ -298,20 +316,40 @@ def render_naming_tab(active_model):
 
             # Dynamic reference box based on device type and site
             ref_label = "Device"
+            name_prefix_filter = ""
+            default_examples = "SWUSNYC01-0       (Switch Stack, Member 0)\nWAPUSNYC01        (Access Point 01)\nFWUSNYCPA01       (Firewall 01)"
+            
             if "SW" in dev_prefix or "Switch" in dev_type_preset:
                 ref_label = "Switch"
+                name_prefix_filter = "SW"
+                default_examples = "SWUSNYC01-0       (Switch Stack, Member 0)\nSWUSLON01         (London Switch 01)\nSWAUSYD02         (Sydney Switch 02)"
             elif "WAP" in dev_prefix or "Wireless" in dev_type_preset:
                 ref_label = "Wireless AP"
+                name_prefix_filter = "WAP"
+                default_examples = "WAPUSNYC01        (Access Point NYC 01)\nWAPUSLON01        (Access Point London 01)\nWAPAUSYD01        (Access Point Sydney 01)"
             elif "FW" in dev_prefix or "Firewall" in dev_type_preset:
                 ref_label = "Firewall"
+                name_prefix_filter = "FW"
+                default_examples = "FWUSNYC01         (NYC Firewall 01)\nFWUSNYCPA01       (NYC Palo Alto FW 01)\nFWUSLONCISCO01    (London Cisco FW 01)"
             elif "RTR" in dev_prefix or "Router" in dev_type_preset:
                 ref_label = "Router"
+                name_prefix_filter = "RTR"
+                default_examples = "RTRUSNYC01        (NYC Router 01)\nRTRUSLON01        (London Router 01)\nRTRAUSYD01        (Sydney Router 01)"
+            elif "ION" in dev_prefix:
+                ref_label = "SD-WAN ION"
+                name_prefix_filter = "ION"
+                default_examples = "IONUSNYC01        (NYC SD-WAN 01)\nIONUSLON01        (London SD-WAN 01)\nIONAUSYD01        (Sydney SD-WAN 01)"
+            elif "VS" in dev_prefix:
+                ref_label = "Virtual Chassis"
+                name_prefix_filter = "VS"
+                default_examples = "VSUSNYC01-0       (Virtual Stack Member 0)\nVSUSLON01-1       (Virtual Stack Member 1)"
             
             display_reference_box(
                 category_key="device",
-                default_lines="SWUSNYC01-0       (Switch Stack, Member 0)\nWAPUSNYC01        (Access Point 01)\nFWUSNYCPA01       (Firewall 01)",
+                default_lines=default_examples,
                 label=ref_label,
-                site_filter=c_site
+                site_filter=c_site,
+                name_filter=name_prefix_filter
             )
 
         with col_b:
@@ -357,8 +395,10 @@ def render_naming_tab(active_model):
             
             elif p_cat == "Switch LAG Member Port (LACP)":
                 r_dev_lag = st.text_input("Remote Device Hostname", value="", placeholder="e.g. SWUSNYC02-0", key="lag_rd").strip()
+                r_port_lag_raw = st.text_input("Remote Port", value="", placeholder="e.g. Gi1/0/1, Te1/0/1, Po1", key="lag_rp")
 
-                lag_desc = f"LACP to {r_dev_lag}" if r_dev_lag else "LACP to <Remote_Device>"
+                r_port_lag_short = normalize_port_shortname(r_port_lag_raw)
+                lag_desc = f"LACP to {r_dev_lag}_{r_port_lag_short}" if r_dev_lag and r_port_lag_raw else "LACP to <Remote_Device>_<Remote_Port_Short>"
 
                 st.caption(f"Generated LAG Member Port Description:")
                 st.code(lag_desc, language="text")
@@ -375,7 +415,7 @@ def render_naming_tab(active_model):
                 
                 display_reference_box(
                     category_key="device",
-                    default_lines="LACP to SWUSNYC02-0\nLACP to FWUSNYC01\nLACP to SWUSLONCORE01",
+                    default_lines="LACP to SWUSNYC02-0_Gi1/0/1\nLACP to FWUSNYC01_Po1\nLACP to SWUSLONCORE01_Te1/0/1",
                     label="LAG Member Port",
                     site_filter=c_site
                 )

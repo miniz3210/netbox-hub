@@ -10,12 +10,22 @@ def render_standards_tab(active_model):
     p_col1, p_col2 = st.columns([1, 1])
     with p_col1:
         st.markdown("#### 📝 Active Infrastructure Guidelines Prompt")
-        st.text_area("System Context", value=prompt_rep, height=380, disabled=True)
-        st.download_button("📥 Download Guidelines Prompt (.txt)", prompt_rep, "naming_standards.txt", "text/plain")
+        st.text_area("System Context", value=prompt_rep, height=380, disabled=True, key="standards_display")
+        
+        col_download, col_clear = st.columns([2, 1])
+        with col_download:
+            st.download_button("📥 Download Guidelines Prompt (.txt)", prompt_rep, "naming_standards.txt", "text/plain")
+        with col_clear:
+            if st.button("🗑️ Clear", help="Reset to default naming standards", use_container_width=True):
+                from config.naming_rules import DEFAULT_RULES
+                save_naming_rules(DEFAULT_RULES)
+                st.session_state["naming_rules"] = load_naming_rules()
+                st.success("✅ Reset to default standards!")
+                st.rerun()
 
     with p_col2:
         st.markdown("#### 📥 Import / Update from Natural Language Prompt")
-        imported_text = st.text_area("Paste Updated Prompt", placeholder="e.g. Switch naming should be...", height=260)
+        imported_text = st.text_area("Paste Updated Prompt", placeholder="e.g. Switch naming should be...", height=260, key="import_prompt_text")
         if st.button("🔄 Parse & Apply Prompt", type="primary"):
             if imported_text.strip():
                 with st.spinner(f"Parsing using {active_model}..."):
