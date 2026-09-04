@@ -616,16 +616,13 @@ def render_ipam_tab(active_model: str):
             help="Quickly load pre-defined standard VLAN structures or start blank."
         )
     with c_status:
-        # Show status indicator when "Load From DB" is selected
-        selected_preset = st.session_state.get("ipam_preset_selector", "")
+        # Always show status indicator
         site_found = st.session_state.get("ipam_site_found_in_db", False)
-        
-        if selected_preset == "🗄️ Load From DB (Existing Site)":
-            st.markdown("<br>", unsafe_allow_html=True)
-            if site_found:
-                st.success("✅ Found Site in DB", icon="✅")
-            else:
-                st.info("⚪ Site not found", icon="ℹ️")
+        st.markdown("<br>", unsafe_allow_html=True)
+        if site_found:
+            st.success("Found Site in DB", icon="✅")
+        else:
+            st.info("Site not in DB", icon="ℹ️")
 
     if "ipam_persisted_rows" not in st.session_state:
         st.session_state["ipam_persisted_rows"] = []
@@ -672,34 +669,25 @@ def render_ipam_tab(active_model: str):
         if sub_str:
             allocated_subnets.append(sub_str)
         
-        # Check if data was loaded from DB
-        loaded_from_db = st.session_state.get("ipam_loaded_from_db", False)
+        # Evaluate subnet for usable range and status
+        eval_res = evaluate_subnet_row(
+            sub_str, 
+            r.get("VLAN ID"), 
+            r.get("Role", ""), 
+            site_name, 
+            supernet_in, 
+            existing_prefixes
+        )
+        r["Usable Range"] = eval_res["usable_range"]
+        r["Status"] = eval_res["status"]
         
-        if loaded_from_db and "_db_prefix_desc" in r and r["_db_prefix_desc"]:
+        # Check if data was loaded from DB and use DB description
+        loaded_from_db = st.session_state.get("ipam_loaded_from_db", False)
+        if loaded_from_db and "_db_prefix_desc" in r and r.get("_db_prefix_desc"):
             # Use the description from DB
-            eval_res = evaluate_subnet_row(
-                sub_str, 
-                r.get("VLAN ID"), 
-                r.get("Role", ""), 
-                site_name, 
-                supernet_in, 
-                existing_prefixes
-            )
-            r["Usable Range"] = eval_res["usable_range"]
-            r["Status"] = eval_res["status"]
-            r["Prefix Description"] = r["_db_prefix_desc"]  # Use DB description
+            r["Prefix Description"] = r["_db_prefix_desc"]
         else:
             # Generate description normally
-            eval_res = evaluate_subnet_row(
-                sub_str, 
-                r.get("VLAN ID"), 
-                r.get("Role", ""), 
-                site_name, 
-                supernet_in, 
-                existing_prefixes
-            )
-            r["Usable Range"] = eval_res["usable_range"]
-            r["Status"] = eval_res["status"]
             r["Prefix Description"] = eval_res["desc"]
 
     # Real-time Available Subnets and Capacity
