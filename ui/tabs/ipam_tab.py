@@ -246,8 +246,9 @@ def on_preset_change():
     selected = st.session_state.get("ipam_preset_selector")
     site_name = st.session_state.get("ipam_site_in", "").strip()
     
-    # Reset site found indicator
+    # Reset site found indicator and DB load flag
     st.session_state["ipam_site_found_in_db"] = False
+    st.session_state["ipam_loaded_from_db"] = False
 
     if selected == "🗄️ Load From DB (Existing Site)" and site_name:
         records = get_ipam_records_by_site(site_name)
@@ -313,14 +314,18 @@ def on_preset_change():
                 
         new_rows = []
         for vid, r in unique_records.items():
-            new_rows.append({
+            # Store the original DB description in a special field for later use
+            row = {
                 "VLAN ID": vid,
                 "Role": r.get("role", ""),
                 "VLAN Name": r.get("vlan_name", ""),
                 "VLAN Description": r.get("description", ""),
-                "Subnet (CIDR)": r.get("prefix_or_subnet", "")
-            })
+                "Subnet (CIDR)": r.get("prefix_or_subnet", ""),
+                "_db_prefix_desc": r.get("description", "")  # Store DB description
+            }
+            new_rows.append(row)
         st.session_state["ipam_persisted_rows"] = new_rows
+        st.session_state["ipam_loaded_from_db"] = True  # Mark that data came from DB
         return
 
     template_list = VLAN_PRESETS.get(selected, [])
@@ -598,30 +603,29 @@ def render_ipam_tab(active_model: str):
 
     # 3. Preset Selection & Allocation Editor
     st.markdown("---")
-    c_title, c_preset = st.columns([2.5, 1.5])
+    c_title, c_preset, c_status = st.columns([2.2, 1.3, 0.7])
     with c_title:
         st.markdown("##### 📊 Subnet Allocation & Live Status (✏️ Click any cell to edit)")
     with c_preset:
-        # Check if site was found in DB
-        selected_preset = st.session_state.get("ipam_preset_selector", "")
-        site_found = st.session_state.get("ipam_site_found_in_db", False)
-        
-        # Add notification to label if Load From DB is selected and site was found
-        if selected_preset == "🗄️ Load From DB (Existing Site)" and site_found:
-            label_text = "Load Standard Preset ✅"
-            help_text = "Site data loaded successfully from database"
-        else:
-            label_text = "Load Standard Preset"
-            help_text = "Quickly load pre-defined standard VLAN structures or start blank."
-        
         st.selectbox(
-            label_text,
+            "Load Standard Preset",
             options=list(VLAN_PRESETS.keys()),
             index=0,
             key="ipam_preset_selector",
             on_change=on_preset_change,
-            help=help_text
+            help="Quickly load pre-defined standard VLAN structures or start blank."
         )
+    with c_status:
+        # Show status indicator when "Load From DB" is selected
+        selected_preset = st.session_state.get("ipam_preset_selector", "")
+        site_found = st.session_state.get("ipam_site_found_in_db", False)
+        
+        if selected_preset == "🗄️ Load From DB (Existing Site)":
+            st.markdown("<br>", unsafe_allow_html=True)
+            if site_found:
+                st.success("✅ Found Site in DB", icon="✅")
+            else:
+                st.info("⚪ Site not found", icon="ℹ️")
 
     if "ipam_persisted_rows" not in st.session_state:
         st.session_state["ipam_persisted_rows"] = []
@@ -667,17 +671,36 @@ def render_ipam_tab(active_model: str):
         sub_str = str(r.get("Subnet (CIDR)", "") or "").strip()
         if sub_str:
             allocated_subnets.append(sub_str)
-        eval_res = evaluate_subnet_row(
-            sub_str, 
-            r.get("VLAN ID"), 
-            r.get("Role", ""), 
-            site_name, 
-            supernet_in, 
-            existing_prefixes
-        )
-        r["Usable Range"] = eval_res["usable_range"]
-        r["Status"] = eval_res["status"]
-        r["Prefix Description"] = eval_res["desc"]
+        
+        # Check if data was loaded from DB
+        loaded_from_db = st.session_state.get("ipam_loaded_from_db", False)
+        
+        if loaded_from_db and "_db_prefix_desc" in r and r["_db_prefix_desc"]:
+            # Use the description from DB
+            eval_res = evaluate_subnet_row(
+                sub_str, 
+                r.get("VLAN ID"), 
+                r.get("Role", ""), 
+                site_name, 
+                supernet_in, 
+                existing_prefixes
+            )
+            r["Usable Range"] = eval_res["usable_range"]
+            r["Status"] = eval_res["status"]
+            r["Prefix Description"] = r["_db_prefix_desc"]  # Use DB description
+        else:
+            # Generate description normally
+            eval_res = evaluate_subnet_row(
+                sub_str, 
+                r.get("VLAN ID"), 
+                r.get("Role", ""), 
+                site_name, 
+                supernet_in, 
+                existing_prefixes
+            )
+            r["Usable Range"] = eval_res["usable_range"]
+            r["Status"] = eval_res["status"]
+            r["Prefix Description"] = eval_res["desc"]
 
     # Real-time Available Subnets and Capacity
     with cap_placeholder.container():
