@@ -627,7 +627,7 @@ def render_ipam_tab(active_model: str):
         site_found = st.session_state.get("ipam_site_found_in_db", False)
         st.markdown("<br>", unsafe_allow_html=True)
         if site_found:
-            st.success("✅", help="Site found in DB - Select 'Load From DB' to load data")
+            st.markdown("✅", help="Site found in DB - Select 'Load From DB' to load data")
         else:
             st.caption("⚪")
 
