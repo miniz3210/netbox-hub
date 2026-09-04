@@ -245,9 +245,20 @@ def handle_ipam_db_reset():
 def on_preset_change():
     selected = st.session_state.get("ipam_preset_selector")
     site_name = st.session_state.get("ipam_site_in", "").strip()
+    
+    # Reset site found indicator
+    st.session_state["ipam_site_found_in_db"] = False
 
     if selected == "🗄️ Load From DB (Existing Site)" and site_name:
         records = get_ipam_records_by_site(site_name)
+        
+        if not records:
+            st.session_state["ipam_persisted_rows"] = []
+            st.session_state["ipam_site_found_in_db"] = False
+            return
+        
+        # Mark that site was found in DB
+        st.session_state["ipam_site_found_in_db"] = True
         
         # Determine if it's a Branch or DC to apply sorting
         branch_vids = {p['vid'] for p in BRANCH_VLAN_PRESET}
@@ -269,12 +280,36 @@ def on_preset_change():
         
         records.sort(key=sort_key)
         
-        # Use a dictionary to de-duplicate based on vlan_id (and keep first one found)
+        # Use a dictionary to de-duplicate based on vlan_id
+        # Prefer records with non-empty role, vlan_name, and description
         unique_records = {}
         for r in records:
             vid = r.get("vlan_id")
-            if vid is not None and vid not in unique_records:
+            if vid is None:
+                continue
+                
+            # If this VLAN ID hasn't been seen yet, add it
+            if vid not in unique_records:
                 unique_records[vid] = r
+            else:
+                # Already have a record for this VLAN - keep the better one
+                existing = unique_records[vid]
+                
+                # Calculate "quality score" - prefer records with more filled fields
+                def quality_score(rec):
+                    score = 0
+                    if rec.get("role", "").strip():
+                        score += 3  # Role is most important
+                    if rec.get("description", "").strip():
+                        score += 2
+                    if rec.get("vlan_name", "").strip():
+                        score += 1
+                    if rec.get("prefix_or_subnet", "").strip():
+                        score += 1
+                    return score
+                
+                if quality_score(r) > quality_score(existing):
+                    unique_records[vid] = r
                 
         new_rows = []
         for vid, r in unique_records.items():
@@ -563,7 +598,7 @@ def render_ipam_tab(active_model: str):
 
     # 3. Preset Selection & Allocation Editor
     st.markdown("---")
-    c_title, c_preset = st.columns([2.5, 1.5])
+    c_title, c_preset, c_indicator = st.columns([2.2, 1.5, 0.5])
     with c_title:
         st.markdown("##### 📊 Subnet Allocation & Live Status (✏️ Click any cell to edit)")
     with c_preset:
@@ -575,6 +610,18 @@ def render_ipam_tab(active_model: str):
             on_change=on_preset_change,
             help="Quickly load pre-defined standard VLAN structures or start blank."
         )
+    with c_indicator:
+        # Show checkbox indicator when "Load From DB" is selected and site was found
+        selected_preset = st.session_state.get("ipam_preset_selector", "")
+        site_found = st.session_state.get("ipam_site_found_in_db", False)
+        
+        if selected_preset == "🗄️ Load From DB (Existing Site)":
+            if site_found:
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.checkbox("", value=True, disabled=True, key="db_found_indicator", help="✅ Site found in database")
+            else:
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.caption("⚪ Not found")
 
     if "ipam_persisted_rows" not in st.session_state:
         st.session_state["ipam_persisted_rows"] = []
