@@ -259,8 +259,8 @@ def on_preset_change():
         target_preset = BRANCH_VLAN_PRESET if match_branch >= match_dc else DATACENTER_VLAN_PRESET
         order_map = {p['vid']: i for i, p in enumerate(target_preset)}
         
-        # Sort records by order in preset, then by vlan_id
-        records.sort(key=lambda r: (order_map.get(r.get('vlan_id'), 999), r.get('vlan_id', 0)))
+        # Sort records by order in preset, then by vlan_id (handle None values)
+        records.sort(key=lambda r: (order_map.get(r.get('vlan_id'), 999), r.get('vlan_id') or 0))
         
         # Use a dictionary to de-duplicate based on vlan_id (and keep first one found)
         unique_records = {}
