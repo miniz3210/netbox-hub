@@ -560,7 +560,6 @@ def render_ipam_tab(active_model: str):
     )
 
     # Site input fields
-    # Site input fields
     top1, top2, top3 = st.columns([2, 1, 2.2])
     with top1:
         st.text_input(
@@ -569,6 +568,14 @@ def render_ipam_tab(active_model: str):
             placeholder="e.g. Bristol, AGE, Adelaide, UK, Site-01",
             on_change=handle_site_change
         )
+
+    # Check if site exists in database when site name is entered
+    if site_name:
+        site_records = get_ipam_records_by_site(site_name)
+        if site_records:
+            st.session_state["ipam_site_found_in_db"] = True
+        else:
+            st.session_state["ipam_site_found_in_db"] = False
 
     auto_scope_id = lookup_scope_id(site_name) if site_name else None
     auto_supernet = lookup_site_supernet_from_db(site_name) if site_name else None
@@ -603,7 +610,7 @@ def render_ipam_tab(active_model: str):
 
     # 3. Preset Selection & Allocation Editor
     st.markdown("---")
-    c_title, c_preset, c_status = st.columns([2.2, 1.3, 0.7])
+    c_title, c_preset, c_status = st.columns([2.3, 1.4, 0.5])
     with c_title:
         st.markdown("##### 📊 Subnet Allocation & Live Status (✏️ Click any cell to edit)")
     with c_preset:
@@ -616,13 +623,13 @@ def render_ipam_tab(active_model: str):
             help="Quickly load pre-defined standard VLAN structures or start blank."
         )
     with c_status:
-        # Always show status indicator
+        # Always show compact status indicator
         site_found = st.session_state.get("ipam_site_found_in_db", False)
         st.markdown("<br>", unsafe_allow_html=True)
         if site_found:
-            st.success("Found Site in DB", icon="✅")
+            st.success("✅", help="Site found in DB - Select 'Load From DB' to load data")
         else:
-            st.info("Site not in DB", icon="ℹ️")
+            st.caption("⚪")
 
     if "ipam_persisted_rows" not in st.session_state:
         st.session_state["ipam_persisted_rows"] = []
