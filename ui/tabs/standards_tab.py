@@ -22,6 +22,8 @@ def render_standards_tab(active_model):
                     try:
                         extracted = parse_prompt_to_rules(imported_text, active_model)
                         save_naming_rules(extracted)
+                        # Reload naming rules in session state
+                        st.session_state["naming_rules"] = load_naming_rules()
                         st.success("✅ Standards updated successfully!")
                         st.rerun()
                     except Exception as e:

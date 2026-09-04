@@ -296,10 +296,21 @@ def render_naming_tab(active_model):
                         site_filter=c_site
                     ))
 
+            # Dynamic reference box based on device type and site
+            ref_label = "Device"
+            if "SW" in dev_prefix or "Switch" in dev_type_preset:
+                ref_label = "Switch"
+            elif "WAP" in dev_prefix or "Wireless" in dev_type_preset:
+                ref_label = "Wireless AP"
+            elif "FW" in dev_prefix or "Firewall" in dev_type_preset:
+                ref_label = "Firewall"
+            elif "RTR" in dev_prefix or "Router" in dev_type_preset:
+                ref_label = "Router"
+            
             display_reference_box(
                 category_key="device",
                 default_lines="SWUSNYC01-0       (Switch Stack, Member 0)\nWAPUSNYC01        (Access Point 01)\nFWUSNYCPA01       (Firewall 01)",
-                label="Device",
+                label=ref_label,
                 site_filter=c_site
             )
 
@@ -336,6 +347,13 @@ def render_naming_tab(active_model):
                             category_key="device",
                             site_filter=c_site
                         ))
+                
+                display_reference_box(
+                    category_key="device",
+                    default_lines="Uplink from SWUSNYC01-0_Gi1/0/48 to SWUSNYC02-0_Gi1/0/48\nUplink from FWUSNYC01_Te1/0/1 to SWUSNYC01-0_Te1/0/1",
+                    label="Switch Uplink Interface",
+                    site_filter=c_site
+                )
             
             elif p_cat == "Switch LAG Member Port (LACP)":
                 r_dev_lag = st.text_input("Remote Device Hostname", value="", placeholder="e.g. SWUSNYC02-0", key="lag_rd").strip()
@@ -354,6 +372,13 @@ def render_naming_tab(active_model):
                             category_key="device",
                             site_filter=c_site
                         ))
+                
+                display_reference_box(
+                    category_key="device",
+                    default_lines="LACP to SWUSNYC02-0\nLACP to FWUSNYC01\nLACP to SWUSLONCORE01",
+                    label="LAG Member Port",
+                    site_filter=c_site
+                )
             
             elif p_cat == "Switch Port-Channel (Logical)":
                 local_po_id = st.text_input("Local Port-Channel ID", value="Po1", placeholder="e.g. Po1, Po10", key="pc_local_id").strip()
@@ -376,6 +401,13 @@ def render_naming_tab(active_model):
                             category_key="device",
                             site_filter=c_site
                         ))
+                
+                display_reference_box(
+                    category_key="device",
+                    default_lines="Po1 to SWUSNYC02-0_Po1 Trunk VLANs 10,20,30\nPo10 to FWUSNYC01_Po10 Trunk All\nPo5 to SWUSLONCORE01_Po5 Trunk",
+                    label="Port-Channel Interface",
+                    site_filter=c_site
+                )
             
             elif p_cat == "Switch Access Port (Endpoint)":
                 access_vlan_id = st.text_input("Access VLAN ID", value="10", placeholder="e.g. 10, 100", key="ac_vlan").strip()
@@ -402,6 +434,13 @@ def render_naming_tab(active_model):
                             category_key="device",
                             site_filter=c_site
                         ))
+                
+                display_reference_box(
+                    category_key="device",
+                    default_lines="Data - PC-001_eth0\nVoice - IP-Phone-101_PoE\nGuest - Printer-Lab_NIC1",
+                    label="Access Port Interface",
+                    site_filter=c_site
+                )
             
             elif p_cat == "Firewall Security Zone Interface":
                 fw_role = st.text_input("Role / Zone", value="", placeholder="e.g. TRUST, UNTRUST, DMZ", key="fw_role").strip()
@@ -421,6 +460,13 @@ def render_naming_tab(active_model):
                             category_key="device",
                             site_filter=c_site
                         ))
+                
+                display_reference_box(
+                    category_key="device",
+                    default_lines="TRUST_10\nUNTRUST_100\nDMZ_50",
+                    label="Firewall Interface",
+                    site_filter=c_site
+                )
 
     # Hosts & VMs
     elif "2. Hosts" in naming_cat:

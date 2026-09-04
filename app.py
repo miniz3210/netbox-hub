@@ -31,6 +31,13 @@ logging.basicConfig(
 logger = logging.getLogger("netbox-hub")
 
 init_db()
+
+# Load naming rules on startup to ensure standards are always current
+if "naming_rules_loaded" not in st.session_state:
+    from config.naming_rules import load_naming_rules
+    st.session_state["naming_rules"] = load_naming_rules()
+    st.session_state["naming_rules_loaded"] = True
+
 active_model = render_sidebar()
 
 # Lazy-load catalog inside session state so it doesn't block the UI on first paint.
