@@ -67,14 +67,6 @@ def fetch_free_models() -> list[str]:
     except Exception as e:
         logger.error(f"Error fetching free models: {e}", exc_info=True)
         return []
-            
-            return sorted(free_models)
-        else:
-            logger.warning(f"Failed to fetch models: HTTP {resp.status_code}, response: {resp.text[:200]}")
-            return []
-    except Exception as e:
-        logger.error(f"Error fetching free models: {e}", exc_info=True)
-        return []
 
 def test_model_connection(model_name: str) -> Tuple[bool, int, str]:
     """Tests model health through OmniRoute using full request structure."""
