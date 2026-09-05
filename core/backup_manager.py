@@ -919,7 +919,10 @@ def get_choice_values_for_field(field_name: str) -> List[str]:
 
 
 def get_choice_set_summary() -> List[Dict[str, Any]]:
-    """List every ingested choice set with its field bindings, value count, and timestamp."""
+    """List every ingested choice set with its field bindings, value count, and timestamp.
+    
+    Returns results sorted with common/important choice sets first.
+    """
     init_backup_tables()
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -935,16 +938,41 @@ def get_choice_set_summary() -> List[Dict[str, Any]]:
     """)
     rows = [dict(r) for r in cursor.fetchall()]
     conn.close()
-    # Get metadata for source filename
+    
+    # Get metadata for source filename (keep full filename)
     meta = get_backup_metadata()
-    source = meta.get('filename', 'NetBox Backup').replace('NetBox_Full_Backup_', '').replace('NetBox_Minimal_Backup_', '').replace('.json', '')
+    source = meta.get('filename', 'NetBox Backup')
     for row in rows:
         row['source'] = source
-    return rows
+    
+    # Define priority choice sets (common ones first)
+    priority_sets = [
+        'Instance Type Set',
+        'Resource Group Set', 
+        'Operating System Set',
+        'Environment Set',
+        'Status Set',
+        'Location Set',
+        'Application Set',
+    ]
+    
+    # Sort with priority sets first, then alphabetically
+    priority_rows = [r for r in rows if r['choice_set'] in priority_sets]
+    other_rows = [r for r in rows if r['choice_set'] not in priority_sets]
+    
+    # Sort priority rows by priority list order
+    priority_rows.sort(key=lambda x: priority_sets.index(x['choice_set']) if x['choice_set'] in priority_sets else 999)
+    # Sort other rows alphabetically
+    other_rows.sort(key=lambda x: x['choice_set'])
+    
+    return priority_rows + other_rows
 
 
 def get_backup_object_counts() -> Dict[str, tuple]:
-    """Return dict of object_type -> (count, timestamp, source)."""
+    """Return dict of object_type -> (count, timestamp, source).
+    
+    Returns results sorted with minimum required data first (sites, devices, IPAM, VMs, etc.)
+    """
     init_backup_tables()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -954,10 +982,44 @@ def get_backup_object_counts() -> Dict[str, tuple]:
     """)
     rows = cursor.fetchall()
     conn.close()
-    # Get metadata for source filename
+    
+    # Get metadata for source filename (keep full filename)
     meta = get_backup_metadata()
-    source = meta.get('filename', 'NetBox Backup').replace('NetBox_Full_Backup_', '').replace('.json', '')
-    return {r[0]: (r[1], r[2], source) for r in rows}
+    source = meta.get('filename', 'NetBox Backup')
+    
+    # Build dict with priority sorting
+    result = {r[0]: (r[1], r[2], source) for r in rows}
+    
+    # Define minimum required data types in priority order
+    priority_types = [
+        # Core infrastructure
+        'dcim_sites', 'dcim_regions', 'dcim_site_groups', 'dcim_locations',
+        'dcim_manufacturers', 'dcim_device_types', 'dcim_device_roles', 'dcim_platforms',
+        'dcim_devices', 'dcim_interfaces',
+        'dcim_racks', 'dcim_rack_roles', 'dcim_rack_groups',
+        # IPAM essentials
+        'ipam_vrfs', 'ipam_prefixes', 'ipam_ip_addresses', 'ipam_vlans', 'ipam_vlan_groups',
+        'ipam_rirs', 'ipam_asns', 'ipam_aggregates', 'ipam_roles',
+        # Virtualization
+        'virtualization_clusters', 'virtualization_cluster_types', 'virtualization_cluster_groups',
+        'virtualization_virtual_machines', 'virtualization_interfaces',
+        # Tenancy
+        'tenancy_tenants', 'tenancy_tenant_groups',
+        'tenancy_contacts', 'tenancy_contact_groups', 'tenancy_contact_roles',
+    ]
+    
+    # Sort with priority types first, then alphabetically
+    sorted_result = {}
+    for ptype in priority_types:
+        if ptype in result:
+            sorted_result[ptype] = result[ptype]
+    
+    # Add remaining types alphabetically
+    for otype in sorted(result.keys()):
+        if otype not in sorted_result:
+            sorted_result[otype] = result[otype]
+    
+    return sorted_result
 
 
 def is_backup_active() -> bool:

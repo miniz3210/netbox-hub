@@ -210,7 +210,7 @@ def render_backup_uploader(scope_key: str) -> dict:
             file_name="netbox-export-full.ps1",
             mime="text/plain",
             key=f"dl_export_full_ps1_{scope_key}",
-            use_container_width=True,
+            width="stretch",
         )
         with st.expander("📄 View netbox-export-full.ps1", expanded=False):
             st.code(export_script_full, language="powershell")
@@ -227,7 +227,7 @@ def render_backup_uploader(scope_key: str) -> dict:
             file_name="netbox-export-min.ps1",
             mime="text/plain",
             key=f"dl_export_min_ps1_{scope_key}",
-            use_container_width=True,
+            width="stretch",
         )
         with st.expander("📄 View netbox-export-min.ps1", expanded=False):
             st.code(export_script_min, language="powershell")
@@ -238,11 +238,11 @@ def render_backup_uploader(scope_key: str) -> dict:
         "Both support `-PageSize 1000` and `-OutputDirectory .` options."
     )
 
-    st.markdown("**Step 2 — Upload the generated JSON or CSV files:**")
+    st.markdown("**Step 2 — Upload JSON backup or CSV files:**")
     st.file_uploader(
-        "Upload NetBox master backup (JSON)",
-        type=["json"],
-        accept_multiple_files=False,
+        "Upload NetBox backup (JSON) or CSV files",
+        type=["json", "csv", "xlsx"],
+        accept_multiple_files=True,
         key=uploader_key,
         on_change=_handle_backup_upload,
         args=(uploader_key, scope_key),
