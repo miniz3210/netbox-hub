@@ -10,8 +10,13 @@ Object sources in the local database:
   - Sites            -> sites_records + backup_records 'dcim_sites'
   - Platforms        -> backup_records 'dcim_platforms'
   - Clusters         -> backup_records 'virtualization_clusters'
-  - Instance Types   -> custom field 'instance_type' on virtual machines
-  - Resource Groups  -> custom field 'resource_group' on virtual machines
+  - Instance Types   -> 'Instance Type Set' choice set (custom field instance_type)
+  - Resource Groups  -> 'Resource Group Set' choice set (custom field resource_group)
+
+Choice values come from `backup_choice_values`, which a full API-walk backup
+populates from `extras/custom-field-choice-sets`. When that table is empty (older
+flat backup with no choice-set endpoint), the checker falls back to scraping the
+`Custom Fields:` text off each VM/device summary.
 """
 
 import logging
@@ -26,6 +31,10 @@ logger = logging.getLogger("netbox-hub")
 # Custom field names carrying Azure metadata on NetBox virtual machines
 INSTANCE_TYPE_FIELD = "instance_type"
 RESOURCE_GROUP_FIELD = "resource_group"
+
+# NetBox choice sets backing those custom fields
+INSTANCE_TYPE_CHOICE_SET = "Instance Type Set"
+RESOURCE_GROUP_CHOICE_SET = "Resource Group Set"
 
 # Azure "OPERATING SYSTEM" values map onto existing NetBox platform names
 PLATFORM_ALIASES = {
@@ -90,7 +99,47 @@ def _parse_custom_fields(summary: str) -> Dict[str, str]:
     return fields
 
 
-def get_existing_custom_field_values(field_name: str) -> Set[str]:
+def get_existing_custom_field_values(field_name: str, choice_set: str = "") -> Set[str]:
+    """Resolve the values a custom field can already hold in NetBox.
+
+    Prefers the authoritative choice set ingested from
+    `extras/custom-field-choice-sets`; falls back to scraping the per-object
+    `Custom Fields:` summary text when no choice set was captured.
+    """
+    values = _fetch_choice_values(field_name, choice_set)
+    if values:
+        return values
+    return _scrape_custom_field_values(field_name)
+
+
+def _fetch_choice_values(field_name: str, choice_set: str = "") -> Set[str]:
+    """Read values from the ingested NetBox custom field choice sets."""
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    values: Set[str] = set()
+    try:
+        cursor.execute(
+            "SELECT value FROM backup_choice_values WHERE LOWER(field_name) = ?",
+            (field_name.strip().lower(),),
+        )
+        values.update(row[0].strip() for row in cursor.fetchall() if row[0] and row[0].strip())
+
+        if not values and choice_set:
+            cursor.execute(
+                "SELECT value FROM backup_choice_values WHERE LOWER(choice_set) = ?",
+                (choice_set.strip().lower(),),
+            )
+            values.update(row[0].strip() for row in cursor.fetchall() if row[0] and row[0].strip())
+    except sqlite3.Error as exc:
+        # Table absent on databases that predate choice-set ingest.
+        logger.debug("Choice set lookup unavailable for %s: %s", field_name, exc)
+    finally:
+        conn.close()
+    return values
+
+
+def _scrape_custom_field_values(field_name: str) -> Set[str]:
     """Collect the distinct values a VM custom field already holds in NetBox."""
     init_db()
     conn = sqlite3.connect(DB_PATH)
@@ -187,10 +236,12 @@ def analyze_netbox_objects(metadata: Dict[str, Any]) -> Dict[str, Dict[str, Any]
          site_names, get_existing_sites()),
         ("platforms", "Platforms (Operating Systems)", "dcim.platform",
          platform_names, get_existing_platforms()),
-        ("instance_types", "Instance Types (Custom Field Choices)", "extras.customfieldchoiceset",
-         list(metadata.get("sizes", [])), get_existing_custom_field_values(INSTANCE_TYPE_FIELD)),
-        ("resource_groups", "Resource Groups (Custom Field Choices)", "extras.customfieldchoiceset",
-         list(metadata.get("resource_groups", [])), get_existing_custom_field_values(RESOURCE_GROUP_FIELD)),
+        ("instance_types", "Instance Type Set (Custom Field Choices)", "extras.customfieldchoiceset",
+         list(metadata.get("sizes", [])),
+         get_existing_custom_field_values(INSTANCE_TYPE_FIELD, INSTANCE_TYPE_CHOICE_SET)),
+        ("resource_groups", "Resource Group Set (Custom Field Choices)", "extras.customfieldchoiceset",
+         list(metadata.get("resource_groups", [])),
+         get_existing_custom_field_values(RESOURCE_GROUP_FIELD, RESOURCE_GROUP_CHOICE_SET)),
     ]
 
     results: Dict[str, Dict[str, Any]] = {}
