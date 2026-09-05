@@ -352,6 +352,7 @@ def map_azure_to_netbox(vm_records: List[Dict[str, Any]]) -> Tuple[List[Dict[str
             # Additional Azure-specific metadata stored in description
             'platform': vm['operating_system'],  # For reference (not stored in this table)
             'tenant': vm['subscription'],  # For reference (not stored in this table)
+            'netbox_ip': resolved['display'],  # Resolved from NetBox backup, if known
         }
         
         netbox_records.append(netbox_record)

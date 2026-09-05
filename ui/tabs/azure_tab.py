@@ -13,7 +13,9 @@ from core.azure_vm_importer import (
     map_azure_to_netbox,
     save_azure_vms_to_db,
     generate_netbox_import_summary,
-    check_vm_exists_in_db
+    check_vm_exists_in_db,
+    build_vm_ip_index,
+    lookup_vm_ip_addresses
 )
 from core.netbox_object_checker import (
     analyze_netbox_objects,
@@ -121,11 +123,26 @@ def render_azure_tab(active_model=None):
                 unique_locations = len(set(vm.get('location', '') for vm in vm_records))
                 st.metric("Locations", unique_locations)
             
-            # Check which VMs exist in database
+            # Check which VMs exist in the database and resolve their NetBox IPs
             st.write("**Checking VMs against database...**")
+            ip_index = build_vm_ip_index()
             vm_status_list = []
+            ip_matched = 0
             for vm in vm_records:
                 existing = check_vm_exists_in_db(vm['name'])
+                ip_entry = ip_index.get(vm['name'].strip().lower()) or {}
+                primary_ip = ip_entry.get('primary', '')
+                assigned_ips = ip_entry.get('assigned', [])
+                resolved_ip = primary_ip or (assigned_ips[0] if assigned_ips else '')
+                if resolved_ip:
+                    ip_matched += 1
+
+                # Flag extra addresses beyond the one shown.
+                extra = len(assigned_ips) - 1 if assigned_ips and resolved_ip in assigned_ips else len(assigned_ips)
+                ip_display = resolved_ip or '—'
+                if resolved_ip and extra > 0:
+                    ip_display = f"{resolved_ip} (+{extra})"
+
                 vm_status = {
                     'Name': vm['name'],
                     'Subscription': vm['subscription'],
@@ -134,6 +151,7 @@ def render_azure_tab(active_model=None):
                     'Status': vm['status'],
                     'OS': vm['operating_system'],
                     'Size': vm['size'],
+                    'NetBox IP': ip_display,
                     'In Database': '✅ Yes' if existing else '❌ No (Need to add to NetBox)'
                 }
                 vm_status_list.append(vm_status)
@@ -152,11 +170,26 @@ def render_azure_tab(active_model=None):
             vms_in_db = sum(1 for vm in vm_status_list if '✅' in vm['In Database'])
             vms_not_in_db = len(vm_status_list) - vms_in_db
             
-            col_a, col_b = st.columns(2)
+            col_a, col_b, col_c = st.columns(3)
             with col_a:
                 st.info(f"**✅ Already in Database:** {vms_in_db} VMs")
             with col_b:
                 st.warning(f"**❌ Need to Add to NetBox:** {vms_not_in_db} VMs")
+            with col_c:
+                if ip_index:
+                    st.info(f"**🌐 IP Found in NetBox:** {ip_matched} VMs")
+                else:
+                    st.caption(
+                        "🌐 No NetBox backup ingested — upload one under "
+                        "*Ingest NetBox Data* to resolve VM IP addresses."
+                    )
+
+            if ip_index and ip_matched < len(vm_records):
+                st.caption(
+                    f"ℹ️ {len(vm_records) - ip_matched} VM(s) have no IP recorded in NetBox. "
+                    "NetBox only reports an address when the VM has a Primary IP set or "
+                    "an IP assigned to one of its interfaces."
+                )
             
             # NetBox Objects Summary
             st.subheader("3️⃣ NetBox Objects Required")
@@ -266,9 +299,15 @@ def render_azure_tab(active_model=None):
                     new_vms_df = pd.DataFrame([
                         vm for vm in vm_records if vm['name'] in metadata['new_vms']
                     ])
-                    
+
+                    # map_azure_to_netbox annotates every record with its resolved
+                    # NetBox IP, so include it when the column is present.
+                    display_cols = ['name', 'subscription', 'resource_group', 'location', 'size', 'operating_system']
+                    if 'netbox_ip' in new_vms_df.columns:
+                        display_cols.append('netbox_ip')
+
                     st.dataframe(
-                        new_vms_df[['name', 'subscription', 'resource_group', 'location', 'size', 'operating_system']],
+                        new_vms_df[display_cols],
                         use_container_width=True,
                         height=300
                     )
@@ -303,18 +342,24 @@ def render_azure_tab(active_model=None):
                 st.code(traceback.format_exc())
     
     else:
-        # Show sample data format when no file uploaded
+        # Show sample data format when no file uploaded.
+        # Fictional placeholder data only — no real hostnames, subscriptions,
+        # resource groups or routable IPs.
         st.subheader("Sample Azure VM CSV Format")
+        st.caption(
+            "Illustrative placeholder data. Replace every value with your own "
+            "Azure export; the column headers are what the parser relies on."
+        )
         sample_data = {
-            'NAME': ['ANZAPP002', 'AUPDJDEI01', 'AU-AZ-WLC02'],
-            'SUBSCRIPTION': ['AW-MS-Prod-AUEast-001', 'JDE-AuEast-001', 'Corp-SharedServices-AuEast-001'],
-            'RESOURCE GROUP': ['rg-anzapp002', 'rg-app-jde-production-aueast-001', 'Rg-Infra-WLC-SharedServices-AuEast-001'],
-            'LOCATION': ['Australia East', 'Australia East', 'Australia East'],
-            'STATUS': ['Running', 'Running', 'Running'],
+            'NAME': ['VM-APP-001', 'VM-SQL-002', 'VM-WEB-003'],
+            'SUBSCRIPTION': ['Example-Prod-Sub-001', 'Example-Prod-Sub-001', 'Example-Dev-Sub-002'],
+            'RESOURCE GROUP': ['rg-example-app-prod', 'rg-example-sql-prod', 'rg-example-web-dev'],
+            'LOCATION': ['Australia East', 'Australia East', 'UK South'],
+            'STATUS': ['Running', 'Running', 'Stopped'],
             'OPERATING SYSTEM': ['Windows', 'Windows', 'Linux'],
-            'SIZE': ['Standard_E2as_v4', 'Standard_E2ads_v5', 'Standard_F4s_v2'],
-            'PUBLIC IP ADDRESS': ['-', '-', '203.0.113.10'],
-            'DISKS': ['2', '2', '1']
+            'SIZE': ['Standard_D2s_v3', 'Standard_E4ds_v4', 'Standard_B2ms'],
+            'PUBLIC IP ADDRESS': ['-', '-', '198.51.100.10'],
+            'DISKS': ['2', '3', '1']
         }
         sample_df = pd.DataFrame(sample_data)
         st.dataframe(sample_df, use_container_width=True)
