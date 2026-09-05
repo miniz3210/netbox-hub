@@ -20,17 +20,17 @@ from core.azure_vm_importer import (
 def render_azure_tab(active_model=None):
     """Render the Azure VM import tab in Streamlit UI."""
     
-    st.header("☁️ Azure Virtual Machine Import")
+    st.header("☁️ Azure Virtual Machine Analysis for NetBox")
     st.write("""
-    Import Azure Virtual Machines from CSV exports. This tool will:
-    1. **Check** if VMs already exist in the database
-    2. **Map** Azure data to NetBox objects:
+    Analyze Azure Virtual Machines and identify which ones need to be added to NetBox. This tool will:
+    1. **Check** if VMs already exist in the NetBox Hub database
+    2. **Identify** new VMs that need to be added to your NetBox instance
+    3. **Show** the required NetBox objects that need to be created:
         - **SUBSCRIPTION** → Tenant (Azure)
         - **RESOURCE GROUP** → Custom Field: Resource Group
         - **LOCATION** → Site (Cloud)
         - **SIZE** → Custom Field: Instance Type
         - **OPERATING SYSTEM** → Platform
-    3. **Import** VMs into NetBox Hub database
     """)
     
     # Instructions section
@@ -114,97 +114,149 @@ def render_azure_tab(active_model=None):
                 unique_locations = len(set(vm.get('location', '') for vm in vm_records))
                 st.metric("Locations", unique_locations)
             
-            # Show data table
+            # Check which VMs exist in database
+            st.write("**Checking VMs against database...**")
+            vm_status_list = []
+            for vm in vm_records:
+                existing = check_vm_exists_in_db(vm['name'])
+                vm_status = {
+                    'Name': vm['name'],
+                    'Subscription': vm['subscription'],
+                    'Resource Group': vm['resource_group'],
+                    'Location': vm['location'],
+                    'Status': vm['status'],
+                    'OS': vm['operating_system'],
+                    'Size': vm['size'],
+                    'In Database': '✅ Yes' if existing else '❌ No (Need to add to NetBox)'
+                }
+                vm_status_list.append(vm_status)
+            
+            # Create DataFrame with status
+            df_with_status = pd.DataFrame(vm_status_list)
+            
+            # Show data table with color coding
             st.dataframe(
-                df_preview[['name', 'subscription', 'resource_group', 'location', 'status', 
-                           'operating_system', 'size']],
+                df_with_status,
                 use_container_width=True,
-                height=300
+                height=400
             )
             
-            # Map to NetBox format
-            st.subheader("3️⃣ Map to NetBox Format")
+            # Show summary
+            vms_in_db = sum(1 for vm in vm_status_list if '✅' in vm['In Database'])
+            vms_not_in_db = len(vm_status_list) - vms_in_db
             
-            if st.button("🔄 Map Azure Data to NetBox", type="primary"):
-                with st.spinner("Mapping Azure VMs to NetBox format..."):
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.info(f"**✅ Already in Database:** {vms_in_db} VMs")
+            with col_b:
+                st.warning(f"**❌ Need to Add to NetBox:** {vms_not_in_db} VMs")
+            
+            # NetBox Objects Summary
+            st.subheader("3️⃣ NetBox Objects Required")
+            
+            if st.button("📋 Analyze NetBox Requirements", type="primary"):
+                with st.spinner("Analyzing NetBox requirements..."):
                     netbox_records, metadata = map_azure_to_netbox(vm_records)
                     st.session_state.azure_vms_mapped = netbox_records
                     st.session_state.azure_metadata = metadata
                 
-                st.success("✅ Mapping complete!")
+                st.success("✅ Analysis complete!")
             
-            # Show mapping results
+            # Show NetBox requirements
             if st.session_state.azure_vms_mapped and st.session_state.azure_metadata:
                 metadata = st.session_state.azure_metadata
                 
-                # Show summary
-                st.info(generate_netbox_import_summary(metadata))
+                st.markdown("### 📊 NetBox Objects to Create")
                 
-                # Show mapped data preview
-                st.subheader("NetBox VM Records Preview")
-                df_netbox = pd.DataFrame(st.session_state.azure_vms_mapped)
-                st.dataframe(
-                    df_netbox[['name', 'manufacturer', 'model_or_role', 'site', 'cluster']],
-                    use_container_width=True,
-                    height=300
-                )
-                
-                # Existing VMs warning
-                if metadata['existing_vms']:
-                    st.warning(f"""
-                    ⚠️ **{len(metadata['existing_vms'])} VMs already exist** in the database.
-                    You can choose to update them or skip them during import.
-                    """)
-                    
-                    with st.expander("View Existing VMs"):
-                        for existing in metadata['existing_vms'][:10]:
-                            st.text(f"- {existing['name']}")
-                        if len(metadata['existing_vms']) > 10:
-                            st.text(f"... and {len(metadata['existing_vms']) - 10} more")
-                
-                # Import section
-                st.subheader("4️⃣ Import to Database")
-                
-                col1, col2 = st.columns([2, 1])
+                col1, col2, col3, col4 = st.columns(4)
                 with col1:
-                    update_existing = st.checkbox(
-                        "Update existing VMs",
-                        value=False,
-                        help="If checked, existing VMs will be updated with new data. Otherwise, they will be skipped."
-                    )
+                    st.metric("Tenants", len(metadata['subscriptions']))
+                with col2:
+                    st.metric("Sites", len(metadata['locations']))
+                with col3:
+                    st.metric("Platforms", len(metadata['platforms']))
+                with col4:
+                    st.metric("Instance Types", len(metadata['sizes']))
                 
-                if st.button("💾 Import VMs to NetBox Hub Database", type="primary"):
-                    with st.spinner("Importing Azure VMs to database..."):
-                        stats = save_azure_vms_to_db(
-                            st.session_state.azure_vms_mapped,
-                            update_existing=update_existing,
-                            source="Azure CSV Import"
-                        )
+                # Tenants/Subscriptions
+                if metadata['subscriptions']:
+                    with st.expander("🔑 Tenants (Subscriptions) to Create in NetBox", expanded=True):
+                        st.markdown("Create these tenants in NetBox under group **'Azure'**:")
+                        for sub in sorted(metadata['subscriptions']):
+                            st.text(f"  • {sub}")
+                
+                # Sites/Locations
+                if metadata['locations']:
+                    with st.expander("📍 Sites (Locations) to Create in NetBox", expanded=True):
+                        st.markdown("Create these cloud sites in NetBox:")
+                        for loc in sorted(metadata['locations']):
+                            st.text(f"  • Azure - {loc}")
+                
+                # Platforms
+                if metadata['platforms']:
+                    with st.expander("💻 Platforms to Create in NetBox", expanded=False):
+                        st.markdown("Create these platforms in NetBox:")
+                        for plat in sorted(metadata['platforms']):
+                            st.text(f"  • {plat}")
+                
+                # VM Sizes
+                if metadata['sizes']:
+                    with st.expander("⚙️ Custom Field Values - Instance Types", expanded=False):
+                        st.markdown("Add these values to the **'Instance Type'** custom field in NetBox:")
+                        for size in sorted(metadata['sizes'])[:20]:
+                            st.text(f"  • {size}")
+                        if len(metadata['sizes']) > 20:
+                            st.text(f"  ... and {len(metadata['sizes']) - 20} more")
+                
+                # Resource Groups
+                if metadata['resource_groups']:
+                    with st.expander("📦 Custom Field Values - Resource Groups", expanded=False):
+                        st.markdown("Add these values to the **'Resource Group'** custom field in NetBox:")
+                        for rg in sorted(metadata['resource_groups'])[:20]:
+                            st.text(f"  • {rg}")
+                        if len(metadata['resource_groups']) > 20:
+                            st.text(f"  ... and {len(metadata['resource_groups']) - 20} more")
+                
+                # VMs that need to be added
+                st.divider()
+                st.markdown("### 🆕 VMs to Add to NetBox")
+                
+                if metadata['new_vms']:
+                    st.success(f"**{len(metadata['new_vms'])} new VMs** need to be added to your NetBox instance:")
                     
-                    # Show results
-                    st.success("✅ Import completed!")
+                    # Create downloadable list
+                    new_vms_df = pd.DataFrame([
+                        vm for vm in vm_records if vm['name'] in metadata['new_vms']
+                    ])
                     
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("Inserted", stats['inserted'], delta=stats['inserted'])
-                    with col2:
-                        st.metric("Updated", stats['updated'], delta=stats['updated'])
-                    with col3:
-                        st.metric("Skipped", stats['skipped'])
-                    with col4:
-                        if stats['errors'] > 0:
-                            st.metric("Errors", stats['errors'], delta=-stats['errors'], delta_color="inverse")
-                        else:
-                            st.metric("Errors", stats['errors'])
+                    st.dataframe(
+                        new_vms_df[['name', 'subscription', 'resource_group', 'location', 'size', 'operating_system']],
+                        use_container_width=True,
+                        height=300
+                    )
                     
-                    st.balloons()
+                    # Download button for new VMs
+                    csv_new = new_vms_df.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        "📥 Download List of New VMs",
+                        csv_new,
+                        f"new-vms-for-netbox-{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
+                        "text/csv",
+                        help="Download CSV of VMs that need to be added to NetBox"
+                    )
+                else:
+                    st.info("✅ All VMs from this export already exist in the database.")
+                
+                # Already in database
+                if metadata['existing_vms']:
+                    st.markdown("### ✅ VMs Already in Database")
+                    st.info(f"**{len(metadata['existing_vms'])} VMs** are already tracked in NetBox Hub database.")
                     
-                    # Clear session state
-                    if st.button("🔄 Import Another File"):
-                        st.session_state.azure_vms_parsed = None
-                        st.session_state.azure_vms_mapped = None
-                        st.session_state.azure_metadata = None
-                        st.rerun()
+                    with st.expander("View VMs already in database"):
+                        for existing in metadata['existing_vms'][:20]:
+                            st.text(f"  • {existing['name']}")
+                        if len(metadata['existing_vms']) > 20:
+                            st.text(f"  ... and {len(metadata['existing_vms']) - 20} more")
         
         except Exception as e:
             st.error(f"❌ Error processing Azure VM CSV: {str(e)}")
@@ -253,13 +305,13 @@ def render_azure_tab(active_model=None):
                     st.success(f"✅ VM **{vm_name_check}** exists in database")
                     st.json(existing)
                 else:
-                    st.info(f"ℹ️ VM **{vm_name_check}** not found in database")
+                    st.info(f"ℹ️ VM **{vm_name_check}** not found in database - needs to be added to NetBox")
             else:
                 st.warning("Please enter a VM name")
     
     with col2:
         st.markdown("### 📊 Export Database")
-        st.write("Export current VM inventory from database")
+        st.write("Export current VM inventory from NetBox Hub database")
         if st.button("Export VMs to CSV"):
             try:
                 from core.db_manager import DB_PATH
@@ -279,9 +331,9 @@ def render_azure_tab(active_model=None):
                 st.download_button(
                     "📥 Download VMs CSV",
                     df_export.to_csv(index=False).encode('utf-8'),
-                    f"netbox-vms-export-{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
+                    f"netbox-hub-vms-{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
                     "text/csv"
                 )
-                st.success(f"✅ Exported {len(df_export)} VMs")
+                st.success(f"✅ Ready to export {len(df_export)} VMs")
             except Exception as e:
                 st.error(f"Error exporting: {str(e)}")
