@@ -3,6 +3,8 @@
 ## Release v2.4.0 — Session State Manager, Database Indexes & Enhanced IPAM
 
 ### 🚀 New Features
+* **NetBox Object Existence Check**: `NetBox Objects to Create` in the Azure tab now queries the local NetBox database (`backup_records`, `sites_records`, VM custom fields) and reports, per category, which objects already exist and which are missing. New module: `core/netbox_object_checker.py`.
+* **Generated Import Scripts**: For every missing object the tab renders a ready-to-paste NetBox import payload — `name,slug,description` CSV for Tenants, `name,slug,status,region,group` for Sites, `name,slug` for Platforms, and `value:label` choice-set lines for the Instance Type and Resource Group custom fields. Each block is individually downloadable, plus a combined bundle.
 * **Session State Manager**: Added centralized session state management in `core/session_manager.py` to reduce scattered `st.session_state` calls (105 instances consolidated into reusable methods)
 * **Database Indexes**: Added performance indexes on `ipam_records`, `sites_records`, and `inventory_records` tables for faster lookups
 * **AI Verification Buttons**: All interface formatters in Naming tab now include "🤖 AI Verify" buttons
