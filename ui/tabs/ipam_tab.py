@@ -249,6 +249,14 @@ def on_preset_change():
     # Reset site found indicator and DB load flag
     st.session_state["ipam_site_found_in_db"] = False
     st.session_state["ipam_loaded_from_db"] = False
+    
+    # Check if site exists in DB immediately
+    if site_name:
+        site_records = get_ipam_records_by_site(site_name)
+        if site_records:
+            st.session_state["ipam_site_found_in_db"] = True
+        else:
+            st.session_state["ipam_site_found_in_db"] = False
 
     if selected == "🗄️ Load From DB (Existing Site)" and site_name:
         records = get_ipam_records_by_site(site_name)
@@ -314,14 +322,15 @@ def on_preset_change():
                 
         new_rows = []
         for vid, r in unique_records.items():
-            # Store the original DB description in a special field for later use
+            # Store all DB fields for later use
             row = {
                 "VLAN ID": vid,
                 "Role": r.get("role", ""),
                 "VLAN Name": r.get("vlan_name", ""),
                 "VLAN Description": r.get("description", ""),
                 "Subnet (CIDR)": r.get("prefix_or_subnet", ""),
-                "_db_prefix_desc": r.get("description", "")  # Store DB description
+                "_db_prefix_desc": r.get("description", ""),  # Store DB description
+                "_db_vlan_desc": r.get("description", "")  # Store DB VLAN Description
             }
             new_rows.append(row)
         st.session_state["ipam_persisted_rows"] = new_rows
@@ -610,7 +619,7 @@ def render_ipam_tab(active_model: str):
 
     # 3. Preset Selection & Allocation Editor
     st.markdown("---")
-    c_title, c_preset, c_status = st.columns([2.3, 1.4, 0.5])
+    c_title, c_preset, c_status, c_refresh = st.columns([2.0, 1.3, 0.4, 0.5])
     with c_title:
         st.markdown("##### 📊 Subnet Allocation & Live Status (✏️ Click any cell to edit)")
     with c_preset:
@@ -630,6 +639,17 @@ def render_ipam_tab(active_model: str):
             st.markdown("✅", help="Site found in DB - Select 'Load From DB' to load data")
         else:
             st.caption("⚪")
+    with c_refresh:
+        # Show refresh button only when "Load From DB" is selected and site is found
+        selected_preset = st.session_state.get("ipam_preset_selector", "")
+        if selected_preset == "🗄️ Load From DB (Existing Site)" and site_found:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🔄", key="btn_refresh_ipam", help="Reload data for current site"):
+                st.session_state["ipam_loaded_from_db"] = False
+                st.session_state["ipam_preset_selector"] = "-- Custom / Empty --"
+                st.session_state["ipam_preset_selector"] = selected_preset
+                on_preset_change()
+                st.rerun()
 
     if "ipam_persisted_rows" not in st.session_state:
         st.session_state["ipam_persisted_rows"] = []
@@ -691,12 +711,15 @@ def render_ipam_tab(active_model: str):
         # Check if data was loaded from DB
         loaded_from_db = st.session_state.get("ipam_loaded_from_db", False)
         if loaded_from_db:
-            # When loaded from DB, use DB description (even if empty)
+            # When loaded from DB, use DB descriptions (even if empty)
             # Do NOT generate if empty - keep it empty
             if "_db_prefix_desc" in r:
                 r["Prefix Description"] = r.get("_db_prefix_desc", "")
             else:
                 r["Prefix Description"] = ""
+            # Preserve VLAN Description from database
+            if "_db_vlan_desc" in r:
+                r["VLAN Description"] = r.get("_db_vlan_desc", "")
         else:
             # Generate description normally for preset/manual entries
             r["Prefix Description"] = eval_res["desc"]

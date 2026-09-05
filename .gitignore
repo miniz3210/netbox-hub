@@ -10,3 +10,4 @@ data/netbox_hub.db
 data/catalog_cache/
 data/NetBox_Backup_*.json
 data/*.json
+data/*.csv
