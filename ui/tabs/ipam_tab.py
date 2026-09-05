@@ -619,37 +619,37 @@ def render_ipam_tab(active_model: str):
 
     # 3. Preset Selection & Allocation Editor
     st.markdown("---")
-    c_title, c_preset, c_status, c_refresh = st.columns([2.0, 1.3, 0.4, 0.5])
+    c_title, c_preset_container = st.columns([2.3, 1.5])
     with c_title:
         st.markdown("##### 📊 Subnet Allocation & Live Status (✏️ Click any cell to edit)")
-    with c_preset:
-        st.selectbox(
-            "Load Standard Preset",
-            options=list(VLAN_PRESETS.keys()),
-            index=0,
-            key="ipam_preset_selector",
-            on_change=on_preset_change,
-            help="Quickly load pre-defined standard VLAN structures or start blank."
-        )
-    with c_status:
-        # Always show compact status indicator
-        site_found = st.session_state.get("ipam_site_found_in_db", False)
-        st.markdown("<br>", unsafe_allow_html=True)
-        if site_found:
-            st.markdown("✅", help="Site found in DB - Select 'Load From DB' to load data")
-        else:
-            st.caption("⚪")
-    with c_refresh:
-        # Show refresh button only when "Load From DB" is selected and site is found
-        selected_preset = st.session_state.get("ipam_preset_selector", "")
-        if selected_preset == "🗄️ Load From DB (Existing Site)" and site_found:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("🔄", key="btn_refresh_ipam", help="Reload data for current site"):
-                st.session_state["ipam_loaded_from_db"] = False
-                st.session_state["ipam_preset_selector"] = "-- Custom / Empty --"
-                st.session_state["ipam_preset_selector"] = selected_preset
-                on_preset_change()
-                st.rerun()
+    with c_preset_container:
+        c_preset_inner, c_status, c_refresh = st.columns([1.0, 0.3, 0.3])
+        with c_preset_inner:
+            st.selectbox(
+                "Load Standard Preset",
+                options=list(VLAN_PRESETS.keys()),
+                index=0,
+                key="ipam_preset_selector",
+                on_change=on_preset_change,
+                help="Quickly load pre-defined standard VLAN structures or start blank."
+            )
+        with c_status:
+            # Always show compact status indicator
+            site_found = st.session_state.get("ipam_site_found_in_db", False)
+            if site_found:
+                st.markdown("✅", help="Site found in DB - Select 'Load From DB' to load data")
+            else:
+                st.caption("⚪")
+        with c_refresh:
+            # Show refresh button only when "Load From DB" is selected and site is found
+            selected_preset = st.session_state.get("ipam_preset_selector", "")
+            if selected_preset == "🗄️ Load From DB (Existing Site)":
+                if site_found:
+                    if st.button("🔄", key="btn_refresh_ipam", help="Reload data for current site"):
+                        # Clear the data and trigger reload
+                        st.session_state["ipam_persisted_rows"] = []
+                        st.session_state["ipam_loaded_from_db"] = False
+                        st.rerun()
 
     if "ipam_persisted_rows" not in st.session_state:
         st.session_state["ipam_persisted_rows"] = []
