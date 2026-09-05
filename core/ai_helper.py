@@ -26,6 +26,8 @@ from core.backup_manager import (
     get_backup_object_counts,
     get_backup_records_by_type,
     get_backup_site_names,
+    get_choice_set_summary,
+    get_choice_values_for_field,
     is_backup_active,
     search_backup_records,
 )
@@ -41,18 +43,47 @@ BACKUP_TOPIC_HINTS: List[tuple] = [
     ("dcim_device_types", ("device type", "device types", "model", "models", "part number", "chassis")),
     ("dcim_device_roles", ("device role", "device roles", "roles")),
     ("dcim_manufacturers", ("manufacturer", "manufacturers", "vendor", "vendors", "make")),
-    ("dcim_platforms", ("platform", "platforms", "os version", "firmware")),
+    ("dcim_platforms", ("platform", "platforms", "os version", "firmware", "operating system")),
     ("dcim_regions", ("region", "regions", "country", "countries", "continent")),
     ("dcim_sites", ("site", "sites", "branch", "branches", "office", "offices", "winery", "wineries", "location", "locations", "address", "timezone", "time zone")),
+    ("dcim_locations", ("location", "locations", "floor", "room", "building")),
+    ("dcim_virtual_chassis", ("virtual chassis", "stack", "stacks", "vc")),
+    ("dcim_modules", ("module", "modules", "line card", "sfp")),
+    ("dcim_cables", ("cable", "cables", "patch", "cabling")),
     ("ipam_prefixes", ("prefix", "prefixes", "subnet", "subnets", "cidr", "supernet", "scope id", "network range")),
     ("ipam_vlans", ("vlan", "vlans", "vid", "vlan group", "broadcast domain")),
+    ("ipam_vlan_groups", ("vlan group", "vlan groups")),
     ("ipam_ip_addresses", ("ip", "ip address", "ip addresses", "gateway", "dns name", "dhcp", "dns server", "host address")),
+    ("ipam_ip_ranges", ("ip range", "ip ranges", "dhcp pool", "dhcp scope", "address pool")),
+    ("ipam_aggregates", ("aggregate", "aggregates", "rir block")),
+    ("ipam_asns", ("asn", "asns", "as number", "autonomous system")),
     ("ipam_vrfs", ("vrf", "vrfs", "route distinguisher")),
+    ("ipam_roles", ("ipam role", "prefix role", "vlan role")),
     ("virtualization_virtual_machines", ("vm", "vms", "virtual machine", "virtual machines", "guest", "vcpu", "vcpus", "memory")),
     ("virtualization_clusters", ("cluster", "clusters", "vcenter")),
-    ("tenancy_tenants", ("tenant", "tenants", "tenancy", "business unit")),
+    ("virtualization_cluster_groups", ("cluster group", "cluster groups")),
+    ("virtualization_virtual_disks", ("virtual disk", "virtual disks", "vmdk")),
+    ("tenancy_tenants", ("tenant", "tenants", "tenancy", "business unit", "subscription", "subscriptions")),
+    ("tenancy_tenant_groups", ("tenant group", "tenant groups")),
     ("circuits_circuits", ("circuit", "circuits", "wan link", "isp link", "commit rate")),
     ("circuits_providers", ("provider", "providers", "carrier", "carriers", "isp")),
+    ("wireless_wireless_lans", ("wireless lan", "wireless lans", "ssid", "ssids", "wlan")),
+    ("extras_tags", ("tag", "tags")),
+    ("extras_custom_fields", ("custom field", "custom fields")),
+    ("extras_custom_field_choice_sets", (
+        "choice set", "choice sets", "instance type", "instance types",
+        "resource group", "resource groups", "custom field choice",
+    )),
+]
+
+# Custom field choice sets surfaced verbatim when the question names them.
+CHOICE_FIELD_HINTS: List[tuple] = [
+    ("instance_type", ("instance type", "instance types", "vm size", "vm sizes", "sku", "skus")),
+    ("resource_group", ("resource group", "resource groups")),
+    ("organization", ("organization", "organisations", "organizations")),
+    ("owner", ("owner", "owners")),
+    ("tier", ("tier", "tiers")),
+    ("runtime", ("runtime", "runtimes")),
 ]
 
 STOPWORDS = {
@@ -107,6 +138,18 @@ def _detect_backup_topics(prompt: str) -> List[str]:
     return topics
 
 
+def _detect_choice_fields(prompt: str) -> List[str]:
+    """Map the prompt onto custom field choice sets it explicitly asks about."""
+    prompt_lower = (prompt or "").lower()
+    fields: List[str] = []
+    for field_name, hints in CHOICE_FIELD_HINTS:
+        for hint in hints:
+            if re.search(rf"\b{re.escape(hint.strip())}\b", prompt_lower):
+                fields.append(field_name)
+                break
+    return fields
+
+
 def build_backup_context(prompt: str, site_filter: str = None, max_rows: int = 60) -> str:
     """Build AI context from the uploaded NetBox master backup (JSON).
 
@@ -122,6 +165,21 @@ def build_backup_context(prompt: str, site_filter: str = None, max_rows: int = 6
     context.append("=== NETBOX MASTER BACKUP (FULL DATABASE) ===")
     context.append(f"Source File: {meta['filename']} | Uploaded: {meta['uploaded_at']} | Objects: {meta['record_count']}")
 
+    source = meta.get("source_info") or {}
+    if source:
+        source_bits = []
+        if source.get("netbox_url"):
+            source_bits.append(f"NetBox URL: {source['netbox_url']}")
+        if source.get("netbox_version"):
+            source_bits.append(f"NetBox Version: {source['netbox_version']}")
+        if source.get("successful_endpoints") is not None:
+            source_bits.append(
+                f"Endpoints Captured: {source['successful_endpoints']}/"
+                f"{source.get('endpoints_processed', '?')}"
+            )
+        if source_bits:
+            context.append(" | ".join(source_bits))
+
     if counts:
         inventory_line = ", ".join(
             f"{OBJECT_LABELS.get(k, k.replace('_', ' ').title())}: {v}"
@@ -132,6 +190,16 @@ def build_backup_context(prompt: str, site_filter: str = None, max_rows: int = 6
     backup_sites = get_backup_site_names()
     if backup_sites:
         context.append(f"Backup Sites ({len(backup_sites)}): {', '.join(backup_sites)}")
+
+    # Custom field choice sets (Instance Type Set, Resource Group Set, ...) are the
+    # authoritative allowed-value lists, so advertise them for every question.
+    choice_sets = get_choice_set_summary()
+    if choice_sets:
+        summary_line = ", ".join(
+            f"{row['choice_set']} ({row.get('fields') or '-'}): {row['value_count']} values"
+            for row in choice_sets
+        )
+        context.append(f"Custom Field Choice Sets: {summary_line}")
 
     # Resolve a site from the prompt when the caller did not pass one.
     target_site = (site_filter or "").strip()
@@ -144,6 +212,17 @@ def build_backup_context(prompt: str, site_filter: str = None, max_rows: int = 6
 
     topics = _detect_backup_topics(prompt)[:4]
     identifiers, keywords = _split_terms(prompt)
+
+    # 0. Full choice value lists when the question names a choice-backed field.
+    for field_name in _detect_choice_fields(prompt)[:3]:
+        values = get_choice_values_for_field(field_name)
+        if not values:
+            continue
+        context.append(
+            f"\n--- Allowed Values for Custom Field `{field_name}` "
+            f"(total: {len(values)}) ---"
+        )
+        context.append(", ".join(values))
 
     # 1. Exact identifier hits across every object type (hostnames, IPs, CIDRs).
     if identifiers:

@@ -1,12 +1,21 @@
 """
 NetBox Master Backup (JSON) Ingest & Lookup Layer
 
-Consumes the full `NetBox_Backup_*.json` export (the same payload the PowerShell
-sync agent pushes) and makes every object available to the app and the AI
-Assistant. The upload populates the regular Sites / IPAM / Inventory tables so
-existing lookups keep working, and additionally stores a flattened, searchable
-row per NetBox object so the AI Assistant can answer questions about any part of
-the master database.
+Consumes the full NetBox JSON export and makes every object available to the app
+and the AI Assistant. Two export layouts are supported:
+
+1. Legacy flat layout — one top-level key per endpoint:
+       {"dcim_sites": [...], "ipam_vlans": [...]}
+
+2. Full API-walk layout produced by `netbox-export.ps1` v2.0:
+       {"metadata": {...},
+        "endpoints": [{"path": "dcim/sites", "records": [...]}, ...],
+        "summary": [...]}
+
+The upload populates the regular Sites / IPAM / Inventory tables so existing
+lookups keep working, stores a flattened searchable row per NetBox object, and
+records custom field definitions and their choice sets (Instance Type Set,
+Resource Group Set, ...) so object-existence checks can use authoritative data.
 """
 
 import json
@@ -27,30 +36,80 @@ BACKUP_SOURCE = "NetBox Backup (JSON)"
 
 HYPERVISOR_HINTS = ("esx", "hypervisor", "infhost", "vmhost", "esxi")
 
+# Endpoint paths never ingested from a full API walk.
+# - users/*            carries API tokens and password/permission data
+# - core/*             changelog, jobs, queues, workers, object-type registry
+# - extras/tagged-objects and journal/changelog style endpoints are pure noise
+# - plugins/*, status  instance internals, not inventory
+SKIP_ENDPOINTS = {
+    "status",
+    "extras/tagged-objects",
+    "extras/object-changes",
+    "extras/journal-entries",
+    "extras/notifications",
+    "extras/subscriptions",
+    "extras/bookmarks",
+    "extras/dashboard",
+    "extras/image-attachments",
+}
+SKIP_ENDPOINT_PREFIXES = ("core/", "users/", "plugins/")
+
+# NetBox object type holding custom field choice values
+CHOICE_SET_TYPE = "extras_custom_field_choice_sets"
+CUSTOM_FIELD_TYPE = "extras_custom_fields"
+
 # Canonical object type -> human label used in AI context and UI counters
 OBJECT_LABELS: Dict[str, str] = {
     "dcim_sites": "Site",
+    "dcim_site_groups": "Site Group",
+    "dcim_locations": "Location",
     "dcim_regions": "Region",
     "dcim_racks": "Rack",
+    "dcim_rack_roles": "Rack Role",
+    "dcim_rack_types": "Rack Type",
     "dcim_manufacturers": "Manufacturer",
     "dcim_device_types": "Device Type",
     "dcim_device_roles": "Device Role",
     "dcim_platforms": "Platform",
     "dcim_devices": "Device",
     "dcim_interfaces": "Interface",
+    "dcim_interface_templates": "Interface Template",
+    "dcim_virtual_chassis": "Virtual Chassis",
+    "dcim_modules": "Module",
+    "dcim_module_types": "Module Type",
+    "dcim_module_bays": "Module Bay",
+    "dcim_cables": "Cable",
+    "dcim_console_ports": "Console Port",
+    "dcim_power_ports": "Power Port",
+    "dcim_mac_addresses": "MAC Address",
     "ipam_vrfs": "VRF",
     "ipam_vlans": "VLAN",
     "ipam_prefixes": "Prefix",
     "ipam_ip_addresses": "IP Address",
+    "ipam_ip_ranges": "IP Range",
     "ipam_aggregates": "Aggregate",
     "ipam_roles": "IPAM Role",
+    "ipam_rirs": "RIR",
+    "ipam_asns": "ASN",
     "ipam_vlan_groups": "VLAN Group",
+    "ipam_fhrp_groups": "FHRP Group",
     "virtualization_clusters": "Cluster",
+    "virtualization_cluster_types": "Cluster Type",
+    "virtualization_cluster_groups": "Cluster Group",
     "virtualization_virtual_machines": "Virtual Machine",
     "virtualization_interfaces": "VM Interface",
+    "virtualization_virtual_disks": "Virtual Disk",
     "tenancy_tenants": "Tenant",
+    "tenancy_tenant_groups": "Tenant Group",
     "circuits_providers": "Circuit Provider",
     "circuits_circuits": "Circuit",
+    "circuits_circuit_types": "Circuit Type",
+    "circuits_circuit_terminations": "Circuit Termination",
+    "wireless_wireless_lans": "Wireless LAN",
+    "wireless_wireless_lan_groups": "Wireless LAN Group",
+    "extras_tags": "Tag",
+    CUSTOM_FIELD_TYPE: "Custom Field",
+    CHOICE_SET_TYPE: "Custom Field Choice Set",
 }
 
 # Ordered (label, dotted path) pairs rendered into each record's summary line.
@@ -165,6 +224,16 @@ FIELD_SPECS: Dict[str, List[Any]] = {
         ("Side A", "termination_a"), ("Side Z", "termination_z"),
         ("Description", "description"),
     ],
+    CUSTOM_FIELD_TYPE: [
+        ("Label", "label"), ("Type", "type"), ("Object Types", "object_types"),
+        ("Choice Set", "choice_set"), ("Required", "required"),
+        ("Default", "default"), ("Group", "group_name"),
+        ("Description", "description"),
+    ],
+    CHOICE_SET_TYPE: [
+        ("Base Choices", "base_choices"), ("Choices", "choices_count"),
+        ("Alphabetical", "order_alphabetically"), ("Description", "description"),
+    ],
 }
 
 # Keys searched for a display name, in priority order.
@@ -200,8 +269,24 @@ def init_backup_tables() -> None:
             enabled INTEGER DEFAULT 1
         )
     """)
+    # Authoritative custom field choice values (Instance Type Set, Resource Group
+    # Set, ...) so object-existence checks read NetBox rather than guessing from
+    # per-VM custom field text.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS backup_choice_values (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            choice_set TEXT,
+            field_name TEXT,
+            value TEXT,
+            label TEXT,
+            imported_at TEXT
+        )
+    """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_backup_type ON backup_records(object_type)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_backup_site ON backup_records(site)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_backup_name ON backup_records(name)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_choice_set ON backup_choice_values(choice_set)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_choice_field ON backup_choice_values(field_name)")
     conn.commit()
     conn.close()
 
@@ -345,13 +430,54 @@ def _load_payload(file_bytes: Any) -> Dict[str, Any]:
     return payload
 
 
-def _bucket_payload(payload: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+def _is_full_walk(payload: Dict[str, Any]) -> bool:
+    """True when the payload is the `netbox-export.ps1` v2.0 API-walk layout."""
+    endpoints = payload.get("endpoints")
+    if not isinstance(endpoints, list) or not endpoints:
+        return False
+    first = endpoints[0]
+    return isinstance(first, dict) and "path" in first
+
+
+def _skip_endpoint(path: str) -> bool:
+    clean = path.strip().strip("/").lower()
+    if clean in SKIP_ENDPOINTS:
+        return True
+    return any(clean.startswith(prefix) for prefix in SKIP_ENDPOINT_PREFIXES)
+
+
+def _bucket_full_walk(payload: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+    """Flatten the endpoints array of a full API walk into canonical buckets."""
+    buckets: Dict[str, List[Dict[str, Any]]] = {}
+    for endpoint in payload.get("endpoints", []):
+        if not isinstance(endpoint, dict):
+            continue
+        path = str(endpoint.get("path") or "").strip()
+        if not path or _skip_endpoint(path):
+            continue
+        records = endpoint.get("records")
+        if not isinstance(records, list):
+            continue
+        rows = [item for item in records if isinstance(item, dict)]
+        if not rows:
+            continue
+        buckets.setdefault(_canonical_type(path), []).extend(rows)
+    if not buckets:
+        raise ValueError(
+            "No NetBox object collections found in the backup. Expected endpoint "
+            "paths such as `dcim/sites`, `dcim/devices`, `ipam/vlans` or `ipam/prefixes`."
+        )
+    return buckets
+
+
+def _bucket_flat(payload: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+    """Flatten the legacy layout that keys collections at the top level."""
     buckets: Dict[str, List[Dict[str, Any]]] = {}
     for raw_key, value in payload.items():
         if not isinstance(value, list):
             continue
         canonical = _canonical_type(raw_key)
-        if canonical in ("sync_key",):
+        if canonical in ("sync_key", "summary", "metadata"):
             continue
         rows = [item for item in value if isinstance(item, dict)]
         if rows:
@@ -362,6 +488,29 @@ def _bucket_payload(payload: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
             "`dcim_sites`, `dcim_devices`, `ipam_vlans` or `ipam_prefixes`."
         )
     return buckets
+
+
+def _bucket_payload(payload: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+    """Normalize either export layout into {canonical_object_type: [records]}."""
+    if _is_full_walk(payload):
+        return _bucket_full_walk(payload)
+    return _bucket_flat(payload)
+
+
+def _payload_source_info(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract the exporter metadata block, when the export provides one."""
+    meta = payload.get("metadata")
+    if not isinstance(meta, dict):
+        return {}
+    return {
+        "netbox_url": meta.get("netbox_url") or "",
+        "netbox_version": meta.get("netbox_version") or "",
+        "backup_completed": meta.get("backup_completed") or "",
+        "endpoints_processed": meta.get("endpoints_processed"),
+        "successful_endpoints": meta.get("successful_endpoints"),
+        "failed_endpoints": meta.get("failed_endpoints"),
+        "script_version": meta.get("script_version") or "",
+    }
 
 
 def _build_parent_site_map(buckets: Dict[str, List[Dict[str, Any]]]) -> Dict[int, str]:
@@ -530,6 +679,66 @@ def _ingest_inventory(buckets: Dict[str, List[Dict[str, Any]]]) -> Dict[str, int
     return save_records_batch(records, clear_first=True, source=BACKUP_SOURCE)
 
 
+def _ingest_choice_values(
+    buckets: Dict[str, List[Dict[str, Any]]],
+    uploaded_at: str,
+) -> int:
+    """Store every custom field choice value, mapped to the fields that use it.
+
+    NetBox returns `extra_choices` as a list of `[value, label]` pairs. Choice
+    sets are linked to custom fields via `custom_field.choice_set.name`, so the
+    Instance Type / Resource Group values become queryable by field name.
+    """
+    choice_sets = buckets.get(CHOICE_SET_TYPE, [])
+    custom_fields = buckets.get(CUSTOM_FIELD_TYPE, [])
+
+    # choice set name -> field names referencing it
+    set_to_fields: Dict[str, List[str]] = {}
+    for field in custom_fields:
+        cs = field.get("choice_set")
+        set_name = _flatten_value(cs) if cs else ""
+        field_name = _flatten_value(field.get("name"))
+        if set_name and field_name:
+            set_to_fields.setdefault(set_name, []).append(field_name)
+
+    rows: List[tuple] = []
+    for cs in choice_sets:
+        set_name = _flatten_value(cs.get("name"))
+        if not set_name:
+            continue
+        field_names = set_to_fields.get(set_name) or [""]
+        for choice in cs.get("extra_choices") or []:
+            if isinstance(choice, (list, tuple)):
+                value = _flatten_value(choice[0]) if choice else ""
+                label = _flatten_value(choice[1]) if len(choice) > 1 else value
+            elif isinstance(choice, dict):
+                value = _flatten_value(choice.get("value"))
+                label = _flatten_value(choice.get("label")) or value
+            else:
+                value = _flatten_value(choice)
+                label = value
+            if not value:
+                continue
+            for field_name in field_names:
+                rows.append((set_name, field_name, value, label, uploaded_at))
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM backup_choice_values")
+    if rows:
+        cursor.executemany(
+            """
+            INSERT INTO backup_choice_values
+                (choice_set, field_name, value, label, imported_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+    conn.commit()
+    conn.close()
+    return len(rows)
+
+
 # ── FULL-FIDELITY BACKUP ROWS ───────────────────────────────────────────
 
 def _ingest_backup_rows(
@@ -570,13 +779,16 @@ def _ingest_backup_rows(
 def save_netbox_backup(file_bytes: Any, filename: str = "") -> Dict[str, Any]:
     """Ingest a NetBox master backup JSON file.
 
-    Populates the Sites / IPAM / Inventory tables (replacing existing records)
-    and stores a searchable row for every NetBox object in the backup.
+    Accepts both the legacy flat layout and the full API-walk layout produced by
+    `netbox-export.ps1` v2.0. Populates the Sites / IPAM / Inventory tables
+    (replacing existing records), stores a searchable row for every NetBox
+    object, and records custom field choice sets.
     """
     init_backup_tables()
 
     payload = _load_payload(file_bytes)
     buckets = _bucket_payload(payload)
+    source_info = _payload_source_info(payload)
     uploaded_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     object_counts = _ingest_backup_rows(buckets, uploaded_at)
@@ -585,6 +797,11 @@ def save_netbox_backup(file_bytes: Any, filename: str = "") -> Dict[str, Any]:
     sites = _ingest_sites(buckets)
     ipam = _ingest_ipam(buckets)
     inventory = _ingest_inventory(buckets)
+    choice_values = _ingest_choice_values(buckets, uploaded_at)
+
+    counts_payload = dict(object_counts)
+    if source_info:
+        counts_payload["__source__"] = source_info
 
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -592,7 +809,7 @@ def save_netbox_backup(file_bytes: Any, filename: str = "") -> Dict[str, Any]:
         INSERT OR REPLACE INTO backup_metadata
             (id, filename, uploaded_at, record_count, object_counts, enabled)
         VALUES (1, ?, ?, ?, ?, 1)
-    """, (filename or "NetBox_Backup.json", uploaded_at, total, json.dumps(object_counts)))
+    """, (filename or "NetBox_Backup.json", uploaded_at, total, json.dumps(counts_payload)))
     conn.commit()
     conn.close()
 
@@ -607,6 +824,9 @@ def save_netbox_backup(file_bytes: Any, filename: str = "") -> Dict[str, Any]:
         "ipam": ipam,
         "devices": inventory.get("device", 0) + inventory.get("hypervisor", 0),
         "vms": inventory.get("vm", 0),
+        "choice_values": choice_values,
+        "object_types": len(object_counts),
+        "source_info": source_info,
         "uploaded_at": uploaded_at,
         "filename": filename,
     }
@@ -626,7 +846,7 @@ def get_backup_metadata() -> Dict[str, Any]:
     if not row:
         return {
             "filename": "", "uploaded_at": "Never", "record_count": 0,
-            "object_counts": {}, "enabled": False, "loaded": False,
+            "object_counts": {}, "source_info": {}, "enabled": False, "loaded": False,
         }
 
     try:
@@ -634,11 +854,14 @@ def get_backup_metadata() -> Dict[str, Any]:
     except json.JSONDecodeError:
         object_counts = {}
 
+    source_info = object_counts.pop("__source__", {}) or {}
+
     return {
         "filename": row[0] or "",
         "uploaded_at": row[1] or "Never",
         "record_count": int(row[2] or 0),
         "object_counts": object_counts,
+        "source_info": source_info,
         "enabled": bool(row[4]),
         "loaded": int(row[2] or 0) > 0,
     }
@@ -659,11 +882,59 @@ def clear_backup_records() -> int:
     cursor = conn.cursor()
     cursor.execute("DELETE FROM backup_records")
     deleted = cursor.rowcount
+    cursor.execute("DELETE FROM backup_choice_values")
     cursor.execute("DELETE FROM backup_metadata")
     cursor.execute("DELETE FROM sync_metadata WHERE module = 'netbox_backup'")
     conn.commit()
     conn.close()
     return deleted
+
+
+def get_choice_set_values(choice_set: str) -> List[str]:
+    """Return the values held by one NetBox custom field choice set."""
+    init_backup_tables()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT DISTINCT value FROM backup_choice_values WHERE LOWER(choice_set) = ? ORDER BY value",
+        (choice_set.strip().lower(),),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [r[0] for r in rows if r[0]]
+
+
+def get_choice_values_for_field(field_name: str) -> List[str]:
+    """Return the values available to one custom field (e.g. `instance_type`)."""
+    init_backup_tables()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT DISTINCT value FROM backup_choice_values WHERE LOWER(field_name) = ? ORDER BY value",
+        (field_name.strip().lower(),),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [r[0] for r in rows if r[0]]
+
+
+def get_choice_set_summary() -> List[Dict[str, Any]]:
+    """List every ingested choice set with its field bindings and value count."""
+    init_backup_tables()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT choice_set,
+               GROUP_CONCAT(DISTINCT field_name) AS fields,
+               COUNT(DISTINCT value) AS value_count
+        FROM backup_choice_values
+        GROUP BY choice_set
+        ORDER BY choice_set
+    """)
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
 
 
 def get_backup_object_counts() -> Dict[str, int]:

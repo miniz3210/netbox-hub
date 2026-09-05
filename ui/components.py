@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Callable
 
 import streamlit as st
@@ -9,162 +10,42 @@ from core.backup_manager import (
     clear_backup_records,
     get_backup_metadata,
     get_backup_object_counts,
+    get_choice_set_summary,
     save_netbox_backup,
     set_backup_enabled,
 )
 
 CHAT_HEIGHT = 380
 
-# Standalone PowerShell exporter that produces the NetBox_Backup_<timestamp>.json
-# master file consumed by the Option A uploader below.
-NETBOX_EXPORT_PS1 = r"""param(
-    [Parameter(Mandatory = $true)]
-    [string]$NetBoxUrl,
+# The PowerShell exporter ships in the repo and is read from disk so the script and
+# the download button can never drift apart. It walks the whole NetBox REST API and
+# writes NetBox_Full_Backup_<timestamp>.json.
+NETBOX_EXPORT_PS1_PATH = Path(__file__).resolve().parent.parent / "data" / "netbox-export.ps1"
 
-    [Parameter(Mandatory = $true)]
-    [string]$ApiToken,
-
-    [int]$PageSize = 2000
+_PS1_MISSING = (
+    "# netbox-export.ps1 was not found in this deployment.\n"
+    "# Expected at: data/netbox-export.ps1\n"
 )
 
-# Remove trailing slash
-$NetBoxUrl = $NetBoxUrl.TrimEnd('/')
 
-# API headers
-$Headers = @{
-    Authorization = "Token $ApiToken"
-    Accept        = "application/json"
-}
+@st.cache_data(show_spinner=False)
+def _load_export_script(path_str: str, mtime: float) -> str:
+    """Read the exporter from disk. `mtime` busts the cache when the file changes."""
+    try:
+        # utf-8-sig strips the BOM PowerShell editors add, which would otherwise
+        # render as a stray character at the top of the code block.
+        return Path(path_str).read_text(encoding="utf-8-sig")
+    except OSError:
+        return _PS1_MISSING
 
-# Output file
-$TimeStamp = Get-Date -Format "yyyyMMdd_HHmmss"
-$OutputFile = "NetBox_Backup_$TimeStamp.json"
 
-# Storage object
-$BackupData = [ordered]@{}
+def get_netbox_export_script() -> str:
+    try:
+        mtime = NETBOX_EXPORT_PS1_PATH.stat().st_mtime
+    except OSError:
+        return _PS1_MISSING
+    return _load_export_script(str(NETBOX_EXPORT_PS1_PATH), mtime)
 
-function Get-PaginatedData {
-    param(
-        [string]$Endpoint
-    )
-
-    $Results = @()
-    $Url = "$NetBoxUrl/api/$Endpoint/?limit=$PageSize"
-
-    do {
-
-        Write-Host "Fetching: $Url"
-
-        $Response = Invoke-RestMethod `
-            -Uri $Url `
-            -Method GET `
-            -Headers $Headers `
-            -ErrorAction Stop
-
-        if ($Response.results) {
-
-            $Results += $Response.results
-
-            Write-Host ("Retrieved {0} records" -f $Results.Count)
-
-            $Url = $Response.next
-        }
-        else {
-
-            $Url = $null
-        }
-
-    } while ($Url)
-
-    return $Results
-}
-
-# Test API connection
-try {
-
-    $Status = Invoke-RestMethod `
-        -Uri "$NetBoxUrl/api/status/" `
-        -Method GET `
-        -Headers $Headers `
-        -ErrorAction Stop
-
-    Write-Host ""
-    Write-Host "Connected to NetBox"
-    Write-Host ("NetBox Version: {0}" -f $Status.'netbox-version')
-    Write-Host ""
-}
-catch {
-
-    Write-Error "Unable to connect to NetBox API"
-    exit 1
-}
-
-# Endpoints to export
-$Endpoints = @(
-    "dcim/sites",
-    "dcim/regions",
-    "dcim/racks",
-    "dcim/manufacturers",
-    "dcim/device-types",
-    "dcim/device-roles",
-    "dcim/platforms",
-    "dcim/devices",
-    "dcim/interfaces",
-
-    "ipam/vrfs",
-    "ipam/vlans",
-    "ipam/prefixes",
-    "ipam/ip-addresses",
-
-    "virtualization/clusters",
-    "virtualization/virtual-machines",
-
-    "tenancy/tenants",
-
-    "circuits/providers",
-    "circuits/circuits"
-)
-
-Write-Host "====================================="
-Write-Host "STARTING NETBOX BACKUP"
-Write-Host "====================================="
-
-foreach ($Endpoint in $Endpoints) {
-
-    Write-Host ""
-    Write-Host "Exporting $Endpoint"
-
-    try {
-
-        $Key = $Endpoint.Replace("/", "_")
-
-        $Data = Get-PaginatedData -Endpoint $Endpoint
-
-        $BackupData[$Key] = $Data
-
-        Write-Host ("Completed: {0} ({1} records)" -f $Endpoint, $Data.Count)
-    }
-    catch {
-
-        Write-Warning ("Failed: {0}" -f $Endpoint)
-        Write-Warning $_.Exception.Message
-    }
-}
-
-Write-Host ""
-Write-Host "Writing JSON backup..."
-
-$BackupData |
-    ConvertTo-Json -Depth 100 |
-    Set-Content -Path $OutputFile -Encoding UTF8
-
-Write-Host ""
-Write-Host "====================================="
-Write-Host "BACKUP COMPLETED"
-Write-Host "====================================="
-Write-Host "File : $OutputFile"
-Write-Host ""
-"""
 
 def _clear_ai_chat(history_key: str, open_key: str) -> None:
     st.session_state[history_key] = []
@@ -291,27 +172,38 @@ def render_backup_uploader(scope_key: str) -> dict:
     result_key = f"backup_upload_result_{scope_key}"
     error_key = f"backup_upload_error_{scope_key}"
 
-    st.markdown("**Option A: Upload Netbox_Backup**")
+    st.markdown("**Option A: Upload NetBox Backup (recommended)**")
     st.caption(
-        "Upload the full `NetBox_Backup_<timestamp>.json` master export. "
-        "Every object (sites, devices, interfaces, VLANs, prefixes, IPs, VMs, "
-        "clusters, tenants, circuits) becomes searchable by the AI Assistant."
+        "Upload the `NetBox_Full_Backup_<timestamp>.json` produced by "
+        "`netbox-export.ps1`. The exporter walks the entire NetBox REST API, so "
+        "every object — sites, devices, interfaces, VLANs, prefixes, IPs, VMs, "
+        "clusters, tenants, circuits, tags and custom field choice sets such as "
+        "**Instance Type Set** and **Resource Group Set** — becomes available to "
+        "lookups, object-existence checks and the AI Assistant. "
+        "Older flat `NetBox_Backup_*.json` files are still accepted."
     )
 
-    st.markdown("**Step 1 — Generate `NetBox_Backup.json` with PowerShell:**")
+    export_script = get_netbox_export_script()
+
+    st.markdown("**Step 1 — Generate the backup JSON with PowerShell:**")
     st.code(
-        '.\\netbox-export.ps1 -NetBoxUrl "https://xxxx" -ApiToken "xxxx"',
+        '.\\netbox-export.ps1 -NetBoxUrl "https://netbox.example.com" -ApiToken "<API_TOKEN>"',
         language="powershell",
+    )
+    st.caption(
+        "Optional: `-PageSize 1000` tunes the API page size, `-OutputDirectory .` "
+        "sets where the JSON and matching `.log` are written. The script exits "
+        "non-zero if any endpoint fails or a record count does not reconcile."
     )
     st.download_button(
         "⬇️ Download netbox-export.ps1",
-        NETBOX_EXPORT_PS1,
+        export_script,
         file_name="netbox-export.ps1",
         mime="text/plain",
         key=f"dl_export_ps1_{scope_key}",
     )
     with st.expander("📄 View netbox-export.ps1", expanded=False):
-        st.code(NETBOX_EXPORT_PS1, language="powershell")
+        st.code(export_script, language="powershell")
 
     st.markdown("**Step 2 — Upload the generated JSON file:**")
     st.file_uploader(
@@ -330,11 +222,15 @@ def render_backup_uploader(scope_key: str) -> dict:
 
     result = st.session_state.get(result_key)
     if result:
-        st.success(
-            f"✅ Ingested {result['total']} NetBox objects "
+        message = (
+            f"✅ Ingested {result['total']} NetBox objects across "
+            f"{result.get('object_types', 0)} object types "
             f"({result['sites']} sites, {result['ipam']} IPAM records, "
-            f"{result['devices']} devices, {result['vms']} VMs)."
+            f"{result['devices']} devices, {result['vms']} VMs"
         )
+        if result.get("choice_values"):
+            message += f", {result['choice_values']} custom field choices"
+        st.success(message + ").")
         st.session_state[result_key] = None
 
     if not meta["loaded"]:
@@ -364,12 +260,46 @@ def render_backup_uploader(scope_key: str) -> dict:
             width="stretch",
         )
 
+    source = meta.get("source_info") or {}
+    if source:
+        bits = []
+        if source.get("netbox_url"):
+            bits.append(f"Source: `{source['netbox_url']}`")
+        if source.get("netbox_version"):
+            bits.append(f"NetBox `{source['netbox_version']}`")
+        if source.get("successful_endpoints") is not None:
+            bits.append(
+                f"Endpoints: {source['successful_endpoints']}/"
+                f"{source.get('endpoints_processed', '?')} OK"
+            )
+        if source.get("failed_endpoints"):
+            bits.append(f"⚠️ {source['failed_endpoints']} endpoint(s) failed")
+        if bits:
+            st.caption(" | ".join(bits))
+
     counts = get_backup_object_counts()
     if counts:
         with st.expander(f"📊 Backup contents ({len(counts)} object types)", expanded=False):
             for object_type, count in counts.items():
                 label = OBJECT_LABELS.get(object_type, object_type.replace("_", " ").title())
                 st.markdown(f"* **{label}**: `{count}`")
+
+    choice_sets = get_choice_set_summary()
+    if choice_sets:
+        with st.expander(
+            f"⚙️ Custom field choice sets ({len(choice_sets)})", expanded=False
+        ):
+            st.caption(
+                "Read from `extras/custom-field-choice-sets`. These are the "
+                "authoritative values used when checking whether an Instance Type "
+                "or Resource Group already exists in NetBox."
+            )
+            for row in choice_sets:
+                fields = row.get("fields") or "—"
+                st.markdown(
+                    f"* **{row['choice_set']}** → `{fields}`: "
+                    f"`{row['value_count']}` values"
+                )
 
     if not meta["enabled"]:
         st.warning("⚠️ Backup is uploaded but excluded from AI Assistant lookups.", icon="⚠️")

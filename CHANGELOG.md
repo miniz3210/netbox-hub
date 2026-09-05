@@ -1,5 +1,20 @@
 # Changelog
 
+## Release v3.1.0 — Full API-Walk Backup Ingest & Authoritative Choice Sets
+
+### 🚀 New Features
+* **Full API-Walk Backup Support**: `Ingest NetBox Data (Backup / CSV)` now accepts the `NetBox_Full_Backup_<timestamp>.json` produced by the rewritten `netbox-export.ps1` v2.0, which recursively walks every NetBox REST endpoint. `core/backup_manager.py` detects the `{metadata, endpoints[], summary}` layout and flattens `endpoints[].records` into canonical buckets; the legacy flat `{dcim_sites: [...]}` layout still ingests unchanged. Object coverage rises from 18 to 57 types (3,573 → 5,511 objects on the current export).
+* **Custom Field Choice Set Ingest**: `extras/custom-field-choice-sets` and `extras/custom-fields` are captured into a new `backup_choice_values` table, binding each choice set to the custom fields that use it. The current export yields 121 values across 6 sets — **Instance Type Set** (16), **Resource Group Set** (94), Organization, Owner, Runtime and Tier.
+* **Authoritative Instance Type / Resource Group Checks**: `analyze_netbox_objects()` now resolves those two categories from the NetBox choice sets instead of scraping per-VM `Custom Fields:` text, so a value defined in NetBox but not yet used by any VM is correctly reported as existing. Against the live export this moved Resource Groups from 7 discoverable values to the full 94. Scraping remains as a fallback for older flat backups.
+* **Exporter Read From Disk**: `netbox-export.ps1` is now loaded from `data/netbox-export.ps1` at render time (mtime-cached) rather than duplicated as a Python string literal in `ui/components.py`, so the download button and the on-screen script can no longer drift from the shipped file.
+* **Backup Provenance Display**: The uploader shows the source NetBox URL, version, and endpoint success ratio from the export's `metadata` block, and warns when the exporter reported failed endpoints.
+
+### 🛠️ Improvements & Refinements
+* **Expanded Object Labels**: Added labels for locations, site groups, IP ranges, aggregates, ASNs, RIRs, VLAN groups, cluster types/groups, virtual disks, tenant groups, circuit types/terminations, wireless LANs, tags, modules, cables and console/power ports.
+* **Expanded AI Topic Routing**: `BACKUP_TOPIC_HINTS` covers the newly ingested object types, and a new `CHOICE_FIELD_HINTS` map injects the complete allowed-value list when a question names Instance Type, Resource Group, Organization, Owner, Tier or Runtime.
+* **Sensitive Endpoint Exclusion**: `users/*` (API tokens, permissions), `core/*` (changelog, jobs, queues), `plugins/*`, `status` and tagged-object/journal noise are skipped during ingest rather than stored in the searchable table.
+* **New Query Helpers**: `get_choice_set_values()`, `get_choice_values_for_field()` and `get_choice_set_summary()` expose choice data to the UI and AI context.
+
 ## Release v2.4.0 — Session State Manager, Database Indexes & Enhanced IPAM
 
 ### 🚀 New Features
