@@ -104,6 +104,12 @@ def _standards_tab(active_model):
     _fn(active_model)
 
 
+def _azure_tab(active_model):
+    from ui.tabs.azure_tab import render_azure_tab as _fn
+
+    _fn(active_model)
+
+
 # Tab registry: (label, renderer, requires_catalog)
 TABS: List[Tuple[str, Callable, bool]] = [
     ("🖥️ Device Types", _device_tab, True),
@@ -113,6 +119,7 @@ TABS: List[Tuple[str, Callable, bool]] = [
     ("📦 Batch", _batch_tab, True),
     ("🌐 IPAM", _ipam_tab, False),
     ("🏷️ Naming", _naming_tab, False),
+    ("☁️ Azure VMs", _azure_tab, False),
     ("📖 Standards", _standards_tab, False),
 ]
 
