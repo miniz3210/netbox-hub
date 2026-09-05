@@ -1,6 +1,7 @@
 import io
 import re
 import ipaddress
+from typing import Dict, List
 import streamlit as st
 import pandas as pd
 import openpyxl
@@ -242,101 +243,125 @@ def handle_ipam_db_reset():
         del st.session_state["ipam_super_in"]
     st.toast("🗑️ Database Cleared. Restored default templates.", icon="🧹")
 
+def load_ipam_records_from_db(site_name: str) -> bool:
+    """Load IPAM allocation rows for a site straight from the local database.
+
+    Returns True when records were found and loaded into the editor.
+    """
+    site_name = (site_name or "").strip()
+    records = get_ipam_records_by_site(site_name) if site_name else []
+
+    # Drop stale editor deltas so edits from the previous site are not replayed
+    if "ipam_data_editor_live" in st.session_state:
+        del st.session_state["ipam_data_editor_live"]
+
+    st.session_state["ipam_loaded_site"] = site_name
+
+    if not records:
+        st.session_state["ipam_persisted_rows"] = []
+        st.session_state["ipam_loaded_from_db"] = False
+        st.session_state["ipam_site_found_in_db"] = False
+        return False
+
+    st.session_state["ipam_site_found_in_db"] = True
+
+    # Determine if it's a Branch or DC to apply sorting
+    branch_vids = {p['vid'] for p in BRANCH_VLAN_PRESET}
+    dc_vids = {p['vid'] for p in DATACENTER_VLAN_PRESET}
+
+    match_branch = sum(1 for r in records if r.get('vlan_id') in branch_vids)
+    match_dc = sum(1 for r in records if r.get('vlan_id') in dc_vids)
+
+    target_preset = BRANCH_VLAN_PRESET if match_branch >= match_dc else DATACENTER_VLAN_PRESET
+    order_map = {p['vid']: i for i, p in enumerate(target_preset)}
+
+    # Sort records by order in preset, then by vlan_id (handle None values)
+    def sort_key(r):
+        vlan_id = r.get('vlan_id')
+        # If vlan_id is None, treat it as 9999 for sorting (put at end)
+        if vlan_id is None:
+            return (999, 9999)
+        return (order_map.get(vlan_id, 999), vlan_id)
+
+    records.sort(key=sort_key)
+
+    def _clean(value) -> str:
+        return str(value or "").strip()
+
+    # Merge the VLAN row and the prefix row that NetBox stores separately for the
+    # same VLAN ID: the 'vlan' record holds the real VLAN description while the
+    # 'prefix' record holds the prefix description.
+    merged: Dict[int, Dict[str, str]] = {}
+    order: List[int] = []
+    for r in records:
+        vid = r.get("vlan_id")
+        if vid is None:
+            continue
+
+        if vid not in merged:
+            merged[vid] = {
+                "role": "",
+                "vlan_name": "",
+                "vlan_desc": "",
+                "prefix_desc": "",
+                "subnet": "",
+            }
+            order.append(vid)
+
+        entry = merged[vid]
+        rec_type = _clean(r.get("record_type")).lower()
+        desc = _clean(r.get("description"))
+
+        if not entry["role"]:
+            entry["role"] = _clean(r.get("role"))
+        if not entry["vlan_name"]:
+            entry["vlan_name"] = _clean(r.get("vlan_name"))
+        if not entry["subnet"]:
+            entry["subnet"] = _clean(r.get("prefix_or_subnet"))
+
+        if rec_type == "vlan":
+            if desc and not entry["vlan_desc"]:
+                entry["vlan_desc"] = desc
+        elif rec_type == "prefix":
+            if desc and not entry["prefix_desc"]:
+                entry["prefix_desc"] = desc
+        else:
+            # Unknown record type: use it only as a fallback for both fields
+            if desc and not entry["vlan_desc"]:
+                entry["vlan_desc"] = desc
+            if desc and not entry["prefix_desc"]:
+                entry["prefix_desc"] = desc
+
+    new_rows = []
+    for vid in order:
+        entry = merged[vid]
+        # Keep the raw DB text so it is never replaced by generated descriptions
+        new_rows.append({
+            "VLAN ID": vid,
+            "Role": entry["role"],
+            "VLAN Name": entry["vlan_name"],
+            "VLAN Description": entry["vlan_desc"] or entry["prefix_desc"],
+            "Subnet (CIDR)": entry["subnet"],
+            "_db_prefix_desc": entry["prefix_desc"] or entry["vlan_desc"],
+            "_db_vlan_desc": entry["vlan_desc"] or entry["prefix_desc"],
+        })
+
+    st.session_state["ipam_persisted_rows"] = new_rows
+    st.session_state["ipam_loaded_from_db"] = True
+    return True
+
 def on_preset_change():
     selected = st.session_state.get("ipam_preset_selector")
     site_name = st.session_state.get("ipam_site_in", "").strip()
-    
-    # Reset site found indicator and DB load flag
-    st.session_state["ipam_site_found_in_db"] = False
-    st.session_state["ipam_loaded_from_db"] = False
-    
-    # Check if site exists in DB immediately
-    if site_name:
-        site_records = get_ipam_records_by_site(site_name)
-        if site_records:
-            st.session_state["ipam_site_found_in_db"] = True
-        else:
-            st.session_state["ipam_site_found_in_db"] = False
 
-    if selected == "🗄️ Load From DB (Existing Site)" and site_name:
-        records = get_ipam_records_by_site(site_name)
-        
-        if not records:
-            st.session_state["ipam_persisted_rows"] = []
-            st.session_state["ipam_site_found_in_db"] = False
-            return
-        
-        # Mark that site was found in DB
-        st.session_state["ipam_site_found_in_db"] = True
-        
-        # Determine if it's a Branch or DC to apply sorting
-        branch_vids = {p['vid'] for p in BRANCH_VLAN_PRESET}
-        dc_vids = {p['vid'] for p in DATACENTER_VLAN_PRESET}
-        
-        match_branch = sum(1 for r in records if r.get('vlan_id') in branch_vids)
-        match_dc = sum(1 for r in records if r.get('vlan_id') in dc_vids)
-        
-        target_preset = BRANCH_VLAN_PRESET if match_branch >= match_dc else DATACENTER_VLAN_PRESET
-        order_map = {p['vid']: i for i, p in enumerate(target_preset)}
-        
-        # Sort records by order in preset, then by vlan_id (handle None values)
-        def sort_key(r):
-            vlan_id = r.get('vlan_id')
-            # If vlan_id is None, treat it as 9999 for sorting (put at end)
-            if vlan_id is None:
-                return (999, 9999)
-            return (order_map.get(vlan_id, 999), vlan_id)
-        
-        records.sort(key=sort_key)
-        
-        # Use a dictionary to de-duplicate based on vlan_id
-        # Prefer records with non-empty role, vlan_name, and description
-        unique_records = {}
-        for r in records:
-            vid = r.get("vlan_id")
-            if vid is None:
-                continue
-                
-            # If this VLAN ID hasn't been seen yet, add it
-            if vid not in unique_records:
-                unique_records[vid] = r
-            else:
-                # Already have a record for this VLAN - keep the better one
-                existing = unique_records[vid]
-                
-                # Calculate "quality score" - prefer records with more filled fields
-                def quality_score(rec):
-                    score = 0
-                    if rec.get("role", "").strip():
-                        score += 3  # Role is most important
-                    if rec.get("description", "").strip():
-                        score += 2
-                    if rec.get("vlan_name", "").strip():
-                        score += 1
-                    if rec.get("prefix_or_subnet", "").strip():
-                        score += 1
-                    return score
-                
-                if quality_score(r) > quality_score(existing):
-                    unique_records[vid] = r
-                
-        new_rows = []
-        for vid, r in unique_records.items():
-            # Store all DB fields for later use
-            row = {
-                "VLAN ID": vid,
-                "Role": r.get("role", ""),
-                "VLAN Name": r.get("vlan_name", ""),
-                "VLAN Description": r.get("description", ""),
-                "Subnet (CIDR)": r.get("prefix_or_subnet", ""),
-                "_db_prefix_desc": r.get("description", ""),  # Store DB description
-                "_db_vlan_desc": r.get("description", "")  # Store DB VLAN Description
-            }
-            new_rows.append(row)
-        st.session_state["ipam_persisted_rows"] = new_rows
-        st.session_state["ipam_loaded_from_db"] = True  # Mark that data came from DB
+    # Reset DB load flag; the loader re-sets it when records are found
+    st.session_state["ipam_loaded_from_db"] = False
+
+    if selected == "🗄️ Load From DB (Existing Site)":
+        load_ipam_records_from_db(site_name)
         return
 
+    st.session_state["ipam_loaded_site"] = None
     template_list = VLAN_PRESETS.get(selected, [])
     
     if "ipam_data_editor_live" in st.session_state:
@@ -579,12 +604,10 @@ def render_ipam_tab(active_model: str):
         )
 
     # Check if site exists in database when site name is entered
+    site_found = False
     if site_name:
-        site_records = get_ipam_records_by_site(site_name)
-        if site_records:
-            st.session_state["ipam_site_found_in_db"] = True
-        else:
-            st.session_state["ipam_site_found_in_db"] = False
+        site_found = bool(get_ipam_records_by_site(site_name))
+    st.session_state["ipam_site_found_in_db"] = site_found
 
     auto_scope_id = lookup_scope_id(site_name) if site_name else None
     auto_supernet = lookup_site_supernet_from_db(site_name) if site_name else None
@@ -623,7 +646,7 @@ def render_ipam_tab(active_model: str):
     with c_title:
         st.markdown("##### 📊 Subnet Allocation & Live Status (✏️ Click any cell to edit)")
     with c_preset_container:
-        c_preset_inner, c_status, c_refresh = st.columns([1.0, 0.3, 0.3])
+        c_preset_inner, c_refresh, c_status = st.columns([1.0, 0.3, 0.3])
         with c_preset_inner:
             st.selectbox(
                 "Load Standard Preset",
@@ -633,23 +656,31 @@ def render_ipam_tab(active_model: str):
                 on_change=on_preset_change,
                 help="Quickly load pre-defined standard VLAN structures or start blank."
             )
+        selected_preset = st.session_state.get("ipam_preset_selector", "")
+        db_mode = selected_preset == "🗄️ Load From DB (Existing Site)"
+
+        with c_refresh:
+            # Refresh sits right next to the preset selector, active in DB mode
+            st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+            if db_mode:
+                if st.button("🔄", key="btn_refresh_ipam", help=f"Reload '{site_name or 'site'}' data from database"):
+                    if load_ipam_records_from_db(site_name):
+                        st.toast(f"🔄 Reloaded {site_name} from database.", icon="✅")
+                    else:
+                        st.toast(f"⚠️ No records found for '{site_name}'.", icon="⚠️")
+                    st.rerun()
         with c_status:
             # Always show compact status indicator
-            site_found = st.session_state.get("ipam_site_found_in_db", False)
+            st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
             if site_found:
                 st.markdown("✅", help="Site found in DB - Select 'Load From DB' to load data")
             else:
                 st.caption("⚪")
-        with c_refresh:
-            # Show refresh button only when "Load From DB" is selected and site is found
-            selected_preset = st.session_state.get("ipam_preset_selector", "")
-            if selected_preset == "🗄️ Load From DB (Existing Site)":
-                if site_found:
-                    if st.button("🔄", key="btn_refresh_ipam", help="Reload data for current site"):
-                        # Clear the data and trigger reload
-                        st.session_state["ipam_persisted_rows"] = []
-                        st.session_state["ipam_loaded_from_db"] = False
-                        st.rerun()
+
+    # Auto-reload when the site name changed while DB mode is active
+    if db_mode and site_name and st.session_state.get("ipam_loaded_site") != site_name:
+        load_ipam_records_from_db(site_name)
+        st.rerun()
 
     if "ipam_persisted_rows" not in st.session_state:
         st.session_state["ipam_persisted_rows"] = []
@@ -690,6 +721,7 @@ def render_ipam_tab(active_model: str):
     computed_rows = compute_chained_rows(supernet_in, raw_rows)
     st.session_state["ipam_persisted_rows"] = computed_rows
 
+    loaded_from_db = st.session_state.get("ipam_loaded_from_db", False)
     allocated_subnets = []
     for r in computed_rows:
         sub_str = str(r.get("Subnet (CIDR)", "") or "").strip()
@@ -708,20 +740,11 @@ def render_ipam_tab(active_model: str):
         r["Usable Range"] = eval_res["usable_range"]
         r["Status"] = eval_res["status"]
         
-        # Check if data was loaded from DB
-        loaded_from_db = st.session_state.get("ipam_loaded_from_db", False)
-        if loaded_from_db:
-            # When loaded from DB, use DB descriptions (even if empty)
-            # Do NOT generate if empty - keep it empty
-            if "_db_prefix_desc" in r:
-                r["Prefix Description"] = r.get("_db_prefix_desc", "")
-            else:
-                r["Prefix Description"] = ""
-            # Preserve VLAN Description from database
-            if "_db_vlan_desc" in r:
-                r["VLAN Description"] = r.get("_db_vlan_desc", "")
+        # Prefix Description: prefer the raw NetBox text for DB-loaded rows,
+        # generate it only for preset rows and rows added in the editor.
+        if loaded_from_db and "_db_prefix_desc" in r:
+            r["Prefix Description"] = r.get("_db_prefix_desc") or ""
         else:
-            # Generate description normally for preset/manual entries
             r["Prefix Description"] = eval_res["desc"]
 
     # Real-time Available Subnets and Capacity
