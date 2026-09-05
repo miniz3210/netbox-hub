@@ -1,4 +1,128 @@
-﻿[CmdletBinding()]
+﻿<#
+.SYNOPSIS
+    NetBox Complete REST API Backup - Full Export
+
+.DESCRIPTION
+    Ingest NetBox Site Data (Backup / CSV)
+    
+    This script performs a comprehensive backup of all NetBox data via REST API,
+    discovering and exporting all available endpoints automatically. The resulting
+    JSON backup can be imported into NetBox Hub for complete site data ingestion.
+
+.VERSION
+    3.1.1
+
+.BACKUP CONTENTS
+    The following data types are exported and can be ingested via PowerShell (PS) or manual CSV upload (CSV):
+    
+    DCIM - Infrastructure:
+    • Sites, Regions, Site Groups, Locations (PS/CSV)
+    • Racks, Rack Roles, Rack Groups, Rack Types (PS/CSV)
+    • Manufacturers, Device Types, Device Roles, Platforms (PS/CSV)
+    • Devices, Modules, Module Types, Module Bays (PS/CSV)
+    • Interfaces, Interface Templates, MAC Addresses (PS/CSV)
+    • Cables, Cable Terminations, Cable Bundles (PS)
+    • Console Ports/Server Ports, Power Ports/Outlets/Panels/Feeds (PS/CSV)
+    • Front Ports, Rear Ports, Device Bays (PS)
+    • Virtual Chassis, Virtual Device Contexts (PS)
+    
+    IPAM - Network:
+    • VRFs, RIRs, ASNs, ASN Ranges, Aggregates (PS/CSV)
+    • Prefixes, IP Addresses, IP Ranges (PS/CSV)
+    • VLANs, VLAN Groups, VLAN Translation Policies/Rules (PS/CSV)
+    • Roles, Services, Service Templates (PS/CSV)
+    • FHRP Groups, FHRP Group Assignments (PS)
+    • Route Targets (PS)
+    
+    Virtualization:
+    • Cluster Types, Cluster Groups, Clusters (PS/CSV)
+    • Virtual Machines, Virtual Machine Types (PS/CSV)
+    • VM Interfaces, Virtual Disks (PS/CSV)
+    
+    Circuits:
+    • Providers, Provider Accounts, Provider Networks (PS/CSV)
+    • Circuit Types, Circuits, Circuit Terminations (PS/CSV)
+    • Circuit Groups, Circuit Group Assignments (PS)
+    • Virtual Circuits, Virtual Circuit Types, Virtual Circuit Terminations (PS)
+    
+    Tenancy:
+    • Tenants, Tenant Groups (PS/CSV)
+    • Contacts, Contact Groups, Contact Roles, Contact Assignments (PS/CSV)
+    
+    VPN:
+    • IKE/IPSec Policies, Proposals, Profiles (PS)
+    • Tunnels, Tunnel Groups, Tunnel Terminations (PS)
+    • L2VPNs, L2VPN Terminations (PS)
+    
+    Wireless:
+    • Wireless LANs, Wireless LAN Groups, Wireless Links (PS)
+    
+    Extras - Configuration:
+    • Tags, Custom Fields, Custom Links (PS/CSV)
+    • Config Contexts, Config Context Profiles, Config Templates (PS)
+    • Export Templates, Event Rules, Webhooks (PS)
+    • Scripts, Saved Filters, Notification Groups (PS)
+    
+    Audit & Metadata:
+    • Object Changes, Journal Entries, Image Attachments (PS)
+    • Bookmarks, Subscriptions, Table Configs (PS)
+    • Background Jobs, Tasks, Queues, Workers (PS)
+    • Data Sources, Data Files, Object Types (PS)
+
+.CUSTOM FIELD CHOICE SETS
+    Custom field choice sets define dropdown/selection options for custom fields.
+    These are automatically exported and can be ingested via:
+    
+    • Instance Type Set (Azure VM Sizes) - PS/CSV
+    • Resource Group Set (Azure Resource Groups) - PS/CSV  
+    • Operating System Set (OS Platforms) - PS/CSV
+    • Environment Set (Production/Development/etc.) - PS/CSV
+    • Status Set (Active/Decommissioned/etc.) - PS/CSV
+    • Location Set (Custom location values) - PS/CSV
+    • Application Set (Application names) - PS/CSV
+    • Cost Center Set (Budget codes) - PS/CSV
+    • All custom-defined choice sets from NetBox - PS/CSV
+
+.INGEST OPTIONS
+    Option A: PowerShell Backup (Recommended)
+    - Run this script to export complete JSON backup
+    - Upload JSON file to NetBox Hub via "🔄 NetBox Backup" tab
+    - All data automatically ingested with relationships intact
+    - Supports full incremental updates
+    
+    Option B: Manual CSV Upload
+    - Export individual object types from NetBox as CSV
+    - Upload via NetBox Hub CSV import interfaces
+    - Suitable for partial updates or specific object types
+    - May require multiple uploads to maintain relationships
+
+.PARAMETER NetBoxUrl
+    The base URL of your NetBox instance (must start with https://)
+
+.PARAMETER ApiToken
+    NetBox API authentication token with read permissions
+
+.PARAMETER PageSize
+    Number of records to fetch per API request (1-10000, default: 1000)
+
+.PARAMETER OutputDirectory
+    Directory to save backup files (default: current directory)
+
+.EXAMPLE
+    .\netbox-export-full.ps1 -NetBoxUrl "https://netbox.example.com" -ApiToken "abc123..."
+    
+.EXAMPLE
+    .\netbox-export-full.ps1 -NetBoxUrl "https://netbox.example.com" -ApiToken "abc123..." -OutputDirectory "C:\Backups" -PageSize 500
+
+.NOTES
+    - Exports all discoverable endpoints via NetBox REST API root
+    - Automatically handles pagination for large datasets
+    - Validates JSON output before finalizing
+    - Creates timestamped backup and log files
+    - Non-destructive read-only operation
+#>
+
+[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
@@ -433,7 +557,7 @@ function Export-NetBoxUrl {
 
 Write-Host ""
 Write-Host "=============================================="
-Write-Host " NETBOX COMPLETE REST API BACKUP V2"
+Write-Host " NETBOX COMPLETE REST API BACKUP V3.1.1"
 Write-Host "=============================================="
 Write-Host ""
 
@@ -552,7 +676,7 @@ $BackupData = [ordered]@{
         endpoints_processed  = $BackupSummary.Count
         successful_endpoints = $SuccessfulCount
         failed_endpoints     = $FailedCount
-        script_version       = "2.0"
+        script_version       = "3.1.1"
     }
 
     endpoints = @($ExportedEndpoints)
