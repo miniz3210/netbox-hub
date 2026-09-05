@@ -19,6 +19,9 @@
 * **UI Streamlining**: More compact status indicators for better UX
 
 ### 🛠️ Bug Fixes & Improvements
+* **IPAM Refresh Button**: Added a 🔄 button beside the `🗄️ Load From DB (Existing Site)` selector that re-reads the current site straight from the database. It no longer writes to `ipam_preset_selector`, so the `cannot be modified after the widget ... is instantiated` crash is gone.
+* **Site Switch Auto-Reload**: Changing the Branch / Site Name while DB mode is active now reloads that site's rows automatically (tracked via `ipam_loaded_site`), instead of leaving the previous site's table on screen.
+* **VLAN vs Prefix Description Merge**: NetBox stores a `vlan` row and a `prefix` row per VLAN ID. Both are now merged, so `VLAN Description` shows the real VLAN text (e.g. `AV equipment`) and `Prefix Description` shows the prefix text (e.g. `Bristol Audio Visual -- VLAN 800`).
 * IPAM Tab crash when VLAN ID was None (TypeError: '<' not supported)
 * Naming standards not updating across tabs (added session state reload)
 * Load From DB not using database prefix descriptions
