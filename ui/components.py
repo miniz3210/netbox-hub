@@ -238,16 +238,17 @@ def render_backup_uploader(scope_key: str) -> dict:
         "Both support `-PageSize 1000` and `-OutputDirectory .` options."
     )
 
-    st.markdown("**Step 2 — Upload JSON backup or CSV files:**")
+    st.markdown("**Step 2 — Upload JSON backup file:**")
     st.file_uploader(
-        "Upload NetBox backup (JSON) or CSV files",
-        type=["json", "csv", "xlsx"],
-        accept_multiple_files=True,
+        "Upload NetBox backup JSON file",
+        type=["json"],
+        accept_multiple_files=False,
         key=uploader_key,
         on_change=_handle_backup_upload,
         args=(uploader_key, scope_key),
         label_visibility="collapsed",
     )
+    st.caption("CSV files can be uploaded through the individual object type sections below in 'Backup contents'.")
 
     error = st.session_state.get(error_key)
     if error:
