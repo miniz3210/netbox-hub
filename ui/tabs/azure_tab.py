@@ -15,6 +15,11 @@ from core.azure_vm_importer import (
     generate_netbox_import_summary,
     check_vm_exists_in_db
 )
+from core.netbox_object_checker import (
+    analyze_netbox_objects,
+    generate_import_scripts,
+    generate_combined_import_bundle
+)
 
 
 def render_azure_tab(active_model=None):
@@ -70,6 +75,8 @@ def render_azure_tab(active_model=None):
         st.session_state.azure_vms_mapped = None
     if 'azure_metadata' not in st.session_state:
         st.session_state.azure_metadata = None
+    if 'azure_object_analysis' not in st.session_state:
+        st.session_state.azure_object_analysis = None
     
     # Parse and preview
     if uploaded_file is not None:
@@ -159,63 +166,94 @@ def render_azure_tab(active_model=None):
                     netbox_records, metadata = map_azure_to_netbox(vm_records)
                     st.session_state.azure_vms_mapped = netbox_records
                     st.session_state.azure_metadata = metadata
-                
+                    st.session_state.azure_object_analysis = analyze_netbox_objects(metadata)
+
                 st.success("✅ Analysis complete!")
-            
+
             # Show NetBox requirements
             if st.session_state.azure_vms_mapped and st.session_state.azure_metadata:
                 metadata = st.session_state.azure_metadata
-                
+                analysis = st.session_state.get("azure_object_analysis") or analyze_netbox_objects(metadata)
+
                 st.markdown("### 📊 NetBox Objects to Create")
-                
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("Tenants", len(metadata['subscriptions']))
-                with col2:
-                    st.metric("Sites", len(metadata['locations']))
-                with col3:
-                    st.metric("Platforms", len(metadata['platforms']))
-                with col4:
-                    st.metric("Instance Types", len(metadata['sizes']))
-                
-                # Tenants/Subscriptions
-                if metadata['subscriptions']:
-                    with st.expander("🔑 Tenants (Subscriptions) to Create in NetBox", expanded=True):
-                        st.markdown("Create these tenants in NetBox under group **'Azure'**:")
-                        for sub in sorted(metadata['subscriptions']):
-                            st.text(f"  • {sub}")
-                
-                # Sites/Locations
-                if metadata['locations']:
-                    with st.expander("📍 Sites (Locations) to Create in NetBox", expanded=True):
-                        st.markdown("Create these cloud sites in NetBox:")
-                        for loc in sorted(metadata['locations']):
-                            st.text(f"  • Azure - {loc}")
-                
-                # Platforms
-                if metadata['platforms']:
-                    with st.expander("💻 Platforms to Create in NetBox", expanded=False):
-                        st.markdown("Create these platforms in NetBox:")
-                        for plat in sorted(metadata['platforms']):
-                            st.text(f"  • {plat}")
-                
-                # VM Sizes
-                if metadata['sizes']:
-                    with st.expander("⚙️ Custom Field Values - Instance Types", expanded=False):
-                        st.markdown("Add these values to the **'Instance Type'** custom field in NetBox:")
-                        for size in sorted(metadata['sizes'])[:20]:
-                            st.text(f"  • {size}")
-                        if len(metadata['sizes']) > 20:
-                            st.text(f"  ... and {len(metadata['sizes']) - 20} more")
-                
-                # Resource Groups
-                if metadata['resource_groups']:
-                    with st.expander("📦 Custom Field Values - Resource Groups", expanded=False):
-                        st.markdown("Add these values to the **'Resource Group'** custom field in NetBox:")
-                        for rg in sorted(metadata['resource_groups'])[:20]:
-                            st.text(f"  • {rg}")
-                        if len(metadata['resource_groups']) > 20:
-                            st.text(f"  ... and {len(metadata['resource_groups']) - 20} more")
+                st.caption(
+                    "Checked against the local NetBox database (backup / CSV ingest). "
+                    "Only objects reported as missing need to be imported."
+                )
+
+                total_missing = sum(len(d["missing"]) for d in analysis.values())
+                if total_missing:
+                    st.warning(f"**{total_missing} objects** are missing from NetBox and need to be created.")
+                else:
+                    st.success("✅ All required NetBox objects already exist.")
+
+                # Per-category counters: existing vs missing
+                summary_rows = []
+                for data in analysis.values():
+                    summary_rows.append({
+                        "Object Type": data["label"],
+                        "NetBox Object": data["netbox_object"],
+                        "Required": data["total"],
+                        "✅ Exists": len(data["existing"]),
+                        "❌ Missing": len(data["missing"]),
+                    })
+                st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+
+                # Detail per category
+                for key, data in analysis.items():
+                    missing = data["missing"]
+                    existing = data["existing"]
+                    icon = "❌" if missing else "✅"
+                    header = f"{icon} {data['label']} — {len(missing)} missing / {len(existing)} existing"
+                    with st.expander(header, expanded=bool(missing)):
+                        det_a, det_b = st.columns(2)
+                        with det_a:
+                            st.markdown("**❌ Missing (needs import)**")
+                            if missing:
+                                for value in missing:
+                                    st.text(f"  • {value}")
+                            else:
+                                st.caption("None — all present in NetBox.")
+                        with det_b:
+                            st.markdown("**✅ Already in NetBox**")
+                            if existing:
+                                for value in existing[:20]:
+                                    st.text(f"  • {value}")
+                                if len(existing) > 20:
+                                    st.caption(f"... and {len(existing) - 20} more")
+                            else:
+                                st.caption("None found in the local NetBox data.")
+
+                # Import payloads for the missing objects only
+                st.divider()
+                st.markdown("### 📥 Generated NetBox Import Scripts")
+
+                scripts = generate_import_scripts(analysis)
+                if not scripts:
+                    st.info("Nothing to import — every required object already exists in NetBox.")
+                else:
+                    st.caption("Copy each block into its matching NetBox import form.")
+                    for key, script in scripts.items():
+                        with st.expander(f"📄 {script['label']} ({script['count']} missing)", expanded=True):
+                            st.caption(script["instructions"])
+                            lang = "csv" if script["format"] == "csv" else "text"
+                            st.code(script["content"], language=lang)
+                            st.download_button(
+                                f"📥 Download {script['label']}",
+                                script["content"].encode("utf-8"),
+                                script["filename"],
+                                "text/plain",
+                                key=f"dl_{key}",
+                            )
+
+                    bundle = generate_combined_import_bundle(scripts)
+                    st.download_button(
+                        "📦 Download All Import Scripts (bundle)",
+                        bundle.encode("utf-8"),
+                        f"netbox-import-bundle-{pd.Timestamp.now().strftime('%Y%m%d')}.txt",
+                        "text/plain",
+                        key="dl_bundle",
+                    )
                 
                 # VMs that need to be added
                 st.divider()
