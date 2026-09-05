@@ -140,6 +140,120 @@ def check_vm_exists_in_db(vm_name: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def build_vm_ip_index() -> Dict[str, Dict[str, Any]]:
+    """Index every VM IP address held in the ingested NetBox backup.
+
+    Two independent sources are merged, because NetBox records them separately:
+
+    * `virtualization/virtual-machines` carries the VM's `Primary IP`, which the
+      backup flattens into the summary as ``Primary IP: 10.0.0.5/24``.
+    * `ipam/ip-addresses` carries every assigned address, flattened as
+      ``Assigned VM: <name>`` alongside ``Assigned To: <interface>``.
+
+    Returns:
+        Mapping of lowercase VM name -> {"primary": str, "assigned": [str]}.
+        Empty when no backup has been ingested.
+    """
+    init_db()
+    index: Dict[str, Dict[str, Any]] = {}
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        # Primary IP straight off each virtual machine record.
+        cursor.execute(
+            """
+            SELECT name, summary FROM backup_records
+            WHERE object_type = 'virtualization_virtual_machines'
+              AND summary LIKE '%Primary IP:%'
+            """
+        )
+        for name, summary in cursor.fetchall():
+            if not name:
+                continue
+            match = re.search(r"Primary IP:\s*([^|]+)", summary or "")
+            if not match:
+                continue
+            primary = match.group(1).strip()
+            if primary:
+                entry = index.setdefault(name.strip().lower(), {"primary": "", "assigned": []})
+                entry["primary"] = primary
+
+        # Every address whose assignment resolves back to a virtual machine.
+        cursor.execute(
+            """
+            SELECT name, summary FROM backup_records
+            WHERE object_type = 'ipam_ip_addresses'
+              AND summary LIKE '%Assigned VM:%'
+            """
+        )
+        for address, summary in cursor.fetchall():
+            match = re.search(r"Assigned VM:\s*([^|]+)", summary or "")
+            if not match or not address:
+                continue
+            vm_name = match.group(1).strip()
+            if not vm_name:
+                continue
+            entry = index.setdefault(vm_name.lower(), {"primary": "", "assigned": []})
+            clean = address.strip()
+            if clean and clean not in entry["assigned"]:
+                entry["assigned"].append(clean)
+    except sqlite3.Error as exc:
+        # backup_records is absent until a backup is ingested.
+        logger.debug("VM IP index unavailable: %s", exc)
+        return {}
+    finally:
+        conn.close()
+
+    for entry in index.values():
+        entry["assigned"].sort()
+    return index
+
+
+def lookup_vm_ip_addresses(vm_name: str) -> Dict[str, Any]:
+    """Resolve the NetBox IP addresses recorded for one VM.
+
+    Returns:
+        {"primary": str, "assigned": [str], "display": str} — `display` is the
+        primary IP when known, otherwise the first assigned address, otherwise "".
+    """
+    entry = build_vm_ip_index().get((vm_name or "").strip().lower())
+    if not entry:
+        return {"primary": "", "assigned": [], "display": ""}
+    return _finalize_ip_entry(entry)
+
+
+def _finalize_ip_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
+    primary = entry.get("primary", "")
+    assigned = list(entry.get("assigned", []))
+    display = primary or (assigned[0] if assigned else "")
+    return {"primary": primary, "assigned": assigned, "display": display}
+
+
+def enrich_vms_with_netbox_ips(vm_records: List[Dict[str, Any]]) -> int:
+    """Attach NetBox IP data to each parsed Azure VM record, in place.
+
+    Adds `netbox_primary_ip`, `netbox_assigned_ips` and `netbox_ip` to every
+    record. Builds the index once, so cost is two queries regardless of VM count.
+
+    Returns:
+        The number of VMs for which at least one IP address was found.
+    """
+    index = build_vm_ip_index()
+    matched = 0
+
+    for vm in vm_records:
+        entry = index.get((vm.get("name") or "").strip().lower())
+        resolved = _finalize_ip_entry(entry) if entry else {"primary": "", "assigned": [], "display": ""}
+        vm["netbox_primary_ip"] = resolved["primary"]
+        vm["netbox_assigned_ips"] = resolved["assigned"]
+        vm["netbox_ip"] = resolved["display"]
+        if resolved["display"]:
+            matched += 1
+
+    return matched
+
+
 def map_azure_to_netbox(vm_records: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Map Azure VM records to NetBox inventory format.
@@ -165,12 +279,25 @@ def map_azure_to_netbox(vm_records: List[Dict[str, Any]]) -> Tuple[List[Dict[str
         'sizes': set(),
         'platforms': set(),
         'new_vms': [],
-        'existing_vms': []
+        'existing_vms': [],
+        'vms_with_netbox_ip': 0,
     }
-    
+
+    # Resolve NetBox IP data for the whole batch up front (two queries total).
+    ip_index = build_vm_ip_index()
+
     for vm in vm_records:
         vm_name = vm['name']
-        
+
+        # Attach NetBox IP data so callers and the UI can display it.
+        entry = ip_index.get(vm_name.strip().lower())
+        resolved = _finalize_ip_entry(entry) if entry else {"primary": "", "assigned": [], "display": ""}
+        vm['netbox_primary_ip'] = resolved['primary']
+        vm['netbox_assigned_ips'] = resolved['assigned']
+        vm['netbox_ip'] = resolved['display']
+        if resolved['display']:
+            metadata['vms_with_netbox_ip'] += 1
+
         # Check if VM already exists
         existing_vm = check_vm_exists_in_db(vm_name)
         
@@ -209,6 +336,8 @@ def map_azure_to_netbox(vm_records: List[Dict[str, Any]]) -> Tuple[List[Dict[str
             description_parts.append(f"Status: {vm['status']}")
         if vm['public_ip']:
             description_parts.append(f"Public IP: {vm['public_ip']}")
+        if resolved['display']:
+            description_parts.append(f"NetBox IP: {resolved['display']}")
         if vm['disk_count']:
             description_parts.append(f"Disks: {vm['disk_count']}")
         
