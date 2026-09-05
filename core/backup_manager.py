@@ -928,7 +928,7 @@ def get_choice_set_summary() -> List[Dict[str, Any]]:
         SELECT choice_set,
                GROUP_CONCAT(DISTINCT field_name) AS fields,
                COUNT(DISTINCT value) AS value_count,
-               MAX(uploaded_at) AS uploaded_at
+               MAX(imported_at) AS uploaded_at
         FROM backup_choice_values
         GROUP BY choice_set
         ORDER BY choice_set
@@ -937,7 +937,7 @@ def get_choice_set_summary() -> List[Dict[str, Any]]:
     conn.close()
     # Get metadata for source filename
     meta = get_backup_metadata()
-    source = meta.get('filename', 'NetBox Backup').replace('NetBox_Full_Backup_', '').replace('.json', '')
+    source = meta.get('filename', 'NetBox Backup').replace('NetBox_Full_Backup_', '').replace('NetBox_Minimal_Backup_', '').replace('.json', '')
     for row in rows:
         row['source'] = source
     return rows

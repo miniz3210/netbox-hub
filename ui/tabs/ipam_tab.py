@@ -562,7 +562,7 @@ def render_ipam_tab(active_model: str):
         
         c_ref_row, c_ref_cap = st.columns([1, 3])
         with c_ref_row:
-            if st.button("🔄 Refresh", key="ref_ipam_btn", use_container_width=True):
+            if st.button("🔄 Refresh", key="ref_ipam_btn", width="stretch"):
                 st.rerun()
         with c_ref_cap:
             st.caption("Reload the local database view.")
