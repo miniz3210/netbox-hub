@@ -28,6 +28,30 @@ def fetch_free_models() -> list[str]:
         "stt",
         "embedding",
         "moderation",
+        "preview",
+        "experimental",
+        "beta",
+    ]
+    
+    # Include patterns for suitable text generation models
+    suitable_patterns = [
+        "gpt",
+        "claude",
+        "gemini",
+        "llama",
+        "mistral",
+        "qwen",
+        "deepseek",
+        "command",
+        "cohere",
+        "mixtral",
+        "phi",
+        "solar",
+        "yi-",
+        "dolphin",
+        "openchat",
+        "zephyr",
+        "hermes",
     ]
     
     try:
@@ -54,7 +78,10 @@ def fetch_free_models() -> list[str]:
                 # Exclude unsuitable models
                 is_excluded = any(pattern in model_id_lower for pattern in exclude_patterns)
                 
-                if not is_excluded:
+                # Only include models matching suitable patterns
+                is_suitable = any(pattern in model_id_lower for pattern in suitable_patterns)
+                
+                if not is_excluded and is_suitable:
                     available_models.append(model_id)
                     if len(available_models) <= 10:
                         logger.info(f"✓ Added: {model_id}")
