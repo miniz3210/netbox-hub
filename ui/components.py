@@ -17,14 +17,15 @@ from core.backup_manager import (
 
 CHAT_HEIGHT = 380
 
-# The PowerShell exporter ships in the repo and is read from disk so the script and
-# the download button can never drift apart. It walks the whole NetBox REST API and
-# writes NetBox_Full_Backup_<timestamp>.json.
-NETBOX_EXPORT_PS1_PATH = Path(__file__).resolve().parent.parent / "data" / "netbox-export.ps1"
+# The PowerShell exporters ship in the repo and are read from disk so the scripts and
+# the download buttons can never drift apart. They walk the NetBox REST API and
+# write NetBox_Full_Backup_<timestamp>.json or NetBox_Minimal_Backup_<timestamp>.json.
+NETBOX_EXPORT_FULL_PS1_PATH = Path(__file__).resolve().parent.parent / "data" / "netbox-export-full.ps1"
+NETBOX_EXPORT_MIN_PS1_PATH = Path(__file__).resolve().parent.parent / "data" / "netbox-export-min.ps1"
 
 _PS1_MISSING = (
-    "# netbox-export.ps1 was not found in this deployment.\n"
-    "# Expected at: data/netbox-export.ps1\n"
+    "# netbox-export script was not found in this deployment.\n"
+    "# Expected at: data/netbox-export-full.ps1 or data/netbox-export-min.ps1\n"
 )
 
 
@@ -39,12 +40,22 @@ def _load_export_script(path_str: str, mtime: float) -> str:
         return _PS1_MISSING
 
 
-def get_netbox_export_script() -> str:
+def get_netbox_export_script(script_type: str = "full") -> str:
+    """Get the PowerShell export script content.
+    
+    Args:
+        script_type: Either "full" or "min" to select which script to load
+    """
+    if script_type == "min":
+        script_path = NETBOX_EXPORT_MIN_PS1_PATH
+    else:
+        script_path = NETBOX_EXPORT_FULL_PS1_PATH
+    
     try:
-        mtime = NETBOX_EXPORT_PS1_PATH.stat().st_mtime
+        mtime = script_path.stat().st_mtime
     except OSError:
         return _PS1_MISSING
-    return _load_export_script(str(NETBOX_EXPORT_PS1_PATH), mtime)
+    return _load_export_script(str(script_path), mtime)
 
 
 def _clear_ai_chat(history_key: str, open_key: str) -> None:
@@ -172,40 +183,62 @@ def render_backup_uploader(scope_key: str) -> dict:
     result_key = f"backup_upload_result_{scope_key}"
     error_key = f"backup_upload_error_{scope_key}"
 
-    st.markdown("**Option A: Upload NetBox Backup (recommended)**")
+    st.markdown("**Upload NetBox Backup JSON or CSV files**")
     st.caption(
-        "Upload the `NetBox_Full_Backup_<timestamp>.json` produced by "
-        "`netbox-export.ps1`. The exporter walks the entire NetBox REST API, so "
-        "every object — sites, devices, interfaces, VLANs, prefixes, IPs, VMs, "
-        "clusters, tenants, circuits, tags and custom field choice sets such as "
-        "**Instance Type Set** and **Resource Group Set** — becomes available to "
-        "lookups, object-existence checks and the AI Assistant. "
-        "Older flat `NetBox_Backup_*.json` files are still accepted."
+        "Upload the JSON backup produced by PowerShell export scripts, or manually upload "
+        "individual CSV files from NetBox. JSON backup (recommended) provides complete data with "
+        "relationships intact. CSV upload allows selective updates of specific object types."
     )
 
-    export_script = get_netbox_export_script()
+    # Get both scripts
+    export_script_full = get_netbox_export_script("full")
+    export_script_min = get_netbox_export_script("min")
 
-    st.markdown("**Step 1 — Generate the backup JSON with PowerShell:**")
-    st.code(
-        '.\\netbox-export.ps1 -NetBoxUrl "https://netbox.example.com" -ApiToken "<API_TOKEN>"',
-        language="powershell",
-    )
+    st.markdown("**Step 1 — Generate backup JSON with PowerShell (choose one):**")
+    
+    col_full, col_min = st.columns(2)
+    
+    with col_full:
+        st.markdown("**Full Backup (All Data)**")
+        st.code(
+            '.\\netbox-export-full.ps1 -NetBoxUrl "https://netbox.example.com" -ApiToken "<TOKEN>"',
+            language="powershell",
+        )
+        st.download_button(
+            "⬇️ Download netbox-export-full.ps1",
+            export_script_full,
+            file_name="netbox-export-full.ps1",
+            mime="text/plain",
+            key=f"dl_export_full_ps1_{scope_key}",
+            use_container_width=True,
+        )
+        with st.expander("📄 View netbox-export-full.ps1", expanded=False):
+            st.code(export_script_full, language="powershell")
+    
+    with col_min:
+        st.markdown("**Minimal Backup (Essential Only)**")
+        st.code(
+            '.\\netbox-export-min.ps1 -NetBoxUrl "https://netbox.example.com" -ApiToken "<TOKEN>"',
+            language="powershell",
+        )
+        st.download_button(
+            "⬇️ Download netbox-export-min.ps1",
+            export_script_min,
+            file_name="netbox-export-min.ps1",
+            mime="text/plain",
+            key=f"dl_export_min_ps1_{scope_key}",
+            use_container_width=True,
+        )
+        with st.expander("📄 View netbox-export-min.ps1", expanded=False):
+            st.code(export_script_min, language="powershell")
+    
     st.caption(
-        "Optional: `-PageSize 1000` tunes the API page size, `-OutputDirectory .` "
-        "sets where the JSON and matching `.log` are written. The script exits "
-        "non-zero if any endpoint fails or a record count does not reconcile."
+        "**Full backup** exports all 145+ endpoints (audit logs, jobs, users, plugins). "
+        "**Minimal backup** exports 68 essential endpoints only (sites, devices, IPAM, VMs, config). "
+        "Both support `-PageSize 1000` and `-OutputDirectory .` options."
     )
-    st.download_button(
-        "⬇️ Download netbox-export.ps1",
-        export_script,
-        file_name="netbox-export.ps1",
-        mime="text/plain",
-        key=f"dl_export_ps1_{scope_key}",
-    )
-    with st.expander("📄 View netbox-export.ps1", expanded=False):
-        st.code(export_script, language="powershell")
 
-    st.markdown("**Step 2 — Upload the generated JSON file:**")
+    st.markdown("**Step 2 — Upload the generated JSON or CSV files:**")
     st.file_uploader(
         "Upload NetBox master backup (JSON)",
         type=["json"],
@@ -280,9 +313,9 @@ def render_backup_uploader(scope_key: str) -> dict:
     counts = get_backup_object_counts()
     if counts:
         with st.expander(f"📊 Backup contents ({len(counts)} object types)", expanded=False):
-            for object_type, count in counts.items():
+            for object_type, (count, timestamp, source) in counts.items():
                 label = OBJECT_LABELS.get(object_type, object_type.replace("_", " ").title())
-                st.markdown(f"* **{label}**: `{count}`")
+                st.markdown(f"* **{label}**: `{count}` — {source} `{timestamp}`")
 
     choice_sets = get_choice_set_summary()
     if choice_sets:
@@ -296,9 +329,11 @@ def render_backup_uploader(scope_key: str) -> dict:
             )
             for row in choice_sets:
                 fields = row.get("fields") or "—"
+                timestamp = row.get("uploaded_at") or "Unknown"
+                source = row.get("source", "NetBox Backup")
                 st.markdown(
                     f"* **{row['choice_set']}** → `{fields}`: "
-                    f"`{row['value_count']}` values"
+                    f"`{row['value_count']}` values — {source} `{timestamp}`"
                 )
 
     if not meta["enabled"]:

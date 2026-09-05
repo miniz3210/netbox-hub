@@ -919,7 +919,7 @@ def get_choice_values_for_field(field_name: str) -> List[str]:
 
 
 def get_choice_set_summary() -> List[Dict[str, Any]]:
-    """List every ingested choice set with its field bindings and value count."""
+    """List every ingested choice set with its field bindings, value count, and timestamp."""
     init_backup_tables()
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -927,27 +927,37 @@ def get_choice_set_summary() -> List[Dict[str, Any]]:
     cursor.execute("""
         SELECT choice_set,
                GROUP_CONCAT(DISTINCT field_name) AS fields,
-               COUNT(DISTINCT value) AS value_count
+               COUNT(DISTINCT value) AS value_count,
+               MAX(uploaded_at) AS uploaded_at
         FROM backup_choice_values
         GROUP BY choice_set
         ORDER BY choice_set
     """)
     rows = [dict(r) for r in cursor.fetchall()]
     conn.close()
+    # Get metadata for source filename
+    meta = get_backup_metadata()
+    source = meta.get('filename', 'NetBox Backup').replace('NetBox_Full_Backup_', '').replace('.json', '')
+    for row in rows:
+        row['source'] = source
     return rows
 
 
-def get_backup_object_counts() -> Dict[str, int]:
+def get_backup_object_counts() -> Dict[str, tuple]:
+    """Return dict of object_type -> (count, timestamp, source)."""
     init_backup_tables()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT object_type, COUNT(*) FROM backup_records
+        SELECT object_type, COUNT(*), MAX(imported_at) FROM backup_records
         GROUP BY object_type ORDER BY COUNT(*) DESC
     """)
     rows = cursor.fetchall()
     conn.close()
-    return {r[0]: r[1] for r in rows}
+    # Get metadata for source filename
+    meta = get_backup_metadata()
+    source = meta.get('filename', 'NetBox Backup').replace('NetBox_Full_Backup_', '').replace('.json', '')
+    return {r[0]: (r[1], r[2], source) for r in rows}
 
 
 def is_backup_active() -> bool:

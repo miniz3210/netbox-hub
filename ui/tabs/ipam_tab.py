@@ -499,17 +499,10 @@ def render_ipam_tab(active_model: str):
             st.markdown(f"**DB Status:** `Source: {display_source}`")
 
         render_backup_uploader("ipam")
+        
         st.markdown("---")
-
-        c_ref_row, c_ref_cap = st.columns([1, 3])
-        with c_ref_row:
-            if st.button("🔄 Refresh", key="ref_ipam_btn", width="stretch"):
-                st.rerun()
-        with c_ref_cap:
-            st.caption("Reload the local database view.")
-
-        st.markdown("**Option B: Manual CSV Export & Upload:**")
-
+        st.markdown("**Manual CSV Upload (Alternative to JSON backup):**")
+        
         meta_sites = get_sync_metadata("netbox_sites")
         meta_vlans = get_sync_metadata("netbox_VLANs")
         meta_prefixes = get_sync_metadata("netbox_prefixes")
@@ -566,6 +559,13 @@ def render_ipam_tab(active_model: str):
                 st.button("🗑️ Clear All DB", on_click=handle_ipam_db_reset, width="stretch", key="rst_ipam_csv_btn")
             else:
                 st.caption("No custom data loaded.")
+        
+        c_ref_row, c_ref_cap = st.columns([1, 3])
+        with c_ref_row:
+            if st.button("🔄 Refresh", key="ref_ipam_btn", use_container_width=True):
+                st.rerun()
+        with c_ref_cap:
+            st.caption("Reload the local database view.")
 
     # 2. Site Inputs and Dynamic Lookups
     if "ipam_site_in" not in st.session_state:
