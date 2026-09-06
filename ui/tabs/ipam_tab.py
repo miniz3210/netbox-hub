@@ -253,11 +253,16 @@ def handle_ipam_file_upload():
     if errors:
         for err in errors:
             st.error(err)
-
-        if total_scopes > 0 or total_prefixes > 0:
-            st.toast(f"✅ Ingested: {total_scopes} Sites, {total_prefixes} Prefixes!", icon="🚀")
-            st.session_state["ipam_multi_uploader"] = []
-            st.rerun()
+    
+    # Clear uploader and show success message if any data was ingested
+    if total_scopes > 0 or total_prefixes > 0:
+        st.toast(f"✅ Ingested: {total_scopes} Sites, {total_prefixes} Prefixes!", icon="🚀")
+        # Clear the uploader by incrementing the key
+        st.session_state["uploader_key"] = st.session_state.get("uploader_key", 0) + 1
+        st.rerun()
+    elif not errors:
+        # No data ingested and no errors - clear uploader anyway
+        st.session_state["uploader_key"] = st.session_state.get("uploader_key", 0) + 1
 
 
 def handle_ipam_db_reset():
@@ -534,12 +539,7 @@ def render_ipam_tab(active_model: str):
         st.caption(
             "**Sites:** `Organization` ➔ `Sites` ➔ `Export` ➔ `All Data` (netbox_sites.csv)  \n"
             "**VLANs:** `IPAM` ➔ `VLANs` ➔ `Export` ➔ `All Data` (netbox_VLANs.csv)  \n"
-            "**Prefixes:** `IPAM` ➔ `Prefixes` ➔ `Export` ➔ `All Data` (netbox_prefixes.csv)  \n"
-            "**Device Types:** `Devices` ➔ `Device Types` ➔ `Export` ➔ `All Data` (netbox_device_types.csv)  \n"
-            "**Device Roles:** `Devices` ➔ `Device Roles` ➔ `Export` ➔ `All Data` (netbox_device_roles.csv)  \n"
-            "**Platforms:** `Devices` ➔ `Platforms` ➔ `Export` ➔ `All Data` (netbox_platforms.csv)  \n"
-            "**Devices:** `Devices` ➔ `Devices` ➔ `Export` ➔ `All Data` (netbox_devices.csv)  \n"
-            "**Virtual Machines:** `Virtualization` ➔ `Virtual Machines` ➔ `Export` ➔ `All Data` (netbox_virtual_machines.csv)"
+            "**Prefixes:** `IPAM` ➔ `Prefixes` ➔ `Export` ➔ `All Data` (netbox_prefixes.csv)"
         )
         
         # Consolidated upload section

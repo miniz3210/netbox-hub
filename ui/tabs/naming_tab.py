@@ -92,9 +92,16 @@ def handle_csv_upload():
     if errors:
         for err in errors:
             st.error(err)
-
+    
+    # Clear uploader and show success message if any data was ingested
     if total_devices > 0 or total_hypervisors > 0 or total_vms > 0:
         st.toast(f"✅ Ingested: {total_devices} Devices, {total_hypervisors} Hypervisors, {total_vms} VMs!", icon="🚀")
+        # Clear the uploader by resetting the key
+        st.session_state["global_netbox_csv"] = None
+        st.rerun()
+    elif not errors:
+        # No data ingested and no errors - clear uploader anyway
+        st.session_state["global_netbox_csv"] = None
 
 def handle_csv_reset():
     clear_inventory_records()
@@ -160,9 +167,6 @@ def render_compact_toolbar(active_model):
         
         st.markdown("**CSV Export Paths:**")
         st.caption(
-            "**Sites:** `Organization` ➔ `Sites` ➔ `Export` ➔ `All Data` (netbox_sites.csv)  \n"
-            "**VLANs:** `IPAM` ➔ `VLANs` ➔ `Export` ➔ `All Data` (netbox_VLANs.csv)  \n"
-            "**Prefixes:** `IPAM` ➔ `Prefixes` ➔ `Export` ➔ `All Data` (netbox_prefixes.csv)  \n"
             "**Device Types:** `Devices` ➔ `Device Types` ➔ `Export` ➔ `All Data` (netbox_device_types.csv)  \n"
             "**Device Roles:** `Devices` ➔ `Device Roles` ➔ `Export` ➔ `All Data` (netbox_device_roles.csv)  \n"
             "**Platforms:** `Devices` ➔ `Platforms` ➔ `Export` ➔ `All Data` (netbox_platforms.csv)  \n"
