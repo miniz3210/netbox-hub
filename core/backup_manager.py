@@ -987,23 +987,51 @@ def get_backup_object_counts() -> Dict[str, tuple]:
     """Return dict of object_type -> (count, timestamp, source).
     
     Returns results sorted with minimum required data first (sites, devices, IPAM, VMs, etc.)
+    Merges data from backup_records (JSON) and CSV tables (sites_records, ipam_records).
     """
     init_backup_tables()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    
+    # Get JSON backup data from backup_records
     cursor.execute("""
         SELECT object_type, COUNT(*), MAX(imported_at) FROM backup_records
         GROUP BY object_type ORDER BY COUNT(*) DESC
     """)
     rows = cursor.fetchall()
-    conn.close()
     
-    # Get metadata for source filename (keep full filename)
+    # Get metadata for JSON backup source filename
     meta = get_backup_metadata()
-    source = meta.get('filename', 'NetBox Backup')
+    json_source = meta.get('filename', 'NetBox Backup')
     
-    # Build dict with priority sorting
-    result = {r[0]: (r[1], r[2], source) for r in rows}
+    # Build dict with JSON backup data
+    result = {r[0]: (r[1], r[2], json_source) for r in rows}
+    
+    # Add CSV-uploaded sites data if exists
+    cursor.execute("""
+        SELECT COUNT(*), MAX(imported_at) FROM sites_records
+    """)
+    sites_row = cursor.fetchone()
+    if sites_row and sites_row[0] > 0:
+        result['dcim_sites'] = (sites_row[0], sites_row[1], 'netbox_sites.csv')
+    
+    # Add CSV-uploaded VLAN data if exists
+    cursor.execute("""
+        SELECT COUNT(*), MAX(imported_at) FROM ipam_records WHERE record_type = 'vlan'
+    """)
+    vlan_row = cursor.fetchone()
+    if vlan_row and vlan_row[0] > 0:
+        result['ipam_vlans'] = (vlan_row[0], vlan_row[1], 'netbox_VLANs.csv')
+    
+    # Add CSV-uploaded prefix data if exists
+    cursor.execute("""
+        SELECT COUNT(*), MAX(imported_at) FROM ipam_records WHERE record_type = 'prefix'
+    """)
+    prefix_row = cursor.fetchone()
+    if prefix_row and prefix_row[0] > 0:
+        result['ipam_prefixes'] = (prefix_row[0], prefix_row[1], 'netbox_prefixes.csv')
+    
+    conn.close()
     
     # Define minimum required data types in priority order
     # These with CSV filenames are shown first (minimum required for IPAM/Naming tabs)

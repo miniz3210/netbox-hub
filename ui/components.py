@@ -270,48 +270,51 @@ def render_backup_uploader(scope_key: str) -> dict:
 
     if not meta["loaded"]:
         st.caption("⚪ No backup file uploaded — AI Assistant uses CSV/agent data only.")
-        return meta
+    else:
+        # The database holds the authoritative enabled flag; seed the widget from it.
+        if checkbox_key not in st.session_state:
+            st.session_state[checkbox_key] = meta["enabled"]
 
-    # The database holds the authoritative enabled flag; seed the widget from it.
-    if checkbox_key not in st.session_state:
-        st.session_state[checkbox_key] = meta["enabled"]
-
-    c_chk, c_clr = st.columns([3, 1])
-    with c_chk:
-        st.checkbox(
-            f"📦 `{meta['filename']}` — uploaded {meta['uploaded_at']} "
-            f"({meta['record_count']} objects)",
-            key=checkbox_key,
-            on_change=_handle_backup_toggle,
-            args=(checkbox_key,),
-            help="Tick to let the AI Assistant read this backup file. Untick to exclude it without deleting.",
-        )
-    with c_clr:
-        st.button(
-            "🗑️ Remove Backup",
-            key=f"btn_clear_backup_{scope_key}",
-            on_click=_handle_backup_clear,
-            args=(scope_key,),
-            width="stretch",
-        )
-
-    source = meta.get("source_info") or {}
-    if source:
-        bits = []
-        if source.get("netbox_url"):
-            bits.append(f"Source: `{source['netbox_url']}`")
-        if source.get("netbox_version"):
-            bits.append(f"NetBox `{source['netbox_version']}`")
-        if source.get("successful_endpoints") is not None:
-            bits.append(
-                f"Endpoints: {source['successful_endpoints']}/"
-                f"{source.get('endpoints_processed', '?')} OK"
+        c_chk, c_clr = st.columns([3, 1])
+        with c_chk:
+            st.checkbox(
+                f"📦 `{meta['filename']}` — uploaded {meta['uploaded_at']} "
+                f"({meta['record_count']} objects)",
+                key=checkbox_key,
+                on_change=_handle_backup_toggle,
+                args=(checkbox_key,),
+                help="Tick to let the AI Assistant read this backup file. Untick to exclude it without deleting.",
             )
-        if source.get("failed_endpoints"):
-            bits.append(f"⚠️ {source['failed_endpoints']} endpoint(s) failed")
-        if bits:
-            st.caption(" | ".join(bits))
+        with c_clr:
+            st.button(
+                "🗑️ Remove Backup",
+                key=f"btn_clear_backup_{scope_key}",
+                on_click=_handle_backup_clear,
+                args=(scope_key,),
+                width="stretch",
+            )
 
+        source = meta.get("source_info") or {}
+        if source:
+            bits = []
+            if source.get("netbox_url"):
+                bits.append(f"Source: `{source['netbox_url']}`")
+            if source.get("netbox_version"):
+                bits.append(f"NetBox `{source['netbox_version']}`")
+            if source.get("successful_endpoints") is not None:
+                bits.append(
+                    f"Endpoints: {source['successful_endpoints']}/"
+                    f"{source.get('endpoints_processed', '?')} OK"
+                )
+            if source.get("failed_endpoints"):
+                bits.append(f"⚠️ {source['failed_endpoints']} endpoint(s) failed")
+            if bits:
+                st.caption(" | ".join(bits))
+
+        if not meta["enabled"]:
+            st.warning("⚠️ Backup is uploaded but excluded from AI Assistant lookups.", icon="⚠️")
+
+    # Always show backup contents and choice sets (even if no JSON backup uploaded)
     counts = get_backup_object_counts()
     if counts:
         with st.expander(f"📊 Backup contents ({len(counts)} object types)", expanded=False):
@@ -344,9 +347,6 @@ def render_backup_uploader(scope_key: str) -> dict:
                     f"* **{row['choice_set']}** → `{fields}`: "
                     f"`{row['value_count']}` values — {source} `{timestamp}`"
                 )
-
-    if not meta["enabled"]:
-        st.warning("⚠️ Backup is uploaded but excluded from AI Assistant lookups.", icon="⚠️")
 
     return meta
 
