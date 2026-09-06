@@ -501,12 +501,23 @@ def render_ipam_tab(active_model: str):
         render_backup_uploader("ipam")
         
         st.markdown("---")
+        st.markdown("**CSV Export Paths:**")
+        st.caption(
+            "**Sites:** `Organization` ➔ `Sites` ➔ `Export` ➔ `All Data` (netbox_sites.csv)  \n"
+            "**VLANs:** `IPAM` ➔ `VLANs` ➔ `Export` ➔ `All Data` (netbox_VLANs.csv)  \n"
+            "**Prefixes:** `IPAM` ➔ `Prefixes` ➔ `Export` ➔ `All Data` (netbox_prefixes.csv)  \n"
+            "**Device Types:** `Devices` ➔ `Device Types` ➔ `Export` ➔ `All Data` (netbox_device_types.csv)  \n"
+            "**Device Roles:** `Devices` ➔ `Device Roles` ➔ `Export` ➔ `All Data` (netbox_device_roles.csv)  \n"
+            "**Platforms:** `Devices` ➔ `Platforms` ➔ `Export` ➔ `All Data` (netbox_platforms.csv)  \n"
+            "**Devices:** `Devices` ➔ `Devices` ➔ `Export` ➔ `All Data` (netbox_devices.csv)  \n"
+            "**Virtual Machines:** `Virtualization` ➔ `Virtual Machines` ➔ `Export` ➔ `All Data` (netbox_virtual_machines.csv)"
+        )
         
         # Consolidated upload section
         c_up, c_clr, c_ref = st.columns([3, 1, 1])
         with c_up:
             st.file_uploader(
-                "Upload CSV files (netbox_sites.csv, netbox_VLANs.csv, netbox_prefixes.csv) or Excel", 
+                "Upload CSV files or Excel", 
                 type=["xlsx", "csv"], 
                 accept_multiple_files=True,
                 key=f"ipam_multi_uploader_{st.session_state.get('uploader_key', 0)}",

@@ -112,15 +112,19 @@ OBJECT_LABELS: Dict[str, str] = {
     CHOICE_SET_TYPE: "Custom Field Choice Set",
 }
 
-# CSV filename mapping for IPAM and Naming tabs
+# CSV filename mapping for IPAM and Naming tabs (minimum required data)
 CSV_FILENAMES: Dict[str, str] = {
+    # Core infrastructure (IPAM required)
     "dcim_sites": "netbox_sites.csv",
     "ipam_vlans": "netbox_VLANs.csv",
     "ipam_prefixes": "netbox_prefixes.csv",
-    "dcim_manufacturers": "netbox_manufacturers.csv",
+    # Naming tab required
     "dcim_device_types": "netbox_device_types.csv",
     "dcim_device_roles": "netbox_device_roles.csv",
     "dcim_platforms": "netbox_platforms.csv",
+    # Essential inventory
+    "dcim_devices": "netbox_devices.csv",
+    "virtualization_virtual_machines": "netbox_virtual_machines.csv",
 }
 
 # Ordered (label, dotted path) pairs rendered into each record's summary line.
@@ -1002,18 +1006,27 @@ def get_backup_object_counts() -> Dict[str, tuple]:
     result = {r[0]: (r[1], r[2], source) for r in rows}
     
     # Define minimum required data types in priority order
+    # These with CSV filenames are shown first (minimum required for IPAM/Naming tabs)
     priority_types = [
-        # Core infrastructure
-        'dcim_sites', 'dcim_regions', 'dcim_site_groups', 'dcim_locations',
-        'dcim_manufacturers', 'dcim_device_types', 'dcim_device_roles', 'dcim_platforms',
-        'dcim_devices', 'dcim_interfaces',
+        # Minimum required CSVs (shown with CSV filenames)
+        'dcim_sites',           # netbox_sites.csv
+        'ipam_vlans',           # netbox_VLANs.csv
+        'ipam_prefixes',        # netbox_prefixes.csv
+        'dcim_device_types',    # netbox_device_types.csv
+        'dcim_device_roles',    # netbox_device_roles.csv
+        'dcim_platforms',       # netbox_platforms.csv
+        'dcim_devices',         # netbox_devices.csv
+        'virtualization_virtual_machines',  # netbox_virtual_machines.csv
+        # Other important infrastructure
+        'dcim_regions', 'dcim_site_groups', 'dcim_locations',
+        'dcim_manufacturers', 'dcim_interfaces',
         'dcim_racks', 'dcim_rack_roles', 'dcim_rack_groups',
         # IPAM essentials
-        'ipam_vrfs', 'ipam_prefixes', 'ipam_ip_addresses', 'ipam_vlans', 'ipam_vlan_groups',
+        'ipam_vrfs', 'ipam_ip_addresses', 'ipam_vlan_groups',
         'ipam_rirs', 'ipam_asns', 'ipam_aggregates', 'ipam_roles',
         # Virtualization
         'virtualization_clusters', 'virtualization_cluster_types', 'virtualization_cluster_groups',
-        'virtualization_virtual_machines', 'virtualization_interfaces',
+        'virtualization_interfaces',
         # Tenancy
         'tenancy_tenants', 'tenancy_tenant_groups',
         'tenancy_contacts', 'tenancy_contact_groups', 'tenancy_contact_roles',
