@@ -112,6 +112,17 @@ OBJECT_LABELS: Dict[str, str] = {
     CHOICE_SET_TYPE: "Custom Field Choice Set",
 }
 
+# CSV filename mapping for IPAM and Naming tabs
+CSV_FILENAMES: Dict[str, str] = {
+    "dcim_sites": "netbox_sites.csv",
+    "ipam_vlans": "netbox_VLANs.csv",
+    "ipam_prefixes": "netbox_prefixes.csv",
+    "dcim_manufacturers": "netbox_manufacturers.csv",
+    "dcim_device_types": "netbox_device_types.csv",
+    "dcim_device_roles": "netbox_device_roles.csv",
+    "dcim_platforms": "netbox_platforms.csv",
+}
+
 # Ordered (label, dotted path) pairs rendered into each record's summary line.
 FIELD_SPECS: Dict[str, List[Any]] = {
     "dcim_sites": [

@@ -6,6 +6,7 @@ from config.constants import APP_VERSION
 from config.settings import AVAILABLE_MODELS, OPENROUTER_BASE_URL
 from core.ai_client import call_ai, test_model_connection, fetch_free_models
 from core.backup_manager import (
+    CSV_FILENAMES,
     OBJECT_LABELS,
     clear_backup_records,
     get_backup_metadata,
@@ -316,7 +317,14 @@ def render_backup_uploader(scope_key: str) -> dict:
         with st.expander(f"📊 Backup contents ({len(counts)} object types)", expanded=False):
             for object_type, (count, timestamp, source) in counts.items():
                 label = OBJECT_LABELS.get(object_type, object_type.replace("_", " ").title())
-                st.markdown(f"* **{label}**: `{count}` — {source} `{timestamp}`")
+                csv_filename = CSV_FILENAMES.get(object_type, "")
+                
+                if csv_filename:
+                    # Show with CSV filename for required data
+                    st.markdown(f"* **{label}** (`{csv_filename}`): `{count}` — {source} `{timestamp}`")
+                else:
+                    # Show without CSV filename for other data
+                    st.markdown(f"* **{label}**: `{count}` — {source} `{timestamp}`")
 
     choice_sets = get_choice_set_summary()
     if choice_sets:

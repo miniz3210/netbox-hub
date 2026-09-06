@@ -501,50 +501,9 @@ def render_ipam_tab(active_model: str):
         render_backup_uploader("ipam")
         
         st.markdown("---")
-        st.markdown("**CSV Upload (Sites, VLANs, Prefixes):**")
-        st.caption("Alternative method: Upload individual CSV exports from NetBox IPAM section.")
         
-        meta_sites = get_sync_metadata("netbox_sites")
-        meta_vlans = get_sync_metadata("netbox_VLANs")
-        meta_prefixes = get_sync_metadata("netbox_prefixes")
-        
-        sites_timestamp = f" — Last updated: `{meta_sites['updated_at']}`" if meta_sites['updated_at'] != "Never" else ""
-        vlans_timestamp = f" — Last updated: `{meta_vlans['updated_at']}`" if meta_vlans['updated_at'] != "Never" else ""
-        prefixes_timestamp = f" — Last updated: `{meta_prefixes['updated_at']}`" if meta_prefixes['updated_at'] != "Never" else ""
-
-        col_l1, col_r1 = st.columns([12, 1])
-        with col_l1:
-            st.markdown(f"* **Sites** (`netbox_sites.csv`){tick_sites}{sites_timestamp}")
-        with col_r1:
-            if total_sites_recs > 0:
-                if st.button("🗑️", key="btn_clr_sites_inline", help="Clear netbox_sites.csv data"):
-                    clear_sites_records()
-                    st.toast("🗑️ Cleared netbox_sites.csv data.", icon="🧹")
-                    st.rerun()
-
-        col_l2, col_r2 = st.columns([12, 1])
-        with col_l2:
-            st.markdown(f"* **VLANs** (`netbox_VLANs.csv`){tick_vlans}{vlans_timestamp}")
-        with col_r2:
-            if total_vlans_recs > 0:
-                if st.button("🗑️", key="btn_clr_vlans_inline", help="Clear netbox_VLANs.csv data"):
-                    clear_vlans_records()
-                    st.toast("🗑️ Cleared netbox_VLANs.csv data.", icon="🧹")
-                    st.session_state["ipam_multi_uploader"] = None
-                    st.rerun()
-
-        col_l3, col_r3 = st.columns([12, 1])
-        with col_l3:
-            st.markdown(f"* **Prefixes** (`netbox_prefixes.csv`){tick_prefixes}{prefixes_timestamp}")
-        with col_r3:
-            if total_prefixes_recs > 0:
-                if st.button("🗑️", key="btn_clr_prefixes_inline", help="Clear netbox_prefixes.csv data"):
-                    clear_prefixes_records()
-                    st.toast("🗑️ Cleared netbox_prefixes.csv data.", icon="🧹")
-                    st.session_state["ipam_multi_uploader"] = None
-                    st.rerun()
-
-        c_up, c_rst = st.columns([3, 1])
+        # Consolidated upload section
+        c_up, c_clr, c_ref = st.columns([3, 1, 1])
         with c_up:
             st.file_uploader(
                 "Upload CSV files (netbox_sites.csv, netbox_VLANs.csv, netbox_prefixes.csv) or Excel", 
@@ -554,19 +513,11 @@ def render_ipam_tab(active_model: str):
                 on_change=handle_ipam_file_upload,
                 label_visibility="collapsed"
             )
-
-        with c_rst:
+        with c_clr:
             if total_db_count > 0:
-                st.button("🗑️ Clear All", on_click=handle_ipam_db_reset, width="stretch", key="rst_ipam_csv_btn")
-        
-        st.markdown("---")
-        
-        c_ref_row, c_ref_cap = st.columns([1, 3])
-        with c_ref_row:
-            if st.button("🔄 Refresh", key="ref_ipam_btn", width="stretch"):
-                st.rerun()
-        with c_ref_cap:
-            st.caption("Reload the local database view.")
+                st.button("🗑️ Clear All", on_click=handle_ipam_db_reset, width="stretch", key="rst_ipam_csv_btn", help="Clear all CSV data")
+        with c_ref:
+            st.button("🔄 Refresh", key="ref_ipam_btn", width="stretch", on_click=lambda: None, help="Reload the view")
 
     # 2. Site Inputs and Dynamic Lookups
     if "ipam_site_in" not in st.session_state:
