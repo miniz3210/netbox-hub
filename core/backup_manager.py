@@ -987,7 +987,7 @@ def get_backup_object_counts() -> Dict[str, tuple]:
     """Return dict of object_type -> (count, timestamp, source).
     
     Returns results sorted with minimum required data first (sites, devices, IPAM, VMs, etc.)
-    Merges data from backup_records (JSON) and CSV tables (sites_records, ipam_records, inventory_records).
+    Merges data from backup_records (JSON) and CSV tables, showing the most recent source.
     """
     init_backup_tables()
     conn = sqlite3.connect(DB_PATH)
@@ -1005,49 +1005,73 @@ def get_backup_object_counts() -> Dict[str, tuple]:
     json_source = meta.get('filename', 'NetBox Backup')
     
     # Build dict with JSON backup data
-    result = {r[0]: (r[1], r[2], json_source) for r in rows}
+    result = {}
+    for r in rows:
+        timestamp = r[2]
+        # Ensure UTC suffix on all timestamps
+        if timestamp and not timestamp.endswith(' UTC'):
+            timestamp = f"{timestamp} UTC"
+        result[r[0]] = (r[1], timestamp, json_source)
     
-    # Add CSV-uploaded sites data if exists
+    # Helper function to add CSV data, comparing timestamps to show most recent source
+    def add_csv_data(object_type: str, csv_source: str, count: int, csv_timestamp: str):
+        # Ensure UTC suffix on CSV timestamps
+        if csv_timestamp and not csv_timestamp.endswith(' UTC'):
+            csv_timestamp = f"{csv_timestamp} UTC"
+        
+        # If this object type exists from JSON backup, compare timestamps
+        if object_type in result:
+            json_count, json_timestamp, json_src = result[object_type]
+            # Compare timestamps (both should be in format "YYYY-MM-DD HH:MM:SS UTC")
+            # Use the most recent one
+            if csv_timestamp > json_timestamp:
+                result[object_type] = (count, csv_timestamp, csv_source)
+            # else keep JSON data (it's newer)
+        else:
+            # No JSON data for this type, use CSV
+            result[object_type] = (count, csv_timestamp, csv_source)
+    
+    # Check CSV-uploaded sites data
     cursor.execute("""
         SELECT COUNT(*), MAX(imported_at) FROM sites_records
     """)
     sites_row = cursor.fetchone()
     if sites_row and sites_row[0] > 0:
-        result['dcim_sites'] = (sites_row[0], sites_row[1], 'netbox_sites.csv')
+        add_csv_data('dcim_sites', 'netbox_sites.csv', sites_row[0], sites_row[1])
     
-    # Add CSV-uploaded VLAN data if exists
+    # Check CSV-uploaded VLAN data
     cursor.execute("""
         SELECT COUNT(*), MAX(imported_at) FROM ipam_records WHERE record_type = 'vlan'
     """)
     vlan_row = cursor.fetchone()
     if vlan_row and vlan_row[0] > 0:
-        result['ipam_vlans'] = (vlan_row[0], vlan_row[1], 'netbox_VLANs.csv')
+        add_csv_data('ipam_vlans', 'netbox_VLANs.csv', vlan_row[0], vlan_row[1])
     
-    # Add CSV-uploaded prefix data if exists
+    # Check CSV-uploaded prefix data
     cursor.execute("""
         SELECT COUNT(*), MAX(imported_at) FROM ipam_records WHERE record_type = 'prefix'
     """)
     prefix_row = cursor.fetchone()
     if prefix_row and prefix_row[0] > 0:
-        result['ipam_prefixes'] = (prefix_row[0], prefix_row[1], 'netbox_prefixes.csv')
+        add_csv_data('ipam_prefixes', 'netbox_prefixes.csv', prefix_row[0], prefix_row[1])
     
-    # Add CSV-uploaded devices data if exists (devices and hypervisors)
+    # Check CSV-uploaded devices data (devices and hypervisors)
     cursor.execute("""
         SELECT COUNT(*), MAX(imported_at) FROM inventory_records 
         WHERE category IN ('device', 'hypervisor')
     """)
     device_row = cursor.fetchone()
     if device_row and device_row[0] > 0:
-        result['dcim_devices'] = (device_row[0], device_row[1], 'netbox_devices.csv')
+        add_csv_data('dcim_devices', 'netbox_devices.csv', device_row[0], device_row[1])
     
-    # Add CSV-uploaded virtual machines data if exists
+    # Check CSV-uploaded virtual machines data
     cursor.execute("""
         SELECT COUNT(*), MAX(imported_at) FROM inventory_records 
         WHERE category = 'vm'
     """)
     vm_row = cursor.fetchone()
     if vm_row and vm_row[0] > 0:
-        result['virtualization_virtual_machines'] = (vm_row[0], vm_row[1], 'netbox_virtual_machines.csv')
+        add_csv_data('virtualization_virtual_machines', 'netbox_virtual_machines.csv', vm_row[0], vm_row[1])
     
     conn.close()
     
