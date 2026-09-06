@@ -338,11 +338,22 @@ def save_universal_csv(file_bytes, filename: str = "", clear_first: bool = False
     df = pd.read_csv(file_bytes)
     cols = {str(c).lower().strip(): c for c in df.columns}
 
-    if "vid" in cols or "q-in-q role" in cols or "q-in-q svlan" in cols or "prefixes" in cols:
-        raise ValueError("Invalid file uploaded to Naming. This is a NetBox VLANs export (`netbox_VLANs.csv`). Please upload `netbox_devices.csv` or `netbox_virtual machines.csv`.")
+    # Check for IPAM-specific files (should go to IPAM tab)
+    if "vid" in cols or "q-in-q role" in cols or "q-in-q svlan" in cols or "prefixes" in cols or "prefix" in cols:
+        raise ValueError(
+            "This appears to be an IPAM CSV file (VLANs or Prefixes). "
+            "Please upload it in the **🌐 IPAM** tab instead. "
+            "Naming tab accepts: netbox_devices.csv, netbox_virtual_machines.csv, "
+            "netbox_device_types.csv, netbox_device_roles.csv, netbox_platforms.csv"
+        )
 
     if "asns" in cols or "facility" in cols or "time zone" in cols:
-        raise ValueError("Invalid file uploaded to Naming. This is a NetBox Sites export (`netbox_sites.csv`). Please upload `netbox_devices.csv` or `netbox_virtual machines.csv`.")
+        raise ValueError(
+            "This appears to be a NetBox Sites export (netbox_sites.csv). "
+            "Please upload it in the **🌐 IPAM** tab instead. "
+            "Naming tab accepts: netbox_devices.csv, netbox_virtual_machines.csv, "
+            "netbox_device_types.csv, netbox_device_roles.csv, netbox_platforms.csv"
+        )
 
     name_col = cols.get("name")
     if not name_col:

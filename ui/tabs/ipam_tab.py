@@ -126,11 +126,40 @@ def handle_ipam_file_upload():
                 
                 df = pd.read_csv(io.StringIO(content_str), sep=delim)
                 cols = {str(c).lower().strip(): c for c in df.columns}
-                st.toast(f"DEBUG: CSV Columns={list(cols.keys())}", icon="🔍")
+                
+                # Detect file type based on columns and filename
+                filename_lower = filename.lower()
+                
+                # Check for device/VM files (not suitable for IPAM tab)
+                is_device_file = (
+                    "device" in filename_lower or 
+                    "device_types" in filename_lower or
+                    "device_roles" in filename_lower or
+                    "platforms" in filename_lower or
+                    any(col in cols for col in ["device_type", "device_role", "manufacturer", "model", "serial", "asset_tag"])
+                )
+                
+                is_vm_file = (
+                    "virtual" in filename_lower or 
+                    "vm" in filename_lower or
+                    any(col in cols for col in ["virtual_machine", "vcpus", "memory", "disk", "cluster"])
+                )
+                
+                # Reject device/VM files in IPAM tab
+                if is_device_file or is_vm_file:
+                    file_type = "device/naming" if is_device_file else "virtual machine/naming"
+                    raise ValueError(
+                        f"This appears to be a {file_type} CSV file. "
+                        f"Please upload it in the **🏷️ Naming** tab instead. "
+                        f"IPAM tab accepts: netbox_sites.csv, netbox_VLANs.csv, netbox_prefixes.csv"
+                    )
 
                 # Robust site format detection: distinguish from prefixes/VLANs
-
-                is_site_file = ("name" in cols or "site" in cols or "location" in cols) and not ("prefix" in cols or "prefixes" in cols or "vid" in cols or "vlan" in cols)
+                is_site_file = (
+                    ("name" in cols or "site" in cols or "location" in cols) and 
+                    not ("prefix" in cols or "prefixes" in cols or "vid" in cols or "vlan" in cols) and
+                    not is_device_file and not is_vm_file
+                )
                 if is_site_file:
                     name_col = cols.get("name", cols.get("site", cols.get("location")))
                     id_col = cols.get("id")
@@ -526,7 +555,7 @@ def render_ipam_tab(active_model: str):
             )
         with c_clr:
             if total_db_count > 0:
-                st.button("🗑️ Clear All", on_click=handle_ipam_db_reset, width="stretch", key="rst_ipam_csv_btn", help="Clear all CSV data")
+                st.button("🗑️ Clear All CSV", on_click=handle_ipam_db_reset, width="stretch", key="rst_ipam_csv_btn", help="Clear all CSV data (sites, VLANs, prefixes)")
         with c_ref:
             st.button("🔄 Refresh", key="ref_ipam_btn", width="stretch", on_click=lambda: None, help="Reload the view")
 

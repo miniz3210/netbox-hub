@@ -287,11 +287,12 @@ def render_backup_uploader(scope_key: str) -> dict:
             )
         with c_clr:
             st.button(
-                "🗑️ Remove Backup",
+                "🗑️ Clear All JSON",
                 key=f"btn_clear_backup_{scope_key}",
                 on_click=_handle_backup_clear,
                 args=(scope_key,),
                 width="stretch",
+                help="Clear all JSON backup data from backup_records table",
             )
 
         source = meta.get("source_info") or {}

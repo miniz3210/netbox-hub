@@ -183,7 +183,7 @@ def render_compact_toolbar(active_model):
             )
         with c_clr:
             if total_recs > 0:
-                st.button("🗑️ Clear All", on_click=handle_csv_reset, width="stretch", key="rst_csv_btn", help="Clear all CSV data")
+                st.button("🗑️ Clear All CSV", on_click=handle_csv_reset, width="stretch", key="rst_csv_btn", help="Clear all CSV data (devices, VMs)")
         with c_ref:
             st.button("🔄 Refresh", key="ref_naming_btn", width="stretch", on_click=lambda: None, help="Reload the view")
     
