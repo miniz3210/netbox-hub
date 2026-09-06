@@ -987,7 +987,7 @@ def get_backup_object_counts() -> Dict[str, tuple]:
     """Return dict of object_type -> (count, timestamp, source).
     
     Returns results sorted with minimum required data first (sites, devices, IPAM, VMs, etc.)
-    Merges data from backup_records (JSON) and CSV tables (sites_records, ipam_records).
+    Merges data from backup_records (JSON) and CSV tables (sites_records, ipam_records, inventory_records).
     """
     init_backup_tables()
     conn = sqlite3.connect(DB_PATH)
@@ -1030,6 +1030,24 @@ def get_backup_object_counts() -> Dict[str, tuple]:
     prefix_row = cursor.fetchone()
     if prefix_row and prefix_row[0] > 0:
         result['ipam_prefixes'] = (prefix_row[0], prefix_row[1], 'netbox_prefixes.csv')
+    
+    # Add CSV-uploaded devices data if exists (devices and hypervisors)
+    cursor.execute("""
+        SELECT COUNT(*), MAX(imported_at) FROM inventory_records 
+        WHERE category IN ('device', 'hypervisor')
+    """)
+    device_row = cursor.fetchone()
+    if device_row and device_row[0] > 0:
+        result['dcim_devices'] = (device_row[0], device_row[1], 'netbox_devices.csv')
+    
+    # Add CSV-uploaded virtual machines data if exists
+    cursor.execute("""
+        SELECT COUNT(*), MAX(imported_at) FROM inventory_records 
+        WHERE category = 'vm'
+    """)
+    vm_row = cursor.fetchone()
+    if vm_row and vm_row[0] > 0:
+        result['virtualization_virtual_machines'] = (vm_row[0], vm_row[1], 'netbox_virtual_machines.csv')
     
     conn.close()
     

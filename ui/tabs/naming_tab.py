@@ -157,58 +157,35 @@ def render_compact_toolbar(active_model):
 
         render_backup_uploader("naming")
         st.markdown("---")
-
-        c_ref_row, c_ref_cap = st.columns([1, 3])
-        with c_ref_row:
-            if st.button("🔄 Refresh", key="ref_naming_btn", use_container_width=True):
-                st.rerun()
-        with c_ref_cap:
-            st.caption("Reload the local database view.")
-
-        st.markdown("**Option B: Manual CSV Export & Upload:**")
-
-        # Get timestamps for each file
-        meta_devices = get_sync_metadata("netbox_devices")
-        meta_vms = get_sync_metadata("netbox_virtual_machines")
         
-        devices_timestamp = f" `{meta_devices['updated_at']}`" if meta_devices['updated_at'] != "Never" else ""
-        vms_timestamp = f" `{meta_vms['updated_at']}`" if meta_vms['updated_at'] != "Never" else ""
-
-        col_l1, col_r1 = st.columns([12, 1])
-        with col_l1:
-            st.markdown(f"* **Devices / Servers / Switches:** Go to `Devices` ➔ `Devices` ➔ `Export` ➔ `All Data` (`netbox_devices.csv`){tick_devices}{devices_timestamp}")
-        with col_r1:
-            if device_count > 0:
-                if st.button("🗑️", key="btn_clr_dev_inline", help="Clear netbox_devices.csv data"):
-                    clear_device_records()
-                    st.toast("🗑️ Cleared netbox_devices.csv data.", icon="🧹")
-                    st.rerun()
-
-        col_l2, col_r2 = st.columns([12, 1])
-        with col_l2:
-            st.markdown(f"* **Virtual Machines:** Go to `Virtualization` ➔ `Virtual Machines` ➔ `Export` ➔ `All Data` (`netbox_virtual_machines.csv`){tick_vms}{vms_timestamp}")
-        with col_r2:
-            if vm_count > 0:
-                if st.button("🗑️", key="btn_clr_vm_inline", help="Clear netbox_virtual machines.csv data"):
-                    clear_vm_records()
-                    st.toast("🗑️ Cleared netbox_virtual machines.csv data.", icon="🧹")
-                    st.rerun()
-
-        c_up, c_rst = st.columns([3, 1])
+        st.markdown("**CSV Export Paths:**")
+        st.caption(
+            "**Sites:** `Organization` ➔ `Sites` ➔ `Export` ➔ `All Data` (netbox_sites.csv)  \n"
+            "**VLANs:** `IPAM` ➔ `VLANs` ➔ `Export` ➔ `All Data` (netbox_VLANs.csv)  \n"
+            "**Prefixes:** `IPAM` ➔ `Prefixes` ➔ `Export` ➔ `All Data` (netbox_prefixes.csv)  \n"
+            "**Device Types:** `Devices` ➔ `Device Types` ➔ `Export` ➔ `All Data` (netbox_device_types.csv)  \n"
+            "**Device Roles:** `Devices` ➔ `Device Roles` ➔ `Export` ➔ `All Data` (netbox_device_roles.csv)  \n"
+            "**Platforms:** `Devices` ➔ `Platforms` ➔ `Export` ➔ `All Data` (netbox_platforms.csv)  \n"
+            "**Devices:** `Devices` ➔ `Devices` ➔ `Export` ➔ `All Data` (netbox_devices.csv)  \n"
+            "**Virtual Machines:** `Virtualization` ➔ `Virtual Machines` ➔ `Export` ➔ `All Data` (netbox_virtual_machines.csv)"
+        )
+        
+        # Consolidated upload section
+        c_up, c_clr, c_ref = st.columns([3, 1, 1])
         with c_up:
             st.file_uploader(
-                "Upload NetBox CSV Export",
-                type=["csv"],
+                "Upload CSV files or Excel",
+                type=["csv", "xlsx"],
                 accept_multiple_files=True,
                 key="global_netbox_csv",
                 on_change=handle_csv_upload,
                 label_visibility="collapsed"
             )
-        with c_rst:
+        with c_clr:
             if total_recs > 0:
-                st.button("🗑️ Clear All DB", on_click=handle_csv_reset, use_container_width=True, key="rst_csv_btn")
-            else:
-                st.caption("No custom data loaded.")
+                st.button("🗑️ Clear All", on_click=handle_csv_reset, width="stretch", key="rst_csv_btn", help="Clear all CSV data")
+        with c_ref:
+            st.button("🔄 Refresh", key="ref_naming_btn", width="stretch", on_click=lambda: None, help="Reload the view")
     
     # AI Assistant
     render_ai_chat(
