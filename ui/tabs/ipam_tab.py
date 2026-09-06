@@ -259,7 +259,6 @@ def handle_ipam_file_upload():
         st.toast(f"✅ Ingested: {total_scopes} Sites, {total_prefixes} Prefixes!", icon="🚀")
         # Clear the uploader by incrementing the key
         st.session_state["uploader_key"] = st.session_state.get("uploader_key", 0) + 1
-        st.rerun()
     elif not errors:
         # No data ingested and no errors - clear uploader anyway
         st.session_state["uploader_key"] = st.session_state.get("uploader_key", 0) + 1

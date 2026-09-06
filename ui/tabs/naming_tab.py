@@ -98,7 +98,6 @@ def handle_csv_upload():
         st.toast(f"✅ Ingested: {total_devices} Devices, {total_hypervisors} Hypervisors, {total_vms} VMs!", icon="🚀")
         # Clear the uploader by resetting the key
         st.session_state["global_netbox_csv"] = None
-        st.rerun()
     elif not errors:
         # No data ingested and no errors - clear uploader anyway
         st.session_state["global_netbox_csv"] = None
