@@ -338,16 +338,23 @@ def map_azure_to_netbox(vm_records: List[Dict[str, Any]]) -> Tuple[List[Dict[str
         if vm.get('owner'):
             metadata['owners'].add(vm['owner'])
         tag_metadata = {
-            'tag_application': 'tag_applications',
-            'tag_environment': 'tag_environments',
-            'tag_cost_centre': 'tag_cost_centres',
-            'tag_business_criticality': 'tag_business_criticalities',
-            'tag_deployment_method': 'tag_deployment_methods',
-            'tag_backup': 'tag_backups',
+            'tag_application': ('tag_applications', ''),
+            'tag_environment': ('tag_environments', ''),
+            'tag_cost_centre': ('tag_cost_centres', 'Cost Centre:'),
+            'tag_business_criticality': ('tag_business_criticalities', 'BusinessCriticality:'),
+            'tag_deployment_method': ('tag_deployment_methods', 'Deploymentmethod:'),
+            'tag_backup': ('tag_backups', ''),
         }
-        for field, metadata_key in tag_metadata.items():
-            if vm.get(field):
-                metadata[metadata_key].add(vm[field])
+        for field, (metadata_key, prefix) in tag_metadata.items():
+            val = vm.get(field)
+            if val:
+                val_str = str(val).strip()
+                if val_str and val_str.lower() != 'nan':
+                    if prefix and not val_str.lower().startswith(prefix.lower()):
+                        tag_name = f"{prefix}{val_str}"
+                    else:
+                        tag_name = val_str
+                    metadata[metadata_key].add(tag_name)
 
         raw_location = _strip_azure_prefix(vm.get('location', ''))
         if raw_location:
