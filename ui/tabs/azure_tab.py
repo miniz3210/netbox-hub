@@ -151,6 +151,10 @@ def render_azure_tab(active_model=None):
                     'Status': vm['status'],
                     'OS': vm['operating_system'],
                     'Size': vm['size'],
+                    'Azure IP': vm.get('public_ip') or '—',
+                    'VNet': vm.get('vnet') or '—',
+                    'Subnet': vm.get('subnet') or '—',
+                    'Owner': vm.get('owner') or '—',
                     'NetBox IP': ip_display,
                     'In Database': '✅ Yes' if existing else '❌ No (Need to add to NetBox)'
                 }
@@ -324,6 +328,26 @@ def render_azure_tab(active_model=None):
                 else:
                     st.info("✅ All VMs from this export already exist in the database.")
                 
+                st.divider()
+                st.markdown("### 💾 Import VMs to NetBox Hub Database")
+                update_existing = st.checkbox(
+                    "Update existing VMs with values from this export",
+                    value=False,
+                    help="Leave unchecked to preserve existing records and skip them."
+                )
+                if st.button("Import VMs to NetBox Hub Database", type="primary"):
+                    with st.spinner("Importing Azure VM records..."):
+                        stats = save_azure_vms_to_db(
+                            st.session_state.azure_vms_mapped,
+                            update_existing=update_existing,
+                            source="Azure Resource Graph CSV Import"
+                        )
+                    st.success(
+                        f"Import complete: {stats['inserted']} inserted, "
+                        f"{stats['updated']} updated, {stats['skipped']} skipped, "
+                        f"{stats['errors']} errors."
+                    )
+
                 # Already in database
                 if metadata['existing_vms']:
                     st.markdown("### ✅ VMs Already in Database")

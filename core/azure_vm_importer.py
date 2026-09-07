@@ -18,84 +18,88 @@ logger = logging.getLogger("netbox-hub")
 
 
 def parse_azure_vm_csv(csv_path: str) -> Tuple[List[Dict[str, Any]], List[str]]:
-    """
-    Parse Azure VM CSV export and transform to NetBox-compatible format.
-    
-    Expected CSV columns:
-    - NAME: VM name
-    - SUBSCRIPTION: Azure subscription name
-    - RESOURCE GROUP: Azure resource group
-    - LOCATION: Azure region (e.g., "Australia East")
-    - STATUS: Running, Stopped, etc.
-    - OPERATING SYSTEM: Windows, Linux
-    - SIZE: VM size/SKU (e.g., "Standard_E2as_v4")
-    - PUBLIC IP ADDRESS: Public IP or " -"
-    - DISKS: Number of attached disks
-    - UPDATE STATUS: Update configuration (JSON string)
-    - RESOURCE LINK: Azure portal link
-    
-    Returns:
-        Tuple of (vm_records, warnings)
-    """
+    """Parse Azure Portal and Azure Resource Graph VM CSV exports."""
     vm_records = []
     warnings = []
-    
+
+    def clean(value: Any) -> str:
+        if value is None:
+            return ""
+        normalized = str(value).strip()
+        return "" if normalized.lower() == "nan" else normalized
+
     try:
-        # Handle UTF-8 BOM if present
-        with open(csv_path, 'r', encoding='utf-8-sig') as f:
+        with open(csv_path, 'r', encoding='utf-8-sig', newline='') as f:
             reader = csv.DictReader(f)
-            row_num = 1
-            
-            for row in reader:
-                row_num += 1
+            headers = {clean(header).lower(): header for header in (reader.fieldnames or [])}
+            is_resource_graph = 'tenant' in headers or 'primaryipv4' in headers
+
+            aliases = {
+                'name': ('name',),
+                'subscription': ('subscription', 'tenant'),
+                'resource_group': ('resource group', 'resource_group', 'cf_resourcegroups'),
+                'location': ('location', 'site'),
+                'status': ('status',),
+                'operating_system': ('operating system', 'platform'),
+                'size': ('size', 'cfinstancetype', 'cf_instancetype'),
+                'public_ip': ('public ip address', 'primaryipv4'),
+                'disk_count': ('disks',),
+                'resource_link': ('resource link',),
+                'vnet': ('vnet',),
+                'subnet': ('subnet',),
+                'owner': ('cf_owner',),
+                'purpose': ('cf_purpose',),
+                'organization': ('cf_organization',),
+                'subscription_id': ('subscriptionid',),
+            }
+
+            def value_for(row: Dict[str, Any], field: str) -> str:
+                for alias in aliases[field]:
+                    header = headers.get(alias.lower())
+                    if header is not None:
+                        return clean(row.get(header))
+                return ""
+
+            for row_num, row in enumerate(reader, start=2):
                 try:
-                    vm_name = row.get('NAME', '').strip()
-                    
+                    vm_name = value_for(row, 'name')
                     if not vm_name:
                         warnings.append(f"Row {row_num}: Missing VM name, skipping")
                         continue
-                    
-                    # Extract and normalize fields
-                    subscription = row.get('SUBSCRIPTION', '').strip()
-                    resource_group = row.get('RESOURCE GROUP', '').strip()
-                    location = row.get('LOCATION', '').strip()
-                    status = row.get('STATUS', '').strip()
-                    os_type = row.get('OPERATING SYSTEM', '').strip()
-                    size = row.get('SIZE', '').strip()
-                    public_ip = row.get('PUBLIC IP ADDRESS', '').strip()
-                    disks = row.get('DISKS', '').strip()
-                    resource_link = row.get('RESOURCE LINK', '').strip()
-                    
-                    # Clean up public IP (" -" means no public IP)
-                    if public_ip in ['-', ' -', '']:
-                        public_ip = None
-                    
-                    # Build VM record
+
+                    public_ip = value_for(row, 'public_ip')
+                    if public_ip in {'-', ' -'}:
+                        public_ip = ''
+
                     vm_record = {
                         'name': vm_name,
-                        'subscription': subscription,
-                        'resource_group': resource_group,
-                        'location': location,
-                        'status': status,
-                        'operating_system': os_type,
-                        'size': size,
-                        'public_ip': public_ip,
-                        'disk_count': disks,
-                        'resource_link': resource_link,
-                        'source': 'Azure CSV Import',
+                        'subscription': value_for(row, 'subscription'),
+                        'resource_group': value_for(row, 'resource_group'),
+                        'location': value_for(row, 'location'),
+                        'status': value_for(row, 'status'),
+                        'operating_system': value_for(row, 'operating_system'),
+                        'size': value_for(row, 'size'),
+                        'public_ip': public_ip or None,
+                        'disk_count': value_for(row, 'disk_count'),
+                        'resource_link': value_for(row, 'resource_link'),
+                        'vnet': value_for(row, 'vnet'),
+                        'subnet': value_for(row, 'subnet'),
+                        'owner': value_for(row, 'owner'),
+                        'purpose': value_for(row, 'purpose'),
+                        'organization': value_for(row, 'organization'),
+                        'subscription_id': value_for(row, 'subscription_id'),
+                        'source': 'Azure Resource Graph CSV Import' if is_resource_graph else 'Azure CSV Import',
                         'imported_at': datetime.now().isoformat()
                     }
-                    
                     vm_records.append(vm_record)
-                    
                 except Exception as e:
                     warnings.append(f"Row {row_num}: Error parsing - {str(e)}")
                     logger.error(f"Error parsing row {row_num}: {e}")
-                    continue
-        
+
+        if not vm_records:
+            warnings.append("No VM records found. Check that the CSV contains a Name column.")
         logger.info(f"Parsed {len(vm_records)} Azure VMs from CSV")
         return vm_records, warnings
-        
     except Exception as e:
         logger.error(f"Failed to parse Azure VM CSV: {e}")
         raise
@@ -254,23 +258,16 @@ def enrich_vms_with_netbox_ips(vm_records: List[Dict[str, Any]]) -> int:
     return matched
 
 
+def _strip_azure_prefix(location: str) -> str:
+    """Strip an existing 'Azure - ' prefix from a location string if present."""
+    loc = location or ""
+    prefix = "azure - "
+    if loc.lower().startswith(prefix):
+        return loc[len(prefix):].strip()
+    return loc.strip()
+
+
 def map_azure_to_netbox(vm_records: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
-    """
-    Map Azure VM records to NetBox inventory format.
-    
-    Mappings:
-    - SUBSCRIPTION -> Tenant (Azure)
-    - RESOURCE GROUP -> Custom Field: Resource Group
-    - LOCATION -> Site (Cloud)
-    - SIZE -> Custom Field: Instance Type
-    - OPERATING SYSTEM -> Platform
-    
-    Args:
-        vm_records: List of parsed Azure VM records
-        
-    Returns:
-        Tuple of (netbox_records, metadata)
-    """
     netbox_records = []
     metadata = {
         'subscriptions': set(),
@@ -283,13 +280,11 @@ def map_azure_to_netbox(vm_records: List[Dict[str, Any]]) -> Tuple[List[Dict[str
         'vms_with_netbox_ip': 0,
     }
 
-    # Resolve NetBox IP data for the whole batch up front (two queries total).
     ip_index = build_vm_ip_index()
 
     for vm in vm_records:
         vm_name = vm['name']
 
-        # Attach NetBox IP data so callers and the UI can display it.
         entry = ip_index.get(vm_name.strip().lower())
         resolved = _finalize_ip_entry(entry) if entry else {"primary": "", "assigned": [], "display": ""}
         vm['netbox_primary_ip'] = resolved['primary']
@@ -298,9 +293,8 @@ def map_azure_to_netbox(vm_records: List[Dict[str, Any]]) -> Tuple[List[Dict[str
         if resolved['display']:
             metadata['vms_with_netbox_ip'] += 1
 
-        # Check if VM already exists
         existing_vm = check_vm_exists_in_db(vm_name)
-        
+
         if existing_vm:
             metadata['existing_vms'].append({
                 'name': vm_name,
@@ -309,23 +303,22 @@ def map_azure_to_netbox(vm_records: List[Dict[str, Any]]) -> Tuple[List[Dict[str
             })
         else:
             metadata['new_vms'].append(vm_name)
-        
-        # Collect unique values for NetBox objects
+
         if vm['subscription']:
             metadata['subscriptions'].add(vm['subscription'])
         if vm['resource_group']:
             metadata['resource_groups'].add(vm['resource_group'])
-        if vm['location']:
-            metadata['locations'].add(vm['location'])
         if vm['size']:
             metadata['sizes'].add(vm['size'])
         if vm['operating_system']:
             metadata['platforms'].add(vm['operating_system'])
-        
-        # Map to NetBox inventory format
-        # Map location to site name (e.g., "Australia East" -> "Azure - Australia East")
-        site_name = f"Azure - {vm['location']}" if vm['location'] else "Azure - Unknown"
-        
+
+        raw_location = _strip_azure_prefix(vm.get('location', ''))
+        if raw_location:
+            metadata['locations'].add(raw_location)
+
+        site_name = f"Azure - {raw_location}" if raw_location else "Azure - Unknown"
+
         # Build description with Azure metadata
         description_parts = []
         if vm['subscription']:
@@ -334,36 +327,41 @@ def map_azure_to_netbox(vm_records: List[Dict[str, Any]]) -> Tuple[List[Dict[str
             description_parts.append(f"Resource Group: {vm['resource_group']}")
         if vm['status']:
             description_parts.append(f"Status: {vm['status']}")
-        if vm['public_ip']:
-            description_parts.append(f"Public IP: {vm['public_ip']}")
+        if vm.get('public_ip'):
+            ip_label = "Primary IPv4" if vm.get('vnet') else "Public IP"
+            description_parts.append(f"{ip_label}: {vm['public_ip']}")
+        if vm.get('vnet'):
+            description_parts.append(f"VNet: {vm['vnet']}")
+        if vm.get('subnet'):
+            description_parts.append(f"Subnet: {vm['subnet']}")
+        if vm.get('owner'):
+            description_parts.append(f"Owner: {vm['owner']}")
         if resolved['display']:
             description_parts.append(f"NetBox IP: {resolved['display']}")
-        if vm['disk_count']:
+        if vm.get('disk_count'):
             description_parts.append(f"Disks: {vm['disk_count']}")
-        
+
         netbox_record = {
             'category': 'vm',
             'name': vm_name,
             'description': ' | '.join(description_parts) if description_parts else '',
             'manufacturer': 'Microsoft Azure',
-            'model_or_role': vm['size'],  # SIZE maps to model_or_role (Instance Type)
-            'site': site_name,  # LOCATION maps to site
-            'cluster': vm['resource_group'],  # RESOURCE GROUP maps to cluster
-            # Additional Azure-specific metadata stored in description
-            'platform': vm['operating_system'],  # For reference (not stored in this table)
-            'tenant': vm['subscription'],  # For reference (not stored in this table)
-            'netbox_ip': resolved['display'],  # Resolved from NetBox backup, if known
+            'model_or_role': vm['size'],
+            'site': site_name,
+            'cluster': vm['resource_group'],
+            'platform': vm['operating_system'],
+            'tenant': vm['subscription'],
+            'netbox_ip': resolved['display'],
         }
-        
+
         netbox_records.append(netbox_record)
-    
-    # Convert sets to sorted lists for display
+
     metadata['subscriptions'] = sorted(list(metadata['subscriptions']))
     metadata['resource_groups'] = sorted(list(metadata['resource_groups']))
     metadata['locations'] = sorted(list(metadata['locations']))
     metadata['sizes'] = sorted(list(metadata['sizes']))
     metadata['platforms'] = sorted(list(metadata['platforms']))
-    
+
     return netbox_records, metadata
 
 
