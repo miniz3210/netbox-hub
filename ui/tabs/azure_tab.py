@@ -62,14 +62,21 @@ def render_azure_tab(active_model=None):
 | where type =~ "microsoft.compute/virtualmachines"
 | extend 
     vmSize = tostring(properties.hardwareProfile.vmSize),
-    osPlatform = case(
+    baseOsType = case(
         isnotempty(properties.storageProfile.osDisk.osType), tostring(properties.storageProfile.osDisk.osType),
         isnotempty(properties.osProfile.windowsConfiguration), "Windows",
         isnotempty(properties.osProfile.linuxConfiguration), "Linux",
         "Unknown"
     ),
+    // 1. Exact OS Name reported by the Azure VM Guest Agent (e.g. "Windows Server 2019 Datacenter")
+    guestOsName = tostring(properties.extended.instanceView.osName),
+    guestOsVersion = tostring(properties.extended.instanceView.osVersion),
+    // 2. Fallback to image reference if agent hasn't reported
+    imgOffer = tostring(properties.storageProfile.imageReference.offer),
+    imgSku = tostring(properties.storageProfile.imageReference.sku),
+    imgVersion = coalesce(tostring(properties.storageProfile.imageReference.exactVersion), tostring(properties.storageProfile.imageReference.version)),
     nicIds = properties.networkProfile.networkInterfaces,
-    // Extract VM tags (handles both lowercase and uppercase tag keys)
+    // Extract Tags
     tagOrg = coalesce(tostring(tags["Organization"]), tostring(tags["organization"])),
     tagOwner = coalesce(tostring(tags["Owner"]), tostring(tags["owner"])),
     tagPurpose = coalesce(tostring(tags["Purpose"]), tostring(tags["purpose"])),
@@ -81,6 +88,7 @@ def render_azure_tab(active_model=None):
     tagDeploy = coalesce(tostring(tags["Deploymentmethod"]), tostring(tags["deploymentmethod"])),
     tagBackup = coalesce(tostring(tags["Backup"]), tostring(tags["backup"])),
     RawTags = tostring(tags),
+    // Exact NetBox Site matching
     NetBoxSite = case(
         location =~ "australiaeast", "Azure - Australia East",
         location =~ "australiasoutheast", "Azure - Australia Southeast",
@@ -88,6 +96,16 @@ def render_azure_tab(active_model=None):
         location =~ "spaincentral", "Azure - Spain Central",
         location =~ "uksouth", "Azure - UK South",
         strcat("UNMAPPED - ", location)
+    )
+| extend
+    // Formats Operating System exactly as shown on the Azure Portal Overview: "Windows (Windows Server 2019 Datacenter)"
+    ExactOperatingSystem = case(
+        isnotempty(guestOsName), strcat(baseOsType, " (", guestOsName, ")"),
+        imgOffer =~ "sql2019-ws2019", "Windows (Windows Server 2019 Datacenter)",
+        imgOffer =~ "sql2022-ws2022", "Windows (Windows Server 2022 Datacenter)",
+        imgOffer =~ "windowsserver", strcat("Windows (Windows Server ", imgSku, ")"),
+        isnotempty(imgSku), strcat(baseOsType, " (", imgOffer, " ", imgSku, ")"),
+        baseOsType
     )
 | mv-expand nicId = nicIds
 | extend nicIdStr = tostring(nicId.id)
@@ -118,14 +136,15 @@ def render_azure_tab(active_model=None):
     PrimaryIPv4 = take_any(PrimaryIPv4),
     VNet = take_any(VNetName),
     Subnet = take_any(SubnetName)
-    by id, name, ExactResourceGroupName, resourceGroup, location, NetBoxSite, SubscriptionName, subscriptionId, vmSize, osPlatform, tagOrg, tagOwner, tagPurpose, tagRole, tagApp, tagEnv, tagCostCentre, tagCrit, tagDeploy, tagBackup, RawTags
+    by id, name, ExactResourceGroupName, resourceGroup, location, NetBoxSite, SubscriptionName, subscriptionId, vmSize, baseOsType, ExactOperatingSystem, guestOsName, guestOsVersion, imgOffer, imgSku, imgVersion, tagOrg, tagOwner, tagPurpose, tagRole, tagApp, tagEnv, tagCostCentre, tagCrit, tagDeploy, tagBackup, RawTags
 | project 
     ['Name'] = name,
     ['Status'] = "active",
     ['Site'] = NetBoxSite,
     ['Tenant'] = SubscriptionName,
     ['Role'] = tagRole,
-    ['Platform'] = iff(osPlatform =~ "Windows", "Windows Server", osPlatform),
+    ['Operating_System'] = ExactOperatingSystem,
+    ['Platform'] = iff(baseOsType =~ "Windows", "Windows Server", baseOsType),
     ['PrimaryIPv4'] = PrimaryIPv4,
     ['VNet'] = VNet,
     ['Subnet'] = Subnet,
@@ -234,7 +253,7 @@ def render_azure_tab(active_model=None):
                     'Resource Group': vm['resource_group'],
                     'Location': vm['location'],
                     'Status': vm['status'],
-                    'OS': vm['operating_system'],
+                    'Operating System': vm.get('operating_system') or '—',
                     'Role': vm.get('role') or vm.get('tag_application') or '—',
                     'Size': vm['size'],
                     'Azure IP': vm.get('public_ip') or '—',
@@ -247,7 +266,6 @@ def render_azure_tab(active_model=None):
                     'Business Criticality': vm.get('tag_business_criticality') or '—',
                     'Deployment Method': vm.get('tag_deployment_method') or '—',
                     'Backup': vm.get('tag_backup') or '—',
-                    'Operating System': vm.get('operating_system') or '—',
                     'Tags': vm.get('tags') or '—',
                     'NetBox IP': ip_display,
                     'In Database': '✅ Yes' if existing else '❌ No (Need to add to NetBox)'
@@ -456,7 +474,7 @@ def render_azure_tab(active_model=None):
                             f"Azure - {_strip_azure_prefix(vm.get('location', ''))}" if vm.get('location') else '',
                             canonical_value(vm.get('role', '') or vm.get('tag_application', ''), role_values),
                             vm.get('subscription', ''),
-                            vm.get('operating_system', ''),
+                            vm.get('platform_value') or vm.get('operating_system', ''),
                             canonical_value(vm.get('size', ''), instance_type_values),
                             canonical_value(vm.get('resource_group', ''), resource_group_values),
                             canonical_value(vm.get('owner', ''), owner_values),

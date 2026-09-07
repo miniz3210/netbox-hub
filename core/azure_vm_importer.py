@@ -40,7 +40,8 @@ def parse_azure_vm_csv(csv_path: str) -> Tuple[List[Dict[str, Any]], List[str]]:
                 'resource_group': ('resource group', 'resource_group', 'cf_resourcegroups'),
                 'location': ('location', 'site'),
                 'status': ('status',),
-                'operating_system': ('operating system', 'platform', 'operating_system'),
+                'operating_system': ('operating system', 'operating_system'),
+                'platform_value': ('platform',),
                 'size': ('size', 'cfinstancetype', 'cf_instancetype'),
                 'public_ip': ('public ip address', 'primaryipv4'),
                 'disk_count': ('disks',),
@@ -89,6 +90,7 @@ def parse_azure_vm_csv(csv_path: str) -> Tuple[List[Dict[str, Any]], List[str]]:
                         'location': value_for(row, 'location'),
                         'status': value_for(row, 'status'),
                         'operating_system': value_for(row, 'operating_system'),
+                        'platform_value': value_for(row, 'platform_value'),
                         'size': value_for(row, 'size'),
                         'public_ip': public_ip or None,
                         'disk_count': value_for(row, 'disk_count'),
@@ -339,7 +341,9 @@ def map_azure_to_netbox(vm_records: List[Dict[str, Any]]) -> Tuple[List[Dict[str
             metadata['resource_groups'].add(vm['resource_group'])
         if vm['size']:
             metadata['sizes'].add(vm['size'])
-        if vm['operating_system']:
+        if vm.get('platform_value'):
+            metadata['platforms'].add(vm['platform_value'])
+        elif vm['operating_system']:
             metadata['platforms'].add(vm['operating_system'])
         if vm.get('owner'):
             metadata['owners'].add(vm['owner'])
@@ -402,7 +406,7 @@ def map_azure_to_netbox(vm_records: List[Dict[str, Any]]) -> Tuple[List[Dict[str
             'model_or_role': vm['size'],
             'site': site_name,
             'cluster': vm['resource_group'],
-            'platform': vm['operating_system'],
+            'platform': vm.get('platform_value') or vm['operating_system'],
             'tenant': vm['subscription'],
             'netbox_ip': resolved['display'],
         }
