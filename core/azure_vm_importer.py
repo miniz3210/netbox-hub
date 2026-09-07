@@ -40,7 +40,7 @@ def parse_azure_vm_csv(csv_path: str) -> Tuple[List[Dict[str, Any]], List[str]]:
                 'resource_group': ('resource group', 'resource_group', 'cf_resourcegroups'),
                 'location': ('location', 'site'),
                 'status': ('status',),
-                'operating_system': ('operating system', 'platform'),
+                'operating_system': ('operating system', 'platform', 'operating_system'),
                 'size': ('size', 'cfinstancetype', 'cf_instancetype'),
                 'public_ip': ('public ip address', 'primaryipv4'),
                 'disk_count': ('disks',),
@@ -79,6 +79,9 @@ def parse_azure_vm_csv(csv_path: str) -> Tuple[List[Dict[str, Any]], List[str]]:
                     if public_ip in {'-', ' -'}:
                         public_ip = ''
 
+                    role_val = value_for(row, 'role') or value_for(row, 'tag_application')
+                    tag_app = value_for(row, 'tag_application') or role_val
+
                     vm_record = {
                         'name': vm_name,
                         'subscription': value_for(row, 'subscription'),
@@ -93,16 +96,17 @@ def parse_azure_vm_csv(csv_path: str) -> Tuple[List[Dict[str, Any]], List[str]]:
                         'vnet': value_for(row, 'vnet'),
                         'subnet': value_for(row, 'subnet'),
                         'owner': value_for(row, 'owner'),
-                        'role': value_for(row, 'role'),
+                        'role': role_val,
                         'purpose': value_for(row, 'purpose'),
                         'organization': value_for(row, 'organization'),
                         'subscription_id': value_for(row, 'subscription_id'),
-                        'tag_application': value_for(row, 'tag_application'),
+                        'tag_application': tag_app,
                         'tag_environment': value_for(row, 'tag_environment'),
                         'tag_cost_centre': value_for(row, 'tag_cost_centre'),
                         'tag_business_criticality': value_for(row, 'tag_business_criticality'),
                         'tag_deployment_method': value_for(row, 'tag_deployment_method'),
                         'tag_backup': value_for(row, 'tag_backup'),
+                        'tag_operating_system': value_for(row, 'operating_system'),
                         'tags': value_for(row, 'tags'),
                         'source': 'Azure Resource Graph CSV Import' if is_resource_graph else 'Azure CSV Import',
                         'imported_at': datetime.now().isoformat()
@@ -292,12 +296,14 @@ def map_azure_to_netbox(vm_records: List[Dict[str, Any]]) -> Tuple[List[Dict[str
         'sizes': set(),
         'platforms': set(),
         'owners': set(),
+        'roles': set(),
         'tag_applications': set(),
         'tag_environments': set(),
         'tag_cost_centres': set(),
         'tag_business_criticalities': set(),
         'tag_deployment_methods': set(),
         'tag_backups': set(),
+        'tag_operating_systems': set(),
         'new_vms': [],
         'existing_vms': [],
         'vms_with_netbox_ip': 0,
@@ -337,6 +343,9 @@ def map_azure_to_netbox(vm_records: List[Dict[str, Any]]) -> Tuple[List[Dict[str
             metadata['platforms'].add(vm['operating_system'])
         if vm.get('owner'):
             metadata['owners'].add(vm['owner'])
+        role_val = vm.get('role') or vm.get('tag_application')
+        if role_val:
+            metadata['roles'].add(role_val)
         tag_metadata = {
             'tag_application': ('tag_applications', ''),
             'tag_environment': ('tag_environments', ''),
@@ -344,6 +353,7 @@ def map_azure_to_netbox(vm_records: List[Dict[str, Any]]) -> Tuple[List[Dict[str
             'tag_business_criticality': ('tag_business_criticalities', 'BusinessCriticality:'),
             'tag_deployment_method': ('tag_deployment_methods', 'Deploymentmethod:'),
             'tag_backup': ('tag_backups', ''),
+            'tag_operating_system': ('tag_operating_systems', ''),
         }
         for field, (metadata_key, prefix) in tag_metadata.items():
             val = vm.get(field)
@@ -405,12 +415,14 @@ def map_azure_to_netbox(vm_records: List[Dict[str, Any]]) -> Tuple[List[Dict[str
     metadata['sizes'] = sorted(list(metadata['sizes']))
     metadata['platforms'] = sorted(list(metadata['platforms']))
     metadata['owners'] = sorted(list(metadata['owners']))
+    metadata['roles'] = sorted(list(metadata['roles']))
     metadata['tag_applications'] = sorted(list(metadata['tag_applications']))
     metadata['tag_environments'] = sorted(list(metadata['tag_environments']))
     metadata['tag_cost_centres'] = sorted(list(metadata['tag_cost_centres']))
     metadata['tag_business_criticalities'] = sorted(list(metadata['tag_business_criticalities']))
     metadata['tag_deployment_methods'] = sorted(list(metadata['tag_deployment_methods']))
     metadata['tag_backups'] = sorted(list(metadata['tag_backups']))
+    metadata['tag_operating_systems'] = sorted(list(metadata['tag_operating_systems']))
 
     return netbox_records, metadata
 

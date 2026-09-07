@@ -196,6 +196,11 @@ def get_existing_clusters() -> Set[str]:
     return _fetch_backup_names("virtualization_clusters")
 
 
+def get_existing_roles() -> Set[str]:
+    """Device/VM Role names already present in NetBox."""
+    return _fetch_backup_names("dcim_device_roles")
+
+
 def get_existing_sites() -> Set[str]:
     """Site names from both the sites table and the ingested backup."""
     sites = _fetch_backup_names("dcim_sites")
@@ -261,8 +266,8 @@ def analyze_netbox_objects(metadata: Dict[str, Any]) -> Dict[str, Dict[str, Any]
         ("owners", "Owner Set (Custom Field Choices)", "extras.customfieldchoiceset",
          list(metadata.get("owners", [])),
          get_existing_custom_field_values(OWNER_FIELD, OWNER_CHOICE_SET)),
-        ("tag_applications", "Application Tags", "extras.tag",
-         list(metadata.get("tag_applications", [])), _fetch_backup_names("extras_tags")),
+        ("roles", "Roles (Applications)", "dcim.devicerole",
+         list(metadata.get("roles", [])), get_existing_roles()),
         ("tag_environments", "Environment Tags", "extras.tag",
          list(metadata.get("tag_environments", [])), _fetch_backup_names("extras_tags")),
         ("tag_cost_centres", "Cost Centre Tags", "extras.tag",
@@ -273,6 +278,8 @@ def analyze_netbox_objects(metadata: Dict[str, Any]) -> Dict[str, Dict[str, Any]
          list(metadata.get("tag_deployment_methods", [])), _fetch_backup_names("extras_tags")),
         ("tag_backups", "Backup Tags", "extras.tag",
          list(metadata.get("tag_backups", [])), _fetch_backup_names("extras_tags")),
+        ("tag_operating_systems", "Operating System Tags", "extras.tag",
+         list(metadata.get("tag_operating_systems", [])), _fetch_backup_names("extras_tags")),
     ]
 
     results: Dict[str, Dict[str, Any]] = {}
@@ -417,8 +424,18 @@ def generate_import_scripts(analysis: Dict[str, Dict[str, Any]]) -> Dict[str, Di
             ),
         }
 
+    roles = analysis.get("roles", {}).get("missing", [])
+    if roles:
+        scripts["roles"] = {
+            "label": "Roles (Applications)",
+            "format": "csv",
+            "filename": "netbox-roles-import.csv",
+            "content": generate_roles_csv(roles),
+            "count": len(roles),
+            "instructions": "NetBox → Organization → Device Roles (or Devices → Device Roles) → Import → paste as CSV",
+        }
+
     tag_categories = [
-        ("tag_applications", "Application Tags", "netbox-application-tags.csv"),
         ("tag_environments", "Environment Tags", "netbox-environment-tags.csv"),
         ("tag_cost_centres", "Cost Centre Tags", "netbox-cost-centre-tags.csv"),
         ("tag_business_criticalities", "Business Criticality Tags", "netbox-business-criticality-tags.csv"),
@@ -438,6 +455,18 @@ def generate_import_scripts(analysis: Dict[str, Dict[str, Any]]) -> Dict[str, Di
             }
 
     return scripts
+
+
+def generate_roles_csv(role_names: List[str]) -> str:
+    """Render the `name,slug,color` CSV NetBox expects for device/VM role import."""
+    output = io.StringIO(newline="")
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow(["name", "slug", "color"])
+    for name in role_names:
+        clean = (name or "").strip()
+        if clean:
+            writer.writerow([clean, slugify(clean), "ffffff"])
+    return output.getvalue().rstrip("\n")
 
 
 def generate_tags_csv(tag_names: List[str]) -> str:

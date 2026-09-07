@@ -24,6 +24,7 @@ from core.netbox_object_checker import (
     generate_import_scripts,
     generate_combined_import_bundle,
     get_existing_custom_field_values,
+    get_existing_roles,
     INSTANCE_TYPE_FIELD,
     RESOURCE_GROUP_FIELD,
     OWNER_FIELD,
@@ -47,6 +48,7 @@ def render_azure_tab(active_model=None):
         - **LOCATION** → Site (Cloud)
         - **SIZE** → Custom Field: Instance Type
         - **OPERATING SYSTEM** → Platform
+        - **APPLICATION** → Role
     """)
     
     # Instructions section
@@ -233,17 +235,19 @@ def render_azure_tab(active_model=None):
                     'Location': vm['location'],
                     'Status': vm['status'],
                     'OS': vm['operating_system'],
+                    'Role': vm.get('role') or vm.get('tag_application') or '—',
                     'Size': vm['size'],
                     'Azure IP': vm.get('public_ip') or '—',
                     'VNet': vm.get('vnet') or '—',
                     'Subnet': vm.get('subnet') or '—',
                     'Owner': vm.get('owner') or '—',
-                    'Application': vm.get('tag_application') or '—',
+                    'Application': vm.get('tag_application') or vm.get('role') or '—',
                     'Environment': vm.get('tag_environment') or '—',
                     'Cost Centre': vm.get('tag_cost_centre') or '—',
                     'Business Criticality': vm.get('tag_business_criticality') or '—',
                     'Deployment Method': vm.get('tag_deployment_method') or '—',
                     'Backup': vm.get('tag_backup') or '—',
+                    'Operating System': vm.get('operating_system') or '—',
                     'Tags': vm.get('tags') or '—',
                     'NetBox IP': ip_display,
                     'In Database': '✅ Yes' if existing else '❌ No (Need to add to NetBox)'
@@ -428,6 +432,7 @@ def render_azure_tab(active_model=None):
                         RESOURCE_GROUP_FIELD, RESOURCE_GROUP_CHOICE_SET
                     )
                     owner_values = get_existing_custom_field_values(OWNER_FIELD, OWNER_CHOICE_SET)
+                    role_values = get_existing_roles()
 
                     def canonical_value(value, existing_values):
                         clean = (value or '').strip()
@@ -442,14 +447,14 @@ def render_azure_tab(active_model=None):
                         "name", "status", "site", "role", "tenant", "platform",
                         "cf_instance_type", "cf_resource_group", "cf_owner",
                         "cf_application", "cf_environment", "cf_cost_centre",
-                        "cf_business_criticality", "cf_deployment_method", "cf_backup", "tags"
+                        "cf_business_criticality", "cf_deployment_method", "cf_backup", "cf_operating_system", "tags"
                     ]]
                     for vm in new_vm_records:
                         vm_import_rows.append([
                             vm.get('name', ''),
                             vm.get('status', ''),
                             f"Azure - {_strip_azure_prefix(vm.get('location', ''))}" if vm.get('location') else '',
-                            vm.get('role', ''),
+                            canonical_value(vm.get('role', '') or vm.get('tag_application', ''), role_values),
                             vm.get('subscription', ''),
                             vm.get('operating_system', ''),
                             canonical_value(vm.get('size', ''), instance_type_values),
@@ -461,6 +466,7 @@ def render_azure_tab(active_model=None):
                             vm.get('tag_business_criticality', ''),
                             vm.get('tag_deployment_method', ''),
                             vm.get('tag_backup', ''),
+                            vm.get('tag_operating_system', ''),
                             vm.get('tags', ''),
                         ])
                     csv_buffer = io.StringIO(newline='')
