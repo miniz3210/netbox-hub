@@ -4,6 +4,7 @@ pandas
 openpyxl
 Flask
 flask-cors
+waitress
 python-dotenv
 tornado
 pyyaml

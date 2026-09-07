@@ -16,7 +16,7 @@ def render_standards_tab(active_model):
         with col_download:
             st.download_button("📥 Download Guidelines Prompt (.txt)", prompt_rep, "naming_standards.txt", "text/plain")
         with col_clear:
-            if st.button("🗑️ Clear", help="Reset to default naming standards", use_container_width=True):
+            if st.button("🗑️ Clear", help="Reset to default naming standards", width="stretch"):
                 from config.naming_rules import DEFAULT_RULES
                 save_naming_rules(DEFAULT_RULES)
                 st.session_state["naming_rules"] = load_naming_rules()

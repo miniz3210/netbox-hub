@@ -18,7 +18,7 @@ def render_batch_tab(catalog, active_model):
     batch_file = st.file_uploader("Upload Batch File (.xlsx, .csv)", type=["xlsx", "csv"])
     if batch_file:
         df = pd.read_csv(batch_file) if batch_file.name.endswith(".csv") else pd.read_excel(batch_file)
-        st.dataframe(df.head(), use_container_width=True)
+        st.dataframe(df.head(), width="stretch")
         
         if st.button("Start Parallel Batch Processing (5x Speed)", type="primary"):
             pbar = st.progress(0)
@@ -61,5 +61,5 @@ def render_batch_tab(catalog, active_model):
                         pbar.progress((i + 1) / len(rows))
 
             st.success("Parallel Batch Generation Completed!")
-            st.dataframe(pd.DataFrame(results), use_container_width=True)
+            st.dataframe(pd.DataFrame(results), width="stretch")
             st.download_button("📦 Download All Assets (.zip)", zip_buf.getvalue(), "netbox_assets.zip", "application/zip")

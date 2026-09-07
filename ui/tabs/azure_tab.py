@@ -22,7 +22,14 @@ from core.azure_vm_importer import (
 from core.netbox_object_checker import (
     analyze_netbox_objects,
     generate_import_scripts,
-    generate_combined_import_bundle
+    generate_combined_import_bundle,
+    get_existing_custom_field_values,
+    INSTANCE_TYPE_FIELD,
+    RESOURCE_GROUP_FIELD,
+    OWNER_FIELD,
+    INSTANCE_TYPE_CHOICE_SET,
+    RESOURCE_GROUP_CHOICE_SET,
+    OWNER_CHOICE_SET,
 )
 
 
@@ -224,7 +231,7 @@ def render_azure_tab(active_model=None):
             # Show data table with color coding
             st.dataframe(
                 df_with_status,
-                use_container_width=True,
+                width="stretch",
                 height=400
             )
             
@@ -292,7 +299,7 @@ def render_azure_tab(active_model=None):
                         "✅ Exists": len(data["existing"]),
                         "❌ Missing": len(data["missing"]),
                     })
-                st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(summary_rows), width="stretch", hide_index=True)
 
                 # Detail per category
                 for key, data in analysis.items():
@@ -370,7 +377,7 @@ def render_azure_tab(active_model=None):
 
                     st.dataframe(
                         new_vms_df[display_cols],
-                        use_container_width=True,
+                        width="stretch",
                         height=300
                     )
                     
@@ -389,6 +396,23 @@ def render_azure_tab(active_model=None):
                     new_vm_records = [
                         vm for vm in vm_records if vm['name'] in metadata['new_vms']
                     ]
+                    instance_type_values = get_existing_custom_field_values(
+                        INSTANCE_TYPE_FIELD, INSTANCE_TYPE_CHOICE_SET
+                    )
+                    resource_group_values = get_existing_custom_field_values(
+                        RESOURCE_GROUP_FIELD, RESOURCE_GROUP_CHOICE_SET
+                    )
+                    owner_values = get_existing_custom_field_values(OWNER_FIELD, OWNER_CHOICE_SET)
+
+                    def canonical_value(value, existing_values):
+                        clean = (value or '').strip()
+                        matches = {
+                            candidate.strip().lower(): candidate.strip()
+                            for candidate in existing_values
+                            if candidate and candidate.strip()
+                        }
+                        return matches.get(clean.lower(), clean)
+
                     vm_import_rows = [[
                         "name", "status", "site", "role", "tenant", "platform",
                         "cf_instance_type", "cf_resource_group", "cf_owner"
@@ -401,9 +425,9 @@ def render_azure_tab(active_model=None):
                             vm.get('role', ''),
                             vm.get('subscription', ''),
                             vm.get('operating_system', ''),
-                            vm.get('size', ''),
-                            vm.get('resource_group', ''),
-                            vm.get('owner', ''),
+                            canonical_value(vm.get('size', ''), instance_type_values),
+                            canonical_value(vm.get('resource_group', ''), resource_group_values),
+                            canonical_value(vm.get('owner', ''), owner_values),
                         ])
                     csv_buffer = io.StringIO(newline='')
                     csv.writer(csv_buffer, lineterminator='\n').writerows(vm_import_rows)
@@ -448,7 +472,7 @@ def render_azure_tab(active_model=None):
             'DISKS': ['2', '3', '1']
         }
         sample_df = pd.DataFrame(sample_data)
-        st.dataframe(sample_df, use_container_width=True)
+        st.dataframe(sample_df, width="stretch")
         
         st.download_button(
             "📄 Download Sample CSV Template",

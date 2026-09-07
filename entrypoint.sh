@@ -4,7 +4,7 @@ set -e
 mkdir -p /app/data/catalog_cache /app/.streamlit /opt/netbox-hub/data/catalog_cache
 
 echo "Starting Flask API Service..."
-python api_service.py &
+waitress-serve --host=0.0.0.0 --port=5000 api_service:app &
 
 echo "Starting Streamlit UI on port 8501..."
 exec streamlit run app.py \

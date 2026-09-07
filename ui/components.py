@@ -425,7 +425,7 @@ def render_sidebar() -> str:
             st.session_state["model_test_history"] = {}
 
         # 4. Connection Test Button
-        if st.button("🧪 Test Model Connection", key="btn_ping_model", use_container_width=True):
+        if st.button("🧪 Test Model Connection", key="btn_ping_model", width="stretch"):
             with st.spinner(f"Testing `{active_model}`..."):
                 ok, latency, msg = test_model_connection(active_model)
                 st.session_state["model_test_history"][active_model] = {

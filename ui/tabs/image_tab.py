@@ -21,10 +21,10 @@ def render_image_tab(catalog):
                 st.success(f"Found {len(matched_images)} matching image(s):")
                 for img_path in matched_images:
                     raw_data = fetch_raw_content(img_path, binary=True)
-                    st.image(raw_data, caption=img_path.split("/")[-1], use_container_width=True)
+                    st.image(raw_data, caption=img_path.split("/")[-1], width="stretch")
                     st.download_button(f"📥 Download {img_path.split('/')[-1]}", raw_data, img_path.split('/')[-1])
             else:
                 st.warning("No official image found. Generated standard vector SVG template:")
                 svg_front = generate_placeholder_svg(effective_mfg, i_model, u_height=2, view="front")
-                st.image(svg_front, caption="Auto-Generated Front SVG", use_container_width=True)
+                st.image(svg_front, caption="Auto-Generated Front SVG", width="stretch")
                 st.download_button("📥 Download Vector (.svg)", svg_front, f"{effective_mfg}_{i_model}.front.svg", "image/svg+xml")
