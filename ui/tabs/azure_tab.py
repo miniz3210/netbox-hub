@@ -18,6 +18,7 @@ from core.azure_vm_importer import (
     build_vm_ip_index,
     lookup_vm_ip_addresses,
     _strip_azure_prefix,
+    _build_netbox_tags,
 )
 from core.netbox_object_checker import (
     analyze_netbox_objects,
@@ -183,10 +184,19 @@ def render_azure_tab(active_model=None):
         st.session_state.azure_metadata = None
     if 'azure_object_analysis' not in st.session_state:
         st.session_state.azure_object_analysis = None
-    
+    if 'azure_dedup_cache' not in st.session_state:
+        st.session_state.azure_dedup_cache = None
+
     # Parse and preview
     if uploaded_file is not None:
         try:
+            # Clear previous state before parsing begins.
+            st.session_state.azure_vms_parsed = None
+            st.session_state.azure_vms_mapped = None
+            st.session_state.azure_metadata = None
+            st.session_state.azure_object_analysis = None
+            st.session_state.azure_dedup_cache = None
+
             # Save uploaded file temporarily
             temp_path = Path("data/temp_azure_upload.csv")
             temp_path.parent.mkdir(exist_ok=True)
@@ -265,10 +275,11 @@ def render_azure_tab(active_model=None):
                     'Business Criticality': vm.get('tag_business_criticality') or '—',
                     'Deployment Method': vm.get('tag_deployment_method') or '—',
                     'Backup': vm.get('tag_backup') or '—',
-                    'Tags': vm.get('tags') or '—',
+                    'NetBox Tags': ", ".join(t['name'] for t in (vm.get('netbox_tags') or [])),
                     'NetBox IP': ip_display,
                     'In Database': '✅ Yes' if existing else '❌ No (Need to add to NetBox)'
                 }
+
                 vm_status_list.append(vm_status)
             
             # Create DataFrame with status

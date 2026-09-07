@@ -69,12 +69,17 @@ def parse_azure_vm_csv(csv_path: str) -> Tuple[List[Dict[str, Any]], List[str]]:
                         return clean(row.get(header))
                 return ""
 
+            # Dedup dictionary: name (lower) -> record
+            vm_map = {}
+
             for row_num, row in enumerate(reader, start=2):
                 try:
                     vm_name = value_for(row, 'name')
                     if not vm_name:
                         warnings.append(f"Row {row_num}: Missing VM name, skipping")
                         continue
+                    
+                    vm_name_key = vm_name.strip().lower()
 
                     public_ip = value_for(row, 'public_ip')
                     if public_ip in {'-', ' -'}:
@@ -113,10 +118,12 @@ def parse_azure_vm_csv(csv_path: str) -> Tuple[List[Dict[str, Any]], List[str]]:
                         'source': 'Azure Resource Graph CSV Import' if is_resource_graph else 'Azure CSV Import',
                         'imported_at': datetime.now().isoformat()
                     }
-                    vm_records.append(vm_record)
+                    vm_map[vm_name_key] = vm_record
                 except Exception as e:
                     warnings.append(f"Row {row_num}: Error parsing - {str(e)}")
                     logger.error(f"Error parsing row {row_num}: {e}")
+            
+            vm_records = list(vm_map.values())
 
         if not vm_records:
             warnings.append("No VM records found. Check that the CSV contains a Name column.")
@@ -289,6 +296,80 @@ def _strip_azure_prefix(location: str) -> str:
     return loc.strip()
 
 
+def _slugify_tag(tag_name: str) -> str:
+    """Generate a NetBox-compliant slug from a tag name.
+
+    Lowercases the value, replaces any non-alphanumeric character with a
+    hyphen, and collapses repeated hyphens so slugs stay clean and stable.
+    """
+    if not tag_name:
+        return ""
+    slug = re.sub(r"[^a-z0-9]+", "-", tag_name.lower())
+    slug = re.sub(r"-+", "-", slug).strip("-")
+    return slug
+
+
+def _build_netbox_tags(vm: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Build the NetBox tag array for a single parsed Azure VM.
+
+    Tag rules (see the Azure CSV import feature spec):
+
+    1. Operating System: raw value from ``Operating_System`` / ``operating_system``
+       (e.g. ``"Windows (Windows Server 2019 Datacenter)"``). No prefix is added.
+    2. Key-value formatted tags (``Key:Value``):
+       - ``Tag_BusinessCriticality`` -> ``BusinessCriticality:<value>``
+       - ``Tag_DeploymentMethod`` / ``Deploymentmethod`` -> ``Deploymentmethod:<value>``
+       - ``Tag_Environment`` -> ``Environment:<value>``
+    3. Backup policy: raw value from ``Tag_Backup`` (e.g.
+       ``"Daily(BackupPolicy-AU-LowDataChange)"``). ``No Policy``, ``-``, empty
+       and ``null`` are excluded.
+    4. Each tag is emitted as ``{"name": ..., "slug": ...}``.
+    """
+    tag_names: List[str] = []
+
+    def add_tag(name: str) -> None:
+        if not name:
+            return
+        cleaned = str(name).strip()
+        if not cleaned or cleaned.lower() in {"-", "nan", "null", "none", "no policy"}:
+            return
+        if cleaned not in tag_names:
+            tag_names.append(cleaned)
+
+    # 1. Operating System — direct string, no prefix.
+    add_tag(vm.get('operating_system'))
+
+    # 2. Key-value formatted tags.
+    def add_kv_tag(key: str, val: Any) -> None:
+        if val:
+            v = str(val).strip()
+            if v and v.lower() not in {"-", "nan", "null", "none"}:
+                add_tag(f"{key}:{v}")
+
+    add_kv_tag("BusinessCriticality", vm.get('tag_business_criticality'))
+    add_kv_tag("Deploymentmethod", vm.get('tag_deployment_method'))
+    add_kv_tag("Environment", vm.get('tag_environment'))
+
+    # 3. Backup policy — direct string, excluding placeholders.
+    add_tag(vm.get('tag_backup'))
+
+    return [{"name": name, "slug": _slugify_tag(name)} for name in tag_names]
+
+
+def _dedupe_vm_records(vm_records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Deduplicate VM records by name (case-insensitive, trimmed).
+
+    When the same name appears more than once the latest valid entry wins.
+    """
+    deduped: Dict[str, Dict[str, Any]] = {}
+    for vm in vm_records:
+        name = (vm.get('name') or '').strip().lower()
+        if not name:
+            continue
+        deduped[name] = vm
+    return list(deduped.values())
+
+
 def map_azure_to_netbox(vm_records: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     netbox_records = []
     metadata = {
@@ -409,6 +490,7 @@ def map_azure_to_netbox(vm_records: List[Dict[str, Any]]) -> Tuple[List[Dict[str
             'platform': vm.get('platform_value') or vm['operating_system'],
             'tenant': vm['subscription'],
             'netbox_ip': resolved['display'],
+            'netbox_tags': _build_netbox_tags(vm),
         }
 
         netbox_records.append(netbox_record)
