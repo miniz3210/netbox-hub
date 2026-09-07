@@ -260,7 +260,6 @@ def render_azure_tab(active_model=None):
                     'VNet': vm.get('vnet') or '—',
                     'Subnet': vm.get('subnet') or '—',
                     'Owner': vm.get('owner') or '—',
-                    'Application': vm.get('tag_application') or vm.get('role') or '—',
                     'Environment': vm.get('tag_environment') or '—',
                     'Cost Centre': vm.get('tag_cost_centre') or '—',
                     'Business Criticality': vm.get('tag_business_criticality') or '—',
