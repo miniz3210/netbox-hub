@@ -270,12 +270,7 @@ def render_azure_tab(active_model=None):
                     'VNet': vm.get('vnet') or '—',
                     'Subnet': vm.get('subnet') or '—',
                     'Owner': vm.get('owner') or '—',
-                    'Environment': vm.get('tag_environment') or '—',
-                    'Cost Centre': vm.get('tag_cost_centre') or '—',
-                    'Business Criticality': vm.get('tag_business_criticality') or '—',
-                    'Deployment Method': vm.get('tag_deployment_method') or '—',
-                    'Backup': vm.get('tag_backup') or '—',
-                    'NetBox Tags': ", ".join(t['name'] for t in (vm.get('netbox_tags') or [])),
+                    'NetBox Tags': ", ".join(t['name'] for t in (_build_netbox_tags(vm))),
                     'NetBox IP': ip_display,
                     'In Database': '✅ Yes' if existing else '❌ No (Need to add to NetBox)'
                 }
