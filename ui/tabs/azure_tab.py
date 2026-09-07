@@ -11,8 +11,6 @@ from typing import Optional
 from core.azure_vm_importer import (
     parse_azure_vm_csv,
     map_azure_to_netbox,
-    save_azure_vms_to_db,
-    generate_netbox_import_summary,
     check_vm_exists_in_db,
     build_vm_ip_index,
     lookup_vm_ip_addresses
@@ -328,36 +326,7 @@ def render_azure_tab(active_model=None):
                 else:
                     st.info("✅ All VMs from this export already exist in the database.")
                 
-                st.divider()
-                st.markdown("### 💾 Import VMs to NetBox Hub Database")
-                update_existing = st.checkbox(
-                    "Update existing VMs with values from this export",
-                    value=False,
-                    help="Leave unchecked to preserve existing records and skip them."
-                )
-                if st.button("Import VMs to NetBox Hub Database", type="primary"):
-                    with st.spinner("Importing Azure VM records..."):
-                        stats = save_azure_vms_to_db(
-                            st.session_state.azure_vms_mapped,
-                            update_existing=update_existing,
-                            source="Azure Resource Graph CSV Import"
-                        )
-                    st.success(
-                        f"Import complete: {stats['inserted']} inserted, "
-                        f"{stats['updated']} updated, {stats['skipped']} skipped, "
-                        f"{stats['errors']} errors."
-                    )
-
-                # Already in database
-                if metadata['existing_vms']:
-                    st.markdown("### ✅ VMs Already in Database")
-                    st.info(f"**{len(metadata['existing_vms'])} VMs** are already tracked in NetBox Hub database.")
-                    
-                    with st.expander("View VMs already in database"):
-                        for existing in metadata['existing_vms'][:20]:
-                            st.text(f"  • {existing['name']}")
-                        if len(metadata['existing_vms']) > 20:
-                            st.text(f"  ... and {len(metadata['existing_vms']) - 20} more")
+                
         
         except Exception as e:
             st.error(f"❌ Error processing Azure VM CSV: {str(e)}")
