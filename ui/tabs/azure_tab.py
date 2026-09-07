@@ -3,9 +3,12 @@ Azure VM Import Tab for NetBox Hub
 Provides UI for importing Azure Virtual Machine exports into NetBox.
 """
 
-import streamlit as st
-import pandas as pd
+import csv
+import io
 from pathlib import Path
+
+import pandas as pd
+import streamlit as st
 from typing import Optional
 
 from core.azure_vm_importer import (
@@ -13,7 +16,8 @@ from core.azure_vm_importer import (
     map_azure_to_netbox,
     check_vm_exists_in_db,
     build_vm_ip_index,
-    lookup_vm_ip_addresses
+    lookup_vm_ip_addresses,
+    _strip_azure_prefix,
 )
 from core.netbox_object_checker import (
     analyze_netbox_objects,
@@ -378,6 +382,39 @@ def render_azure_tab(active_model=None):
                         f"new-vms-for-netbox-{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
                         "text/csv",
                         help="Download CSV of VMs that need to be added to NetBox"
+                    )
+
+                    # Generated NetBox VM import scripts for the new VMs
+                    st.markdown("#### 📄 Generated NetBox VMs Import Scripts")
+                    new_vm_records = [
+                        vm for vm in vm_records if vm['name'] in metadata['new_vms']
+                    ]
+                    vm_import_rows = [[
+                        "name", "status", "site", "role", "tenant", "platform",
+                        "cf_instance_type", "cf_resource_group", "cf_owner"
+                    ]]
+                    for vm in new_vm_records:
+                        vm_import_rows.append([
+                            vm.get('name', ''),
+                            vm.get('status', ''),
+                            f"Azure - {_strip_azure_prefix(vm.get('location', ''))}" if vm.get('location') else '',
+                            vm.get('role', ''),
+                            vm.get('subscription', ''),
+                            vm.get('operating_system', ''),
+                            vm.get('size', ''),
+                            vm.get('resource_group', ''),
+                            vm.get('owner', ''),
+                        ])
+                    csv_buffer = io.StringIO(newline='')
+                    csv.writer(csv_buffer, lineterminator='\n').writerows(vm_import_rows)
+                    vm_import_script = csv_buffer.getvalue()
+                    st.code(vm_import_script, language="csv")
+                    st.download_button(
+                        "📥 Download NetBox VMs Import CSV",
+                        vm_import_script.encode("utf-8"),
+                        f"netbox-vms-import-{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
+                        "text/csv",
+                        key=f"dl_vms_import_{pd.Timestamp.now().strftime('%Y%m%d%H%M%S')}",
                     )
                 else:
                     st.info("✅ All VMs from this export already exist in the database.")
