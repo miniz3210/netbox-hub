@@ -41,23 +41,79 @@ def render_azure_tab(active_model=None):
     # Instructions section
     with st.expander("📋 How to Export Azure VMs", expanded=False):
         st.markdown("""
-        ### Export from Azure Portal
-        1. Navigate to **Virtual Machines** in Azure Portal
-        2. Click **Export to CSV** button at the top of the VM list
-        3. Save the CSV file to your computer
-        4. Upload the file using the uploader below
-        
-        ### Required CSV Columns
-        - `NAME`: VM name
-        - `SUBSCRIPTION`: Azure subscription
-        - `RESOURCE GROUP`: Resource group name
-        - `LOCATION`: Azure region (e.g., "Australia East")
-        - `STATUS`: Running, Stopped, etc.
-        - `OPERATING SYSTEM`: Windows or Linux
-        - `SIZE`: VM SKU (e.g., "Standard_E2as_v4")
-        - `PUBLIC IP ADDRESS`: Public IP or "-"
-        - `DISKS`: Number of disks
-        - `RESOURCE LINK`: Azure portal URL
+        ### Export from Azure Resource Graph Explorer
+        1. In the search bar at the top of the Azure Portal, type and select **Resource Graph Explorer**.
+        2. Paste the following KQL query into the query editor:
+        """)
+        st.code('''Resources
+| where type =~ "microsoft.compute/virtualmachines"
+| extend 
+    vmSize = tostring(properties.hardwareProfile.vmSize),
+    osPlatform = case(
+        isnotempty(properties.storageProfile.osDisk.osType), tostring(properties.storageProfile.osDisk.osType),
+        isnotempty(properties.osProfile.windowsConfiguration), "Windows",
+        isnotempty(properties.osProfile.linuxConfiguration), "Linux",
+        "Unknown"
+    ),
+    nicIds = properties.networkProfile.networkInterfaces,
+    tagOrg = tostring(tags["Organization"]),
+    tagOwner = tostring(tags["Owner"]),
+    tagPurpose = tostring(tags["Purpose"]),
+    tagRole = tostring(tags["Role"]),
+    NetBoxSite = case(
+        location =~ "australiaeast", "Azure - Australia East",
+        location =~ "australiasoutheast", "Azure - Australia Southeast",
+        location =~ "francecentral", "Azure - France Central",
+        location =~ "spaincentral", "Azure - Spain Central",
+        location =~ "uksouth", "Azure - UK South",
+        strcat("UNMAPPED - ", location)
+    )
+| mv-expand nicId = nicIds
+| extend nicIdStr = tostring(nicId.id)
+| join kind=leftouter (
+    Resources
+    | where type =~ "microsoft.network/networkinterfaces"
+    | project nicIdStr = id, ipConfigs = properties.ipConfigurations
+    | mv-expand ipConfig = ipConfigs
+    | extend isPrimaryIp = tostring(ipConfig.properties.primary)
+    | where isPrimaryIp =~ "true" or isempty(isPrimaryIp)
+    | project 
+        nicIdStr,
+        PrimaryIPv4 = tostring(ipConfig.properties.privateIPAddress),
+        SubnetId = tostring(ipConfig.properties.subnet.id)
+    | parse SubnetId with * "/virtualNetworks/" VNetName "/subnets/" SubnetName
+) on nicIdStr
+| join kind=leftouter (
+    ResourceContainers
+    | where type =~ "microsoft.resources/subscriptions"
+    | project subscriptionId, SubscriptionName = name
+) on subscriptionId
+| summarize 
+    PrimaryIPv4 = take_any(PrimaryIPv4),
+    VNet = take_any(VNetName),
+    Subnet = take_any(SubnetName)
+    by id, name, resourceGroup, location, NetBoxSite, SubscriptionName, subscriptionId, vmSize, osPlatform, tagOrg, tagOwner, tagPurpose, tagRole
+| project 
+    ['Name'] = name,
+    ['Status'] = "active",
+    ['Site'] = NetBoxSite,
+    ['Tenant'] = SubscriptionName,
+    ['Role'] = tagRole,
+    ['Platform'] = iff(osPlatform =~ "Windows", "Windows Server", osPlatform),
+    ['PrimaryIPv4'] = PrimaryIPv4,
+    ['VNet'] = VNet,
+    ['Subnet'] = Subnet,
+    ['cf_InstanceType'] = vmSize,
+    ['cf_ResourceGroups'] = resourceGroup,
+    ['cf_Organization'] = tagOrg,
+    ['cf_Owner'] = tagOwner,
+    ['cf_Purpose'] = tagPurpose,
+    ['Azure_Region'] = location,
+    ['SubscriptionId'] = subscriptionId''', language="kusto")
+        st.markdown("""
+        3. Select **Run query**.
+        4. Export the results as CSV.
+        5. Upload the CSV file using the uploader below.
         """)
     
     # File uploader

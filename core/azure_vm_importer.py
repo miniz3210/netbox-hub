@@ -275,6 +275,7 @@ def map_azure_to_netbox(vm_records: List[Dict[str, Any]]) -> Tuple[List[Dict[str
         'locations': set(),
         'sizes': set(),
         'platforms': set(),
+        'owners': set(),
         'new_vms': [],
         'existing_vms': [],
         'vms_with_netbox_ip': 0,
@@ -312,6 +313,8 @@ def map_azure_to_netbox(vm_records: List[Dict[str, Any]]) -> Tuple[List[Dict[str
             metadata['sizes'].add(vm['size'])
         if vm['operating_system']:
             metadata['platforms'].add(vm['operating_system'])
+        if vm.get('owner'):
+            metadata['owners'].add(vm['owner'])
 
         raw_location = _strip_azure_prefix(vm.get('location', ''))
         if raw_location:
@@ -361,6 +364,7 @@ def map_azure_to_netbox(vm_records: List[Dict[str, Any]]) -> Tuple[List[Dict[str
     metadata['locations'] = sorted(list(metadata['locations']))
     metadata['sizes'] = sorted(list(metadata['sizes']))
     metadata['platforms'] = sorted(list(metadata['platforms']))
+    metadata['owners'] = sorted(list(metadata['owners']))
 
     return netbox_records, metadata
 

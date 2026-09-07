@@ -31,10 +31,12 @@ logger = logging.getLogger("netbox-hub")
 # Custom field names carrying Azure metadata on NetBox virtual machines
 INSTANCE_TYPE_FIELD = "instance_type"
 RESOURCE_GROUP_FIELD = "resource_group"
+OWNER_FIELD = "owner"
 
 # NetBox choice sets backing those custom fields
 INSTANCE_TYPE_CHOICE_SET = "Instance Type Set"
 RESOURCE_GROUP_CHOICE_SET = "Resource Group Set"
+OWNER_CHOICE_SET = "Owner Set"
 
 # Azure "OPERATING SYSTEM" values map onto existing NetBox platform names
 PLATFORM_ALIASES = {
@@ -242,6 +244,9 @@ def analyze_netbox_objects(metadata: Dict[str, Any]) -> Dict[str, Dict[str, Any]
         ("resource_groups", "Resource Group Set (Custom Field Choices)", "extras.customfieldchoiceset",
          list(metadata.get("resource_groups", [])),
          get_existing_custom_field_values(RESOURCE_GROUP_FIELD, RESOURCE_GROUP_CHOICE_SET)),
+        ("owners", "Owner Set (Custom Field Choices)", "extras.customfieldchoiceset",
+         list(metadata.get("owners", [])),
+         get_existing_custom_field_values(OWNER_FIELD, OWNER_CHOICE_SET)),
     ]
 
     results: Dict[str, Dict[str, Any]] = {}
@@ -368,6 +373,20 @@ def generate_import_scripts(analysis: Dict[str, Dict[str, Any]]) -> Dict[str, Di
             "count": len(resource_groups),
             "instructions": (
                 "NetBox → Customization → Custom Field Choice Sets → Resource Group "
+                "→ Extra choices → append these lines"
+            ),
+        }
+
+    owners = analysis.get("owners", {}).get("missing", [])
+    if owners:
+        scripts["owners"] = {
+            "label": "Owner Set",
+            "format": "choices",
+            "filename": "netbox-owner-choices.txt",
+            "content": generate_choice_set(owners),
+            "count": len(owners),
+            "instructions": (
+                "NetBox → Customization → Custom Field Choice Sets → Owner "
                 "→ Extra choices → append these lines"
             ),
         }
