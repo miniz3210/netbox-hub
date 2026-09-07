@@ -220,6 +220,9 @@ def render_azure_tab(active_model=None):
                     'VNet': vm.get('vnet') or '—',
                     'Subnet': vm.get('subnet') or '—',
                     'Owner': vm.get('owner') or '—',
+                    'Application': vm.get('tag_application') or '—',
+                    'Environment': vm.get('tag_environment') or '—',
+                    'Backup': vm.get('tag_backup') or '—',
                     'NetBox IP': ip_display,
                     'In Database': '✅ Yes' if existing else '❌ No (Need to add to NetBox)'
                 }
@@ -415,7 +418,9 @@ def render_azure_tab(active_model=None):
 
                     vm_import_rows = [[
                         "name", "status", "site", "role", "tenant", "platform",
-                        "cf_instance_type", "cf_resource_group", "cf_owner"
+                        "cf_instance_type", "cf_resource_group", "cf_owner",
+                        "cf_application", "cf_environment", "cf_cost_centre",
+                        "cf_business_criticality", "cf_deployment_method", "cf_backup", "tags"
                     ]]
                     for vm in new_vm_records:
                         vm_import_rows.append([
@@ -428,6 +433,13 @@ def render_azure_tab(active_model=None):
                             canonical_value(vm.get('size', ''), instance_type_values),
                             canonical_value(vm.get('resource_group', ''), resource_group_values),
                             canonical_value(vm.get('owner', ''), owner_values),
+                            vm.get('tag_application', ''),
+                            vm.get('tag_environment', ''),
+                            vm.get('tag_cost_centre', ''),
+                            vm.get('tag_business_criticality', ''),
+                            vm.get('tag_deployment_method', ''),
+                            vm.get('tag_backup', ''),
+                            vm.get('tags', ''),
                         ])
                     csv_buffer = io.StringIO(newline='')
                     csv.writer(csv_buffer, lineterminator='\n').writerows(vm_import_rows)

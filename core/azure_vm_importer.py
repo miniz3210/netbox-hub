@@ -52,6 +52,13 @@ def parse_azure_vm_csv(csv_path: str) -> Tuple[List[Dict[str, Any]], List[str]]:
                 'purpose': ('cf_purpose',),
                 'organization': ('cf_organization',),
                 'subscription_id': ('subscriptionid',),
+                'tag_application': ('tag_application',),
+                'tag_environment': ('tag_environment',),
+                'tag_cost_centre': ('tag_costcentre', 'tag_cost_centre'),
+                'tag_business_criticality': ('tag_businesscriticality', 'tag_business_criticality'),
+                'tag_deployment_method': ('tag_deploymentmethod', 'tag_deployment_method'),
+                'tag_backup': ('tag_backup',),
+                'tags': ('tags',),
             }
 
             def value_for(row: Dict[str, Any], field: str) -> str:
@@ -90,6 +97,13 @@ def parse_azure_vm_csv(csv_path: str) -> Tuple[List[Dict[str, Any]], List[str]]:
                         'purpose': value_for(row, 'purpose'),
                         'organization': value_for(row, 'organization'),
                         'subscription_id': value_for(row, 'subscription_id'),
+                        'tag_application': value_for(row, 'tag_application'),
+                        'tag_environment': value_for(row, 'tag_environment'),
+                        'tag_cost_centre': value_for(row, 'tag_cost_centre'),
+                        'tag_business_criticality': value_for(row, 'tag_business_criticality'),
+                        'tag_deployment_method': value_for(row, 'tag_deployment_method'),
+                        'tag_backup': value_for(row, 'tag_backup'),
+                        'tags': value_for(row, 'tags'),
                         'source': 'Azure Resource Graph CSV Import' if is_resource_graph else 'Azure CSV Import',
                         'imported_at': datetime.now().isoformat()
                     }
