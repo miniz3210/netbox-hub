@@ -441,14 +441,14 @@ def generate_import_scripts(analysis: Dict[str, Dict[str, Any]]) -> Dict[str, Di
 
 
 def generate_tags_csv(tag_names: List[str]) -> str:
-    """Render the `name,slug,color` CSV NetBox expects for tag import."""
+    """Render the `name,slug,color,weight` CSV NetBox expects for tag import."""
     output = io.StringIO(newline="")
     writer = csv.writer(output, lineterminator="\n")
-    writer.writerow(["name", "slug", "color"])
+    writer.writerow(["name", "slug", "color", "weight"])
     for name in tag_names:
         clean = (name or "").strip()
         if clean:
-            writer.writerow([clean, slugify(clean), "ffffff"])
+            writer.writerow([clean, slugify(clean), "ffffff", 1000])
     return output.getvalue().rstrip("\n")
 
 
