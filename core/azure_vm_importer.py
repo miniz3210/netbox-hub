@@ -292,6 +292,12 @@ def map_azure_to_netbox(vm_records: List[Dict[str, Any]]) -> Tuple[List[Dict[str
         'sizes': set(),
         'platforms': set(),
         'owners': set(),
+        'tag_applications': set(),
+        'tag_environments': set(),
+        'tag_cost_centres': set(),
+        'tag_business_criticalities': set(),
+        'tag_deployment_methods': set(),
+        'tag_backups': set(),
         'new_vms': [],
         'existing_vms': [],
         'vms_with_netbox_ip': 0,
@@ -331,6 +337,17 @@ def map_azure_to_netbox(vm_records: List[Dict[str, Any]]) -> Tuple[List[Dict[str
             metadata['platforms'].add(vm['operating_system'])
         if vm.get('owner'):
             metadata['owners'].add(vm['owner'])
+        tag_metadata = {
+            'tag_application': 'tag_applications',
+            'tag_environment': 'tag_environments',
+            'tag_cost_centre': 'tag_cost_centres',
+            'tag_business_criticality': 'tag_business_criticalities',
+            'tag_deployment_method': 'tag_deployment_methods',
+            'tag_backup': 'tag_backups',
+        }
+        for field, metadata_key in tag_metadata.items():
+            if vm.get(field):
+                metadata[metadata_key].add(vm[field])
 
         raw_location = _strip_azure_prefix(vm.get('location', ''))
         if raw_location:
@@ -381,6 +398,12 @@ def map_azure_to_netbox(vm_records: List[Dict[str, Any]]) -> Tuple[List[Dict[str
     metadata['sizes'] = sorted(list(metadata['sizes']))
     metadata['platforms'] = sorted(list(metadata['platforms']))
     metadata['owners'] = sorted(list(metadata['owners']))
+    metadata['tag_applications'] = sorted(list(metadata['tag_applications']))
+    metadata['tag_environments'] = sorted(list(metadata['tag_environments']))
+    metadata['tag_cost_centres'] = sorted(list(metadata['tag_cost_centres']))
+    metadata['tag_business_criticalities'] = sorted(list(metadata['tag_business_criticalities']))
+    metadata['tag_deployment_methods'] = sorted(list(metadata['tag_deployment_methods']))
+    metadata['tag_backups'] = sorted(list(metadata['tag_backups']))
 
     return netbox_records, metadata
 

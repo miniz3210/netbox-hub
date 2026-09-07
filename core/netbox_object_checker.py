@@ -19,6 +19,8 @@ flat backup with no choice-set endpoint), the checker falls back to scraping the
 `Custom Fields:` text off each VM/device summary.
 """
 
+import csv
+import io
 import logging
 import re
 import sqlite3
@@ -32,11 +34,23 @@ logger = logging.getLogger("netbox-hub")
 INSTANCE_TYPE_FIELD = "instance_type"
 RESOURCE_GROUP_FIELD = "resource_group"
 OWNER_FIELD = "owner"
+TAG_APPLICATION_FIELD = "application"
+TAG_ENVIRONMENT_FIELD = "environment"
+TAG_COST_CENTRE_FIELD = "cost_centre"
+TAG_BUSINESS_CRITICALITY_FIELD = "business_criticality"
+TAG_DEPLOYMENT_METHOD_FIELD = "deployment_method"
+TAG_BACKUP_FIELD = "backup"
 
 # NetBox choice sets backing those custom fields
 INSTANCE_TYPE_CHOICE_SET = "Instance Type Set"
 RESOURCE_GROUP_CHOICE_SET = "Resource Group Set"
 OWNER_CHOICE_SET = "Owner Set"
+TAG_APPLICATION_CHOICE_SET = "Application Set"
+TAG_ENVIRONMENT_CHOICE_SET = "Environment Set"
+TAG_COST_CENTRE_CHOICE_SET = "Cost Centre Set"
+TAG_BUSINESS_CRITICALITY_CHOICE_SET = "Business Criticality Set"
+TAG_DEPLOYMENT_METHOD_CHOICE_SET = "Deployment Method Set"
+TAG_BACKUP_CHOICE_SET = "Backup Set"
 
 # Azure "OPERATING SYSTEM" values map onto existing NetBox platform names
 PLATFORM_ALIASES = {
@@ -247,6 +261,18 @@ def analyze_netbox_objects(metadata: Dict[str, Any]) -> Dict[str, Dict[str, Any]
         ("owners", "Owner Set (Custom Field Choices)", "extras.customfieldchoiceset",
          list(metadata.get("owners", [])),
          get_existing_custom_field_values(OWNER_FIELD, OWNER_CHOICE_SET)),
+        ("tag_applications", "Application Tags", "extras.tag",
+         list(metadata.get("tag_applications", [])), _fetch_backup_names("extras_tags")),
+        ("tag_environments", "Environment Tags", "extras.tag",
+         list(metadata.get("tag_environments", [])), _fetch_backup_names("extras_tags")),
+        ("tag_cost_centres", "Cost Centre Tags", "extras.tag",
+         list(metadata.get("tag_cost_centres", [])), _fetch_backup_names("extras_tags")),
+        ("tag_business_criticalities", "Business Criticality Tags", "extras.tag",
+         list(metadata.get("tag_business_criticalities", [])), _fetch_backup_names("extras_tags")),
+        ("tag_deployment_methods", "Deployment Method Tags", "extras.tag",
+         list(metadata.get("tag_deployment_methods", [])), _fetch_backup_names("extras_tags")),
+        ("tag_backups", "Backup Tags", "extras.tag",
+         list(metadata.get("tag_backups", [])), _fetch_backup_names("extras_tags")),
     ]
 
     results: Dict[str, Dict[str, Any]] = {}
@@ -391,7 +417,39 @@ def generate_import_scripts(analysis: Dict[str, Dict[str, Any]]) -> Dict[str, Di
             ),
         }
 
+    tag_categories = [
+        ("tag_applications", "Application Tags", "netbox-application-tags.csv"),
+        ("tag_environments", "Environment Tags", "netbox-environment-tags.csv"),
+        ("tag_cost_centres", "Cost Centre Tags", "netbox-cost-centre-tags.csv"),
+        ("tag_business_criticalities", "Business Criticality Tags", "netbox-business-criticality-tags.csv"),
+        ("tag_deployment_methods", "Deployment Method Tags", "netbox-deployment-method-tags.csv"),
+        ("tag_backups", "Backup Tags", "netbox-backup-tags.csv"),
+    ]
+    for key, label, filename in tag_categories:
+        missing = analysis.get(key, {}).get("missing", [])
+        if missing:
+            scripts[key] = {
+                "label": label,
+                "format": "csv",
+                "filename": filename,
+                "content": generate_tags_csv(missing),
+                "count": len(missing),
+                "instructions": "NetBox → Organization → Tags → Import → paste as CSV",
+            }
+
     return scripts
+
+
+def generate_tags_csv(tag_names: List[str]) -> str:
+    """Render the `name,slug,color` CSV NetBox expects for tag import."""
+    output = io.StringIO(newline="")
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow(["name", "slug", "color"])
+    for name in tag_names:
+        clean = (name or "").strip()
+        if clean:
+            writer.writerow([clean, slugify(clean), "ffffff"])
+    return output.getvalue().rstrip("\n")
 
 
 def generate_combined_import_bundle(scripts: Dict[str, Dict[str, str]]) -> str:

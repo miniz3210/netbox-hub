@@ -222,7 +222,11 @@ def render_azure_tab(active_model=None):
                     'Owner': vm.get('owner') or '—',
                     'Application': vm.get('tag_application') or '—',
                     'Environment': vm.get('tag_environment') or '—',
+                    'Cost Centre': vm.get('tag_cost_centre') or '—',
+                    'Business Criticality': vm.get('tag_business_criticality') or '—',
+                    'Deployment Method': vm.get('tag_deployment_method') or '—',
                     'Backup': vm.get('tag_backup') or '—',
+                    'Tags': vm.get('tags') or '—',
                     'NetBox IP': ip_display,
                     'In Database': '✅ Yes' if existing else '❌ No (Need to add to NetBox)'
                 }
