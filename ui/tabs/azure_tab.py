@@ -67,10 +67,18 @@ def render_azure_tab(active_model=None):
         "Unknown"
     ),
     nicIds = properties.networkProfile.networkInterfaces,
-    tagOrg = tostring(tags["Organization"]),
-    tagOwner = tostring(tags["Owner"]),
-    tagPurpose = tostring(tags["Purpose"]),
-    tagRole = tostring(tags["Role"]),
+    // Extract VM tags (handles both lowercase and uppercase tag keys)
+    tagOrg = coalesce(tostring(tags["Organization"]), tostring(tags["organization"])),
+    tagOwner = coalesce(tostring(tags["Owner"]), tostring(tags["owner"])),
+    tagPurpose = coalesce(tostring(tags["Purpose"]), tostring(tags["purpose"])),
+    tagRole = coalesce(tostring(tags["Role"]), tostring(tags["role"])),
+    tagApp = coalesce(tostring(tags["Application"]), tostring(tags["application"])),
+    tagEnv = coalesce(tostring(tags["Environment"]), tostring(tags["environment"])),
+    tagCostCentre = coalesce(tostring(tags["CostCentre"]), tostring(tags["costcentre"])),
+    tagCrit = coalesce(tostring(tags["BusinessCriticality"]), tostring(tags["businesscriticality"])),
+    tagDeploy = coalesce(tostring(tags["Deploymentmethod"]), tostring(tags["deploymentmethod"])),
+    tagBackup = coalesce(tostring(tags["Backup"]), tostring(tags["backup"])),
+    RawTags = tostring(tags),
     NetBoxSite = case(
         location =~ "australiaeast", "Azure - Australia East",
         location =~ "australiasoutheast", "Azure - Australia Southeast",
@@ -99,11 +107,16 @@ def render_azure_tab(active_model=None):
     | where type =~ "microsoft.resources/subscriptions"
     | project subscriptionId, SubscriptionName = name
 ) on subscriptionId
+| join kind=leftouter (
+    ResourceContainers
+    | where type =~ "microsoft.resources/subscriptions/resourcegroups"
+    | project subscriptionId, resourceGroup = tolower(name), ExactResourceGroupName = name
+) on subscriptionId, resourceGroup
 | summarize 
     PrimaryIPv4 = take_any(PrimaryIPv4),
     VNet = take_any(VNetName),
     Subnet = take_any(SubnetName)
-    by id, name, resourceGroup, location, NetBoxSite, SubscriptionName, subscriptionId, vmSize, osPlatform, tagOrg, tagOwner, tagPurpose, tagRole
+    by id, name, ExactResourceGroupName, resourceGroup, location, NetBoxSite, SubscriptionName, subscriptionId, vmSize, osPlatform, tagOrg, tagOwner, tagPurpose, tagRole, tagApp, tagEnv, tagCostCentre, tagCrit, tagDeploy, tagBackup, RawTags
 | project 
     ['Name'] = name,
     ['Status'] = "active",
@@ -115,12 +128,17 @@ def render_azure_tab(active_model=None):
     ['VNet'] = VNet,
     ['Subnet'] = Subnet,
     ['cf_InstanceType'] = vmSize,
-    ['cf_ResourceGroups'] = resourceGroup,
+    ['cf_ResourceGroups'] = coalesce(ExactResourceGroupName, resourceGroup),
     ['cf_Organization'] = tagOrg,
     ['cf_Owner'] = tagOwner,
     ['cf_Purpose'] = tagPurpose,
-    ['Azure_Region'] = location,
-    ['SubscriptionId'] = subscriptionId''', language="kusto")
+    ['Tag_Application'] = tagApp,
+    ['Tag_Environment'] = tagEnv,
+    ['Tag_CostCentre'] = tagCostCentre,
+    ['Tag_BusinessCriticality'] = tagCrit,
+    ['Tag_DeploymentMethod'] = tagDeploy,
+    ['Tag_Backup'] = tagBackup,
+    ['Tags'] = RawTags''', language="kusto")
         st.markdown("""
         3. Select **Run query**.
         4. Export the results as CSV.
