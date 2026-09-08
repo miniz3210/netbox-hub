@@ -155,8 +155,9 @@ def check_vm_exists_in_db(vm_name: str) -> Optional[Dict[str, Any]]:
     cursor = conn.cursor()
     
     # First try to get complete data from backup_records (NetBox JSON backup)
+    # Note: Site is stored in a separate column, not in summary
     cursor.execute("""
-        SELECT summary, search_blob
+        SELECT site, summary
         FROM backup_records
         WHERE LOWER(name) = LOWER(?) 
         AND object_type = 'virtualization_virtual_machines'
@@ -166,15 +167,14 @@ def check_vm_exists_in_db(vm_name: str) -> Optional[Dict[str, Any]]:
     backup_row = cursor.fetchone()
     
     if backup_row:
-        summary, search_blob = backup_row
+        site_column, summary = backup_row
         
-        # Parse the enriched data from summary
-        # Summary format: "Role: JDE Application | Status: Active | Site: Azure - Australia East | ..."
+        # Initialize with site from the dedicated column
         vm_data = {
             'name': vm_name,
             'role': '',
             'status': '',
-            'site': '',
+            'site': site_column or '',  # Site comes from dedicated column
             'tenant': '',
             'platform': '',
             'cluster': '',
@@ -182,12 +182,15 @@ def check_vm_exists_in_db(vm_name: str) -> Optional[Dict[str, Any]]:
             'tags': [],
             'custom_fields': {},
             'primary_ip': '',
+            'primary_ip4': '',
             'device': '',
             'owner': ''
         }
         
-        # Extract from summary (format: "Field: Value | Field: Value | ...")
+        # Parse summary line: "Role: JDE Application | Status: Active | Cluster: vCluster | Tags: tag1, tag2 | Custom Fields: key=value, key=value"
         if summary:
+            custom_fields_section = None
+            
             for field_pair in summary.split('|'):
                 field_pair = field_pair.strip()
                 if ':' not in field_pair:
@@ -200,33 +203,41 @@ def check_vm_exists_in_db(vm_name: str) -> Optional[Dict[str, Any]]:
                 if not value_clean or value_clean.lower() in ('none', 'null', '—', '---------'):
                     continue
                 
-                # Map summary fields to vm_data keys
-                field_map = {
-                    'role': 'role',
-                    'status': 'status',
-                    'site': 'site',
-                    'tenant': 'tenant',
-                    'platform': 'platform',
-                    'cluster': 'cluster',
-                    'description': 'description',
-                    'primary ip': 'primary_ip',
-                    'device': 'device',
-                    'owner': 'owner',
-                }
-                
-                if key_clean in field_map:
-                    vm_data[field_map[key_clean]] = value_clean
-                # Handle Tags from summary (format: "Tags: Tag1, Tag2, Tag3")
-                elif key_clean == 'tags':
+                # Handle Tags (format: "Tags: Tag1, Tag2, Tag3")
+                if key_clean == 'tags':
                     vm_data['tags'] = [t.strip() for t in value_clean.split(',') if t.strip()]
-                # Handle Custom Fields from summary (format: "Custom Fields: key1: val1, key2: val2")
+                # Handle Custom Fields (format: "Custom Fields: instance_type=Standard_D4s_v3, resource_group=rg-prod")
                 elif key_clean == 'custom fields':
-                    # Parse custom fields: "Instance Type: Standard_D4s_v3, Resource Group: rg-prod"
-                    for cf_pair in value_clean.split(','):
-                        if ':' in cf_pair:
-                            cf_key, cf_val = cf_pair.split(':', 1)
-                            cf_key_norm = cf_key.strip().lower().replace(' ', '_')
-                            vm_data['custom_fields'][cf_key_norm] = cf_val.strip()
+                    custom_fields_section = value_clean
+                # Standard fields
+                elif key_clean == 'role':
+                    vm_data['role'] = value_clean
+                elif key_clean == 'status':
+                    vm_data['status'] = value_clean
+                elif key_clean == 'tenant':
+                    vm_data['tenant'] = value_clean
+                elif key_clean == 'platform':
+                    vm_data['platform'] = value_clean
+                elif key_clean == 'cluster':
+                    vm_data['cluster'] = value_clean
+                elif key_clean == 'description':
+                    vm_data['description'] = value_clean
+                elif key_clean in ('primary ip', 'primary_ip'):
+                    vm_data['primary_ip'] = value_clean
+                    vm_data['primary_ip4'] = value_clean
+                elif key_clean == 'device':
+                    vm_data['device'] = value_clean
+                elif key_clean == 'owner':
+                    vm_data['owner'] = value_clean
+            
+            # Parse custom fields section separately (format: "key=value, key=value")
+            if custom_fields_section:
+                for cf_pair in custom_fields_section.split(','):
+                    cf_pair = cf_pair.strip()
+                    if '=' in cf_pair:
+                        cf_key, cf_val = cf_pair.split('=', 1)
+                        cf_key_clean = cf_key.strip().lower().replace(' ', '_')
+                        vm_data['custom_fields'][cf_key_clean] = cf_val.strip()
         
         conn.close()
         return vm_data
@@ -258,6 +269,7 @@ def check_vm_exists_in_db(vm_name: str) -> Optional[Dict[str, Any]]:
             'tenant': '',
             'platform': '',
             'primary_ip': '',
+            'primary_ip4': '',
             'device': '',
             'owner': ''
         }

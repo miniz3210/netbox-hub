@@ -700,6 +700,18 @@ def render_azure_tab(active_model=None):
                     if not db_vm and not csv_vm:
                         st.warning(f"VM '{vm_search_input.strip()}' not found in NetBox database or uploaded Azure CSV.")
                     else:
+                        # Debug: Show what data sources are available
+                        with st.expander("🔍 Debug: Data Sources", expanded=False):
+                            st.write("**Database VM Data:**")
+                            if db_vm:
+                                st.json(db_vm)
+                            else:
+                                st.write("None")
+                            st.write("**CSV Row Data:**")
+                            if matched_row:
+                                st.json(matched_row)
+                            else:
+                                st.write("None")
                         def extract_val(source_dict, candidate_keys):
                             if not source_dict or not isinstance(source_dict, dict):
                                 return ""
@@ -805,8 +817,14 @@ def render_azure_tab(active_model=None):
                         
                         with col_right:
                             st.markdown("#### Placement")
-                            raw_loc = _strip_azure_prefix(vm_location)
-                            vm_site = f"Azure - {raw_loc}" if raw_loc else "Azure - Unknown"
+                            # Site: use database value as-is if it already has the Azure prefix
+                            if vm_location and vm_location.startswith("Azure - "):
+                                vm_site = vm_location
+                            elif vm_location:
+                                raw_loc = _strip_azure_prefix(vm_location)
+                                vm_site = f"Azure - {raw_loc}"
+                            else:
+                                vm_site = "Azure - Unknown"
                             st.text_input("Site", value=str(vm_site), disabled=True, key="nb_site")
                             st.text_input("Cluster", value=str(vm_cluster), disabled=True, key="nb_cluster")
                             st.text_input("Device", value=str(vm_device), disabled=True, key="nb_device")
