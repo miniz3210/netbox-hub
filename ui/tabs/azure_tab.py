@@ -61,7 +61,41 @@ def render_azure_tab(active_model=None):
         1. In the search bar at the top of the Azure Portal, type and select **Resource Graph Explorer**.
         2. Paste the following KQL query into the query editor:
         """)
-        st.code('''Resources
+
+        # Inject robust clipboard-copy helpers (works in HTTP/HTTPS and iframes).
+        st.components.v1.html("""
+        <script>
+        function copyToClipboard(text) {
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(text).catch(function() {
+                    fallbackCopy(text);
+                });
+            } else {
+                fallbackCopy(text);
+            }
+        }
+
+        function fallbackCopy(text) {
+            var textArea = document.createElement("textarea");
+            textArea.value = text;
+            textArea.style.position = "fixed";
+            textArea.style.left = "-999999px";
+            textArea.style.top = "-999999px";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+                document.execCommand('copy');
+            } catch (err) {
+                console.error('Fallback copy failed', err);
+            }
+            document.body.removeChild(textArea);
+        }
+        </script>
+        """, height=0)
+
+        # KQL query stored so the copy button can pass it to the clipboard helper.
+        kql_query = '''Resources
 | where type =~ "microsoft.compute/virtualmachines"
 | extend 
     vmSize = tostring(properties.hardwareProfile.vmSize),
@@ -162,7 +196,24 @@ def render_azure_tab(active_model=None):
     ['Tag_BusinessCriticality'] = tagCrit,
     ['Tag_DeploymentMethod'] = tagDeploy,
     ['Tag_Backup'] = tagBackup,
-    ['Tags'] = RawTags''', language="kusto")
+    ['Tags'] = RawTags'''
+        st.code(kql_query, language="kusto")
+
+        # Copy-to-clipboard button wired to the injected JS helper.
+        copy_col1, _ = st.columns([1, 4])
+        with copy_col1:
+            st.components.v1.html(
+                f"""
+                <button onclick="copyToClipboard({kql_query!r})"
+                        style="padding:4px 12px; font-size:13px; cursor:pointer;"
+                        onmouseover="this.style.opacity=0.8"
+                        onmouseout="this.style.opacity=1">
+                    📋 Copy KQL
+                </button>
+                """,
+                height=40,
+            )
+
         st.markdown("""
         3. Select **Run query**.
         4. Export the results as CSV.
