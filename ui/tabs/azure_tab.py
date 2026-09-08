@@ -689,28 +689,65 @@ def render_azure_tab(active_model=None):
                     if not db_vm and not csv_vm:
                         st.warning(f"VM '{vm_search_input.strip()}' not found in NetBox database or uploaded Azure CSV.")
                     else:
-                        def get_field(csv_keys, db_keys, default=""):
-                            for k in csv_keys:
-                                if csv_vm and k in csv_vm and str(csv_vm.get(k, '')).strip() not in ["", "nan", "None", "-"]:
-                                    return str(csv_vm.get(k, '')).strip()
-                            for k in db_keys:
-                                if db_vm and k in db_vm and str(db_vm.get(k, '')).strip() not in ["", "nan", "None", "-"]:
-                                    return str(db_vm.get(k, '')).strip()
-                            return default
+                        def extract_val(source_dict, candidate_keys):
+                            if not source_dict or not isinstance(source_dict, dict):
+                                return ""
+                            norm_dict = {str(k).strip().lower(): v for k, v in source_dict.items()}
+                            for k in candidate_keys:
+                                k_norm = k.strip().lower()
+                                if k_norm in norm_dict:
+                                    val = norm_dict[k_norm]
+                                    if val is not None and str(val).strip() not in ["", "nan", "None", "---------"]:
+                                        return val
+                            return ""
                         
-                        vm_name = get_field(["Name", "name"], ["name"], default=clean_target.upper())
-                        vm_role = get_field(["Role", "role"], ["model_or_role", "role"], default="---------")
-                        vm_status = get_field(["Status", "status"], ["status"], default="Active").capitalize()
-                        vm_location = get_field(["Location", "location", "Site", "site"], ["site"], default="Australia East")
-                        vm_tenant = get_field(["Subscription", "tenant", "Tenant Group", "subscription"], ["tenant"], default="---------")
-                        vm_platform = get_field(["Operating System", "Operating_System", "platform", "Platform"], ["platform"], default="Windows Server")
-                        vm_ip = get_field(["Azure IP", "Primary IPv4", "primary_ip", "ip_address", "public_ip"], ["primary_ip", "ip"], default="---------")
-                        vm_instance = get_field(["Size", "Instance Type", "cfinstancetype", "cf_instancetype", "cfinstancetype"], ["instance_type"], default="---------")
-                        vm_rg = get_field(["Resource Group", "Resource Groups", "cf_resource_group", "cfresourcegroups"], ["resource_group"], default="---------")
-                        vm_owner = get_field(["Owner", "owner"], ["owner"], default="---------")
-                        vm_desc = get_field(["Description", "description", "Purpose"], ["description"], default="")
+                        def format_tags(tags_val):
+                            if not tags_val:
+                                return "—"
+                            if isinstance(tags_val, list):
+                                tag_names = [t.get('name', str(t)) if isinstance(t, dict) else str(t) for t in tags_val]
+                                return ", ".join(tag_names)
+                            if isinstance(tags_val, str) and tags_val.strip() not in ["", "nan", "None"]:
+                                return tags_val.strip()
+                            return "—"
                         
-                        vm_tags_raw = get_field(["NetBox Tags", "Tags", "tags"], ["tags"], default="")
+                        vm_name = extract_val(db_vm, ['name']) or extract_val(csv_vm, ['Name', 'name']) or clean_target.upper()
+                        vm_role = extract_val(db_vm, ['role', 'model_or_role']) or extract_val(csv_vm, ['Role', 'role']) or "---------"
+                        vm_status = extract_val(db_vm, ['status']) or extract_val(csv_vm, ['Status', 'status']) or "Active"
+                        if isinstance(vm_status, str):
+                            vm_status = vm_status.capitalize()
+                        vm_desc = extract_val(db_vm, ['description']) or extract_val(csv_vm, ['Description', 'description', 'Purpose']) or ""
+                        
+                        raw_tags = extract_val(db_vm, ['tags']) or extract_val(csv_vm, ['NetBox Tags', 'Tags', 'tags'])
+                        vm_tags_display = format_tags(raw_tags)
+                        
+                        vm_location = extract_val(db_vm, ['site']) or extract_val(csv_vm, ['Location', 'site', 'Site']) or "Australia East"
+                        if isinstance(vm_location, dict):
+                            vm_location = vm_location.get('name', 'Australia East')
+                        
+                        vm_cluster = extract_val(db_vm, ['cluster']) or "---------"
+                        if isinstance(vm_cluster, dict):
+                            vm_cluster = vm_cluster.get('name', '---------')
+                        
+                        vm_tenant_group = "Azure"
+                        vm_tenant = extract_val(db_vm, ['tenant']) or extract_val(csv_vm, ['Subscription', 'tenant', 'Tenant']) or "---------"
+                        if isinstance(vm_tenant, dict):
+                            vm_tenant = vm_tenant.get('name', '---------')
+                        
+                        vm_platform = extract_val(db_vm, ['platform']) or extract_val(csv_vm, ['Operating System', 'Platform', 'platform']) or "Windows Server"
+                        if isinstance(vm_platform, dict):
+                            vm_platform = vm_platform.get('name', 'Windows Server')
+                        
+                        vm_ip = extract_val(db_vm, ['primary_ip', 'primary_ip4', 'ip', 'primary_ipv4']) or extract_val(csv_vm, ['Azure IP', 'Primary IPv4', 'ip']) or "---------"
+                        if isinstance(vm_ip, dict):
+                            vm_ip = vm_ip.get('address', '---------')
+                        
+                        custom_fields = db_vm.get('custom_fields', {}) if (db_vm and isinstance(db_vm.get('custom_fields'), dict)) else {}
+                        vm_instance = extract_val(custom_fields, ['instance_type']) or extract_val(db_vm, ['instance_type']) or extract_val(csv_vm, ['Size', 'Instance Type', 'cf_instance_type']) or "---------"
+                        vm_rg = extract_val(custom_fields, ['resource_group']) or extract_val(db_vm, ['resource_group']) or extract_val(csv_vm, ['Resource Group', 'Resource Groups', 'cf_resource_group']) or "---------"
+                        vm_owner = extract_val(db_vm, ['owner']) or extract_val(csv_vm, ['Owner', 'owner', 'users.owner']) or "---------"
+                        if isinstance(vm_owner, dict):
+                            vm_owner = vm_owner.get('name', '---------')
                         
                         if db_vm and csv_vm:
                             st.success("🟢 Source: Matched in Database (Enriched with Azure CSV Data)")
@@ -723,39 +760,39 @@ def render_azure_tab(active_model=None):
                         
                         with col_left:
                             st.markdown("#### Virtual Machine")
-                            st.text_input("Name*", value=vm_name, disabled=True, key="hf_vm_name")
-                            st.text_input("Role", value=vm_role, disabled=True, key="hf_vm_role")
-                            st.text_input("Status*", value=vm_status, disabled=True, key="hf_vm_status")
-                            st.text_input("Start on boot*", value="Off", disabled=True, key="hf_vm_boot")
-                            st.text_area("Description", value=vm_desc, disabled=True, key="hf_vm_desc")
-                            st.text_input("Tags", value=vm_tags_raw if vm_tags_raw else "—", disabled=True, key="hf_vm_tags")
+                            st.text_input("Name*", value=str(vm_name), disabled=True, key="nb_vm_name")
+                            st.text_input("Role", value=str(vm_role), disabled=True, key="nb_vm_role")
+                            st.text_input("Status*", value=str(vm_status), disabled=True, key="nb_vm_status")
+                            st.text_input("Start on boot*", value="Off", disabled=True, key="nb_vm_boot")
+                            st.text_area("Description", value=str(vm_desc), disabled=True, key="nb_vm_desc")
+                            st.text_input("Tags", value=str(vm_tags_display), disabled=True, key="nb_vm_tags")
                             
                             st.markdown("#### Tenancy")
-                            st.text_input("Tenant group", value="Azure", disabled=True, key="hf_tenant_group")
-                            st.text_input("Tenant", value=vm_tenant, disabled=True, key="hf_tenant")
+                            st.text_input("Tenant group", value=str(vm_tenant_group), disabled=True, key="nb_tenant_group")
+                            st.text_input("Tenant", value=str(vm_tenant), disabled=True, key="nb_tenant")
                         
                         with col_right:
                             st.markdown("#### Placement")
                             raw_loc = _strip_azure_prefix(vm_location)
                             vm_site = f"Azure - {raw_loc}" if raw_loc else "Azure - Unknown"
-                            st.text_input("Site", value=vm_site, disabled=True, key="hf_site")
-                            st.text_input("Cluster", value="---------", disabled=True, key="hf_cluster")
-                            st.text_input("Device", value="---------", disabled=True, key="hf_device")
+                            st.text_input("Site", value=str(vm_site), disabled=True, key="nb_site")
+                            st.text_input("Cluster", value=str(vm_cluster), disabled=True, key="nb_cluster")
+                            st.text_input("Device", value=str(vm_device), disabled=True, key="nb_device")
                             
                             st.markdown("#### Management")
-                            st.text_input("Platform", value=vm_platform, disabled=True, key="hf_platform")
-                            st.text_input("Primary IPv4", value=vm_ip, disabled=True, key="hf_ipv4")
-                            st.text_input("Primary IPv6", value="---------", disabled=True, key="hf_ipv6")
-                            st.text_input("Config template", value="---------", disabled=True, key="hf_template")
+                            st.text_input("Platform", value=str(vm_platform), disabled=True, key="nb_platform")
+                            st.text_input("Primary IPv4", value=str(vm_ip), disabled=True, key="nb_ipv4")
+                            st.text_input("Primary IPv6", value="---------", disabled=True, key="nb_ipv6")
+                            st.text_input("Config template", value="---------", disabled=True, key="nb_template")
                         
                         st.markdown("#### Custom Fields & Ownership")
                         cf_col1, cf_col2 = st.columns(2)
                         with cf_col1:
-                            st.text_input("Instance Type", value=vm_instance, disabled=True, key="hf_instance_type")
-                            st.text_input("Resource Groups", value=vm_rg, disabled=True, key="hf_rg")
+                            st.text_input("Instance Type", value=str(vm_instance), disabled=True, key="nb_instance_type")
+                            st.text_input("Resource Groups", value=str(vm_rg), disabled=True, key="nb_rg")
                         with cf_col2:
-                            st.text_input("Owner (Native Ownership)", value=vm_owner, disabled=True, key="hf_owner")
-                            st.text_input("Owner group", value="---------", disabled=True, key="hf_owner_group")
+                            st.text_input("Owner (Native Ownership)", value=str(vm_owner), disabled=True, key="nb_owner")
+                            st.text_input("Owner group", value="---------", disabled=True, key="nb_owner_group")
                 
                 
         
