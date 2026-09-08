@@ -4,6 +4,7 @@ Provides UI for importing Azure Virtual Machine exports into NetBox.
 """
 
 import csv
+import html
 import io
 from pathlib import Path
 
@@ -257,6 +258,16 @@ def render_azure_tab(active_model=None):
                 if resolved_ip and extra > 0:
                     ip_display = f"{resolved_ip} (+{extra})"
 
+                tag_names = [t['name'] for t in _build_netbox_tags(vm)]
+                if tag_names:
+                    chips = "".join(
+                        f'<span class="nb-tag-chip" title="{html.escape(n)}">{html.escape(n)}</span>'
+                        for n in tag_names
+                    )
+                    netbox_tags_html = f'<div class="nb-tags-cell">{chips}</div>'
+                else:
+                    netbox_tags_html = '—'
+
                 vm_status = {
                     'Name': vm['name'],
                     'Subscription': vm['subscription'],
@@ -270,21 +281,87 @@ def render_azure_tab(active_model=None):
                     'VNet': vm.get('vnet') or '—',
                     'Subnet': vm.get('subnet') or '—',
                     'Owner': vm.get('owner') or '—',
-                    'NetBox Tags': ", ".join(t['name'] for t in (_build_netbox_tags(vm))),
+                    'NetBox Tags': netbox_tags_html,
                     'NetBox IP': ip_display,
                     'In Database': '✅ Yes' if existing else '❌ No (Need to add to NetBox)'
                 }
 
                 vm_status_list.append(vm_status)
             
-            # Create DataFrame with status
-            df_with_status = pd.DataFrame(vm_status_list)
-            
-            # Show data table with color coding
-            st.dataframe(
-                df_with_status,
-                width="stretch",
-                height=400
+            table_columns = list(vm_status_list[0].keys()) if vm_status_list else []
+            table_headers = "".join(f"<th>{html.escape(column)}</th>" for column in table_columns)
+            table_rows = []
+            for row in vm_status_list:
+                cells = []
+                for column in table_columns:
+                    value = row[column]
+                    if column == "NetBox Tags" and value != "—":
+                        cell = f'<td class="nb-tags-column"><div class="nb-tags-cell">{value}</div></td>'
+                    else:
+                        cell = f"<td>{html.escape(str(value))}</td>"
+                    cells.append(cell)
+                table_rows.append(f"<tr>{''.join(cells)}</tr>")
+
+            st.markdown(
+                f"""
+                <style>
+                .nb-table-scroll {{
+                    max-width: 100%;
+                    max-height: 400px;
+                    overflow: auto;
+                    border: 1px solid rgba(128, 128, 128, 0.25);
+                }}
+                .nb-vm-table {{
+                    border-collapse: collapse;
+                    min-width: 1900px;
+                    width: max-content;
+                    font-size: 12px;
+                }}
+                .nb-vm-table th, .nb-vm-table td {{
+                    padding: 6px 8px;
+                    border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+                    text-align: left;
+                    vertical-align: top;
+                    white-space: nowrap;
+                }}
+                .nb-vm-table th {{
+                    position: sticky;
+                    top: 0;
+                    z-index: 1;
+                    background: var(--background-color);
+                }}
+                .nb-vm-table .nb-tags-column {{
+                    min-width: 320px;
+                    max-width: 520px;
+                    white-space: normal;
+                }}
+                .nb-tags-cell {{
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 4px;
+                    min-width: 320px;
+                    white-space: normal;
+                    line-height: 1.4;
+                }}
+                .nb-tag-chip {{
+                    display: inline-flex;
+                    align-items: center;
+                    padding: 2px 8px;
+                    font-size: 11px;
+                    border: 1px solid rgba(128, 128, 128, 0.35);
+                    border-radius: 9999px;
+                    background: rgba(128, 128, 128, 0.08);
+                    max-width: 100%;
+                }}
+                </style>
+                <div class="nb-table-scroll">
+                    <table class="nb-vm-table">
+                        <thead><tr>{table_headers}</tr></thead>
+                        <tbody>{''.join(table_rows)}</tbody>
+                    </table>
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
             
             # Show summary
