@@ -201,6 +201,11 @@ def get_existing_roles() -> Set[str]:
     return _fetch_backup_names("dcim_device_roles")
 
 
+def get_existing_owners() -> Set[str]:
+    """Owner names from the native users.owner records held in the ingested backup."""
+    return _fetch_backup_names("users_owner")
+
+
 def get_existing_sites() -> Set[str]:
     """Site names from both the sites table and the ingested backup."""
     sites = _fetch_backup_names("dcim_sites")
@@ -263,9 +268,9 @@ def analyze_netbox_objects(metadata: Dict[str, Any]) -> Dict[str, Dict[str, Any]
         ("resource_groups", "Resource Group Set (Custom Field Choices)", "extras.customfieldchoiceset",
          list(metadata.get("resource_groups", [])),
          get_existing_custom_field_values(RESOURCE_GROUP_FIELD, RESOURCE_GROUP_CHOICE_SET)),
-        ("owners", "Owner Set (Custom Field Choices)", "extras.customfieldchoiceset",
+        ("owners", "Owners (users.owner)", "users.owner",
          list(metadata.get("owners", [])),
-         get_existing_custom_field_values(OWNER_FIELD, OWNER_CHOICE_SET)),
+         get_existing_owners()),
         ("roles", "Roles (Applications)", "dcim.devicerole",
          list(metadata.get("roles", [])), get_existing_roles()),
         ("tag_environments", "Environment Tags", "extras.tag",
@@ -413,15 +418,12 @@ def generate_import_scripts(analysis: Dict[str, Dict[str, Any]]) -> Dict[str, Di
     owners = analysis.get("owners", {}).get("missing", [])
     if owners:
         scripts["owners"] = {
-            "label": "Owner Set",
-            "format": "choices",
-            "filename": "netbox-owner-choices.txt",
-            "content": generate_choice_set(owners),
+            "label": "Owners",
+            "format": "csv",
+            "filename": "netbox-owners-import.csv",
+            "content": generate_owners_csv(owners),
             "count": len(owners),
-            "instructions": (
-                "NetBox → Customization → Custom Field Choice Sets → Owner "
-                "→ Extra choices → append these lines"
-            ),
+            "instructions": "NetBox → Admin → Ownership → Owners → Import → paste as CSV",
         }
 
     roles = analysis.get("roles", {}).get("missing", [])
@@ -466,6 +468,18 @@ def generate_roles_csv(role_names: List[str]) -> str:
         clean = (name or "").strip()
         if clean:
             writer.writerow([clean, slugify(clean), "ffffff"])
+    return output.getvalue().rstrip("\n")
+
+
+def generate_owners_csv(owner_names: List[str]) -> str:
+    """Render the `name` CSV NetBox expects for Users → Ownership → Owners import."""
+    output = io.StringIO(newline="")
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow(["name"])
+    for name in owner_names:
+        clean = " ".join((name or "").split())
+        if clean:
+            writer.writerow([clean])
     return output.getvalue().rstrip("\n")
 
 

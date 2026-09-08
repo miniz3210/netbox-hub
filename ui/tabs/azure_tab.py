@@ -639,7 +639,7 @@ def render_azure_tab(active_model=None):
 
                     vm_import_rows = [[
                         "name", "status", "site", "role", "tenant", "platform",
-                        "cf_instance_type", "cf_resource_group", "cf_owner",
+                        "cf_instance_type", "cf_resource_group", "owner",
                         "cf_application", "cf_environment", "cf_cost_centre",
                         "cf_business_criticality", "cf_deployment_method", "cf_backup", "cf_operating_system", "tags"
                     ]]
@@ -653,7 +653,7 @@ def render_azure_tab(active_model=None):
                             vm.get('platform_value') or vm.get('operating_system', ''),
                             canonical_value(vm.get('size', ''), instance_type_values),
                             canonical_value(vm.get('resource_group', ''), resource_group_values),
-                            canonical_value(vm.get('owner', ''), owner_values),
+                            vm.get('owner', ''),
                             vm.get('tag_application', ''),
                             vm.get('tag_environment', ''),
                             vm.get('tag_cost_centre', ''),
