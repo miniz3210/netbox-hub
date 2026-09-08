@@ -667,8 +667,111 @@ def render_azure_tab(active_model=None):
                             "text/csv",
                             key=f"dl_vms_import_{pd.Timestamp.now().strftime('%Y%m%d%H%M%S')}",
                         )
-                else:
-                    st.info("✅ All VMs from this export already exist in the database.")
+                
+                st.divider()
+                st.markdown("### 🔍 NetBox VM Manual Form Helper")
+                
+                vm_search_name = st.text_input("Enter VM Name / Hostname (e.g. ANZJDE001):", key="vm_helper_search")
+                
+                if vm_search_name:
+                    vm_search_name = vm_search_name.strip()
+                    
+                    found_vm = None
+                    source = None
+                    
+                    if vm_records:
+                        vm_search_lower = vm_search_name.lower()
+                        for vm in vm_records:
+                            if vm.get('name', '').lower() == vm_search_lower:
+                                found_vm = vm
+                                source = "Azure CSV (New VM staging data)"
+                                break
+                    
+                    db_vm = check_vm_exists_in_db(vm_search_name) if vm_search_name else None
+                    
+                    if db_vm:
+                        found_vm = db_vm
+                        source = "Existing NetBox Database"
+                    
+                    if found_vm and source:
+                        if source == "Existing NetBox Database":
+                            st.success(f"🟢 Source: Existing NetBox Database")
+                            st.markdown("##### VM Details from NetBox Database")
+                            with st.expander("View Database Record", expanded=True):
+                                st.json(found_vm)
+                        else:
+                            st.success(f"🔵 Source: Uploaded Azure CSV (New VM staging data)")
+                            st.markdown("##### VM Details from Azure CSV")
+                            
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                st.markdown("**Virtual Machine**")
+                                st.text(f"Name: {found_vm.get('name', '')}")
+                                st.text(f"Role: {found_vm.get('role', '') or found_vm.get('tag_application', '')}")
+                                st.text(f"Status: {found_vm.get('status', 'active')}")
+                                
+                                tags_str = found_vm.get('tags', '')
+                                tag_names = [t['name'] for t in _build_netbox_tags(found_vm)] if tags_str else []
+                                if tag_names:
+                                    st.text(f"Tags: {', '.join(tag_names)}")
+                                else:
+                                    st.text("Tags: —")
+                                
+                                description = found_vm.get('description', '')
+                                if not description:
+                                    desc_parts = []
+                                    if found_vm.get('subscription'):
+                                        desc_parts.append(f"Subscription: {found_vm.get('subscription')}")
+                                    if found_vm.get('resource_group'):
+                                        desc_parts.append(f"Resource Group: {found_vm.get('resource_group')}")
+                                    if found_vm.get('status'):
+                                        desc_parts.append(f"Status: {found_vm.get('status')}")
+                                    if found_vm.get('public_ip'):
+                                        ip_label = "Primary IPv4" if found_vm.get('vnet') else "Public IP"
+                                        desc_parts.append(f"{ip_label}: {found_vm.get('public_ip')}")
+                                    if found_vm.get('vnet'):
+                                        desc_parts.append(f"VNet: {found_vm.get('vnet')}")
+                                    if found_vm.get('subnet'):
+                                        desc_parts.append(f"Subnet: {found_vm.get('subnet')}")
+                                    if found_vm.get('owner'):
+                                        desc_parts.append(f"Owner: {found_vm.get('owner')}")
+                                    if found_vm.get('disk_count'):
+                                        desc_parts.append(f"Disks: {found_vm.get('disk_count')}")
+                                    description = ' | '.join(desc_parts) if desc_parts else ''
+                                st.text(f"Description: {description}")
+                            
+                            with col2:
+                                st.markdown("**Placement**")
+                                raw_location = _strip_azure_prefix(found_vm.get('location', ''))
+                                site_name = f"Azure - {raw_location}" if raw_location else "Azure - Unknown"
+                                st.text(f"Site: {site_name}")
+                                st.text(f"Cluster: {found_vm.get('resource_group', '') or '—'}")
+                                
+                                st.markdown("**Tenancy & Management**")
+                                st.text(f"Tenant: {found_vm.get('subscription', '')}")
+                                platform_val = found_vm.get('platform_value') or found_vm.get('operating_system', '')
+                                st.text(f"Platform: {platform_val}")
+                                st.text(f"Primary IPv4: {found_vm.get('public_ip', '') or '—'}")
+                                
+                                st.markdown("**Resources**")
+                                st.text(f"Instance Type: {found_vm.get('size', '')}")
+                                
+                                st.markdown("**Custom Fields & Ownership**")
+                                st.text(f"Instance Type: {found_vm.get('size', '')}")
+                                st.text(f"Resource Groups: {found_vm.get('resource_group', '') or '—'}")
+                                st.text(f"Owner: {found_vm.get('owner', '')}")
+                                st.text(f"Organization: {found_vm.get('organization', '') or '—'}")
+                                st.text(f"Purpose: {found_vm.get('purpose', '') or '—'}")
+                                st.text(f"Application: {found_vm.get('tag_application', '') or '—'}")
+                                st.text(f"Environment: {found_vm.get('tag_environment', '') or '—'}")
+                                st.text(f"Cost Centre: {found_vm.get('tag_cost_centre', '') or '—'}")
+                                st.text(f"Business Criticality: {found_vm.get('tag_business_criticality', '') or '—'}")
+                                st.text(f"Deployment Method: {found_vm.get('tag_deployment_method', '') or '—'}")
+                                st.text(f"Backup: {found_vm.get('tag_backup', '') or '—'}")
+                                st.text(f"Operating System: {found_vm.get('operating_system', '') or '—'}")
+                    elif vm_search_name:
+                        st.warning(f"VM '{vm_search_name}' not found in NetBox database or uploaded Azure CSV.")
                 
                 
         
