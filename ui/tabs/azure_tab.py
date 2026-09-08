@@ -62,10 +62,10 @@ def render_azure_tab(active_model=None):
         2. Paste the following KQL query into the query editor:
         """)
 
-        # Inject robust clipboard-copy helpers (works in HTTP/HTTPS and iframes).
+        # Global clipboard-copy handler (works in HTTP/HTTPS and iframes).
         st.components.v1.html("""
         <script>
-        function copyToClipboard(text) {
+        function copyTextToClipboard(text) {
             if (navigator.clipboard && window.isSecureContext) {
                 navigator.clipboard.writeText(text).catch(function() {
                     fallbackCopy(text);
@@ -78,23 +78,24 @@ def render_azure_tab(active_model=None):
         function fallbackCopy(text) {
             var textArea = document.createElement("textarea");
             textArea.value = text;
+            textArea.style.top = "0";
+            textArea.style.left = "0";
             textArea.style.position = "fixed";
-            textArea.style.left = "-999999px";
-            textArea.style.top = "-999999px";
+            textArea.style.opacity = "0";
             document.body.appendChild(textArea);
             textArea.focus();
             textArea.select();
             try {
                 document.execCommand('copy');
             } catch (err) {
-                console.error('Fallback copy failed', err);
+                console.error('Fallback clipboard copy failed:', err);
             }
             document.body.removeChild(textArea);
         }
         </script>
         """, height=0)
 
-        # KQL query stored so the copy button can pass it to the clipboard helper.
+        # KQL query stored for reference.
         kql_query = '''Resources
 | where type =~ "microsoft.compute/virtualmachines"
 | extend 
@@ -179,7 +180,7 @@ def render_azure_tab(active_model=None):
     ['Status'] = "active",
     ['Site'] = NetBoxSite,
     ['Tenant'] = SubscriptionName,
-    ['Role'] = tagRole,
+    ['Role'] = coalesce(tagRole, tagApp),
     ['Operating_System'] = ExactOperatingSystem,
     ['Platform'] = iff(baseOsType =~ "Windows", "Windows Server", baseOsType),
     ['PrimaryIPv4'] = PrimaryIPv4,
@@ -198,21 +199,6 @@ def render_azure_tab(active_model=None):
     ['Tag_Backup'] = tagBackup,
     ['Tags'] = RawTags'''
         st.code(kql_query, language="kusto")
-
-        # Copy-to-clipboard button wired to the injected JS helper.
-        copy_col1, _ = st.columns([1, 4])
-        with copy_col1:
-            st.components.v1.html(
-                f"""
-                <button onclick="copyToClipboard({kql_query!r})"
-                        style="padding:4px 12px; font-size:13px; cursor:pointer;"
-                        onmouseover="this.style.opacity=0.8"
-                        onmouseout="this.style.opacity=1">
-                    📋 Copy KQL
-                </button>
-                """,
-                height=40,
-            )
 
         st.markdown("""
         3. Select **Run query**.
@@ -307,8 +293,8 @@ def render_azure_tab(active_model=None):
 
             df_export = pd.DataFrame(export_records)
 
-            # Export parsed dataset as CSV / JSON
-            export_csv_col, export_json_col = st.columns(2)
+            # Export parsed dataset as CSV
+            export_csv_col, _ = st.columns([1, 3])
             with export_csv_col:
                 st.download_button(
                     "📥 Download Parsed VMs CSV",
@@ -316,14 +302,6 @@ def render_azure_tab(active_model=None):
                     f"azure-vms-parsed-{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
                     "text/csv",
                     help="Download the cleaned Azure VM dataset as CSV",
-                )
-            with export_json_col:
-                st.download_button(
-                    "📥 Download Parsed VMs JSON",
-                    df_export.to_json(orient="records", indent=2).encode("utf-8"),
-                    f"azure-vms-parsed-{pd.Timestamp.now().strftime('%Y%m%d')}.json",
-                    "application/json",
-                    help="Download the cleaned Azure VM dataset as JSON",
                 )
 
             # Show summary statistics
@@ -571,13 +549,28 @@ def render_azure_tab(active_model=None):
                             st.caption(script["instructions"])
                             lang = "csv" if script["format"] == "csv" else "text"
                             st.code(script["content"], language=lang)
-                            st.download_button(
-                                f"📥 Download {script['label']}",
-                                script["content"].encode("utf-8"),
-                                script["filename"],
-                                "text/plain",
-                                key=f"dl_{key}",
-                            )
+
+                            copy_col, dl_col = st.columns([1, 1])
+                            with copy_col:
+                                st.components.v1.html(
+                                    f"""
+                                    <button onclick="copyTextToClipboard({script['content']!r})"
+                                            style="padding:4px 12px; font-size:13px; cursor:pointer;"
+                                            onmouseover="this.style.opacity=0.8"
+                                            onmouseout="this.style.opacity=1">
+                                        📋 Copy
+                                    </button>
+                                    """,
+                                    height=40,
+                                )
+                            with dl_col:
+                                st.download_button(
+                                    f"📥 Download {script['label']}",
+                                    script["content"].encode("utf-8"),
+                                    script["filename"],
+                                    "text/plain",
+                                    key=f"dl_{key}",
+                                )
 
                     bundle = generate_combined_import_bundle(scripts)
                     st.download_button(
@@ -675,13 +668,28 @@ def render_azure_tab(active_model=None):
                     csv.writer(csv_buffer, lineterminator='\n').writerows(vm_import_rows)
                     vm_import_script = csv_buffer.getvalue()
                     st.code(vm_import_script, language="csv")
-                    st.download_button(
-                        "📥 Download NetBox VMs Import CSV",
-                        vm_import_script.encode("utf-8"),
-                        f"netbox-vms-import-{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
-                        "text/csv",
-                        key=f"dl_vms_import_{pd.Timestamp.now().strftime('%Y%m%d%H%M%S')}",
-                    )
+
+                    copy_col, dl_col = st.columns([1, 1])
+                    with copy_col:
+                        st.components.v1.html(
+                            f"""
+                            <button onclick="copyTextToClipboard({vm_import_script!r})"
+                                    style="padding:4px 12px; font-size:13px; cursor:pointer;"
+                                    onmouseover="this.style.opacity=0.8"
+                                    onmouseout="this.style.opacity=1">
+                                📋 Copy
+                            </button>
+                            """,
+                            height=40,
+                        )
+                    with dl_col:
+                        st.download_button(
+                            "📥 Download NetBox VMs Import CSV",
+                            vm_import_script.encode("utf-8"),
+                            f"netbox-vms-import-{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
+                            "text/csv",
+                            key=f"dl_vms_import_{pd.Timestamp.now().strftime('%Y%m%d%H%M%S')}",
+                        )
                 else:
                     st.info("✅ All VMs from this export already exist in the database.")
                 
