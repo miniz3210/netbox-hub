@@ -707,16 +707,17 @@ def render_azure_tab(active_model=None):
                             else:
                                 st.write("None")
                         def extract_val(source_dict, candidate_keys):
+                            """Extract value from dict, return None if not found (allows or-chaining)"""
                             if not source_dict or not isinstance(source_dict, dict):
-                                return ""
+                                return None
                             norm_dict = {str(k).strip().lower(): v for k, v in source_dict.items()}
                             for k in candidate_keys:
                                 k_norm = k.strip().lower()
                                 if k_norm in norm_dict:
                                     val = norm_dict[k_norm]
                                     if val is not None and str(val).strip() not in ["", "nan", "None", "---------"]:
-                                        return val
-                            return ""
+                                        return str(val).strip()
+                            return None
                         
                         def format_tags(tags_val):
                             if not tags_val:
@@ -728,7 +729,8 @@ def render_azure_tab(active_model=None):
                                 return tags_val.strip()
                             return "—"
                         
-                        def get_val_from_row(row_dict, candidate_keys, default="---------"):
+                        def get_val_from_row(row_dict, candidate_keys, default=None):
+                            """Extract value from row dict, return None if not found (allows or-chaining)"""
                             if not row_dict:
                                 return default
                             row_norm = {str(k).strip().lower(): v for k, v in row_dict.items()}
@@ -740,11 +742,15 @@ def render_azure_tab(active_model=None):
                                         return str(val).strip()
                             return default
 
+                        # Extract all field values with proper fallback chains
                         vm_name = get_val_from_row(matched_row, ['Name', 'name']) or extract_val(db_vm, ['name']) or clean_target.upper()
+                        
                         vm_role = extract_val(db_vm, ['role', 'model_or_role']) or get_val_from_row(matched_row, ['Role', 'role']) or "---------"
+                        
                         vm_status = extract_val(db_vm, ['status']) or get_val_from_row(matched_row, ['Status', 'status']) or "Active"
                         if isinstance(vm_status, str):
                             vm_status = vm_status.capitalize()
+                        
                         vm_desc = extract_val(db_vm, ['description']) or get_val_from_row(matched_row, ['Description', 'description', 'Purpose']) or ""
                         
                         # Tags: prioritize database tags
@@ -753,7 +759,7 @@ def render_azure_tab(active_model=None):
                             vm_tags_display = format_tags(db_tags)
                         else:
                             raw_tags = get_val_from_row(matched_row, ['NetBox Tags', 'Tags', 'tags'], default="—")
-                            vm_tags_display = format_tags(raw_tags)
+                            vm_tags_display = format_tags(raw_tags) if raw_tags else "—"
                         
                         # Prioritize database values, then CSV values
                         vm_location = extract_val(db_vm, ['site']) or get_val_from_row(matched_row, ['Location', 'site', 'Site']) or "Australia East"
