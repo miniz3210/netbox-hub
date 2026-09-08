@@ -262,7 +262,8 @@ def render_azure_tab(active_model=None):
 
 # Convert to DataFrame for display
             df_preview = pd.DataFrame(vm_records)
-            st.session_state.azure_preview_table_df = df_preview.copy()
+            # Store raw VM records for later use
+            st.session_state.azure_raw_vm_records = vm_records
 
             # Build a clean, enriched export dataset.
             export_records = []
@@ -369,6 +370,9 @@ def render_azure_tab(active_model=None):
                 }
 
                 vm_status_list.append(vm_status)
+            
+            # Store the actual preview table DataFrame with proper column names
+            st.session_state.azure_preview_table_df = pd.DataFrame(vm_status_list)
             
             table_columns = list(vm_status_list[0].keys()) if vm_status_list else []
             table_headers = "".join(f"<th>{html.escape(column)}</th>" for column in table_columns)
