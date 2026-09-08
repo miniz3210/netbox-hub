@@ -694,77 +694,88 @@ def render_azure_tab(active_model=None):
                     if found_vm and source:
                         if source == "Existing NetBox Database":
                             st.success(f"🟢 Source: Existing NetBox Database")
-                            st.markdown("##### VM Details from NetBox Database")
-                            with st.expander("View Database Record", expanded=True):
-                                st.json(found_vm)
                         else:
                             st.success(f"🔵 Source: Uploaded Azure CSV (New VM staging data)")
-                            st.markdown("##### VM Details from Azure CSV")
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.markdown("**Virtual Machine**")
+                            vm_name = found_vm.get('name', '') or found_vm.get('vm_name', '')
+                            st.text_input("Name*", value=vm_name, disabled=True, key=f"vm_{vm_name}_name")
+                            role_val = found_vm.get('role', '') or found_vm.get('tag_application', '') or found_vm.get('application', '')
+                            st.text_input("Role", value=role_val, disabled=True, key=f"vm_{vm_name}_role")
+                            st.text_input("Status", value="Active", disabled=True, key=f"vm_{vm_name}_status")
+                            st.text_input("Start on boot", value="Off", disabled=True, key=f"vm_{vm_name}_boot")
                             
-                            col1, col2 = st.columns(2)
+                            tags_str = found_vm.get('tags', '')
+                            tag_names = [t['name'] for t in _build_netbox_tags(found_vm)] if tags_str else []
+                            st.text_input("Tags", value=', '.join(tag_names) if tag_names else '—', disabled=True, key=f"vm_{vm_name}_tags")
                             
-                            with col1:
-                                st.markdown("**Virtual Machine**")
-                                st.text(f"Name: {found_vm.get('name', '')}")
-                                st.text(f"Role: {found_vm.get('role', '') or found_vm.get('tag_application', '')}")
-                                st.text(f"Status: {found_vm.get('status', 'active')}")
-                                
-                                tags_str = found_vm.get('tags', '')
-                                tag_names = [t['name'] for t in _build_netbox_tags(found_vm)] if tags_str else []
-                                if tag_names:
-                                    st.text(f"Tags: {', '.join(tag_names)}")
-                                else:
-                                    st.text("Tags: —")
-                                
-                                description = found_vm.get('description', '')
-                                if not description:
-                                    desc_parts = []
-                                    if found_vm.get('subscription'):
-                                        desc_parts.append(f"Subscription: {found_vm.get('subscription')}")
-                                    if found_vm.get('resource_group'):
-                                        desc_parts.append(f"Resource Group: {found_vm.get('resource_group')}")
-                                    if found_vm.get('status'):
-                                        desc_parts.append(f"Status: {found_vm.get('status')}")
-                                    if found_vm.get('public_ip'):
-                                        ip_label = "Primary IPv4" if found_vm.get('vnet') else "Public IP"
-                                        desc_parts.append(f"{ip_label}: {found_vm.get('public_ip')}")
-                                    if found_vm.get('vnet'):
-                                        desc_parts.append(f"VNet: {found_vm.get('vnet')}")
-                                    if found_vm.get('subnet'):
-                                        desc_parts.append(f"Subnet: {found_vm.get('subnet')}")
-                                    if found_vm.get('owner'):
-                                        desc_parts.append(f"Owner: {found_vm.get('owner')}")
-                                    if found_vm.get('disk_count'):
-                                        desc_parts.append(f"Disks: {found_vm.get('disk_count')}")
-                                    description = ' | '.join(desc_parts) if desc_parts else ''
-                                st.text(f"Description: {description}")
+                            description = found_vm.get('description', '')
+                            if not description:
+                                desc_parts = []
+                                if found_vm.get('subscription'):
+                                    desc_parts.append(f"Subscription: {found_vm.get('subscription')}")
+                                if found_vm.get('resource_group'):
+                                    desc_parts.append(f"Resource Group: {found_vm.get('resource_group')}")
+                                if found_vm.get('status'):
+                                    desc_parts.append(f"Status: {found_vm.get('status')}")
+                                if found_vm.get('public_ip'):
+                                    ip_label = "Primary IPv4" if found_vm.get('vnet') else "Public IP"
+                                    desc_parts.append(f"{ip_label}: {found_vm.get('public_ip')}")
+                                if found_vm.get('vnet'):
+                                    desc_parts.append(f"VNet: {found_vm.get('vnet')}")
+                                if found_vm.get('subnet'):
+                                    desc_parts.append(f"Subnet: {found_vm.get('subnet')}")
+                                if found_vm.get('owner'):
+                                    desc_parts.append(f"Owner: {found_vm.get('owner')}")
+                                if found_vm.get('disk_count'):
+                                    desc_parts.append(f"Disks: {found_vm.get('disk_count')}")
+                                description = ' | '.join(desc_parts) if desc_parts else ''
+                            st.text_area("Description", value=description, disabled=True, key=f"vm_{vm_name}_desc")
+                        
+                        with col2:
+                            st.markdown("**Placement**")
+                            raw_location = _strip_azure_prefix(found_vm.get('location', ''))
+                            site_name = f"Azure - {raw_location}" if raw_location else "Azure - Unknown"
+                            st.text_input("Site", value=site_name, disabled=True, key=f"vm_{vm_name}_site")
+                            st.text_input("Cluster", value=found_vm.get('resource_group', '') or '---------', disabled=True, key=f"vm_{vm_name}_cluster")
+                            st.text_input("Device", value='---------', disabled=True, key=f"vm_{vm_name}_device")
                             
-                            with col2:
-                                st.markdown("**Placement**")
-                                raw_location = _strip_azure_prefix(found_vm.get('location', ''))
-                                site_name = f"Azure - {raw_location}" if raw_location else "Azure - Unknown"
-                                st.text(f"Site: {site_name}")
-                                st.text(f"Cluster: {found_vm.get('resource_group', '') or '—'}")
-                                
-                                st.markdown("**Tenancy & Management**")
-                                st.text(f"Tenant: {found_vm.get('subscription', '')}")
-                                platform_val = found_vm.get('platform_value') or found_vm.get('operating_system', '')
-                                st.text(f"Platform: {platform_val}")
-                                st.text(f"Primary IPv4: {found_vm.get('public_ip', '') or '—'}")
-                                
-                                st.markdown("**Custom Fields & Ownership**")
-                                st.text(f"Instance Type: {found_vm.get('size', '')}")
-                                st.text(f"Resource Groups: {found_vm.get('resource_group', '') or '—'}")
-                                st.text(f"Owner: {found_vm.get('owner', '')}")
-                                st.text(f"Organization: {found_vm.get('organization', '') or '—'}")
-                                st.text(f"Purpose: {found_vm.get('purpose', '') or '—'}")
-                                st.text(f"Application: {found_vm.get('tag_application', '') or '—'}")
-                                st.text(f"Environment: {found_vm.get('tag_environment', '') or '—'}")
-                                st.text(f"Cost Centre: {found_vm.get('tag_cost_centre', '') or '—'}")
-                                st.text(f"Business Criticality: {found_vm.get('tag_business_criticality', '') or '—'}")
-                                st.text(f"Deployment Method: {found_vm.get('tag_deployment_method', '') or '—'}")
-                                st.text(f"Backup: {found_vm.get('tag_backup', '') or '—'}")
-                                st.text(f"Operating System: {found_vm.get('operating_system', '') or '—'}")
+                            st.markdown("**Tenancy**")
+                            st.text_input("Tenant group", value="Azure", disabled=True, key=f"vm_{vm_name}_tg")
+                            tenant_val = found_vm.get('subscription', '')
+                            st.text_input("Tenant", value=tenant_val, disabled=True, key=f"vm_{vm_name}_tenant")
+                            
+                            st.markdown("**Management**")
+                            platform_val = found_vm.get('platform_value', '') or found_vm.get('operating_system', '')
+                            st.text_input("Platform", value=platform_val or '---------', disabled=True, key=f"vm_{vm_name}_platform")
+                            ip_val = found_vm.get('public_ip', '') or found_vm.get('primary_ip', '')
+                            st.text_input("Primary IPv4", value=ip_val if ip_val else '---------', disabled=True, key=f"vm_{vm_name}_ipv4")
+                            st.text_input("Primary IPv6", value='---------', disabled=True, key=f"vm_{vm_name}_ipv6")
+                            st.text_input("Config template", value='---------', disabled=True, key=f"vm_{vm_name}_template")
+                            
+                            st.markdown("**Resources**")
+                            st.text_input("VCPUs", value='', disabled=True, key=f"vm_{vm_name}_vcpus")
+                            st.text_input("Memory (MB)", value='', disabled=True, key=f"vm_{vm_name}_mem")
+                            st.text_input("Disk (MB)", value='', disabled=True, key=f"vm_{vm_name}_disk")
+                            
+                            st.markdown("**Custom Fields**")
+                            st.text_input("Billing Entity", value='', disabled=True, key=f"vm_{vm_name}_be")
+                            st.text_input("Billing Project", value='', disabled=True, key=f"vm_{vm_name}_bp")
+                            st.text_input("Contact", value='', disabled=True, key=f"vm_{vm_name}_contact")
+                            st.text_input("Instance Type", value=found_vm.get('size', '') or '---------', disabled=True, key=f"vm_{vm_name}_it")
+                            st.text_input("Organization", value=found_vm.get('organization', '') or '---------', disabled=True, key=f"vm_{vm_name}_org")
+                            st.text_input("Owner (Custom Field)", value=found_vm.get('owner', '') or '---------', disabled=True, key=f"vm_{vm_name}_cf_owner")
+                            st.text_input("Purpose", value=found_vm.get('purpose', '') or '---------', disabled=True, key=f"vm_{vm_name}_purpose")
+                            st.text_input("Resource Groups", value=found_vm.get('resource_group', '') or '---------', disabled=True, key=f"vm_{vm_name}_rg")
+                            st.text_input("Runtime", value='', disabled=True, key=f"vm_{vm_name}_rt")
+                            st.text_input("Tier", value='', disabled=True, key=f"vm_{vm_name}_tier")
+                            
+                            st.markdown("**Ownership (Native)**")
+                            st.text_input("Owner group", value='---------', disabled=True, key=f"vm_{vm_name}_og")
+                            st.text_input("Owner", value=found_vm.get('owner', '') or '---------', disabled=True, key=f"vm_{vm_name}_owner")
                     elif search_term:
                         st.warning(f"VM '{search_term}' not found in NetBox database or uploaded Azure CSV.")
                 
