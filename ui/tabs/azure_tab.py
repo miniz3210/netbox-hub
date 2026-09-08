@@ -653,7 +653,7 @@ def render_azure_tab(active_model=None):
                             vm.get('platform_value') or vm.get('operating_system', ''),
                             canonical_value(vm.get('size', ''), instance_type_values),
                             canonical_value(vm.get('resource_group', ''), resource_group_values),
-                            vm.get('owner', ''),
+                            canonical_value(vm.get('owner', ''), owner_values),
                             vm.get('tag_application', ''),
                             vm.get('tag_environment', ''),
                             vm.get('tag_cost_centre', ''),
