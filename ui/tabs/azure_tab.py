@@ -716,9 +716,9 @@ def render_azure_tab(active_model=None):
                             if not tags_val:
                                 return "—"
                             if isinstance(tags_val, list):
-                                tag_names = [t.get('name', str(t)) if isinstance(t, dict) else str(t) for t in tags_val]
-                                return ", ".join(tag_names)
-                            if isinstance(tags_val, str) and tags_val.strip() not in ["", "nan", "None"]:
+                                tag_names = [t.get('name', str(t)) if isinstance(t, dict) else str(t) for t in tags_val if t]
+                                return ", ".join(tag_names) if tag_names else "—"
+                            if isinstance(tags_val, str) and tags_val.strip() not in ["", "nan", "None", "—"]:
                                 return tags_val.strip()
                             return "—"
                         
@@ -735,16 +735,22 @@ def render_azure_tab(active_model=None):
                             return default
 
                         vm_name = get_val_from_row(matched_row, ['Name', 'name']) or extract_val(db_vm, ['name']) or clean_target.upper()
-                        vm_role = get_val_from_row(matched_row, ['Role', 'role']) or extract_val(db_vm, ['role', 'model_or_role']) or "---------"
-                        vm_status = get_val_from_row(matched_row, ['Status', 'status']) or extract_val(db_vm, ['status']) or "Active"
+                        vm_role = extract_val(db_vm, ['role', 'model_or_role']) or get_val_from_row(matched_row, ['Role', 'role']) or "---------"
+                        vm_status = extract_val(db_vm, ['status']) or get_val_from_row(matched_row, ['Status', 'status']) or "Active"
                         if isinstance(vm_status, str):
                             vm_status = vm_status.capitalize()
-                        vm_desc = get_val_from_row(matched_row, ['Description', 'description', 'Purpose']) or extract_val(db_vm, ['description']) or ""
+                        vm_desc = extract_val(db_vm, ['description']) or get_val_from_row(matched_row, ['Description', 'description', 'Purpose']) or ""
                         
-                        raw_tags = get_val_from_row(matched_row, ['NetBox Tags', 'Tags', 'tags'], default="—")
-                        vm_tags_display = format_tags(raw_tags)
+                        # Tags: prioritize database tags
+                        db_tags = db_vm.get('tags', []) if db_vm else []
+                        if db_tags:
+                            vm_tags_display = format_tags(db_tags)
+                        else:
+                            raw_tags = get_val_from_row(matched_row, ['NetBox Tags', 'Tags', 'tags'], default="—")
+                            vm_tags_display = format_tags(raw_tags)
                         
-                        vm_location = get_val_from_row(matched_row, ['Location', 'site', 'Site']) or extract_val(db_vm, ['site']) or "Australia East"
+                        # Prioritize database values, then CSV values
+                        vm_location = extract_val(db_vm, ['site']) or get_val_from_row(matched_row, ['Location', 'site', 'Site']) or "Australia East"
                         if isinstance(vm_location, dict):
                             vm_location = vm_location.get('name', 'Australia East')
                         
@@ -753,26 +759,27 @@ def render_azure_tab(active_model=None):
                             vm_cluster = vm_cluster.get('name', '---------')
                         
                         vm_tenant_group = "Azure"
-                        vm_tenant = get_val_from_row(matched_row, ['Subscription', 'tenant', 'Tenant']) or extract_val(db_vm, ['tenant']) or "---------"
+                        vm_tenant = extract_val(db_vm, ['tenant']) or get_val_from_row(matched_row, ['Subscription', 'tenant', 'Tenant']) or "---------"
                         if isinstance(vm_tenant, dict):
                             vm_tenant = vm_tenant.get('name', '---------')
                         
-                        vm_platform = get_val_from_row(matched_row, ['Operating System', 'Platform', 'platform']) or extract_val(db_vm, ['platform']) or "Windows Server"
+                        vm_platform = extract_val(db_vm, ['platform']) or get_val_from_row(matched_row, ['Operating System', 'Platform', 'platform']) or "Windows Server"
                         if isinstance(vm_platform, dict):
                             vm_platform = vm_platform.get('name', 'Windows Server')
                         
-                        vm_ip = get_val_from_row(matched_row, ['Azure IP', 'ip', 'Primary IPv4']) or extract_val(db_vm, ['primary_ip', 'primary_ip4', 'ip']) or "---------"
+                        vm_ip = extract_val(db_vm, ['primary_ip', 'primary_ip4', 'ip']) or get_val_from_row(matched_row, ['Azure IP', 'ip', 'Primary IPv4']) or "---------"
                         if isinstance(vm_ip, dict):
                             vm_ip = vm_ip.get('address', '---------')
                         
+                        # Custom fields: prioritize database values
                         custom_fields = db_vm.get('custom_fields', {}) if (db_vm and isinstance(db_vm.get('custom_fields'), dict)) else {}
-                        vm_instance = get_val_from_row(matched_row, ['Size', 'Instance Type', 'cf_instance_type']) or extract_val(custom_fields, ['instance_type']) or extract_val(db_vm, ['instance_type']) or "---------"
-                        vm_rg = get_val_from_row(matched_row, ['Resource Group', 'Resource Groups', 'cf_resource_group']) or extract_val(custom_fields, ['resource_group']) or extract_val(db_vm, ['resource_group']) or "---------"
-                        vm_owner = get_val_from_row(matched_row, ['Owner', 'owner']) or extract_val(db_vm, ['owner']) or "---------"
+                        vm_instance = extract_val(custom_fields, ['instance_type', 'instancetype']) or extract_val(db_vm, ['instance_type']) or get_val_from_row(matched_row, ['Size', 'Instance Type', 'cf_instance_type']) or "---------"
+                        vm_rg = extract_val(custom_fields, ['resource_group', 'resourcegroup', 'resource_groups', 'resourcegroups']) or extract_val(db_vm, ['resource_group']) or get_val_from_row(matched_row, ['Resource Group', 'Resource Groups', 'cf_resource_group']) or "---------"
+                        vm_owner = extract_val(db_vm, ['owner']) or get_val_from_row(matched_row, ['Owner', 'owner']) or "---------"
                         if isinstance(vm_owner, dict):
                             vm_owner = vm_owner.get('name', '---------')
                         
-                        vm_device = get_val_from_row(matched_row, ['Device', 'device']) or extract_val(db_vm, ['device']) or "---------"
+                        vm_device = extract_val(db_vm, ['device']) or get_val_from_row(matched_row, ['Device', 'device']) or "---------"
                         
                         if db_vm and csv_vm:
                             st.success("🟢 Source: Matched in Database (Enriched with Azure CSV Data)")

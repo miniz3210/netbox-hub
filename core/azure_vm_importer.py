@@ -140,17 +140,98 @@ def parse_azure_vm_csv(csv_path: str) -> Tuple[List[Dict[str, Any]], List[str]]:
 def check_vm_exists_in_db(vm_name: str) -> Optional[Dict[str, Any]]:
     """
     Check if a VM with the given name already exists in the database.
+    Returns enriched data from NetBox backup if available, falls back to inventory_records.
     
     Args:
         vm_name: Virtual machine name
         
     Returns:
-        Dict with existing VM data if found, None otherwise
+        Dict with existing VM data if found, None otherwise.
+        Fields include: name, role, status, site, tenant, platform, cluster, 
+        description, tags, custom_fields, primary_ip, device, owner
     """
     init_db()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
+    # First try to get complete data from backup_records (NetBox JSON backup)
+    cursor.execute("""
+        SELECT summary, search_blob
+        FROM backup_records
+        WHERE LOWER(name) = LOWER(?) 
+        AND object_type = 'virtualization_virtual_machines'
+        LIMIT 1
+    """, (vm_name,))
+    
+    backup_row = cursor.fetchone()
+    
+    if backup_row:
+        summary, search_blob = backup_row
+        
+        # Parse the enriched data from summary
+        # Summary format: "Role: JDE Application | Status: Active | Site: Azure - Australia East | ..."
+        vm_data = {
+            'name': vm_name,
+            'role': '',
+            'status': '',
+            'site': '',
+            'tenant': '',
+            'platform': '',
+            'cluster': '',
+            'description': '',
+            'tags': [],
+            'custom_fields': {},
+            'primary_ip': '',
+            'device': '',
+            'owner': ''
+        }
+        
+        # Extract from summary (format: "Field: Value | Field: Value | ...")
+        if summary:
+            for field_pair in summary.split('|'):
+                field_pair = field_pair.strip()
+                if ':' not in field_pair:
+                    continue
+                    
+                key, value = field_pair.split(':', 1)
+                key_clean = key.strip().lower()
+                value_clean = value.strip()
+                
+                if not value_clean or value_clean.lower() in ('none', 'null', '—', '---------'):
+                    continue
+                
+                # Map summary fields to vm_data keys
+                field_map = {
+                    'role': 'role',
+                    'status': 'status',
+                    'site': 'site',
+                    'tenant': 'tenant',
+                    'platform': 'platform',
+                    'cluster': 'cluster',
+                    'description': 'description',
+                    'primary ip': 'primary_ip',
+                    'device': 'device',
+                    'owner': 'owner',
+                }
+                
+                if key_clean in field_map:
+                    vm_data[field_map[key_clean]] = value_clean
+                # Handle Tags from summary (format: "Tags: Tag1, Tag2, Tag3")
+                elif key_clean == 'tags':
+                    vm_data['tags'] = [t.strip() for t in value_clean.split(',') if t.strip()]
+                # Handle Custom Fields from summary (format: "Custom Fields: key1: val1, key2: val2")
+                elif key_clean == 'custom fields':
+                    # Parse custom fields: "Instance Type: Standard_D4s_v3, Resource Group: rg-prod"
+                    for cf_pair in value_clean.split(','):
+                        if ':' in cf_pair:
+                            cf_key, cf_val = cf_pair.split(':', 1)
+                            cf_key_norm = cf_key.strip().lower().replace(' ', '_')
+                            vm_data['custom_fields'][cf_key_norm] = cf_val.strip()
+        
+        conn.close()
+        return vm_data
+    
+    # Fallback to inventory_records (limited data)
     cursor.execute("""
         SELECT id, name, category, description, manufacturer, model_or_role, 
                site, cluster, imported_at
@@ -168,10 +249,17 @@ def check_vm_exists_in_db(vm_name: str) -> Optional[Dict[str, Any]]:
             'category': row[2],
             'description': row[3],
             'manufacturer': row[4],
-            'model_or_role': row[5],
+            'role': row[5],  # model_or_role maps to role
             'site': row[6],
             'cluster': row[7],
-            'imported_at': row[8]
+            'imported_at': row[8],
+            'tags': [],
+            'custom_fields': {},
+            'tenant': '',
+            'platform': '',
+            'primary_ip': '',
+            'device': '',
+            'owner': ''
         }
     return None
 
