@@ -472,14 +472,20 @@ def render_azure_tab(active_model=None):
             # NetBox Objects Summary
             st.subheader("3️⃣ NetBox Objects Required")
             
-            if st.button("📋 Analyze NetBox Requirements", type="primary"):
+            if "analyze_netbox_clicked" not in st.session_state:
+                st.session_state.analyze_netbox_clicked = False
+            if st.button("📋 Analyze NetBox Requirements", key="btn_analyze_netbox"):
+                st.session_state.analyze_netbox_clicked = True
+            
+            if st.session_state.analyze_netbox_clicked:
                 with st.spinner("Analyzing NetBox requirements..."):
                     netbox_records, metadata = map_azure_to_netbox(vm_records)
                     st.session_state.azure_vms_mapped = netbox_records
                     st.session_state.azure_metadata = metadata
                     st.session_state.azure_object_analysis = analyze_netbox_objects(metadata)
-
+                st.session_state.analyze_netbox_clicked = False
                 st.success("✅ Analysis complete!")
+                st.rerun()
 
             # Show NetBox requirements
             if st.session_state.azure_vms_mapped and st.session_state.azure_metadata:
