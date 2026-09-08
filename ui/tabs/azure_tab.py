@@ -673,26 +673,26 @@ def render_azure_tab(active_model=None):
                 
                 vm_search_input = st.text_input("Enter VM Name / Hostname (e.g. ANZJDE001):", key="netbox_vm_search_query")
                 
-                    if vm_search_input:
-                        search_term = vm_search_input.strip()
-                        found_vm = None
-                        source = None
-                        
-                        if search_term:
-                            clean_query = search_term.strip().lower()
-                            db_vm = check_vm_exists_in_db(search_term)
-                            if db_vm:
-                                found_vm = db_vm
-                                source = "Existing NetBox Database"
-                            elif vm_records:
-                                for vm in vm_records:
-                                    vm_name = vm.get('name', '')
-                                    if vm_name and vm_name.strip().lower() == clean_query:
-                                        found_vm = vm
-                                        source = "Uploaded Azure CSV (New VM staging data)"
-                                        break
+                if vm_search_input:
+                    search_term = vm_search_input.strip()
+                    found_vm = None
+                    source = None
                     
-                    if found_vm and source:
+                    if search_term:
+                        clean_query = search_term.strip().lower()
+                        db_vm = check_vm_exists_in_db(search_term)
+                        if db_vm:
+                            found_vm = db_vm
+                            source = "Existing NetBox Database"
+                        elif vm_records:
+                            for vm in vm_records:
+                                vm_name = vm.get('name', '')
+                                if vm_name and vm_name.strip().lower() == clean_query:
+                                    found_vm = vm
+                                    source = "Uploaded Azure CSV (New VM staging data)"
+                                    break
+                
+                if found_vm and source:
                         if source == "Existing NetBox Database":
                             st.success(f"🟢 Source: Existing NetBox Database")
                         else:
