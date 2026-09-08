@@ -552,7 +552,7 @@ def render_azure_tab(active_model=None):
 
                             copy_col, dl_col = st.columns([1, 1])
                             with copy_col:
-                                st.iframe(
+                                st.html(
                                     f"""
                                     <button onclick="copyTextToClipboard({script['content']!r})"
                                             style="padding:4px 12px; font-size:13px; cursor:pointer;"
@@ -560,9 +560,7 @@ def render_azure_tab(active_model=None):
                                             onmouseout="this.style.opacity=1">
                                         📋 Copy
                                     </button>
-                                    """,
-                                    height=40,
-                                    scrolling=False,
+                                    """
                                 )
                             with dl_col:
                                 st.download_button(
@@ -672,18 +670,16 @@ def render_azure_tab(active_model=None):
 
                     copy_col, dl_col = st.columns([1, 1])
                     with copy_col:
-                        st.iframe(
-                            f"""
-                            <button onclick="copyTextToClipboard({vm_import_script!r})"
-                                    style="padding:4px 12px; font-size:13px; cursor:pointer;"
-                                    onmouseover="this.style.opacity=0.8"
-                                    onmouseout="this.style.opacity=1">
-                                📋 Copy
-                            </button>
-                            """,
-                            height=40,
-                            scrolling=False,
-                        )
+                                st.html(
+                                    f"""
+                                    <button onclick="copyTextToClipboard({script['content']!r})"
+                                            style="padding:4px 12px; font-size:13px; cursor:pointer;"
+                                            onmouseover="this.style.opacity=0.8"
+                                            onmouseout="this.style.opacity=1">
+                                        📋 Copy
+                                    </button>
+                                    """
+                                )
                     with dl_col:
                         st.download_button(
                             "📥 Download NetBox VMs Import CSV",
