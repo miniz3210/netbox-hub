@@ -16,6 +16,9 @@ from core.db_manager import DB_PATH, init_db
 
 logger = logging.getLogger("netbox-hub")
 
+# Values that never represent a real Azure tag and must be filtered out.
+_TAG_PLACEHOLDER_VALUES = {"-", "nan", "null", "none", "no policy"}
+
 
 def parse_azure_vm_csv(csv_path: str) -> Tuple[List[Dict[str, Any]], List[str]]:
     """Parse Azure Portal and Azure Resource Graph VM CSV exports."""

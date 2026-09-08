@@ -6,6 +6,7 @@ Provides UI for importing Azure Virtual Machine exports into NetBox.
 import csv
 import html
 import io
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -220,10 +221,29 @@ def render_azure_tab(active_model=None):
             st.success(f"✅ Parsed {len(vm_records)} Azure VMs")
             
             st.subheader("2️⃣ Preview Azure VMs")
-            
+
             # Convert to DataFrame for display
             df_preview = pd.DataFrame(vm_records)
-            
+
+            # Export parsed dataset as CSV / JSON
+            export_csv_col, export_json_col = st.columns(2)
+            with export_csv_col:
+                st.download_button(
+                    "📥 Download Parsed VMs CSV",
+                    df_preview.to_csv(index=False).encode("utf-8"),
+                    f"azure-vms-parsed-{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
+                    "text/csv",
+                    help="Download the parsed Azure VM dataset as CSV",
+                )
+            with export_json_col:
+                st.download_button(
+                    "📥 Download Parsed VMs JSON",
+                    df_preview.to_json(orient="records", indent=2).encode("utf-8"),
+                    f"azure-vms-parsed-{pd.Timestamp.now().strftime('%Y%m%d')}.json",
+                    "application/json",
+                    help="Download the parsed Azure VM dataset as JSON",
+                )
+
             # Show summary statistics
             col1, col2, col3, col4 = st.columns(4)
             with col1:
@@ -237,7 +257,7 @@ def render_azure_tab(active_model=None):
             with col4:
                 unique_locations = len(set(vm.get('location', '') for vm in vm_records))
                 st.metric("Locations", unique_locations)
-            
+
             # Check which VMs exist in the database and resolve their NetBox IPs
             st.write("**Checking VMs against database...**")
             ip_index = build_vm_ip_index()
