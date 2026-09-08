@@ -273,26 +273,57 @@ def render_azure_tab(active_model=None):
             
             st.subheader("2️⃣ Preview Azure VMs")
 
-            # Convert to DataFrame for display
+# Convert to DataFrame for display
             df_preview = pd.DataFrame(vm_records)
+
+            # Build a clean, enriched export dataset.
+            export_records = []
+            for vm in vm_records:
+                tag_names = [t['name'] for t in _build_netbox_tags(vm)]
+                record = {
+                    'name': vm.get('name', ''),
+                    'subscription': vm.get('subscription', ''),
+                    'resource_group': vm.get('resource_group', ''),
+                    'location': vm.get('location', ''),
+                    'status': vm.get('status', ''),
+                    'operating_system': vm.get('operating_system', ''),
+                    'platform_value': vm.get('platform_value', ''),
+                    'size': vm.get('size', ''),
+                    'primary_ip': vm.get('public_ip', ''),
+                    'vnet': vm.get('vnet', ''),
+                    'subnet': vm.get('subnet', ''),
+                    'owner': vm.get('owner', ''),
+                    'role': vm.get('role', ''),
+                    'tag_environment': vm.get('tag_environment', ''),
+                    'tag_cost_centre': vm.get('tag_cost_centre', ''),
+                    'tag_business_criticality': vm.get('tag_business_criticality', ''),
+                    'tag_deployment_method': vm.get('tag_deployment_method', ''),
+                    'tag_backup': vm.get('tag_backup', ''),
+                    'netbox_tags': ', '.join(tag_names),
+                    'source': vm.get('source', ''),
+                    'imported_at': vm.get('imported_at', ''),
+                }
+                export_records.append(record)
+
+            df_export = pd.DataFrame(export_records)
 
             # Export parsed dataset as CSV / JSON
             export_csv_col, export_json_col = st.columns(2)
             with export_csv_col:
                 st.download_button(
                     "📥 Download Parsed VMs CSV",
-                    df_preview.to_csv(index=False).encode("utf-8"),
+                    df_export.to_csv(index=False).encode("utf-8"),
                     f"azure-vms-parsed-{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
                     "text/csv",
-                    help="Download the parsed Azure VM dataset as CSV",
+                    help="Download the cleaned Azure VM dataset as CSV",
                 )
             with export_json_col:
                 st.download_button(
                     "📥 Download Parsed VMs JSON",
-                    df_preview.to_json(orient="records", indent=2).encode("utf-8"),
+                    df_export.to_json(orient="records", indent=2).encode("utf-8"),
                     f"azure-vms-parsed-{pd.Timestamp.now().strftime('%Y%m%d')}.json",
                     "application/json",
-                    help="Download the parsed Azure VM dataset as JSON",
+                    help="Download the cleaned Azure VM dataset as JSON",
                 )
 
             # Show summary statistics
