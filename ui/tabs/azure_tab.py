@@ -247,6 +247,7 @@ def render_azure_tab(active_model=None):
             with st.spinner("Parsing Azure VM data..."):
                 vm_records, warnings = parse_azure_vm_csv(str(temp_path))
                 st.session_state.azure_vms_parsed = vm_records
+                st.session_state.azure_parsed_vms_table = vm_records
             
             # Show warnings if any
             if warnings:
@@ -679,12 +680,12 @@ def render_azure_tab(active_model=None):
                     db_vm = check_vm_exists_in_db(vm_search_input)
                     csv_vm = None
                     
-                    if vm_records:
-                        for vm in vm_records:
-                            vm_name = vm.get('name', '')
-                            if vm_name and str(vm_name).strip().lower() == clean_target:
-                                csv_vm = vm
-                                break
+                    azure_records = st.session_state.get('azure_parsed_vms_table', vm_records)
+                    for item in azure_records:
+                        item_name = str(item.get('Name') or item.get('name') or '').strip().lower()
+                        if item_name == clean_target:
+                            csv_vm = item
+                            break
                     
                     if not db_vm and not csv_vm:
                         st.warning(f"VM '{vm_search_input.strip()}' not found in NetBox database or uploaded Azure CSV.")
