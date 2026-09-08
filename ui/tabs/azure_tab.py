@@ -668,30 +668,25 @@ def render_azure_tab(active_model=None):
                             key=f"dl_vms_import_{pd.Timestamp.now().strftime('%Y%m%d%H%M%S')}",
                         )
                 
-                st.divider()
-                st.markdown("### 🔍 NetBox VM Manual Form Helper")
+                vm_search_input = st.text_input("Enter VM Name / Hostname (e.g. ANZJDE001):", key="netbox_vm_search_query")
                 
-                vm_search_name = st.text_input("Enter VM Name / Hostname (e.g. ANZJDE001):", key="vm_helper_search")
-                
-                if vm_search_name:
-                    vm_search_name = vm_search_name.strip()
-                    
+                if vm_search_input:
+                    search_term = vm_search_input.strip()
                     found_vm = None
                     source = None
                     
-                    if vm_records:
-                        vm_search_lower = vm_search_name.lower()
-                        for vm in vm_records:
-                            if vm.get('name', '').lower() == vm_search_lower:
-                                found_vm = vm
-                                source = "Azure CSV (New VM staging data)"
-                                break
-                    
-                    db_vm = check_vm_exists_in_db(vm_search_name) if vm_search_name else None
-                    
-                    if db_vm:
-                        found_vm = db_vm
-                        source = "Existing NetBox Database"
+                    if search_term:
+                        db_vm = check_vm_exists_in_db(search_term)
+                        if db_vm:
+                            found_vm = db_vm
+                            source = "Existing NetBox Database"
+                        elif vm_records:
+                            search_lower = search_term.lower()
+                            for vm in vm_records:
+                                if vm.get('name', '').lower() == search_lower:
+                                    found_vm = vm
+                                    source = "Uploaded Azure CSV (New VM staging data)"
+                                    break
                     
                     if found_vm and source:
                         if source == "Existing NetBox Database":
@@ -754,9 +749,6 @@ def render_azure_tab(active_model=None):
                                 st.text(f"Platform: {platform_val}")
                                 st.text(f"Primary IPv4: {found_vm.get('public_ip', '') or '—'}")
                                 
-                                st.markdown("**Resources**")
-                                st.text(f"Instance Type: {found_vm.get('size', '')}")
-                                
                                 st.markdown("**Custom Fields & Ownership**")
                                 st.text(f"Instance Type: {found_vm.get('size', '')}")
                                 st.text(f"Resource Groups: {found_vm.get('resource_group', '') or '—'}")
@@ -770,8 +762,8 @@ def render_azure_tab(active_model=None):
                                 st.text(f"Deployment Method: {found_vm.get('tag_deployment_method', '') or '—'}")
                                 st.text(f"Backup: {found_vm.get('tag_backup', '') or '—'}")
                                 st.text(f"Operating System: {found_vm.get('operating_system', '') or '—'}")
-                    elif vm_search_name:
-                        st.warning(f"VM '{vm_search_name}' not found in NetBox database or uploaded Azure CSV.")
+                    elif search_term:
+                        st.warning(f"VM '{search_term}' not found in NetBox database or uploaded Azure CSV.")
                 
                 
         
