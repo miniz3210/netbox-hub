@@ -63,7 +63,7 @@ def render_azure_tab(active_model=None):
         """)
 
         # Global clipboard-copy handler (works in HTTP/HTTPS and iframes).
-        st.components.v1.html("""
+        st.html("""
         <script>
         function copyTextToClipboard(text) {
             if (navigator.clipboard && window.isSecureContext) {
@@ -93,7 +93,7 @@ def render_azure_tab(active_model=None):
             document.body.removeChild(textArea);
         }
         </script>
-        """, height=0)
+        """)
 
         # KQL query stored for reference.
         kql_query = '''Resources
@@ -552,7 +552,7 @@ def render_azure_tab(active_model=None):
 
                             copy_col, dl_col = st.columns([1, 1])
                             with copy_col:
-                                st.components.v1.html(
+                                st.iframe(
                                     f"""
                                     <button onclick="copyTextToClipboard({script['content']!r})"
                                             style="padding:4px 12px; font-size:13px; cursor:pointer;"
@@ -562,6 +562,7 @@ def render_azure_tab(active_model=None):
                                     </button>
                                     """,
                                     height=40,
+                                    scrolling=False,
                                 )
                             with dl_col:
                                 st.download_button(
@@ -671,7 +672,7 @@ def render_azure_tab(active_model=None):
 
                     copy_col, dl_col = st.columns([1, 1])
                     with copy_col:
-                        st.components.v1.html(
+                        st.iframe(
                             f"""
                             <button onclick="copyTextToClipboard({vm_import_script!r})"
                                     style="padding:4px 12px; font-size:13px; cursor:pointer;"
@@ -681,6 +682,7 @@ def render_azure_tab(active_model=None):
                             </button>
                             """,
                             height=40,
+                            scrolling=False,
                         )
                     with dl_col:
                         st.download_button(
