@@ -691,8 +691,8 @@ def render_azure_tab(active_model=None):
                                     found_vm = vm
                                     source = "Uploaded Azure CSV (New VM staging data)"
                                     break
-                
-                if found_vm and source:
+                    
+                    if found_vm and source:
                         if source == "Existing NetBox Database":
                             st.success(f"🟢 Source: Existing NetBox Database")
                         else:
