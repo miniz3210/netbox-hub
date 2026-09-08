@@ -679,7 +679,7 @@ def render_azure_tab(active_model=None):
                     db_vm = check_vm_exists_in_db(vm_search_input)
                     csv_vm = None
                     
-                    if not db_vm and vm_records:
+                    if vm_records:
                         for vm in vm_records:
                             vm_name = vm.get('name', '')
                             if vm_name and str(vm_name).strip().lower() == clean_target:
