@@ -749,6 +749,8 @@ def render_azure_tab(active_model=None):
                         if isinstance(vm_owner, dict):
                             vm_owner = vm_owner.get('name', '---------')
                         
+                        vm_device = extract_val(db_vm, ['device']) or extract_val(csv_vm, ['Device', 'device']) or "---------"
+                        
                         if db_vm and csv_vm:
                             st.success("🟢 Source: Matched in Database (Enriched with Azure CSV Data)")
                         elif db_vm:
