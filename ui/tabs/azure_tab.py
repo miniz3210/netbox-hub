@@ -550,27 +550,6 @@ def render_azure_tab(active_model=None):
                             lang = "csv" if script["format"] == "csv" else "text"
                             st.code(script["content"], language=lang)
 
-                            copy_col, dl_col = st.columns([1, 1])
-                            with copy_col:
-                                st.html(
-                                    f"""
-                                    <button onclick="copyTextToClipboard({script['content']!r})"
-                                            style="padding:4px 12px; font-size:13px; cursor:pointer;"
-                                            onmouseover="this.style.opacity=0.8"
-                                            onmouseout="this.style.opacity=1">
-                                        📋 Copy
-                                    </button>
-                                    """
-                                )
-                            with dl_col:
-                                st.download_button(
-                                    f"📥 Download {script['label']}",
-                                    script["content"].encode("utf-8"),
-                                    script["filename"],
-                                    "text/plain",
-                                    key=f"dl_{key}",
-                                )
-
                     bundle = generate_combined_import_bundle(scripts)
                     st.download_button(
                         "📦 Download All Import Scripts (bundle)",

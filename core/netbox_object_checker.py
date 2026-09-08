@@ -483,9 +483,11 @@ def generate_owners_csv(owner_names: List[str]) -> str:
     output = io.StringIO(newline="")
     writer = csv.writer(output, lineterminator="\n")
     writer.writerow(["name"])
+    seen = set()
     for name in owner_names:
         clean = re.sub(r"\s+", " ", (name or "").strip())
-        if clean:
+        if clean and clean not in seen:
+            seen.add(clean)
             writer.writerow([clean])
     return output.getvalue().rstrip("\n")
 
