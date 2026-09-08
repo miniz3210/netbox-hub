@@ -656,26 +656,13 @@ def render_azure_tab(active_model=None):
                     vm_import_script = csv_buffer.getvalue()
                     st.code(vm_import_script, language="csv")
 
-                    copy_col, dl_col = st.columns([1, 1])
-                    with copy_col:
-                                st.html(
-                                    f"""
-                                    <button onclick="copyTextToClipboard({script['content']!r})"
-                                            style="padding:4px 12px; font-size:13px; cursor:pointer;"
-                                            onmouseover="this.style.opacity=0.8"
-                                            onmouseout="this.style.opacity=1">
-                                        📋 Copy
-                                    </button>
-                                    """
-                                )
-                    with dl_col:
-                        st.download_button(
-                            "📥 Download NetBox VMs Import CSV",
-                            vm_import_script.encode("utf-8"),
-                            f"netbox-vms-import-{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
-                            "text/csv",
-                            key=f"dl_vms_import_{pd.Timestamp.now().strftime('%Y%m%d%H%M%S')}",
-                        )
+                    st.download_button(
+                        "📥 Download NetBox VMs Import CSV",
+                        vm_import_script.encode("utf-8"),
+                        f"netbox-vms-import-{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
+                        "text/csv",
+                        key=f"dl_vms_import_{pd.Timestamp.now().strftime('%Y%m%d%H%M%S')}",
+                    )
                 
                 vm_search_input = st.text_input("Enter VM Name / Hostname (e.g. ANZJDE001):", key="netbox_vm_search_query")
                 
@@ -705,6 +692,13 @@ def render_azure_tab(active_model=None):
                             st.write("**Database VM Data:**")
                             if db_vm:
                                 st.json(db_vm)
+                                st.write("**Custom Fields Extracted:**")
+                                cf_debug = db_vm.get('custom_fields', {})
+                                if cf_debug:
+                                    st.json(cf_debug)
+                                    st.write(f"Available keys: {list(cf_debug.keys())}")
+                                else:
+                                    st.write("No custom fields found")
                             else:
                                 st.write("None")
                             st.write("**CSV Row Data:**")
@@ -787,36 +781,51 @@ def render_azure_tab(active_model=None):
                         custom_fields = db_vm.get('custom_fields', {}) if (db_vm and isinstance(db_vm.get('custom_fields'), dict)) else {}
                         vm_instance = extract_val(custom_fields, ['instance_type', 'instancetype']) or extract_val(db_vm, ['instance_type']) or get_val_from_row(matched_row, ['Size', 'Instance Type', 'cf_instance_type']) or "---------"
                         vm_rg = extract_val(custom_fields, ['resource_group', 'resourcegroup', 'resource_groups', 'resourcegroups']) or extract_val(db_vm, ['resource_group']) or get_val_from_row(matched_row, ['Resource Group', 'Resource Groups', 'cf_resource_group']) or "---------"
-                        vm_owner = extract_val(db_vm, ['owner']) or get_val_from_row(matched_row, ['Owner', 'owner']) or "---------"
+                        
+                        # Owner: check custom fields first, then top-level owner field, then CSV
+                        vm_owner = extract_val(custom_fields, ['owner']) or extract_val(db_vm, ['owner']) or get_val_from_row(matched_row, ['Owner', 'owner']) or "---------"
                         if isinstance(vm_owner, dict):
                             vm_owner = vm_owner.get('name', '---------')
                         
+                        # Owner group: NetBox native ownership feature (may not be in backup)
+                        vm_owner_group = "---------"  # Not typically stored in minimal backups
+                        
                         vm_device = extract_val(db_vm, ['device']) or get_val_from_row(matched_row, ['Device', 'device']) or "---------"
                         
+                        # Determine data source indicator
                         if db_vm and csv_vm:
-                            st.success("🟢 Source: Matched in Database (Enriched with Azure CSV Data)")
+                            source_icon = "☁️📦"
+                            source_text = "Data from Azure CSV and NetBox Database"
                         elif db_vm:
-                            st.success("🟢 Source: Existing NetBox Database")
+                            source_icon = "📦"
+                            source_text = "Data from NetBox Database"
                         else:
-                            st.info("🔵 Source: Uploaded Azure CSV (New VM Staging Data)")
+                            source_icon = "☁️"
+                            source_text = "Data from Azure CSV"
                         
+                        st.info(f"{source_icon} **{source_text}**")
+                        
+                        # Compact two-column layout
                         col_left, col_right = st.columns(2)
                         
                         with col_left:
-                            st.markdown("#### Virtual Machine")
-                            st.text_input("Name*", value=str(vm_name), disabled=True, key="nb_vm_name")
+                            st.markdown("**Virtual Machine**")
+                            st.text_input("Name", value=str(vm_name), disabled=True, key="nb_vm_name", label_visibility="visible")
                             st.text_input("Role", value=str(vm_role), disabled=True, key="nb_vm_role")
-                            st.text_input("Status*", value=str(vm_status), disabled=True, key="nb_vm_status")
-                            st.text_input("Start on boot*", value="Off", disabled=True, key="nb_vm_boot")
-                            st.text_area("Description", value=str(vm_desc), disabled=True, key="nb_vm_desc")
+                            st.text_input("Status", value=str(vm_status), disabled=True, key="nb_vm_status")
+                            st.text_input("Description", value=str(vm_desc), disabled=True, key="nb_vm_desc")
                             st.text_input("Tags", value=str(vm_tags_display), disabled=True, key="nb_vm_tags")
                             
-                            st.markdown("#### Tenancy")
+                            st.markdown("**Tenancy**")
                             st.text_input("Tenant group", value=str(vm_tenant_group), disabled=True, key="nb_tenant_group")
                             st.text_input("Tenant", value=str(vm_tenant), disabled=True, key="nb_tenant")
+                            
+                            st.markdown("**Custom Fields**")
+                            st.text_input("Instance Type", value=str(vm_instance), disabled=True, key="nb_instance_type")
+                            st.text_input("Resource Groups", value=str(vm_rg), disabled=True, key="nb_rg")
                         
                         with col_right:
-                            st.markdown("#### Placement")
+                            st.markdown("**Placement**")
                             # Site: use database value as-is if it already has the Azure prefix
                             if vm_location and vm_location.startswith("Azure - "):
                                 vm_site = vm_location
@@ -829,20 +838,13 @@ def render_azure_tab(active_model=None):
                             st.text_input("Cluster", value=str(vm_cluster), disabled=True, key="nb_cluster")
                             st.text_input("Device", value=str(vm_device), disabled=True, key="nb_device")
                             
-                            st.markdown("#### Management")
+                            st.markdown("**Management**")
                             st.text_input("Platform", value=str(vm_platform), disabled=True, key="nb_platform")
                             st.text_input("Primary IPv4", value=str(vm_ip), disabled=True, key="nb_ipv4")
-                            st.text_input("Primary IPv6", value="---------", disabled=True, key="nb_ipv6")
-                            st.text_input("Config template", value="---------", disabled=True, key="nb_template")
-                        
-                        st.markdown("#### Custom Fields & Ownership")
-                        cf_col1, cf_col2 = st.columns(2)
-                        with cf_col1:
-                            st.text_input("Instance Type", value=str(vm_instance), disabled=True, key="nb_instance_type")
-                            st.text_input("Resource Groups", value=str(vm_rg), disabled=True, key="nb_rg")
-                        with cf_col2:
-                            st.text_input("Owner (Native Ownership)", value=str(vm_owner), disabled=True, key="nb_owner")
-                            st.text_input("Owner group", value="---------", disabled=True, key="nb_owner_group")
+                            
+                            st.markdown("**Ownership**")
+                            st.text_input("Owner", value=str(vm_owner), disabled=True, key="nb_owner")
+                            st.text_input("Owner group", value=str(vm_owner_group), disabled=True, key="nb_owner_group")
                 
                 
         

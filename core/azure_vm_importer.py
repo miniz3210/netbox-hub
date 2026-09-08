@@ -237,7 +237,12 @@ def check_vm_exists_in_db(vm_name: str) -> Optional[Dict[str, Any]]:
                     if '=' in cf_pair:
                         cf_key, cf_val = cf_pair.split('=', 1)
                         cf_key_clean = cf_key.strip().lower().replace(' ', '_')
-                        vm_data['custom_fields'][cf_key_clean] = cf_val.strip()
+                        cf_val_clean = cf_val.strip()
+                        vm_data['custom_fields'][cf_key_clean] = cf_val_clean
+                        
+                        # If this is the owner field, also set it at the top level
+                        if cf_key_clean == 'owner':
+                            vm_data['owner'] = cf_val_clean
         
         conn.close()
         return vm_data
