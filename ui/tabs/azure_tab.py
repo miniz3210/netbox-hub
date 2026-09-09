@@ -215,95 +215,16 @@ def render_azure_tab(active_model=None):
     # File uploader
     st.subheader("1️⃣ Upload Azure VM CSV Export")
     
-    # Debug section - will remove later
-    with st.expander("🔧 Debug: Database Status", expanded=False):
-        try:
-            from core.db_manager import DB_PATH
-            import sqlite3
-            import os
-            import sys
-            from io import StringIO
-            
-            st.write(f"**Database path:** `{DB_PATH}`")
-            st.write(f"**Database exists:** {os.path.exists(DB_PATH)}")
-            
-            if os.path.exists(DB_PATH):
-                conn = sqlite3.connect(DB_PATH)
-                cursor = conn.cursor()
-                
-                # Check if table exists
-                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='azure_csv_uploads'")
-                table_exists = cursor.fetchone()
-                st.write(f"**Table exists:** {table_exists is not None}")
-                
-                if table_exists:
-                    cursor.execute("SELECT COUNT(*) FROM azure_csv_uploads")
-                    count = cursor.fetchone()[0]
-                    st.write(f"**Rows in table:** {count}")
-                    
-                    if count > 0:
-                        cursor.execute("SELECT id, filename, row_count, uploaded_at FROM azure_csv_uploads")
-                        for row in cursor.fetchall():
-                            st.write(f"**Found:** {row[1]} ({row[2]} rows) - {row[3]}")
-                        
-                        # Now test get_azure_csv_upload() with captured output
-                        st.write("---")
-                        st.write("**Testing get_azure_csv_upload():**")
-                        
-                        # Capture print statements
-                        old_stdout = sys.stdout
-                        sys.stdout = captured_output = StringIO()
-                        
-                        try:
-                            result = get_azure_csv_upload()
-                            
-                            # Restore stdout
-                            sys.stdout = old_stdout
-                            
-                            # Show captured logs
-                            logs = captured_output.getvalue()
-                            if logs:
-                                st.code(logs, language="text")
-                            
-                            # Show result
-                            if result:
-                                st.success(f"✅ Function returned: {result['filename']}, {result['row_count']} rows")
-                            else:
-                                st.error("❌ Function returned None")
-                        except Exception as e:
-                            sys.stdout = old_stdout
-                            st.error(f"❌ Function crashed: {e}")
-                            import traceback
-                            st.code(traceback.format_exc())
-                else:
-                    st.warning("Table 'azure_csv_uploads' does not exist in database")
-                
-                conn.close()
-        except Exception as e:
-            st.error(f"Debug error: {e}")
-    
     # Check if there's a saved upload
-    try:
-        saved_upload = get_azure_csv_upload()
-        
-        # Debug what get_azure_csv_upload returned
-        if saved_upload:
-            st.success(f"✅ DEBUG: get_azure_csv_upload() returned data: {saved_upload['filename']}, {saved_upload['row_count']} rows")
-        else:
-            st.warning("⚠️ DEBUG: get_azure_csv_upload() returned None (but database shows data exists!)")
-    except Exception as e:
-        st.error(f"❌ DEBUG: get_azure_csv_upload() failed with error: {e}")
-        import traceback
-        st.code(traceback.format_exc())
-        saved_upload = None
+    saved_upload = get_azure_csv_upload()
     
-    # Show saved upload info and Clear button if exists
+    # Show saved upload info and Clear button if exists (compact version)
     if saved_upload:
-        col1, col2 = st.columns([3, 1])
+        col1, col2 = st.columns([4, 1])
         with col1:
-            st.info(f"📁 **Saved CSV**: {saved_upload['filename']} ({saved_upload['row_count']} VMs) - Uploaded: {saved_upload['uploaded_at']}")
+            st.caption(f"📁 Saved: **{saved_upload['filename']}** ({saved_upload['row_count']} VMs)")
         with col2:
-            if st.button("🗑️ Clear CSV", help="Remove saved CSV data", use_container_width=True):
+            if st.button("Clear", help="Remove saved CSV data", use_container_width=True):
                 clear_azure_csv_upload()
                 # Clear session state
                 st.session_state.azure_vms_parsed = None
@@ -383,6 +304,9 @@ def render_azure_tab(active_model=None):
             
             # Show preview
             st.success(f"✅ Parsed {len(vm_records)} Azure VMs (saved to database)")
+            
+            # Trigger refresh to reload the page with saved data
+            st.rerun()
             
             st.subheader("2️⃣ Preview Azure VMs")
 
@@ -1069,14 +993,11 @@ def render_azure_tab(active_model=None):
     
     # Show preview and analysis sections if data is loaded (either from upload or database)
     elif st.session_state.azure_vms_parsed is not None:
-        # Debug: Check what we have in session state
-        st.write(f"DEBUG: Showing preview. VMs loaded: {len(st.session_state.azure_vms_parsed)}")
-        
         vm_records = st.session_state.azure_vms_parsed
         
         # Show that data is loaded
         st.subheader("2️⃣ Preview Azure VMs")
-        st.info(f"📊 **{len(vm_records)} VMs loaded** (data persists across page refreshes)")
+        st.caption(f"📊 {len(vm_records)} VMs loaded (data persists across page refreshes)")
         
         # Build export dataset
         export_records = []
