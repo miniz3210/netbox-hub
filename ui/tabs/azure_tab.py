@@ -230,15 +230,10 @@ def render_azure_tab(active_model=None):
             5. Upload the CSV file using the uploader below.
             """)
         
-        # Consolidated upload section
-        c_up, c_clr, c_ref = st.columns([3, 1, 1])
-        with c_up:
-            uploaded_file = st.file_uploader(
-                "Upload Azure VM CSV file",
-                type=["csv"],
-                help="Upload the CSV file exported from Azure Resource Graph Explorer",
-                key="azure_csv_uploader"
-            )
+        st.markdown("---")
+        
+        # Consolidated buttons section
+        c_clr, c_ref = st.columns([1, 1])
         with c_clr:
             if st.button("Clear", help="Remove saved CSV data", use_container_width=True, disabled=not saved_upload):
                 clear_azure_csv_upload()
@@ -255,6 +250,14 @@ def render_azure_tab(active_model=None):
                 # Clear preview table cache to force rebuild
                 st.session_state.azure_preview_table_df = None
                 st.rerun()
+    
+    # File uploader - OUTSIDE the expander so it's always available
+    uploaded_file = st.file_uploader(
+        "Upload Azure VM CSV file",
+        type=["csv"],
+        help="Upload the CSV file exported from Azure Resource Graph Explorer",
+        key="azure_csv_uploader"
+    )
     
     # Session state for parsed data
     if 'azure_vms_parsed' not in st.session_state:
