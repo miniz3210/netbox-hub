@@ -871,6 +871,33 @@ def render_azure_tab(active_model=None):
                             
                             st.caption("Resource Groups:")
                             st.code(str(vm_rg), language="text")
+                            
+                            # Display ALL other custom fields dynamically
+                            if custom_fields:
+                                # Already displayed: instance_type, resource_group, owner
+                                displayed_fields = {'instance_type', 'instancetype', 'resource_group', 
+                                                   'resourcegroup', 'resource_groups', 'resourcegroups', 'owner'}
+                                
+                                # Show all remaining custom fields
+                                for cf_name, cf_value in custom_fields.items():
+                                    if cf_name.lower() not in displayed_fields:
+                                        # Format field name for display
+                                        display_name = cf_name.replace('_', ' ').title()
+                                        
+                                        # Format value
+                                        if cf_value is None or str(cf_value).strip() == "":
+                                            formatted_value = "---------"
+                                        elif isinstance(cf_value, dict):
+                                            formatted_value = cf_value.get('name') or cf_value.get('value') or str(cf_value)
+                                        elif isinstance(cf_value, list):
+                                            formatted_value = ", ".join(str(v) for v in cf_value if v)
+                                        else:
+                                            formatted_value = str(cf_value).strip()
+                                        
+                                        # Only display if not empty
+                                        if formatted_value and formatted_value != "---------":
+                                            st.caption(f"{display_name}:")
+                                            st.code(formatted_value, language="text")
                         
                         with col_right:
                             st.markdown("**Placement**")
