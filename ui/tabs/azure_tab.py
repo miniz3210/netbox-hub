@@ -239,13 +239,8 @@ def render_azure_tab(active_model=None):
         # Consolidated upload section
         c_up, c_clr, c_ref = st.columns([3, 1, 1])
         with c_up:
-            uploaded_file = st.file_uploader(
-                "Upload Azure VM CSV file",
-                type=["csv"],
-                help="Upload the CSV file exported from Azure Resource Graph Explorer",
-                key="azure_csv_uploader",
-                label_visibility="collapsed"
-            )
+            # Placeholder for visual alignment - actual uploader is outside expander
+            st.empty()
         with c_clr:
             if saved_upload:
                 if st.button("🗑️ Clear Azure CSV", key="clear_azure_csv_btn", help="Clear Azure CSV data", use_container_width=True):
@@ -263,6 +258,14 @@ def render_azure_tab(active_model=None):
                 # Clear preview table cache to force rebuild
                 st.session_state.azure_preview_table_df = None
                 st.rerun()
+    
+    # File uploader - OUTSIDE the expander so it's always available
+    uploaded_file = st.file_uploader(
+        "Upload Azure VM CSV file",
+        type=["csv"],
+        help="Upload the CSV file exported from Azure Resource Graph Explorer",
+        key="azure_csv_uploader"
+    )
     
     # Session state for parsed data
     if 'azure_vms_parsed' not in st.session_state:
@@ -1626,34 +1629,3 @@ def render_azure_tab(active_model=None):
                         
                         st.caption("Owner group:")
                         st.code(str(vm_owner_group), language="text")
-        
-    else:
-        # Show sample data format when no file uploaded.
-        # Fictional placeholder data only — no real hostnames, subscriptions,
-        # resource groups or routable IPs.
-        st.subheader("Sample Azure VM CSV Format")
-        st.caption(
-            "Illustrative placeholder data. Replace every value with your own "
-            "Azure export; the column headers are what the parser relies on."
-        )
-        sample_data = {
-            'NAME': ['VM-APP-001', 'VM-SQL-002', 'VM-WEB-003'],
-            'SUBSCRIPTION': ['Example-Prod-Sub-001', 'Example-Prod-Sub-001', 'Example-Dev-Sub-002'],
-            'RESOURCE GROUP': ['rg-example-app-prod', 'rg-example-sql-prod', 'rg-example-web-dev'],
-            'LOCATION': ['Australia East', 'Australia East', 'UK South'],
-            'STATUS': ['Running', 'Running', 'Stopped'],
-            'OPERATING SYSTEM': ['Windows', 'Windows', 'Linux'],
-            'SIZE': ['Standard_D2s_v3', 'Standard_E4ds_v4', 'Standard_B2ms'],
-            'PUBLIC IP ADDRESS': ['-', '-', '198.51.100.10'],
-            'DISKS': ['2', '3', '1']
-        }
-        sample_df = pd.DataFrame(sample_data)
-        st.dataframe(sample_df, width="stretch")
-        
-        st.download_button(
-            "📄 Download Sample CSV Template",
-            sample_df.to_csv(index=False).encode('utf-8'),
-            "azure-vms-sample.csv",
-            "text/csv",
-            help="Download a sample CSV file with the correct format"
-        )
