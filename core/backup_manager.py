@@ -297,11 +297,25 @@ def init_backup_tables() -> None:
             imported_at TEXT
         )
     """)
+    # Dynamic NetBox schema registry - stores discovered fields and custom fields
+    # so the UI adapts automatically when NetBox upgrades or custom fields are added
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS netbox_schema (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            object_type TEXT UNIQUE,
+            field_config TEXT,
+            netbox_version TEXT,
+            is_enabled INTEGER DEFAULT 1,
+            created_at TEXT,
+            updated_at TEXT
+        )
+    """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_backup_type ON backup_records(object_type)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_backup_site ON backup_records(site)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_backup_name ON backup_records(name)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_choice_set ON backup_choice_values(choice_set)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_choice_field ON backup_choice_values(field_name)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_schema_object_type ON netbox_schema(object_type)")
     conn.commit()
     conn.close()
 
@@ -397,9 +411,28 @@ def _resolve_site(obj: Dict[str, Any], device_sites: Dict[int, str]) -> str:
 
 
 def _summarize(object_type: str, obj: Dict[str, Any], site: str) -> str:
-    spec = FIELD_SPECS.get(object_type)
+    """
+    Generate summary text for a NetBox object.
+    
+    Now uses dynamic field specs from the field registry when available,
+    falling back to hardcoded FIELD_SPECS for backward compatibility.
+    """
     parts: List[str] = []
     site_lower = site.strip().lower()
+    
+    # Try to get dynamic field spec first
+    spec = None
+    try:
+        from core.field_registry import FieldRegistry
+        from core.db_manager_wrapper import DatabaseManager
+        registry = FieldRegistry(DatabaseManager())
+        spec = registry.get_field_spec(object_type)
+    except Exception:
+        pass  # Fall back to hardcoded specs
+    
+    # Fall back to hardcoded specs if no dynamic spec found
+    if not spec:
+        spec = FIELD_SPECS.get(object_type)
 
     if spec:
         for label, path in spec:
@@ -798,6 +831,8 @@ def save_netbox_backup(file_bytes: Any, filename: str = "") -> Dict[str, Any]:
     `netbox-export.ps1` v2.0. Populates the Sites / IPAM / Inventory tables
     (replacing existing records), stores a searchable row for every NetBox
     object, and records custom field choice sets.
+    
+    Also performs automatic schema discovery to update the dynamic field registry.
     """
     init_backup_tables()
 
@@ -813,6 +848,20 @@ def save_netbox_backup(file_bytes: Any, filename: str = "") -> Dict[str, Any]:
     ipam = _ingest_ipam(buckets)
     inventory = _ingest_inventory(buckets)
     choice_values = _ingest_choice_values(buckets, uploaded_at)
+    
+    # Auto-discover schema from backup data
+    from core.field_registry import FieldRegistry
+    from core.db_manager_wrapper import DatabaseManager
+    
+    try:
+        db_manager = DatabaseManager()
+        field_registry = FieldRegistry(db_manager)
+        netbox_version = source_info.get("netbox_version") if source_info else None
+        schema_stats = field_registry.discover_schema_from_backup(buckets, netbox_version)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Schema discovery failed: {e}")
+        schema_stats = {}
 
     counts_payload = dict(object_counts)
     if source_info:
@@ -832,7 +881,7 @@ def save_netbox_backup(file_bytes: Any, filename: str = "") -> Dict[str, Any]:
     set_sync_metadata("ipam", BACKUP_SOURCE)
     set_sync_metadata("naming", BACKUP_SOURCE)
 
-    return {
+    result = {
         "total": total,
         "object_counts": object_counts,
         "sites": sites,
@@ -845,6 +894,11 @@ def save_netbox_backup(file_bytes: Any, filename: str = "") -> Dict[str, Any]:
         "uploaded_at": uploaded_at,
         "filename": filename,
     }
+    
+    if schema_stats:
+        result["schema_discovery"] = schema_stats
+    
+    return result
 
 
 def get_backup_metadata() -> Dict[str, Any]:
