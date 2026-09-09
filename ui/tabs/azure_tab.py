@@ -902,70 +902,24 @@ def render_azure_tab(active_model=None):
                         
                         st.info(f"{source_icon} **{source_text}**")
                         
-                        # Compact two-column layout with st.code for built-in copy functionality
+                        # Compact three-column layout with st.code for built-in copy functionality
                         # Use clean_target as part of the key to ensure widgets refresh for each new search
                         key_suffix = clean_target.replace(' ', '_').replace('.', '_')
-                        col_left, col_right = st.columns(2)
+                        col1, col2, col3 = st.columns(3)
                         
-                        with col_left:
+                        with col1:
                             st.markdown("**Virtual Machine**")
                             st.caption("Name:")
                             st.code(str(vm_name), language="text")
-                            
                             st.caption("Role:")
                             st.code(str(vm_role), language="text")
-                            
                             st.caption("Status:")
                             st.code(str(vm_status), language="text")
-                            
                             st.caption("Description:")
                             st.code(str(vm_desc), language="text")
-                            
                             st.caption("Tags:")
                             st.code(str(vm_tags_display), language="text")
                             
-                            st.markdown("**Tenancy**")
-                            st.caption("Tenant group:")
-                            st.code(str(vm_tenant_group), language="text")
-                            
-                            st.caption("Tenant:")
-                            st.code(str(vm_tenant), language="text")
-                            
-                            st.markdown("**Custom Fields**")
-                            st.caption("Instance Type:")
-                            st.code(str(vm_instance), language="text")
-                            
-                            st.caption("Resource Groups:")
-                            st.code(str(vm_rg), language="text")
-                            
-                            # Display ALL other custom fields dynamically
-                            if custom_fields:
-                                # Already displayed: instance_type, resource_group, owner
-                                displayed_fields = {'instance_type', 'instancetype', 'resource_group', 
-                                                   'resourcegroup', 'resource_groups', 'resourcegroups', 'owner'}
-                                
-                                # Show all remaining custom fields
-                                for cf_name, cf_value in custom_fields.items():
-                                    if cf_name.lower() not in displayed_fields:
-                                        # Format field name for display
-                                        display_name = cf_name.replace('_', ' ').title()
-                                        
-                                        # Format value
-                                        if cf_value is None or str(cf_value).strip() == "":
-                                            formatted_value = "---------"
-                                        elif isinstance(cf_value, dict):
-                                            formatted_value = cf_value.get('name') or cf_value.get('value') or str(cf_value)
-                                        elif isinstance(cf_value, list):
-                                            formatted_value = ", ".join(str(v) for v in cf_value if v)
-                                        else:
-                                            formatted_value = str(cf_value).strip()
-                                        
-                                        # Only display if not empty
-                                        if formatted_value and formatted_value != "---------":
-                                            st.caption(f"{display_name}:")
-                                            st.code(formatted_value, language="text")
-                        
-                        with col_right:
                             st.markdown("**Placement**")
                             # Site: use database value as-is if it already has the Azure prefix
                             if vm_location and vm_location.startswith("Azure - "):
@@ -975,15 +929,19 @@ def render_azure_tab(active_model=None):
                                 vm_site = f"Azure - {raw_loc}"
                             else:
                                 vm_site = "Azure - Unknown"
-                            
                             st.caption("Site:")
                             st.code(str(vm_site), language="text")
-                            
                             st.caption("Cluster:")
                             st.code(str(vm_cluster), language="text")
-                            
                             st.caption("Device:")
                             st.code(str(vm_device), language="text")
+                        
+                        with col2:
+                            st.markdown("**Tenancy**")
+                            st.caption("Tenant group:")
+                            st.code(str(vm_tenant_group), language="text")
+                            st.caption("Tenant:")
+                            st.code(str(vm_tenant), language="text")
                             
                             st.markdown("**Management**")
                             st.caption("Platform:")
@@ -991,13 +949,41 @@ def render_azure_tab(active_model=None):
                             
                             st.caption("Primary IPv4:")
                             st.code(str(vm_ip), language="text")
+                        
+                        with col3:
+                            st.markdown("**Custom Fields**")
+                            st.caption("Instance Type:")
+                            st.code(str(vm_instance), language="text")
+                            st.caption("Resource Groups:")
+                            st.code(str(vm_rg), language="text")
                             
                             st.markdown("**Ownership**")
                             st.caption("Owner:")
                             st.code(str(vm_owner), language="text")
-                            
                             st.caption("Owner group:")
                             st.code(str(vm_owner_group), language="text")
+                            
+                            # Display ALL other custom fields dynamically
+                            if custom_fields:
+                                displayed_fields = {'instance_type', 'instancetype', 'resource_group', 
+                                                   'resourcegroup', 'resource_groups', 'resourcegroups', 'owner'}
+                                
+                                for cf_name, cf_value in custom_fields.items():
+                                    if cf_name.lower() not in displayed_fields:
+                                        display_name = cf_name.replace('_', ' ').title()
+                                        
+                                        if cf_value is None or str(cf_value).strip() == "":
+                                            formatted_value = "---------"
+                                        elif isinstance(cf_value, dict):
+                                            formatted_value = cf_value.get('name') or cf_value.get('value') or str(cf_value)
+                                        elif isinstance(cf_value, list):
+                                            formatted_value = ", ".join(str(v) for v in cf_value if v)
+                                        else:
+                                            formatted_value = str(cf_value).strip()
+                                        
+                                        if formatted_value and formatted_value != "---------":
+                                            st.caption(f"{display_name}:")
+                                            st.code(formatted_value, language="text")
                 
                 
         
