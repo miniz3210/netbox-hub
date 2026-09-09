@@ -746,8 +746,10 @@ def render_azure_tab(active_model=None):
                             if isinstance(tags_val, str) and tags_val.strip() not in ["", "nan", "None", "—"]:
                                 # Strip HTML tags if present
                                 import re
-                                clean_text = re.sub(r'<[^>]+>', '', tags_val)
-                                # Replace &nbsp; and other entities
+                                clean_text = re.sub(r'<[^>]+>', ', ', tags_val)  # Replace tags with comma+space
+                                # Clean up multiple commas and spaces
+                                clean_text = re.sub(r',\s*,', ',', clean_text)  # Remove duplicate commas
+                                clean_text = re.sub(r'^\s*,\s*|\s*,\s*$', '', clean_text)  # Remove leading/trailing commas
                                 clean_text = clean_text.replace('&nbsp;', ' ')
                                 return clean_text.strip() if clean_text.strip() else "—"
                             return "—"
@@ -834,120 +836,41 @@ def render_azure_tab(active_model=None):
                         
                         st.info(f"{source_icon} **{source_text}**")
                         
-                        # Add JavaScript for copy-to-clipboard functionality with visual feedback
-                        st.components.v1.html("""
-                        <script>
-                        function copyToClipboard(text, iconId) {
-                            // Decode HTML entities
-                            var txt = document.createElement("textarea");
-                            txt.innerHTML = text;
-                            var decodedText = txt.value;
-                            
-                            if (navigator.clipboard && window.isSecureContext) {
-                                navigator.clipboard.writeText(decodedText).then(function() {
-                                    const icon = document.getElementById(iconId);
-                                    if (icon) {
-                                        icon.textContent = '✓';
-                                        icon.title = 'Copied!';
-                                        setTimeout(function() { 
-                                            icon.textContent = '';
-                                            icon.title = 'Copy to clipboard';
-                                        }, 1000);
-                                    }
-                                });
-                            } else {
-                                var textArea = document.createElement("textarea");
-                                textArea.value = decodedText;
-                                textArea.style.position = "fixed";
-                                textArea.style.opacity = "0";
-                                document.body.appendChild(textArea);
-                                textArea.focus();
-                                textArea.select();
-                                try {
-                                    document.execCommand('copy');
-                                    const icon = document.getElementById(iconId);
-                                    if (icon) {
-                                        icon.textContent = '✓';
-                                        icon.title = 'Copied!';
-                                        setTimeout(function() { 
-                                            icon.textContent = '';
-                                            icon.title = 'Copy to clipboard';
-                                        }, 1000);
-                                    }
-                                } catch (err) {}
-                                document.body.removeChild(textArea);
-                            }
-                        }
-                        </script>
-                        <style>
-                        .field-with-copy {
-                            position: relative;
-                        }
-                        .copy-icon {
-                            cursor: pointer;
-                            margin-left: 8px;
-                            font-size: 12px;
-                            opacity: 0;
-                            user-select: none;
-                            display: inline-block;
-                            transition: opacity 0.2s;
-                        }
-                        .field-with-copy:hover .copy-icon {
-                            opacity: 0.6;
-                        }
-                        .copy-icon:hover {
-                            opacity: 1 !important;
-                        }
-                        /* Fix cursor on input fields */
-                        input[type="text"]:disabled {
-                            cursor: default !important;
-                        }
-                        </style>
-                        """, height=0)
-                        
-                        # Helper function to create label with inline copy button
-                        def label_with_copy(label_text, value, icon_id):
-                            # Clean the value first to remove any HTML
-                            import re
-                            clean_value = re.sub(r'<[^>]+>', '', str(value))
-                            escaped_value = html.escape(clean_value).replace("'", "&#39;").replace('"', '&quot;')
-                            return f'<div class="field-with-copy">{label_text} <span class="copy-icon" id="{icon_id}" onclick="copyToClipboard(\'{escaped_value}\', \'{icon_id}\')" title="Copy to clipboard"></span></div>'
-                        
-                        # Compact two-column layout
+                        # Compact two-column layout with st.code for built-in copy functionality
                         # Use clean_target as part of the key to ensure widgets refresh for each new search
                         key_suffix = clean_target.replace(' ', '_').replace('.', '_')
                         col_left, col_right = st.columns(2)
                         
                         with col_left:
                             st.markdown("**Virtual Machine**")
-                            st.markdown(label_with_copy("Name", vm_name, f"copy_name_{key_suffix}"), unsafe_allow_html=True)
-                            st.text_input("Name", value=str(vm_name), disabled=True, key=f"nb_vm_name_{key_suffix}", label_visibility="collapsed")
+                            st.caption("Name:")
+                            st.code(str(vm_name), language="text")
                             
-                            st.markdown(label_with_copy("Role", vm_role, f"copy_role_{key_suffix}"), unsafe_allow_html=True)
-                            st.text_input("Role", value=str(vm_role), disabled=True, key=f"nb_vm_role_{key_suffix}", label_visibility="collapsed")
+                            st.caption("Role:")
+                            st.code(str(vm_role), language="text")
                             
-                            st.markdown(label_with_copy("Status", vm_status, f"copy_status_{key_suffix}"), unsafe_allow_html=True)
-                            st.text_input("Status", value=str(vm_status), disabled=True, key=f"nb_vm_status_{key_suffix}", label_visibility="collapsed")
+                            st.caption("Status:")
+                            st.code(str(vm_status), language="text")
                             
-                            st.markdown(label_with_copy("Description", vm_desc, f"copy_desc_{key_suffix}"), unsafe_allow_html=True)
-                            st.text_input("Description", value=str(vm_desc), disabled=True, key=f"nb_vm_desc_{key_suffix}", label_visibility="collapsed")
+                            st.caption("Description:")
+                            st.code(str(vm_desc), language="text")
                             
-                            st.markdown(label_with_copy("Tags", vm_tags_display, f"copy_tags_{key_suffix}"), unsafe_allow_html=True)
-                            st.text_input("Tags", value=str(vm_tags_display), disabled=True, key=f"nb_vm_tags_{key_suffix}", label_visibility="collapsed")
+                            st.caption("Tags:")
+                            st.code(str(vm_tags_display), language="text")
                             
                             st.markdown("**Tenancy**")
-                            st.markdown(label_with_copy("Tenant group", vm_tenant_group, f"copy_tg_{key_suffix}"), unsafe_allow_html=True)
-                            st.text_input("Tenant group", value=str(vm_tenant_group), disabled=True, key=f"nb_tenant_group_{key_suffix}", label_visibility="collapsed")
+                            st.caption("Tenant group:")
+                            st.code(str(vm_tenant_group), language="text")
                             
-                            st.markdown(label_with_copy("Tenant", vm_tenant, f"copy_tenant_{key_suffix}"), unsafe_allow_html=True)
-                            st.text_input("Tenant", value=str(vm_tenant), disabled=True, key=f"nb_tenant_{key_suffix}", label_visibility="collapsed")
+                            st.caption("Tenant:")
+                            st.code(str(vm_tenant), language="text")
                             
                             st.markdown("**Custom Fields**")
-                            st.markdown(label_with_copy("Instance Type", vm_instance, f"copy_inst_{key_suffix}"), unsafe_allow_html=True)
-                            st.text_input("Instance Type", value=str(vm_instance), disabled=True, key=f"nb_instance_type_{key_suffix}", label_visibility="collapsed")
+                            st.caption("Instance Type:")
+                            st.code(str(vm_instance), language="text")
                             
-                            st.markdown(label_with_copy("Resource Groups", vm_rg, f"copy_rg_{key_suffix}"), unsafe_allow_html=True)
-                            st.text_input("Resource Groups", value=str(vm_rg), disabled=True, key=f"nb_rg_{key_suffix}", label_visibility="collapsed")
+                            st.caption("Resource Groups:")
+                            st.code(str(vm_rg), language="text")
                         
                         with col_right:
                             st.markdown("**Placement**")
@@ -960,28 +883,28 @@ def render_azure_tab(active_model=None):
                             else:
                                 vm_site = "Azure - Unknown"
                             
-                            st.markdown(label_with_copy("Site", vm_site, f"copy_site_{key_suffix}"), unsafe_allow_html=True)
-                            st.text_input("Site", value=str(vm_site), disabled=True, key=f"nb_site_{key_suffix}", label_visibility="collapsed")
+                            st.caption("Site:")
+                            st.code(str(vm_site), language="text")
                             
-                            st.markdown(label_with_copy("Cluster", vm_cluster, f"copy_cluster_{key_suffix}"), unsafe_allow_html=True)
-                            st.text_input("Cluster", value=str(vm_cluster), disabled=True, key=f"nb_cluster_{key_suffix}", label_visibility="collapsed")
+                            st.caption("Cluster:")
+                            st.code(str(vm_cluster), language="text")
                             
-                            st.markdown(label_with_copy("Device", vm_device, f"copy_device_{key_suffix}"), unsafe_allow_html=True)
-                            st.text_input("Device", value=str(vm_device), disabled=True, key=f"nb_device_{key_suffix}", label_visibility="collapsed")
+                            st.caption("Device:")
+                            st.code(str(vm_device), language="text")
                             
                             st.markdown("**Management**")
-                            st.markdown(label_with_copy("Platform", vm_platform, f"copy_platform_{key_suffix}"), unsafe_allow_html=True)
-                            st.text_input("Platform", value=str(vm_platform), disabled=True, key=f"nb_platform_{key_suffix}", label_visibility="collapsed")
+                            st.caption("Platform:")
+                            st.code(str(vm_platform), language="text")
                             
-                            st.markdown(label_with_copy("Primary IPv4", vm_ip, f"copy_ip_{key_suffix}"), unsafe_allow_html=True)
-                            st.text_input("Primary IPv4", value=str(vm_ip), disabled=True, key=f"nb_ipv4_{key_suffix}", label_visibility="collapsed")
+                            st.caption("Primary IPv4:")
+                            st.code(str(vm_ip), language="text")
                             
                             st.markdown("**Ownership**")
-                            st.markdown(label_with_copy("Owner", vm_owner, f"copy_owner_{key_suffix}"), unsafe_allow_html=True)
-                            st.text_input("Owner", value=str(vm_owner), disabled=True, key=f"nb_owner_{key_suffix}", label_visibility="collapsed")
+                            st.caption("Owner:")
+                            st.code(str(vm_owner), language="text")
                             
-                            st.markdown(label_with_copy("Owner group", vm_owner_group, f"copy_og_{key_suffix}"), unsafe_allow_html=True)
-                            st.text_input("Owner group", value=str(vm_owner_group), disabled=True, key=f"nb_owner_group_{key_suffix}", label_visibility="collapsed")
+                            st.caption("Owner group:")
+                            st.code(str(vm_owner_group), language="text")
                 
                 
         
