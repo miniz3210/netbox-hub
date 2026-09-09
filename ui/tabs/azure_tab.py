@@ -1121,89 +1121,103 @@ def render_azure_tab(active_model=None):
                 vm_status_list.append(vm_status)
             
             st.session_state.azure_preview_table_df = pd.DataFrame(vm_status_list)
+            # Store additional data needed for display
+            st.session_state.azure_preview_table_data = {
+                'vm_status_list': vm_status_list,
+                'ip_matched': ip_matched,
+                'ip_index': ip_index
+            }
+        
+        # Always display the table from cached data
+        if st.session_state.get('azure_preview_table_df') is not None:
+            cached_data = st.session_state.get('azure_preview_table_data', {})
+            vm_status_list = cached_data.get('vm_status_list', [])
+            ip_matched = cached_data.get('ip_matched', 0)
+            ip_index = cached_data.get('ip_index', {})
             
-            # Display the table (same styling as upload flow)
-            table_columns = list(vm_status_list[0].keys()) if vm_status_list else []
-            table_headers = "".join(f"<th>{html.escape(column)}</th>" for column in table_columns)
-            table_rows = []
-            for row in vm_status_list:
-                cells = []
-                for column in table_columns:
-                    value = row[column]
-                    if column == "NetBox Tags" and value != "—":
-                        cell = f'<td class="nb-tags-column"><div class="nb-tags-cell">{value}</div></td>'
-                    else:
-                        cell = f"<td>{html.escape(str(value))}</td>"
-                    cells.append(cell)
-                table_rows.append(f"<tr>{''.join(cells)}</tr>")
+            if vm_status_list:
+                # Display the table
+                table_columns = list(vm_status_list[0].keys())
+                table_headers = "".join(f"<th>{html.escape(column)}</th>" for column in table_columns)
+                table_rows = []
+                for row in vm_status_list:
+                    cells = []
+                    for column in table_columns:
+                        value = row[column]
+                        if column == "NetBox Tags" and value != "—":
+                            cell = f'<td class="nb-tags-column"><div class="nb-tags-cell">{value}</div></td>'
+                        else:
+                            cell = f"<td>{html.escape(str(value))}</td>"
+                        cells.append(cell)
+                    table_rows.append(f"<tr>{''.join(cells)}</tr>")
 
-            st.markdown(
-                f"""
-                <style>
-                .nb-table-scroll {{
-                    max-width: 100%;
-                    max-height: 400px;
-                    overflow: auto;
-                    border: 1px solid rgba(128, 128, 128, 0.25);
-                }}
-                .nb-vm-table {{
-                    width: 100%;
-                    border-collapse: collapse;
-                    font-size: 13px;
-                }}
-                .nb-vm-table thead {{
-                    background-color: rgba(128, 128, 128, 0.1);
-                    position: sticky;
-                    top: 0;
-                }}
-                .nb-vm-table th, .nb-vm-table td {{
-                    padding: 6px 10px;
-                    text-align: left;
-                    border-bottom: 1px solid rgba(128, 128, 128, 0.1);
-                }}
-                .nb-vm-table th {{
-                    font-weight: 600;
-                }}
-                .nb-tags-column {{
-                    max-width: 300px;
-                }}
-                .nb-tags-cell {{
-                    display: flex;
-                    flex-wrap: wrap;
-                    gap: 4px;
-                }}
-                .nb-tag-chip {{
-                    display: inline-block;
-                    padding: 2px 6px;
-                    background-color: rgba(59, 130, 246, 0.15);
-                    color: rgb(59, 130, 246);
-                    border-radius: 4px;
-                    font-size: 11px;
-                    white-space: nowrap;
-                }}
-                </style>
-                <div class="nb-table-scroll">
-                    <table class="nb-vm-table">
-                        <thead><tr>{table_headers}</tr></thead>
-                        <tbody>{''.join(table_rows)}</tbody>
-                    </table>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            
-            # Show summary
-            vms_in_db = sum(1 for vm in vm_status_list if '✅' in vm['In Database'])
-            vms_not_in_db = len(vm_status_list) - vms_in_db
-            
-            col_a, col_b, col_c = st.columns(3)
-            with col_a:
-                st.info(f"**✅ Already in Database:** {vms_in_db} VMs")
-            with col_b:
-                st.warning(f"**❌ Need to Add to NetBox:** {vms_not_in_db} VMs")
-            with col_c:
-                if ip_index:
-                    st.info(f"**🌐 IP Found in NetBox:** {ip_matched} VMs")
+                st.markdown(
+                    f"""
+                    <style>
+                    .nb-table-scroll {{
+                        max-width: 100%;
+                        max-height: 400px;
+                        overflow: auto;
+                        border: 1px solid rgba(128, 128, 128, 0.25);
+                    }}
+                    .nb-vm-table {{
+                        width: 100%;
+                        border-collapse: collapse;
+                        font-size: 13px;
+                    }}
+                    .nb-vm-table thead {{
+                        background-color: rgba(128, 128, 128, 0.1);
+                        position: sticky;
+                        top: 0;
+                    }}
+                    .nb-vm-table th, .nb-vm-table td {{
+                        padding: 6px 10px;
+                        text-align: left;
+                        border-bottom: 1px solid rgba(128, 128, 128, 0.1);
+                    }}
+                    .nb-vm-table th {{
+                        font-weight: 600;
+                    }}
+                    .nb-tags-column {{
+                        max-width: 300px;
+                    }}
+                    .nb-tags-cell {{
+                        display: flex;
+                        flex-wrap: wrap;
+                        gap: 4px;
+                    }}
+                    .nb-tag-chip {{
+                        display: inline-block;
+                        padding: 2px 6px;
+                        background-color: rgba(59, 130, 246, 0.15);
+                        color: rgb(59, 130, 246);
+                        border-radius: 4px;
+                        font-size: 11px;
+                        white-space: nowrap;
+                    }}
+                    </style>
+                    <div class="nb-table-scroll">
+                        <table class="nb-vm-table">
+                            <thead><tr>{table_headers}</tr></thead>
+                            <tbody>{''.join(table_rows)}</tbody>
+                        </table>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                
+                # Show summary
+                vms_in_db = sum(1 for vm in vm_status_list if '✅' in vm['In Database'])
+                vms_not_in_db = len(vm_status_list) - vms_in_db
+                
+                col_a, col_b, col_c = st.columns(3)
+                with col_a:
+                    st.info(f"**✅ Already in Database:** {vms_in_db} VMs")
+                with col_b:
+                    st.warning(f"**❌ Need to Add to NetBox:** {vms_not_in_db} VMs")
+                with col_c:
+                    if ip_index:
+                        st.info(f"**🌐 IP Found in NetBox:** {ip_matched} VMs")
         
         # NetBox Objects Summary
         st.subheader("3️⃣ NetBox Objects Required")
