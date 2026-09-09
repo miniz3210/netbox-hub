@@ -252,6 +252,8 @@ def render_azure_tab(active_model=None):
                 st.rerun()
         with c_ref:
             if st.button("↻", help="Refresh data", use_container_width=True):
+                # Clear preview table cache to force rebuild
+                st.session_state.azure_preview_table_df = None
                 st.rerun()
     
     # Session state for parsed data
@@ -309,10 +311,8 @@ def render_azure_tab(active_model=None):
             df_for_save = pd.DataFrame(vm_records)
             save_result = save_azure_csv_upload(uploaded_file.name, df_for_save)
             
-            # Show preview
-            st.success(f"✅ Parsed {len(vm_records)} Azure VMs (saved to database)")
-            
-            st.subheader("2️⃣ Preview Azure VMs")
+            # Trigger auto-refresh to reload with saved data
+            st.rerun()
 
             # Convert to DataFrame for display
             df_preview = pd.DataFrame(vm_records)
