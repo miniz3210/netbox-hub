@@ -220,7 +220,7 @@ FIELD_SPECS: Dict[str, List[Any]] = {
         ("Role", "role"), ("Status", "status"), ("Site", "site"),
         ("Cluster", "cluster"), ("Device", "device"), ("Platform", "platform"),
         ("Tenant", "tenant"), ("vCPUs", "vcpus"), ("Memory", "memory"),
-        ("Disk", "disk"), ("Primary IP", "primary_ip"),
+        ("Disk", "disk"), ("Primary IP", "primary_ip"), ("Owner", "owner"),
         ("Description", "description"),
     ],
     "tenancy_tenants": [
