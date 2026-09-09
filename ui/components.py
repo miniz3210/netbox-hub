@@ -146,11 +146,51 @@ def _handle_backup_upload(uploader_key: str, scope_key: str) -> None:
 
     files = uploaded if isinstance(uploaded, list) else [uploaded]
     for file_obj in files:
+        # Show progress for large files
+        file_size_mb = file_obj.size / (1024 * 1024) if hasattr(file_obj, 'size') else 0
+        
+        if file_size_mb > 10:
+            progress_placeholder = st.empty()
+            progress_bar = st.progress(0)
+            
+            def progress_callback(message: str):
+                """Update Streamlit UI with progress."""
+                progress_placeholder.info(f"⏳ {message}")
+                # Update progress bar based on message
+                if "Parsing JSON" in message:
+                    progress_bar.progress(20)
+                elif "Organizing" in message:
+                    progress_bar.progress(40)
+                elif "Ingesting" in message or "Processing" in message:
+                    progress_bar.progress(60)
+                elif "Committing" in message:
+                    progress_bar.progress(80)
+                elif "Complete" in message:
+                    progress_bar.progress(100)
+        else:
+            progress_callback = None
+        
         try:
             if hasattr(file_obj, "seek"):
                 file_obj.seek(0)
-            result = save_netbox_backup(file_obj, filename=file_obj.name)
+            
+            with st.spinner(f'Uploading {file_obj.name} ({file_size_mb:.1f} MB)...'):
+                result = save_netbox_backup(
+                    file_obj, 
+                    filename=file_obj.name,
+                    enable_schema_discovery=False,  # Fast upload
+                    progress_callback=progress_callback
+                )
+            
+            # Clear progress indicators
+            if file_size_mb > 10:
+                progress_placeholder.empty()
+                progress_bar.empty()
+                
         except Exception as exc:
+            if file_size_mb > 10:
+                progress_placeholder.empty()
+                progress_bar.empty()
             st.session_state[error_key] = f"**{file_obj.name}**: {exc}"
             st.session_state[result_key] = None
             return

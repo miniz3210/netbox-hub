@@ -465,16 +465,43 @@ def _summarize(object_type: str, obj: Dict[str, Any], site: str) -> str:
 
 # ── PARSING ─────────────────────────────────────────────────────────────
 
-def _load_payload(file_bytes: Any) -> Dict[str, Any]:
+def _load_payload(file_bytes: Any, progress_callback=None) -> Dict[str, Any]:
+    """Load and parse NetBox backup JSON with optional progress tracking."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Read file content
+    if progress_callback:
+        progress_callback("Reading file...")
+    
+    logger.info("Loading NetBox backup JSON file...")
     raw = file_bytes.read() if hasattr(file_bytes, "read") else file_bytes
+    
     if isinstance(raw, bytes):
+        file_size_mb = len(raw) / (1024 * 1024)
+        logger.info(f"File size: {file_size_mb:.1f} MB")
+        if progress_callback:
+            progress_callback(f"Decoding {file_size_mb:.1f} MB file...")
         raw = raw.decode("utf-8-sig", errors="replace")
+    
+    # Parse JSON
+    if progress_callback:
+        progress_callback("Parsing JSON (this may take 10-30 seconds for large files)...")
+    
+    logger.info("Parsing JSON...")
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise ValueError(f"Invalid NetBox backup JSON: {exc}") from exc
+    
+    logger.info("JSON parsed successfully")
+    
     if not isinstance(payload, dict):
         raise ValueError("Invalid NetBox backup: expected a JSON object keyed by NetBox endpoints.")
+    
+    if progress_callback:
+        progress_callback("JSON parsed, processing data...")
+    
     return payload
 
 
@@ -792,16 +819,38 @@ def _ingest_choice_values(
 def _ingest_backup_rows(
     buckets: Dict[str, List[Dict[str, Any]]],
     uploaded_at: str,
+    progress_callback=None,
 ) -> Dict[str, int]:
+    """Ingest backup rows with progress tracking."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     parent_sites = _build_parent_site_map(buckets)
 
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    
+    if progress_callback:
+        progress_callback("Clearing old backup records...")
+    
+    logger.info("Clearing old backup records...")
     cursor.execute("DELETE FROM backup_records")
+    
+    logger.info(f"Processing {len(buckets)} object types...")
 
     counts: Dict[str, int] = {}
+    total_objects = len(buckets)
+    processed = 0
+    
     for object_type, rows in buckets.items():
+        processed += 1
         label = _label_for(object_type)
+        
+        if progress_callback and processed % 5 == 0:
+            progress_callback(f"Processing {object_type} ({processed}/{total_objects})...")
+        
+        logger.info(f"[{processed}/{total_objects}] Processing {object_type}: {len(rows)} records")
+        
         payload = []
         for obj in rows:
             site = _resolve_site(obj, parent_sites)
@@ -809,24 +858,34 @@ def _ingest_backup_rows(
             summary = _summarize(object_type, obj, site)
             blob = " ".join([label, name, site, summary]).lower()
             payload.append((object_type, label, obj.get("id"), name, site, summary, blob, uploaded_at))
+        
         if payload:
+            # Batch insert for performance
             cursor.executemany("""
                 INSERT INTO backup_records
                     (object_type, object_label, object_id, name, site, summary, search_blob, imported_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, payload)
             counts[object_type] = len(payload)
+            logger.info(f"  Inserted {len(payload)} {object_type} records")
 
+    if progress_callback:
+        progress_callback("Committing to database...")
+    
+    logger.info("Committing backup records to database...")
     conn.commit()
     conn.close()
+    
+    logger.info(f"Successfully ingested {sum(counts.values())} total records")
     return counts
 
 
 # ── PUBLIC API ──────────────────────────────────────────────────────────
 
 def save_netbox_backup(file_bytes: Any, filename: str = "", 
-                      enable_schema_discovery: bool = False) -> Dict[str, Any]:
-    """Ingest a NetBox master backup JSON file.
+                      enable_schema_discovery: bool = False,
+                      progress_callback=None) -> Dict[str, Any]:
+    """Ingest a NetBox master backup JSON file with progress tracking.
 
     Accepts both the legacy flat layout and the full API-walk layout produced by
     `netbox-export.ps1` v2.0. Populates the Sites / IPAM / Inventory tables
@@ -839,20 +898,57 @@ def save_netbox_backup(file_bytes: Any, filename: str = "",
         enable_schema_discovery: If True, runs schema discovery (adds ~1-3s for large files)
                                 Default False for fast uploads. Run manually with 
                                 'python field_manager.py discover' later if needed.
+        progress_callback: Optional callback function(message: str) for progress updates
     
     Returns:
         Dict with upload statistics
     """
+    import logging
+    import time
+    logger = logging.getLogger(__name__)
+    
+    start_time = time.time()
+    
     init_backup_tables()
 
-    payload = _load_payload(file_bytes)
+    # Phase 1: Load and parse JSON (slowest part for large files)
+    if progress_callback:
+        progress_callback("Loading JSON file...")
+    logger.info("=" * 60)
+    logger.info("Starting NetBox backup ingestion")
+    logger.info("=" * 60)
+    
+    parse_start = time.time()
+    payload = _load_payload(file_bytes, progress_callback)
+    parse_time = time.time() - parse_start
+    logger.info(f"JSON parsing completed in {parse_time:.1f}s")
+    
+    # Phase 2: Bucket data
+    if progress_callback:
+        progress_callback("Organizing data...")
+    
+    bucket_start = time.time()
     buckets = _bucket_payload(payload)
     source_info = _payload_source_info(payload)
     uploaded_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    bucket_time = time.time() - bucket_start
+    logger.info(f"Data bucketing completed in {bucket_time:.1f}s")
+    logger.info(f"Found {len(buckets)} object types")
 
-    object_counts = _ingest_backup_rows(buckets, uploaded_at)
+    # Phase 3: Ingest records
+    if progress_callback:
+        progress_callback("Ingesting records into database...")
+    
+    ingest_start = time.time()
+    object_counts = _ingest_backup_rows(buckets, uploaded_at, progress_callback)
     total = sum(object_counts.values())
+    ingest_time = time.time() - ingest_start
+    logger.info(f"Record ingestion completed in {ingest_time:.1f}s ({total} records)")
 
+    # Phase 4: Process sites, IPAM, inventory
+    if progress_callback:
+        progress_callback("Processing sites and IPAM data...")
+    
     sites = _ingest_sites(buckets)
     ipam = _ingest_ipam(buckets)
     inventory = _ingest_inventory(buckets)
@@ -860,8 +956,11 @@ def save_netbox_backup(file_bytes: Any, filename: str = "",
     
     schema_stats = {}
     
-    # Optional schema discovery (disabled by default for speed)
+    # Phase 5: Optional schema discovery
     if enable_schema_discovery:
+        if progress_callback:
+            progress_callback("Discovering schema (optional, can skip next time)...")
+        
         try:
             from core.field_registry import FieldRegistry
             from core.db_manager_wrapper import DatabaseManager
@@ -871,10 +970,13 @@ def save_netbox_backup(file_bytes: Any, filename: str = "",
             netbox_version = source_info.get("netbox_version") if source_info else None
             schema_stats = field_registry.discover_schema_from_backup(buckets, netbox_version)
         except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(f"Schema discovery failed: {e}")
+            logger.warning(f"Schema discovery failed: {e}")
             schema_stats = {"error": str(e)}
 
+    # Phase 6: Save metadata
+    if progress_callback:
+        progress_callback("Saving metadata...")
+    
     counts_payload = dict(object_counts)
     if source_info:
         counts_payload["__source__"] = source_info
@@ -893,6 +995,19 @@ def save_netbox_backup(file_bytes: Any, filename: str = "",
     set_sync_metadata("ipam", BACKUP_SOURCE)
     set_sync_metadata("naming", BACKUP_SOURCE)
 
+    total_time = time.time() - start_time
+    
+    logger.info("=" * 60)
+    logger.info(f"Backup ingestion completed successfully in {total_time:.1f}s")
+    logger.info(f"  - JSON parsing: {parse_time:.1f}s")
+    logger.info(f"  - Data bucketing: {bucket_time:.1f}s")
+    logger.info(f"  - Record ingestion: {ingest_time:.1f}s")
+    logger.info(f"  - Total records: {total}")
+    logger.info("=" * 60)
+    
+    if progress_callback:
+        progress_callback(f"Complete! Processed {total} records in {total_time:.1f}s")
+
     result = {
         "total": total,
         "object_counts": object_counts,
@@ -905,6 +1020,12 @@ def save_netbox_backup(file_bytes: Any, filename: str = "",
         "source_info": source_info,
         "uploaded_at": uploaded_at,
         "filename": filename,
+        "timings": {
+            "total": total_time,
+            "parse": parse_time,
+            "bucket": bucket_time,
+            "ingest": ingest_time
+        }
     }
     
     if schema_stats:
