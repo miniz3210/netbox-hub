@@ -263,7 +263,7 @@ def analyze_netbox_objects(metadata: Dict[str, Any]) -> Dict[str, Dict[str, Any]
         ("resource_groups", "Resource Group Set (Custom Field Choices)", "extras.customfieldchoiceset",
          list(metadata.get("resource_groups", [])),
          get_existing_custom_field_values(RESOURCE_GROUP_FIELD, RESOURCE_GROUP_CHOICE_SET)),
-        ("owners", "Owners (users.owner)", "users.owner",
+        ("owners", "Owners", "users.owner",
          list(metadata.get("owners", [])),
          _fetch_backup_names("users_owner")),
         ("roles", "Roles (Applications)", "dcim.devicerole",

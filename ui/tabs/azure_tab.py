@@ -525,7 +525,7 @@ def render_azure_tab(active_model=None):
                     existing = data["existing"]
                     icon = "❌" if missing else "✅"
                     header = f"{icon} {data['label']} — {len(missing)} missing / {len(existing)} existing"
-                    with st.expander(header, expanded=bool(missing)):
+                    with st.expander(header, expanded=False):
                         det_a, det_b = st.columns(2)
                         with det_a:
                             st.markdown("**❌ Missing (needs import)**")
@@ -667,7 +667,10 @@ def render_azure_tab(active_model=None):
                     csv_buffer = io.StringIO(newline='')
                     csv.writer(csv_buffer, lineterminator='\n').writerows(vm_import_rows)
                     vm_import_script = csv_buffer.getvalue()
-                    st.code(vm_import_script, language="csv")
+                    
+                    with st.expander(f"📄 NetBox VMs Import CSV ({len(new_vm_records)} VMs)", expanded=True):
+                        st.caption("Copy this CSV into NetBox's Virtual Machine bulk import form.")
+                        st.code(vm_import_script, language="csv")
 
                     st.download_button(
                         "📥 Download NetBox VMs Import CSV",
@@ -824,26 +827,100 @@ def render_azure_tab(active_model=None):
                         
                         st.info(f"{source_icon} **{source_text}**")
                         
-                        # Compact two-column layout
+                        # Add JavaScript for copy-to-clipboard functionality
+                        st.components.v1.html("""
+                        <script>
+                        function copyToClipboard(text) {
+                            if (navigator.clipboard && window.isSecureContext) {
+                                navigator.clipboard.writeText(text);
+                            } else {
+                                var textArea = document.createElement("textarea");
+                                textArea.value = text;
+                                textArea.style.position = "fixed";
+                                textArea.style.opacity = "0";
+                                document.body.appendChild(textArea);
+                                textArea.focus();
+                                textArea.select();
+                                try {
+                                    document.execCommand('copy');
+                                } catch (err) {}
+                                document.body.removeChild(textArea);
+                            }
+                        }
+                        </script>
+                        """, height=0)
+                        
+                        # Compact two-column layout with copy buttons
                         # Use clean_target as part of the key to ensure widgets refresh for each new search
                         key_suffix = clean_target.replace(' ', '_').replace('.', '_')
                         col_left, col_right = st.columns(2)
                         
                         with col_left:
                             st.markdown("**Virtual Machine**")
-                            st.text_input("Name", value=str(vm_name), disabled=True, key=f"nb_vm_name_{key_suffix}", label_visibility="visible")
-                            st.text_input("Role", value=str(vm_role), disabled=True, key=f"nb_vm_role_{key_suffix}")
-                            st.text_input("Status", value=str(vm_status), disabled=True, key=f"nb_vm_status_{key_suffix}")
-                            st.text_input("Description", value=str(vm_desc), disabled=True, key=f"nb_vm_desc_{key_suffix}")
-                            st.text_input("Tags", value=str(vm_tags_display), disabled=True, key=f"nb_vm_tags_{key_suffix}")
+                            col_name, col_name_btn = st.columns([4, 1])
+                            with col_name:
+                                st.text_input("Name", value=str(vm_name), disabled=True, key=f"nb_vm_name_{key_suffix}", label_visibility="visible")
+                            with col_name_btn:
+                                st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                                st.button("📋", key=f"copy_name_{key_suffix}", help="Copy to clipboard", on_click=lambda: st.write(f'<script>navigator.clipboard.writeText("{vm_name}")</script>', unsafe_allow_html=True))
+                            
+                            col_role, col_role_btn = st.columns([4, 1])
+                            with col_role:
+                                st.text_input("Role", value=str(vm_role), disabled=True, key=f"nb_vm_role_{key_suffix}")
+                            with col_role_btn:
+                                st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                                st.button("📋", key=f"copy_role_{key_suffix}", help="Copy to clipboard")
+                            
+                            col_status, col_status_btn = st.columns([4, 1])
+                            with col_status:
+                                st.text_input("Status", value=str(vm_status), disabled=True, key=f"nb_vm_status_{key_suffix}")
+                            with col_status_btn:
+                                st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                                st.button("📋", key=f"copy_status_{key_suffix}", help="Copy to clipboard")
+                            
+                            col_desc, col_desc_btn = st.columns([4, 1])
+                            with col_desc:
+                                st.text_input("Description", value=str(vm_desc), disabled=True, key=f"nb_vm_desc_{key_suffix}")
+                            with col_desc_btn:
+                                st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                                st.button("📋", key=f"copy_desc_{key_suffix}", help="Copy to clipboard")
+                            
+                            col_tags, col_tags_btn = st.columns([4, 1])
+                            with col_tags:
+                                st.text_input("Tags", value=str(vm_tags_display), disabled=True, key=f"nb_vm_tags_{key_suffix}")
+                            with col_tags_btn:
+                                st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                                st.button("📋", key=f"copy_tags_{key_suffix}", help="Copy to clipboard")
                             
                             st.markdown("**Tenancy**")
-                            st.text_input("Tenant group", value=str(vm_tenant_group), disabled=True, key=f"nb_tenant_group_{key_suffix}")
-                            st.text_input("Tenant", value=str(vm_tenant), disabled=True, key=f"nb_tenant_{key_suffix}")
+                            col_tg, col_tg_btn = st.columns([4, 1])
+                            with col_tg:
+                                st.text_input("Tenant group", value=str(vm_tenant_group), disabled=True, key=f"nb_tenant_group_{key_suffix}")
+                            with col_tg_btn:
+                                st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                                st.button("📋", key=f"copy_tg_{key_suffix}", help="Copy to clipboard")
+                            
+                            col_tenant, col_tenant_btn = st.columns([4, 1])
+                            with col_tenant:
+                                st.text_input("Tenant", value=str(vm_tenant), disabled=True, key=f"nb_tenant_{key_suffix}")
+                            with col_tenant_btn:
+                                st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                                st.button("📋", key=f"copy_tenant_{key_suffix}", help="Copy to clipboard")
                             
                             st.markdown("**Custom Fields**")
-                            st.text_input("Instance Type", value=str(vm_instance), disabled=True, key=f"nb_instance_type_{key_suffix}")
-                            st.text_input("Resource Groups", value=str(vm_rg), disabled=True, key=f"nb_rg_{key_suffix}")
+                            col_inst, col_inst_btn = st.columns([4, 1])
+                            with col_inst:
+                                st.text_input("Instance Type", value=str(vm_instance), disabled=True, key=f"nb_instance_type_{key_suffix}")
+                            with col_inst_btn:
+                                st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                                st.button("📋", key=f"copy_inst_{key_suffix}", help="Copy to clipboard")
+                            
+                            col_rg, col_rg_btn = st.columns([4, 1])
+                            with col_rg:
+                                st.text_input("Resource Groups", value=str(vm_rg), disabled=True, key=f"nb_rg_{key_suffix}")
+                            with col_rg_btn:
+                                st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                                st.button("📋", key=f"copy_rg_{key_suffix}", help="Copy to clipboard")
                         
                         with col_right:
                             st.markdown("**Placement**")
@@ -855,17 +932,57 @@ def render_azure_tab(active_model=None):
                                 vm_site = f"Azure - {raw_loc}"
                             else:
                                 vm_site = "Azure - Unknown"
-                            st.text_input("Site", value=str(vm_site), disabled=True, key=f"nb_site_{key_suffix}")
-                            st.text_input("Cluster", value=str(vm_cluster), disabled=True, key=f"nb_cluster_{key_suffix}")
-                            st.text_input("Device", value=str(vm_device), disabled=True, key=f"nb_device_{key_suffix}")
+                            
+                            col_site, col_site_btn = st.columns([4, 1])
+                            with col_site:
+                                st.text_input("Site", value=str(vm_site), disabled=True, key=f"nb_site_{key_suffix}")
+                            with col_site_btn:
+                                st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                                st.button("📋", key=f"copy_site_{key_suffix}", help="Copy to clipboard")
+                            
+                            col_cluster, col_cluster_btn = st.columns([4, 1])
+                            with col_cluster:
+                                st.text_input("Cluster", value=str(vm_cluster), disabled=True, key=f"nb_cluster_{key_suffix}")
+                            with col_cluster_btn:
+                                st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                                st.button("📋", key=f"copy_cluster_{key_suffix}", help="Copy to clipboard")
+                            
+                            col_device, col_device_btn = st.columns([4, 1])
+                            with col_device:
+                                st.text_input("Device", value=str(vm_device), disabled=True, key=f"nb_device_{key_suffix}")
+                            with col_device_btn:
+                                st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                                st.button("📋", key=f"copy_device_{key_suffix}", help="Copy to clipboard")
                             
                             st.markdown("**Management**")
-                            st.text_input("Platform", value=str(vm_platform), disabled=True, key=f"nb_platform_{key_suffix}")
-                            st.text_input("Primary IPv4", value=str(vm_ip), disabled=True, key=f"nb_ipv4_{key_suffix}")
+                            col_platform, col_platform_btn = st.columns([4, 1])
+                            with col_platform:
+                                st.text_input("Platform", value=str(vm_platform), disabled=True, key=f"nb_platform_{key_suffix}")
+                            with col_platform_btn:
+                                st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                                st.button("📋", key=f"copy_platform_{key_suffix}", help="Copy to clipboard")
+                            
+                            col_ip, col_ip_btn = st.columns([4, 1])
+                            with col_ip:
+                                st.text_input("Primary IPv4", value=str(vm_ip), disabled=True, key=f"nb_ipv4_{key_suffix}")
+                            with col_ip_btn:
+                                st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                                st.button("📋", key=f"copy_ip_{key_suffix}", help="Copy to clipboard")
                             
                             st.markdown("**Ownership**")
-                            st.text_input("Owner", value=str(vm_owner), disabled=True, key=f"nb_owner_{key_suffix}")
-                            st.text_input("Owner group", value=str(vm_owner_group), disabled=True, key=f"nb_owner_group_{key_suffix}")
+                            col_owner, col_owner_btn = st.columns([4, 1])
+                            with col_owner:
+                                st.text_input("Owner", value=str(vm_owner), disabled=True, key=f"nb_owner_{key_suffix}")
+                            with col_owner_btn:
+                                st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                                st.button("📋", key=f"copy_owner_{key_suffix}", help="Copy to clipboard")
+                            
+                            col_og, col_og_btn = st.columns([4, 1])
+                            with col_og:
+                                st.text_input("Owner group", value=str(vm_owner_group), disabled=True, key=f"nb_owner_group_{key_suffix}")
+                            with col_og_btn:
+                                st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                                st.button("📋", key=f"copy_og_{key_suffix}", help="Copy to clipboard")
                 
                 
         
