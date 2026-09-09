@@ -239,8 +239,13 @@ def render_azure_tab(active_model=None):
         # Consolidated upload section
         c_up, c_clr, c_ref = st.columns([3, 1, 1])
         with c_up:
-            # Placeholder for visual alignment - actual uploader is outside expander
-            st.empty()
+            uploaded_file = st.file_uploader(
+                "Upload Azure VM CSV file",
+                type=["csv"],
+                help="Upload the CSV file exported from Azure Resource Graph Explorer",
+                key="azure_csv_uploader",
+                label_visibility="collapsed"
+            )
         with c_clr:
             if saved_upload:
                 if st.button("🗑️ Clear Azure CSV", key="clear_azure_csv_btn", help="Clear Azure CSV data", use_container_width=True):
@@ -258,14 +263,6 @@ def render_azure_tab(active_model=None):
                 # Clear preview table cache to force rebuild
                 st.session_state.azure_preview_table_df = None
                 st.rerun()
-    
-    # File uploader - OUTSIDE the expander so it's always available
-    uploaded_file = st.file_uploader(
-        "Upload Azure VM CSV file",
-        type=["csv"],
-        help="Upload the CSV file exported from Azure Resource Graph Explorer",
-        key="azure_csv_uploader"
-    )
     
     # Session state for parsed data
     if 'azure_vms_parsed' not in st.session_state:
