@@ -414,25 +414,14 @@ def _summarize(object_type: str, obj: Dict[str, Any], site: str) -> str:
     """
     Generate summary text for a NetBox object.
     
-    Now uses dynamic field specs from the field registry when available,
-    falling back to hardcoded FIELD_SPECS for backward compatibility.
+    Uses hardcoded FIELD_SPECS for performance during bulk imports.
+    Dynamic field specs are used by UI components, not during import.
     """
     parts: List[str] = []
     site_lower = site.strip().lower()
     
-    # Try to get dynamic field spec first
-    spec = None
-    try:
-        from core.field_registry import FieldRegistry
-        from core.db_manager_wrapper import DatabaseManager
-        registry = FieldRegistry(DatabaseManager())
-        spec = registry.get_field_spec(object_type)
-    except Exception:
-        pass  # Fall back to hardcoded specs
-    
-    # Fall back to hardcoded specs if no dynamic spec found
-    if not spec:
-        spec = FIELD_SPECS.get(object_type)
+    # Use hardcoded specs for fast bulk import (no DB lookups)
+    spec = FIELD_SPECS.get(object_type)
 
     if spec:
         for label, path in spec:
