@@ -215,8 +215,47 @@ def render_azure_tab(active_model=None):
     # File uploader
     st.subheader("1️⃣ Upload Azure VM CSV Export")
     
+    # Debug section - will remove later
+    with st.expander("🔧 Debug: Database Status", expanded=False):
+        try:
+            from core.db_manager import DB_PATH
+            import sqlite3
+            import os
+            
+            st.write(f"**Database path:** `{DB_PATH}`")
+            st.write(f"**Database exists:** {os.path.exists(DB_PATH)}")
+            
+            if os.path.exists(DB_PATH):
+                conn = sqlite3.connect(DB_PATH)
+                cursor = conn.cursor()
+                
+                # Check if table exists
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='azure_csv_uploads'")
+                table_exists = cursor.fetchone()
+                st.write(f"**Table exists:** {table_exists is not None}")
+                
+                if table_exists:
+                    cursor.execute("SELECT COUNT(*) FROM azure_csv_uploads")
+                    count = cursor.fetchone()[0]
+                    st.write(f"**Rows in table:** {count}")
+                    
+                    if count > 0:
+                        cursor.execute("SELECT id, filename, row_count, uploaded_at FROM azure_csv_uploads")
+                        for row in cursor.fetchall():
+                            st.write(f"**Found:** {row[1]} ({row[2]} rows) - {row[3]}")
+                else:
+                    st.warning("Table 'azure_csv_uploads' does not exist in database")
+                
+                conn.close()
+        except Exception as e:
+            st.error(f"Debug error: {e}")
+    
     # Check if there's a saved upload
-    saved_upload = get_azure_csv_upload()
+    try:
+        saved_upload = get_azure_csv_upload()
+    except Exception as e:
+        st.error(f"Error checking for saved CSV: {e}")
+        saved_upload = None
     
     # Show saved upload info and Clear button if exists
     if saved_upload:
