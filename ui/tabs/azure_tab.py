@@ -742,7 +742,12 @@ def render_azure_tab(active_model=None):
                                 tag_names = [t.get('name', str(t)) if isinstance(t, dict) else str(t) for t in tags_val if t]
                                 return ", ".join(tag_names) if tag_names else "—"
                             if isinstance(tags_val, str) and tags_val.strip() not in ["", "nan", "None", "—"]:
-                                return tags_val.strip()
+                                # Strip HTML tags if present
+                                import re
+                                clean_text = re.sub(r'<[^>]+>', '', tags_val)
+                                # Replace &nbsp; and other entities
+                                clean_text = clean_text.replace('&nbsp;', ' ')
+                                return clean_text.strip() if clean_text.strip() else "—"
                             return "—"
                         
                         def get_val_from_row(row_dict, candidate_keys, default=None):
@@ -831,17 +836,26 @@ def render_azure_tab(active_model=None):
                         st.components.v1.html("""
                         <script>
                         function copyToClipboard(text, iconId) {
+                            // Decode HTML entities
+                            var txt = document.createElement("textarea");
+                            txt.innerHTML = text;
+                            var decodedText = txt.value;
+                            
                             if (navigator.clipboard && window.isSecureContext) {
-                                navigator.clipboard.writeText(text).then(function() {
+                                navigator.clipboard.writeText(decodedText).then(function() {
                                     const icon = document.getElementById(iconId);
                                     if (icon) {
                                         icon.textContent = '✓';
-                                        setTimeout(function() { icon.textContent = '📋'; }, 1000);
+                                        icon.title = 'Copied!';
+                                        setTimeout(function() { 
+                                            icon.textContent = '📋';
+                                            icon.title = 'Copy to clipboard';
+                                        }, 1000);
                                     }
                                 });
                             } else {
                                 var textArea = document.createElement("textarea");
-                                textArea.value = text;
+                                textArea.value = decodedText;
                                 textArea.style.position = "fixed";
                                 textArea.style.opacity = "0";
                                 document.body.appendChild(textArea);
@@ -852,7 +866,11 @@ def render_azure_tab(active_model=None):
                                     const icon = document.getElementById(iconId);
                                     if (icon) {
                                         icon.textContent = '✓';
-                                        setTimeout(function() { icon.textContent = '📋'; }, 1000);
+                                        icon.title = 'Copied!';
+                                        setTimeout(function() { 
+                                            icon.textContent = '📋';
+                                            icon.title = 'Copy to clipboard';
+                                        }, 1000);
                                     }
                                 } catch (err) {}
                                 document.body.removeChild(textArea);
@@ -863,9 +881,10 @@ def render_azure_tab(active_model=None):
                         .copy-icon {
                             cursor: pointer;
                             margin-left: 8px;
-                            font-size: 14px;
-                            opacity: 0.6;
+                            font-size: 12px;
+                            opacity: 0.5;
                             user-select: none;
+                            display: inline-block;
                         }
                         .copy-icon:hover {
                             opacity: 1;
@@ -875,8 +894,11 @@ def render_azure_tab(active_model=None):
                         
                         # Helper function to create label with inline copy button
                         def label_with_copy(label_text, value, icon_id):
-                            escaped_value = html.escape(str(value)).replace("'", "\\'")
-                            return f'{label_text} <span class="copy-icon" id="{icon_id}" onclick="copyToClipboard(\'{escaped_value}\', \'{icon_id}\')">📋</span>'
+                            # Clean the value first to remove any HTML
+                            import re
+                            clean_value = re.sub(r'<[^>]+>', '', str(value))
+                            escaped_value = html.escape(clean_value).replace("'", "&#39;").replace('"', '&quot;')
+                            return f'{label_text} <span class="copy-icon" id="{icon_id}" onclick="copyToClipboard(\'{escaped_value}\', \'{icon_id}\')" title="Copy to clipboard">📋</span>'
                         
                         # Compact two-column layout
                         # Use clean_target as part of the key to ensure widgets refresh for each new search
