@@ -1027,11 +1027,11 @@ def render_azure_tab(active_model=None):
             with st.expander("Error Details"):
                 st.code(traceback.format_exc())
     
-    # Debug: Check what we have in session state
-    st.write(f"DEBUG: uploaded_file={uploaded_file}, azure_vms_parsed={'SET' if st.session_state.get('azure_vms_parsed') else 'None'}")
-    
     # Show preview and analysis sections if data is loaded (either from upload or database)
     elif st.session_state.azure_vms_parsed is not None:
+        # Debug: Check what we have in session state
+        st.write(f"DEBUG: Showing preview. VMs loaded: {len(st.session_state.azure_vms_parsed)}")
+        
         vm_records = st.session_state.azure_vms_parsed
         
         # Show that data is loaded
