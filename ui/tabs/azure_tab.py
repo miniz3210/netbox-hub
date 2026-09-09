@@ -304,10 +304,14 @@ def render_azure_tab(active_model=None):
                 st.session_state.azure_parsed_vms_table = vm_records
                 st.session_state.azure_raw_vm_records = vm_records
                 
+                # Important: Set this to trigger the preview section
+                uploaded_file = "loaded_from_db"
+                
                 st.success(f"✅ Loaded {len(vm_records)} VMs from saved CSV")
-                uploaded_file = "loaded_from_db"  # Trigger processing flow
             except Exception as e:
                 st.error(f"Error loading saved CSV: {e}")
+                import traceback
+                st.code(traceback.format_exc())
                 uploaded_file = None
 
     # Parse and preview
@@ -332,12 +336,6 @@ def render_azure_tab(active_model=None):
                 vm_records, warnings = parse_azure_vm_csv(str(temp_path))
                 st.session_state.azure_vms_parsed = vm_records
                 st.session_state.azure_parsed_vms_table = vm_records
-            
-            # Show warnings if any
-            if warnings:
-                with st.expander("⚠️ Parsing Warnings", expanded=True):
-                    for warning in warnings:
-                        st.warning(warning)
             
             # Save to database for persistence
             df_for_save = pd.DataFrame(vm_records)
@@ -1028,6 +1026,9 @@ def render_azure_tab(active_model=None):
             import traceback
             with st.expander("Error Details"):
                 st.code(traceback.format_exc())
+    
+    # Debug: Check what we have in session state
+    st.write(f"DEBUG: uploaded_file={uploaded_file}, azure_vms_parsed={'SET' if st.session_state.get('azure_vms_parsed') else 'None'}")
     
     # Show preview and analysis sections if data is loaded (either from upload or database)
     elif st.session_state.azure_vms_parsed is not None:
