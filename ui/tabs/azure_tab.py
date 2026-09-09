@@ -212,19 +212,40 @@ def render_azure_tab(active_model=None):
         5. Upload the CSV file using the uploader below.
         """)
     
-    # File uploader
+    # File uploader section with status indicator
     st.subheader("1️⃣ Upload Azure VM CSV Export")
     
     # Check if there's a saved upload
     saved_upload = get_azure_csv_upload()
+    vm_count = saved_upload['row_count'] if saved_upload else 0
     
-    # Show saved upload info and Clear button if exists (compact version)
-    if saved_upload:
-        col1, col2 = st.columns([4, 1])
-        with col1:
-            st.caption(f"📁 Saved: **{saved_upload['filename']}** ({saved_upload['row_count']} VMs)")
-        with col2:
-            if st.button("Clear", help="Remove saved CSV data", use_container_width=True):
+    status_tag = f"🟢 ({vm_count} VMs in DB)" if vm_count > 0 else "⚪ (No data)"
+    
+    with st.expander(f"📥 Ingest Azure VM Data (CSV Export) {status_tag}", expanded=False):
+        if saved_upload:
+            st.markdown(f"**DB Status:** `Source: {saved_upload['filename']}`")
+        
+        st.markdown("---")
+        st.markdown("**CSV Export Path:**")
+        st.caption(
+            "**Azure Resource Graph Explorer:**  \n"
+            "1. In Azure Portal search bar, type and select **Resource Graph Explorer**  \n"
+            "2. Paste the KQL query from the instructions below  \n"
+            "3. Select **Run query**  \n"
+            "4. Click **Export** ➔ **Download as CSV**"
+        )
+        
+        # Consolidated upload section
+        c_up, c_clr, c_ref = st.columns([3, 1, 1])
+        with c_up:
+            uploaded_file = st.file_uploader(
+                "Upload Azure VM CSV file",
+                type=["csv"],
+                help="Upload the CSV file exported from Azure Resource Graph Explorer",
+                key="azure_csv_uploader"
+            )
+        with c_clr:
+            if st.button("Clear", help="Remove saved CSV data", use_container_width=True, disabled=not saved_upload):
                 clear_azure_csv_upload()
                 # Clear session state
                 st.session_state.azure_vms_parsed = None
@@ -234,12 +255,9 @@ def render_azure_tab(active_model=None):
                 st.session_state.azure_dedup_cache = None
                 st.session_state.azure_preview_table_df = None
                 st.rerun()
-    
-    uploaded_file = st.file_uploader(
-        "Select Azure VM CSV file" if not saved_upload else "Upload new CSV to replace saved data",
-        type=["csv"],
-        help="Upload the CSV file exported from Azure Portal or PowerShell"
-    )
+        with c_ref:
+            if st.button("↻", help="Refresh data", use_container_width=True):
+                st.rerun()
     
     # Session state for parsed data
     if 'azure_vms_parsed' not in st.session_state:
