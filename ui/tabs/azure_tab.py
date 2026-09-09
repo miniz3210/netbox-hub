@@ -1186,8 +1186,431 @@ def render_azure_tab(active_model=None):
                 if ip_index:
                     st.info(f"**🌐 IP Found in NetBox:** {ip_matched} VMs")
         
-        # Show rest of the analysis sections (NetBox Objects Required, etc.)
-        # These sections check st.session_state.azure_vms_parsed which is now set
+        # NetBox Objects Summary
+        st.subheader("3️⃣ NetBox Objects Required")
+        
+        if "analyze_netbox_clicked" not in st.session_state:
+            st.session_state["analyze_netbox_clicked"] = False
+        if st.button("📋 Analyze NetBox Requirements", key="btn_analyze_netbox_loaded"):
+            st.session_state["analyze_netbox_clicked"] = True
+        
+        if st.session_state.get("analyze_netbox_clicked", False):
+            with st.spinner("Analyzing NetBox requirements..."):
+                netbox_records, metadata = map_azure_to_netbox(vm_records)
+                st.session_state.azure_vms_mapped = netbox_records
+                st.session_state.azure_metadata = metadata
+                st.session_state.azure_object_analysis = analyze_netbox_objects(metadata)
+
+        # Show NetBox requirements
+        if st.session_state.azure_vms_mapped and st.session_state.azure_metadata:
+            metadata = st.session_state.azure_metadata
+            analysis = st.session_state.get("azure_object_analysis") or analyze_netbox_objects(metadata)
+
+            st.markdown("### 📊 NetBox Objects to Create")
+            st.caption(
+                "Checked against the local NetBox database (backup / CSV ingest). "
+                "Only objects reported as missing need to be imported."
+            )
+
+            total_missing = sum(len(d["missing"]) for d in analysis.values())
+            if total_missing:
+                st.warning(f"**{total_missing} objects** are missing from NetBox and need to be created.")
+            else:
+                st.success("✅ All required NetBox objects already exist.")
+
+            # Per-category counters: existing vs missing
+            summary_rows = []
+            for data in analysis.values():
+                summary_rows.append({
+                    "Object Type": data["label"],
+                    "NetBox Object": data["netbox_object"],
+                    "Required": data["total"],
+                    "✅ Exists": len(data["existing"]),
+                    "❌ Missing": len(data["missing"]),
+                })
+            st.dataframe(pd.DataFrame(summary_rows), width="stretch", hide_index=True)
+
+            # Detail per category
+            for key, data in analysis.items():
+                missing = data["missing"]
+                existing = data["existing"]
+                icon = "❌" if missing else "✅"
+                header = f"{icon} {data['label']} — {len(missing)} missing / {len(existing)} existing"
+                with st.expander(header, expanded=False):
+                    det_a, det_b = st.columns(2)
+                    with det_a:
+                        st.markdown("**❌ Missing (needs import)**")
+                        if missing:
+                            for value in missing:
+                                st.text(f"  • {value}")
+                        else:
+                            st.caption("None — all present in NetBox.")
+                    with det_b:
+                        st.markdown("**✅ Already in NetBox**")
+                        if existing:
+                            for value in existing[:20]:
+                                st.text(f"  • {value}")
+                            if len(existing) > 20:
+                                st.caption(f"... and {len(existing) - 20} more")
+                        else:
+                            st.caption("None found in the local NetBox data.")
+
+            # Import payloads for the missing objects only
+            st.divider()
+            st.markdown("### 📥 Generated NetBox Import Scripts")
+
+            scripts = generate_import_scripts(analysis)
+            if not scripts:
+                st.info("Nothing to import — every required object already exists in NetBox.")
+            else:
+                st.caption("Copy each block into its matching NetBox import form.")
+                for key, script in scripts.items():
+                    with st.expander(f"📄 {script['label']} ({script['count']} missing)", expanded=False):
+                        st.caption(script["instructions"])
+                        lang = "csv" if script["format"] == "csv" else "text"
+                        st.code(script["content"], language=lang)
+
+                bundle = generate_combined_import_bundle(scripts)
+                st.download_button(
+                    "📦 Download All Import Scripts (bundle)",
+                    bundle.encode("utf-8"),
+                    f"netbox-import-bundle-{pd.Timestamp.now().strftime('%Y%m%d')}.txt",
+                    "text/plain",
+                    key="dl_bundle_loaded",
+                )
+            
+            # VMs that need to be added
+            st.divider()
+            st.markdown("### 🆕 VMs to Add to NetBox")
+            
+            if metadata['new_vms']:
+                st.success(f"**{len(metadata['new_vms'])} new VMs** need to be added to your NetBox instance:")
+                
+                # Create downloadable list
+                new_vms_df = pd.DataFrame([
+                    vm for vm in vm_records if vm['name'] in metadata['new_vms']
+                ])
+
+                display_cols = ['name', 'subscription', 'resource_group', 'location', 'size', 'operating_system']
+                if 'netbox_ip' in new_vms_df.columns:
+                    display_cols.append('netbox_ip')
+
+                st.dataframe(
+                    new_vms_df[display_cols],
+                    width="stretch",
+                    height=300
+                )
+                
+                # Download button for new VMs
+                csv_new = new_vms_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    "📥 Download List of New VMs",
+                    csv_new,
+                    f"new-vms-for-netbox-{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
+                    "text/csv",
+                    help="Download CSV of VMs that need to be added to NetBox"
+                )
+
+                # Generated NetBox VM import scripts for the new VMs
+                st.markdown("#### 📄 Generated NetBox VMs Import Scripts")
+                new_vm_records = [
+                    vm for vm in vm_records if vm['name'] in metadata['new_vms']
+                ]
+                
+                # Enrich VM records with data from NetBox database if available
+                for vm in new_vm_records:
+                    db_vm = check_vm_exists_in_db(vm['name'])
+                    if db_vm:
+                        # Merge owner field from database if not present in CSV
+                        if not vm.get('owner') and db_vm.get('owner'):
+                            vm['owner'] = db_vm['owner']
+                        # Also check custom_fields for owner
+                        if not vm.get('owner') and isinstance(db_vm.get('custom_fields'), dict):
+                            cf_owner = db_vm['custom_fields'].get('owner')
+                            if cf_owner:
+                                vm['owner'] = cf_owner
+                instance_type_values = get_existing_custom_field_values(
+                    INSTANCE_TYPE_FIELD, INSTANCE_TYPE_CHOICE_SET
+                )
+                resource_group_values = get_existing_custom_field_values(
+                    RESOURCE_GROUP_FIELD, RESOURCE_GROUP_CHOICE_SET
+                )
+                owner_values = get_existing_custom_field_values(OWNER_FIELD, OWNER_CHOICE_SET)
+                role_values = get_existing_roles()
+
+                def canonical_value(value, existing_values):
+                    clean = (value or '').strip()
+                    matches = {
+                        candidate.strip().lower(): candidate.strip()
+                        for candidate in existing_values
+                        if candidate and candidate.strip()
+                    }
+                    return matches.get(clean.lower(), clean)
+
+                vm_import_rows = [[
+                    "name", "status", "site", "role", "tenant", "platform",
+                    "cf_instance_type", "cf_resource_group", "owner",
+                    "cf_application", "cf_environment", "cf_cost_centre",
+                    "cf_business_criticality", "cf_deployment_method", "cf_backup", "cf_operating_system", "tags"
+                ]]
+                for vm in new_vm_records:
+                    vm_import_rows.append([
+                        vm.get('name', ''),
+                        vm.get('status', ''),
+                        f"Azure - {_strip_azure_prefix(vm.get('location', ''))}" if vm.get('location') else '',
+                        canonical_value(vm.get('role', '') or vm.get('tag_application', ''), role_values),
+                        vm.get('subscription', ''),
+                        vm.get('platform_value') or vm.get('operating_system', ''),
+                        canonical_value(vm.get('size', ''), instance_type_values),
+                        canonical_value(vm.get('resource_group', ''), resource_group_values),
+                        canonical_value(vm.get('owner', ''), owner_values),
+                        vm.get('tag_application', ''),
+                        vm.get('tag_environment', ''),
+                        vm.get('tag_cost_centre', ''),
+                        vm.get('tag_business_criticality', ''),
+                        vm.get('tag_deployment_method', ''),
+                        vm.get('tag_backup', ''),
+                        vm.get('tag_operating_system', ''),
+                        vm.get('tags', ''),
+                    ])
+                csv_buffer = io.StringIO(newline='')
+                csv.writer(csv_buffer, lineterminator='\n').writerows(vm_import_rows)
+                vm_import_script = csv_buffer.getvalue()
+                
+                with st.expander(f"📄 NetBox VMs Import CSV ({len(new_vm_records)} VMs)", expanded=True):
+                    st.caption("Copy this CSV into NetBox's Virtual Machine bulk import form.")
+                    st.code(vm_import_script, language="csv")
+
+                st.download_button(
+                    "📥 Download NetBox VMs Import CSV",
+                    vm_import_script.encode("utf-8"),
+                    f"netbox-vms-import-{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
+                    "text/csv",
+                    key=f"dl_vms_import_loaded_{pd.Timestamp.now().strftime('%Y%m%d%H%M%S')}",
+                )
+            
+            st.divider()
+            st.markdown("### 🔍 VM Input Helper")
+            vm_search_input = st.text_input("Enter VM Name / Hostname", placeholder="e.g., VM-APP-001", key="netbox_vm_search_query_loaded", label_visibility="collapsed")
+            
+            if vm_search_input and vm_search_input.strip():
+                clean_target = vm_search_input.strip().lower()
+                
+                db_vm = check_vm_exists_in_db(vm_search_input)
+                csv_vm = None
+                
+                preview_df = st.session_state.get('azure_preview_table_df')
+                matched_row = None
+                if preview_df is not None and not preview_df.empty:
+                    name_col = next((c for c in preview_df.columns if c.strip().lower() in ['name', 'vm name', 'hostname']), None)
+                    if name_col:
+                        matches = preview_df[preview_df[name_col].astype(str).str.strip().str.lower() == clean_target]
+                        if not matches.empty:
+                            matched_row = matches.iloc[0].to_dict()
+                
+                if matched_row:
+                    csv_vm = matched_row
+                
+                if not db_vm and not csv_vm:
+                    st.warning(f"VM '{vm_search_input.strip()}' not found in NetBox database or uploaded Azure CSV.")
+                else:
+                    def extract_val(source_dict, candidate_keys):
+                        """Extract value from dict, return None if not found (allows or-chaining)"""
+                        if not source_dict or not isinstance(source_dict, dict):
+                            return None
+                        norm_dict = {str(k).strip().lower(): v for k, v in source_dict.items()}
+                        for k in candidate_keys:
+                            k_norm = k.strip().lower()
+                            if k_norm in norm_dict:
+                                val = norm_dict[k_norm]
+                                if val is not None and str(val).strip() not in ["", "nan", "None", "---------"]:
+                                    return str(val).strip()
+                        return None
+                    
+                    def format_tags(tags_val):
+                        if not tags_val:
+                            return "—"
+                        if isinstance(tags_val, list):
+                            tag_names = [t.get('name', str(t)) if isinstance(t, dict) else str(t) for t in tags_val if t]
+                            return ", ".join(tag_names) if tag_names else "—"
+                        if isinstance(tags_val, str) and tags_val.strip() not in ["", "nan", "None", "—"]:
+                            import re
+                            clean_text = re.sub(r'<[^>]+>', ', ', tags_val)
+                            clean_text = re.sub(r',\s*,', ',', clean_text)
+                            clean_text = re.sub(r'^\s*,\s*|\s*,\s*$', '', clean_text)
+                            clean_text = clean_text.replace('&nbsp;', ' ')
+                            return clean_text.strip() if clean_text.strip() else "—"
+                        return "—"
+                    
+                    def get_val_from_row(row_dict, candidate_keys, default=None):
+                        """Extract value from row dict, return None if not found (allows or-chaining)"""
+                        if not row_dict:
+                            return default
+                        row_norm = {str(k).strip().lower(): v for k, v in row_dict.items()}
+                        for k in candidate_keys:
+                            k_norm = k.strip().lower()
+                            if k_norm in row_norm:
+                                val = row_norm[k_norm]
+                                if val is not None and str(val).strip() not in ["", "nan", "None", "---------"]:
+                                    return str(val).strip()
+                        return default
+
+                    # Extract all field values with proper fallback chains
+                    vm_name = get_val_from_row(matched_row, ['Name', 'name']) or extract_val(db_vm, ['name']) or clean_target.upper()
+                    
+                    vm_role = extract_val(db_vm, ['role', 'model_or_role']) or get_val_from_row(matched_row, ['Role', 'role']) or "---------"
+                    
+                    vm_status = extract_val(db_vm, ['status']) or get_val_from_row(matched_row, ['Status', 'status']) or "Active"
+                    if isinstance(vm_status, str):
+                        vm_status = vm_status.capitalize()
+                    
+                    vm_desc = extract_val(db_vm, ['description']) or get_val_from_row(matched_row, ['Description', 'description', 'Purpose']) or ""
+                    
+                    # Tags: prioritize database tags
+                    db_tags = db_vm.get('tags', []) if db_vm else []
+                    if db_tags:
+                        vm_tags_display = format_tags(db_tags)
+                    else:
+                        raw_tags = get_val_from_row(matched_row, ['NetBox Tags', 'Tags', 'tags'], default="—")
+                        vm_tags_display = format_tags(raw_tags) if raw_tags else "—"
+                    
+                    # Prioritize database values, then CSV values
+                    vm_location = extract_val(db_vm, ['site']) or get_val_from_row(matched_row, ['Location', 'site', 'Site']) or "Australia East"
+                    if isinstance(vm_location, dict):
+                        vm_location = vm_location.get('name', 'Australia East')
+                    
+                    vm_cluster = extract_val(db_vm, ['cluster']) or "---------"
+                    if isinstance(vm_cluster, dict):
+                        vm_cluster = vm_cluster.get('name', '---------')
+                    
+                    vm_tenant_group = "Azure"
+                    vm_tenant = extract_val(db_vm, ['tenant']) or get_val_from_row(matched_row, ['Subscription', 'tenant', 'Tenant']) or "---------"
+                    if isinstance(vm_tenant, dict):
+                        vm_tenant = vm_tenant.get('name', '---------')
+                    
+                    vm_platform = extract_val(db_vm, ['platform']) or get_val_from_row(matched_row, ['Operating System', 'Platform', 'platform']) or "Windows Server"
+                    if isinstance(vm_platform, dict):
+                        vm_platform = vm_platform.get('name', 'Windows Server')
+                    
+                    vm_ip = extract_val(db_vm, ['primary_ip', 'primary_ip4', 'ip']) or get_val_from_row(matched_row, ['Azure IP', 'ip', 'Primary IPv4']) or "---------"
+                    if isinstance(vm_ip, dict):
+                        vm_ip = vm_ip.get('address', '---------')
+                    
+                    # Custom fields: prioritize database values
+                    custom_fields = db_vm.get('custom_fields', {}) if (db_vm and isinstance(db_vm.get('custom_fields'), dict)) else {}
+                    vm_instance = extract_val(custom_fields, ['instance_type', 'instancetype']) or extract_val(db_vm, ['instance_type']) or get_val_from_row(matched_row, ['Size', 'Instance Type', 'cf_instance_type']) or "---------"
+                    vm_rg = extract_val(custom_fields, ['resource_group', 'resourcegroup', 'resource_groups', 'resourcegroups']) or extract_val(db_vm, ['resource_group']) or get_val_from_row(matched_row, ['Resource Group', 'Resource Groups', 'cf_resource_group']) or "---------"
+                    
+                    # Owner: check custom fields first, then top-level owner field, then CSV
+                    vm_owner = extract_val(custom_fields, ['owner']) or extract_val(db_vm, ['owner']) or get_val_from_row(matched_row, ['Owner', 'owner']) or "---------"
+                    if isinstance(vm_owner, dict):
+                        vm_owner = vm_owner.get('name', '---------')
+                    
+                    vm_owner_group = "---------"
+                    
+                    vm_device = extract_val(db_vm, ['device']) or get_val_from_row(matched_row, ['Device', 'device']) or "---------"
+                    
+                    # Determine data source indicator
+                    if db_vm and csv_vm:
+                        source_icon = "☁️📦"
+                        source_text = "Data from Azure CSV and NetBox Database"
+                    elif db_vm:
+                        source_icon = "📦"
+                        source_text = "Data from NetBox Database"
+                    else:
+                        source_icon = "☁️"
+                        source_text = "Data from Azure CSV"
+                    
+                    st.info(f"{source_icon} **{source_text}**")
+                    
+                    # Compact two-column layout with st.code for built-in copy functionality
+                    key_suffix = clean_target.replace(' ', '_').replace('.', '_')
+                    col_left, col_right = st.columns(2)
+                    
+                    with col_left:
+                        st.markdown("**Virtual Machine**")
+                        st.caption("Name:")
+                        st.code(str(vm_name), language="text")
+                        
+                        st.caption("Role:")
+                        st.code(str(vm_role), language="text")
+                        
+                        st.caption("Status:")
+                        st.code(str(vm_status), language="text")
+                        
+                        st.caption("Description:")
+                        st.code(str(vm_desc), language="text")
+                        
+                        st.caption("Tags:")
+                        st.code(str(vm_tags_display), language="text")
+                        
+                        st.markdown("**Tenancy**")
+                        st.caption("Tenant group:")
+                        st.code(str(vm_tenant_group), language="text")
+                        
+                        st.caption("Tenant:")
+                        st.code(str(vm_tenant), language="text")
+                        
+                        st.markdown("**Custom Fields**")
+                        st.caption("Instance Type:")
+                        st.code(str(vm_instance), language="text")
+                        
+                        st.caption("Resource Groups:")
+                        st.code(str(vm_rg), language="text")
+                        
+                        if custom_fields:
+                            displayed_fields = {'instance_type', 'instancetype', 'resource_group', 
+                                               'resourcegroup', 'resource_groups', 'resourcegroups', 'owner'}
+                            
+                            for cf_name, cf_value in custom_fields.items():
+                                if cf_name.lower() not in displayed_fields:
+                                    display_name = cf_name.replace('_', ' ').title()
+                                    
+                                    if cf_value is None or str(cf_value).strip() == "":
+                                        formatted_value = "---------"
+                                    elif isinstance(cf_value, dict):
+                                        formatted_value = cf_value.get('name') or cf_value.get('value') or str(cf_value)
+                                    elif isinstance(cf_value, list):
+                                        formatted_value = ", ".join(str(v) for v in cf_value if v)
+                                    else:
+                                        formatted_value = str(cf_value).strip()
+                                    
+                                    if formatted_value and formatted_value != "---------":
+                                        st.caption(f"{display_name}:")
+                                        st.code(formatted_value, language="text")
+                    
+                    with col_right:
+                        st.markdown("**Placement**")
+                        if vm_location and vm_location.startswith("Azure - "):
+                            vm_site = vm_location
+                        elif vm_location:
+                            raw_loc = _strip_azure_prefix(vm_location)
+                            vm_site = f"Azure - {raw_loc}"
+                        else:
+                            vm_site = "Azure - Unknown"
+                        
+                        st.caption("Site:")
+                        st.code(str(vm_site), language="text")
+                        
+                        st.caption("Cluster:")
+                        st.code(str(vm_cluster), language="text")
+                        
+                        st.caption("Device:")
+                        st.code(str(vm_device), language="text")
+                        
+                        st.markdown("**Management**")
+                        st.caption("Platform:")
+                        st.code(str(vm_platform), language="text")
+                        
+                        st.caption("Primary IPv4:")
+                        st.code(str(vm_ip), language="text")
+                        
+                        st.markdown("**Ownership**")
+                        st.caption("Owner:")
+                        st.code(str(vm_owner), language="text")
+                        
+                        st.caption("Owner group:")
+                        st.code(str(vm_owner_group), language="text")
         
     else:
         # Show sample data format when no file uploaded.
