@@ -945,51 +945,5 @@ def render_azure_tab(active_model=None):
             help="Download a sample CSV file with the correct format"
         )
     
-    # Additional features section
-    st.divider()
-    st.subheader("🔧 Additional Actions")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("### 🔍 Check VM Status")
-        vm_name_check = st.text_input("Enter VM name to check", placeholder="e.g., VM-APP-002")
-        if st.button("Check VM"):
-            if vm_name_check:
-                existing = check_vm_exists_in_db(vm_name_check)
-                if existing:
-                    st.success(f"✅ VM **{vm_name_check}** exists in database")
-                    st.json(existing)
-                else:
-                    st.info(f"ℹ️ VM **{vm_name_check}** not found in database - needs to be added to NetBox")
-            else:
-                st.warning("Please enter a VM name")
-    
-    with col2:
-        st.markdown("### 📊 Export Database")
-        st.write("Export current VM inventory from NetBox Hub database")
-        if st.button("Export VMs to CSV"):
-            try:
-                from core.db_manager import DB_PATH
-                import sqlite3
-                
-                conn = sqlite3.connect(DB_PATH)
-                query = """
-                    SELECT name, category, description, manufacturer, model_or_role, 
-                           site, cluster, imported_at
-                    FROM inventory_records
-                    WHERE category = 'vm'
-                    ORDER BY name
-                """
-                df_export = pd.read_sql_query(query, conn)
-                conn.close()
-                
-                st.download_button(
-                    "📥 Download VMs CSV",
-                    df_export.to_csv(index=False).encode('utf-8'),
-                    f"netbox-hub-vms-{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
-                    "text/csv"
-                )
-                st.success(f"✅ Ready to export {len(df_export)} VMs")
-            except Exception as e:
+        except Exception as e:
                 st.error(f"Error exporting: {str(e)}")
