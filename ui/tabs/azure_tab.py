@@ -680,7 +680,9 @@ def render_azure_tab(active_model=None):
                         key=f"dl_vms_import_{pd.Timestamp.now().strftime('%Y%m%d%H%M%S')}",
                     )
                 
-                vm_search_input = st.text_input("Enter VM Name / Hostname:", placeholder="e.g., VM-APP-001", key="netbox_vm_search_query")
+                st.divider()
+                st.markdown("### 🔍 VM Input Helper")
+                vm_search_input = st.text_input("Enter VM Name / Hostname", placeholder="e.g., VM-APP-001", key="netbox_vm_search_query", label_visibility="collapsed")
                 
                 if vm_search_input and vm_search_input.strip():
                     clean_target = vm_search_input.strip().lower()
@@ -848,7 +850,7 @@ def render_azure_tab(active_model=None):
                                         icon.textContent = '✓';
                                         icon.title = 'Copied!';
                                         setTimeout(function() { 
-                                            icon.textContent = '📋';
+                                            icon.textContent = '';
                                             icon.title = 'Copy to clipboard';
                                         }, 1000);
                                     }
@@ -868,7 +870,7 @@ def render_azure_tab(active_model=None):
                                         icon.textContent = '✓';
                                         icon.title = 'Copied!';
                                         setTimeout(function() { 
-                                            icon.textContent = '📋';
+                                            icon.textContent = '';
                                             icon.title = 'Copy to clipboard';
                                         }, 1000);
                                     }
@@ -878,16 +880,27 @@ def render_azure_tab(active_model=None):
                         }
                         </script>
                         <style>
+                        .field-with-copy {
+                            position: relative;
+                        }
                         .copy-icon {
                             cursor: pointer;
                             margin-left: 8px;
                             font-size: 12px;
-                            opacity: 0.5;
+                            opacity: 0;
                             user-select: none;
                             display: inline-block;
+                            transition: opacity 0.2s;
+                        }
+                        .field-with-copy:hover .copy-icon {
+                            opacity: 0.6;
                         }
                         .copy-icon:hover {
-                            opacity: 1;
+                            opacity: 1 !important;
+                        }
+                        /* Fix cursor on input fields */
+                        input[type="text"]:disabled {
+                            cursor: default !important;
                         }
                         </style>
                         """, height=0)
@@ -898,7 +911,7 @@ def render_azure_tab(active_model=None):
                             import re
                             clean_value = re.sub(r'<[^>]+>', '', str(value))
                             escaped_value = html.escape(clean_value).replace("'", "&#39;").replace('"', '&quot;')
-                            return f'{label_text} <span class="copy-icon" id="{icon_id}" onclick="copyToClipboard(\'{escaped_value}\', \'{icon_id}\')" title="Copy to clipboard">📋</span>'
+                            return f'<div class="field-with-copy">{label_text} <span class="copy-icon" id="{icon_id}" onclick="copyToClipboard(\'{escaped_value}\', \'{icon_id}\')" title="Copy to clipboard"></span></div>'
                         
                         # Compact two-column layout
                         # Use clean_target as part of the key to ensure widgets refresh for each new search
