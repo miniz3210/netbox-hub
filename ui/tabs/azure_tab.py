@@ -253,8 +253,16 @@ def render_azure_tab(active_model=None):
     # Check if there's a saved upload
     try:
         saved_upload = get_azure_csv_upload()
+        
+        # Debug what get_azure_csv_upload returned
+        if saved_upload:
+            st.success(f"✅ DEBUG: get_azure_csv_upload() returned data: {saved_upload['filename']}, {saved_upload['row_count']} rows")
+        else:
+            st.warning("⚠️ DEBUG: get_azure_csv_upload() returned None (but database shows data exists!)")
     except Exception as e:
-        st.error(f"Error checking for saved CSV: {e}")
+        st.error(f"❌ DEBUG: get_azure_csv_upload() failed with error: {e}")
+        import traceback
+        st.code(traceback.format_exc())
         saved_upload = None
     
     # Show saved upload info and Clear button if exists
