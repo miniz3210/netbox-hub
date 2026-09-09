@@ -277,14 +277,10 @@ def render_azure_tab(active_model=None):
                 st.session_state.azure_vms_parsed = vm_records
                 st.session_state.azure_parsed_vms_table = vm_records
                 st.session_state.azure_raw_vm_records = vm_records
-                
-                # Important: Set this to trigger the preview section
-                uploaded_file = "loaded_from_db"
             except Exception as e:
                 st.error(f"Error loading saved CSV: {e}")
                 import traceback
                 st.code(traceback.format_exc())
-                uploaded_file = None
 
     # Parse and preview
     if uploaded_file is not None and uploaded_file != "loaded_from_db":
