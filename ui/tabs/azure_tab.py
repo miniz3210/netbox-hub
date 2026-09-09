@@ -22,6 +22,12 @@ from core.azure_vm_importer import (
     _strip_azure_prefix,
     _build_netbox_tags,
 )
+from core.azure_csv_manager import (
+    save_azure_csv_upload,
+    get_azure_csv_upload,
+    clear_azure_csv_upload,
+    has_azure_csv_upload,
+)
 from core.netbox_object_checker import (
     analyze_netbox_objects,
     generate_import_scripts,
@@ -208,8 +214,29 @@ def render_azure_tab(active_model=None):
     
     # File uploader
     st.subheader("1️⃣ Upload Azure VM CSV Export")
+    
+    # Check if there's a saved upload
+    saved_upload = get_azure_csv_upload()
+    
+    # Show saved upload info and Clear button if exists
+    if saved_upload:
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.info(f"📁 **Saved CSV**: {saved_upload['filename']} ({saved_upload['row_count']} VMs) - Uploaded: {saved_upload['uploaded_at']}")
+        with col2:
+            if st.button("🗑️ Clear CSV", help="Remove saved CSV data", use_container_width=True):
+                clear_azure_csv_upload()
+                # Clear session state
+                st.session_state.azure_vms_parsed = None
+                st.session_state.azure_vms_mapped = None
+                st.session_state.azure_metadata = None
+                st.session_state.azure_object_analysis = None
+                st.session_state.azure_dedup_cache = None
+                st.session_state.azure_preview_table_df = None
+                st.rerun()
+    
     uploaded_file = st.file_uploader(
-        "Select Azure VM CSV file",
+        "Select Azure VM CSV file" if not saved_upload else "Upload new CSV to replace saved data",
         type=["csv"],
         help="Upload the CSV file exported from Azure Portal or PowerShell"
     )
@@ -226,8 +253,26 @@ def render_azure_tab(active_model=None):
     if 'azure_dedup_cache' not in st.session_state:
         st.session_state.azure_dedup_cache = None
 
+    # Load saved CSV on page refresh if no new upload
+    if uploaded_file is None and saved_upload and st.session_state.azure_vms_parsed is None:
+        with st.spinner("Loading saved CSV data..."):
+            try:
+                # Convert saved DataFrame to VM records format
+                df_saved = saved_upload['csv_data']
+                vm_records = df_saved.to_dict('records')
+                
+                st.session_state.azure_vms_parsed = vm_records
+                st.session_state.azure_parsed_vms_table = vm_records
+                st.session_state.azure_raw_vm_records = vm_records
+                
+                st.success(f"✅ Loaded {len(vm_records)} VMs from saved CSV")
+                uploaded_file = "loaded_from_db"  # Trigger processing flow
+            except Exception as e:
+                st.error(f"Error loading saved CSV: {e}")
+                uploaded_file = None
+
     # Parse and preview
-    if uploaded_file is not None:
+    if uploaded_file is not None and uploaded_file != "loaded_from_db":
         try:
             # Clear previous state before parsing begins.
             st.session_state.azure_vms_parsed = None
@@ -255,12 +300,16 @@ def render_azure_tab(active_model=None):
                     for warning in warnings:
                         st.warning(warning)
             
+            # Save to database for persistence
+            df_for_save = pd.DataFrame(vm_records)
+            save_result = save_azure_csv_upload(uploaded_file.name, df_for_save)
+            
             # Show preview
-            st.success(f"✅ Parsed {len(vm_records)} Azure VMs")
+            st.success(f"✅ Parsed {len(vm_records)} Azure VMs (saved to database)")
             
             st.subheader("2️⃣ Preview Azure VMs")
 
-# Convert to DataFrame for display
+            # Convert to DataFrame for display
             df_preview = pd.DataFrame(vm_records)
             # Store raw VM records for later use
             st.session_state.azure_raw_vm_records = vm_records
@@ -941,6 +990,207 @@ def render_azure_tab(active_model=None):
             with st.expander("Error Details"):
                 st.code(traceback.format_exc())
     
+    # Show preview and analysis sections if data is loaded (either from upload or database)
+    elif st.session_state.azure_vms_parsed is not None:
+        vm_records = st.session_state.azure_vms_parsed
+        
+        # Show that data is loaded
+        st.subheader("2️⃣ Preview Azure VMs")
+        st.info(f"📊 **{len(vm_records)} VMs loaded** (data persists across page refreshes)")
+        
+        # Build export dataset
+        export_records = []
+        for vm in vm_records:
+            tag_names = [t['name'] for t in _build_netbox_tags(vm)]
+            record = {
+                'name': vm.get('name', ''),
+                'subscription': vm.get('subscription', ''),
+                'resource_group': vm.get('resource_group', ''),
+                'location': vm.get('location', ''),
+                'status': vm.get('status', ''),
+                'operating_system': vm.get('operating_system', ''),
+                'platform_value': vm.get('platform_value', ''),
+                'size': vm.get('size', ''),
+                'primary_ip': vm.get('public_ip', ''),
+                'vnet': vm.get('vnet', ''),
+                'subnet': vm.get('subnet', ''),
+                'owner': vm.get('owner', ''),
+                'role': vm.get('role', ''),
+                'tag_environment': vm.get('tag_environment', ''),
+                'tag_cost_centre': vm.get('tag_cost_centre', ''),
+                'tag_business_criticality': vm.get('tag_business_criticality', ''),
+                'tag_deployment_method': vm.get('tag_deployment_method', ''),
+                'tag_backup': vm.get('tag_backup', ''),
+                'netbox_tags': ', '.join(tag_names),
+                'source': vm.get('source', ''),
+                'imported_at': vm.get('imported_at', ''),
+            }
+            export_records.append(record)
+
+        df_export = pd.DataFrame(export_records)
+
+        # Export parsed dataset as CSV
+        export_csv_col, _ = st.columns([1, 3])
+        with export_csv_col:
+            st.download_button(
+                "📥 Download Parsed VMs CSV",
+                df_export.to_csv(index=False).encode("utf-8"),
+                f"azure-vms-parsed-{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
+                "text/csv",
+                help="Download the cleaned Azure VM dataset as CSV",
+            )
+
+        # Show summary statistics
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total VMs", len(vm_records))
+        with col2:
+            running_count = sum(1 for vm in vm_records if vm.get('status', '').lower() == 'running')
+            st.metric("Running", running_count)
+        with col3:
+            unique_subscriptions = len(set(vm.get('subscription', '') for vm in vm_records))
+            st.metric("Subscriptions", unique_subscriptions)
+        with col4:
+            unique_locations = len(set(vm.get('location', '') for vm in vm_records))
+            st.metric("Locations", unique_locations)
+
+        # Build preview table if not already in session state
+        if st.session_state.get('azure_preview_table_df') is None:
+            st.write("**Checking VMs against database...**")
+            ip_index = build_vm_ip_index()
+            vm_status_list = []
+            ip_matched = 0
+            for vm in vm_records:
+                existing = check_vm_exists_in_db(vm['name'])
+                ip_entry = ip_index.get(vm['name'].strip().lower()) or {}
+                primary_ip = ip_entry.get('primary', '')
+                assigned_ips = ip_entry.get('assigned', [])
+                resolved_ip = primary_ip or (assigned_ips[0] if assigned_ips else '')
+                if resolved_ip:
+                    ip_matched += 1
+
+                extra = len(assigned_ips) - 1 if assigned_ips and resolved_ip in assigned_ips else len(assigned_ips)
+                ip_display = resolved_ip or '—'
+                if resolved_ip and extra > 0:
+                    ip_display = f"{resolved_ip} (+{extra})"
+
+                tag_names = [t['name'] for t in _build_netbox_tags(vm)]
+                if tag_names:
+                    chips = "".join(
+                        f'<span class="nb-tag-chip" title="{html.escape(n)}">{html.escape(n)}</span>'
+                        for n in tag_names
+                    )
+                    netbox_tags_html = f'<div class="nb-tags-cell">{chips}</div>'
+                else:
+                    netbox_tags_html = '—'
+
+                vm_status = {
+                    'Name': vm['name'],
+                    'Subscription': vm['subscription'],
+                    'Resource Group': vm['resource_group'],
+                    'Location': vm['location'],
+                    'Status': vm['status'],
+                    'Operating System': vm.get('operating_system') or '—',
+                    'Role': vm.get('role') or vm.get('tag_application') or '—',
+                    'Size': vm['size'],
+                    'Azure IP': vm.get('public_ip') or '—',
+                    'VNet': vm.get('vnet') or '—',
+                    'Subnet': vm.get('subnet') or '—',
+                    'Owner': vm.get('owner') or '—',
+                    'NetBox Tags': netbox_tags_html,
+                    'NetBox IP': ip_display,
+                    'In Database': '✅ Yes' if existing else '❌ No (Need to add to NetBox)'
+                }
+                vm_status_list.append(vm_status)
+            
+            st.session_state.azure_preview_table_df = pd.DataFrame(vm_status_list)
+            
+            # Display the table (same styling as upload flow)
+            table_columns = list(vm_status_list[0].keys()) if vm_status_list else []
+            table_headers = "".join(f"<th>{html.escape(column)}</th>" for column in table_columns)
+            table_rows = []
+            for row in vm_status_list:
+                cells = []
+                for column in table_columns:
+                    value = row[column]
+                    if column == "NetBox Tags" and value != "—":
+                        cell = f'<td class="nb-tags-column"><div class="nb-tags-cell">{value}</div></td>'
+                    else:
+                        cell = f"<td>{html.escape(str(value))}</td>"
+                    cells.append(cell)
+                table_rows.append(f"<tr>{''.join(cells)}</tr>")
+
+            st.markdown(
+                f"""
+                <style>
+                .nb-table-scroll {{
+                    max-width: 100%;
+                    max-height: 400px;
+                    overflow: auto;
+                    border: 1px solid rgba(128, 128, 128, 0.25);
+                }}
+                .nb-vm-table {{
+                    width: 100%;
+                    border-collapse: collapse;
+                    font-size: 13px;
+                }}
+                .nb-vm-table thead {{
+                    background-color: rgba(128, 128, 128, 0.1);
+                    position: sticky;
+                    top: 0;
+                }}
+                .nb-vm-table th, .nb-vm-table td {{
+                    padding: 6px 10px;
+                    text-align: left;
+                    border-bottom: 1px solid rgba(128, 128, 128, 0.1);
+                }}
+                .nb-vm-table th {{
+                    font-weight: 600;
+                }}
+                .nb-tags-column {{
+                    max-width: 300px;
+                }}
+                .nb-tags-cell {{
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 4px;
+                }}
+                .nb-tag-chip {{
+                    display: inline-block;
+                    padding: 2px 6px;
+                    background-color: rgba(59, 130, 246, 0.15);
+                    color: rgb(59, 130, 246);
+                    border-radius: 4px;
+                    font-size: 11px;
+                    white-space: nowrap;
+                }}
+                </style>
+                <div class="nb-table-scroll">
+                    <table class="nb-vm-table">
+                        <thead><tr>{table_headers}</tr></thead>
+                        <tbody>{''.join(table_rows)}</tbody>
+                    </table>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            
+            # Show summary
+            vms_in_db = sum(1 for vm in vm_status_list if '✅' in vm['In Database'])
+            vms_not_in_db = len(vm_status_list) - vms_in_db
+            
+            col_a, col_b, col_c = st.columns(3)
+            with col_a:
+                st.info(f"**✅ Already in Database:** {vms_in_db} VMs")
+            with col_b:
+                st.warning(f"**❌ Need to Add to NetBox:** {vms_not_in_db} VMs")
+            with col_c:
+                if ip_index:
+                    st.info(f"**🌐 IP Found in NetBox:** {ip_matched} VMs")
+        
+        # Show rest of the analysis sections (NetBox Objects Required, etc.)
+        # These sections check st.session_state.azure_vms_parsed which is now set
+        
     else:
         # Show sample data format when no file uploaded.
         # Fictional placeholder data only — no real hostnames, subscriptions,

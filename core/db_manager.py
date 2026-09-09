@@ -61,6 +61,17 @@ def init_db():
             imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    
+    # Azure CSV Upload Storage (persists across page refreshes)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS azure_csv_uploads (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            filename TEXT,
+            uploaded_at TEXT,
+            csv_data TEXT,
+            row_count INTEGER
+        )
+    """)
 
     # Column migration check for existing DBs
     cursor.execute("PRAGMA table_info(ipam_records)")
