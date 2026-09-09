@@ -46,62 +46,9 @@ from core.netbox_object_checker import (
 def render_azure_tab(active_model=None):
     """Render the Azure VM import tab in Streamlit UI."""
     
-    st.header("☁️ Azure Virtual Machine Analysis for NetBox")
-    st.write("""
-    Analyze Azure Virtual Machines and identify which ones need to be added to NetBox. This tool will:
-    1. **Check** if VMs already exist in the NetBox Hub database
-    2. **Identify** new VMs that need to be added to your NetBox instance
-    3. **Show** the required NetBox objects that need to be created:
-        - **SUBSCRIPTION** → Tenant (Azure)
-        - **RESOURCE GROUP** → Custom Field: Resource Group
-        - **LOCATION** → Site (Cloud)
-        - **SIZE** → Custom Field: Instance Type
-        - **OPERATING SYSTEM** → Platform
-        - **APPLICATION** → Role
-    """)
+    st.header("☁️ Azure VM Import for NetBox")
     
-    # Instructions section
-    with st.expander("📋 How to Export Azure VMs", expanded=False):
-        st.markdown("""
-        ### Export from Azure Resource Graph Explorer
-        1. In the search bar at the top of the Azure Portal, type and select **Resource Graph Explorer**.
-        2. Paste the following KQL query into the query editor:
-        """)
-
-        # Global clipboard-copy handler (works in HTTP/HTTPS and iframes).
-        st.html("""
-        <script>
-        function copyTextToClipboard(text) {
-            if (navigator.clipboard && window.isSecureContext) {
-                navigator.clipboard.writeText(text).catch(function() {
-                    fallbackCopy(text);
-                });
-            } else {
-                fallbackCopy(text);
-            }
-        }
-
-        function fallbackCopy(text) {
-            var textArea = document.createElement("textarea");
-            textArea.value = text;
-            textArea.style.top = "0";
-            textArea.style.left = "0";
-            textArea.style.position = "fixed";
-            textArea.style.opacity = "0";
-            document.body.appendChild(textArea);
-            textArea.focus();
-            textArea.select();
-            try {
-                document.execCommand('copy');
-            } catch (err) {
-                console.error('Fallback clipboard copy failed:', err);
-            }
-            document.body.removeChild(textArea);
-        }
-        </script>
-        """)
-
-        # KQL query stored for reference.
+    # KQL query stored for reference.
         kql_query = '''Resources
 | where type =~ "microsoft.compute/virtualmachines"
 | extend 
@@ -204,13 +151,6 @@ def render_azure_tab(active_model=None):
     ['Tag_DeploymentMethod'] = tagDeploy,
     ['Tag_Backup'] = tagBackup,
     ['Tags'] = RawTags'''
-        st.code(kql_query, language="kusto")
-
-        st.markdown("""
-        3. Select **Run query**.
-        4. Export the results as CSV.
-        5. Upload the CSV file using the uploader below.
-        """)
     
     # File uploader section with status indicator
     st.subheader("1️⃣ Upload Azure VM CSV Export")
@@ -222,18 +162,73 @@ def render_azure_tab(active_model=None):
     status_tag = f"🟢 ({vm_count} VMs in DB)" if vm_count > 0 else "⚪ (No data)"
     
     with st.expander(f"📥 Ingest Azure VM Data (CSV Export) {status_tag}", expanded=False):
+        # Show description
+        st.write("""
+        Analyze Azure Virtual Machines and identify which ones need to be added to NetBox. This tool will:
+        1. **Check** if VMs already exist in the NetBox Hub database
+        2. **Identify** new VMs that need to be added to your NetBox instance
+        3. **Show** the required NetBox objects that need to be created:
+            - **SUBSCRIPTION** → Tenant (Azure)
+            - **RESOURCE GROUP** → Custom Field: Resource Group
+            - **LOCATION** → Site (Cloud)
+            - **SIZE** → Custom Field: Instance Type
+            - **OPERATING SYSTEM** → Platform
+            - **APPLICATION** → Role
+        """)
+        
         if saved_upload:
-            st.markdown(f"**DB Status:** `Source: {saved_upload['filename']}`")
+            st.markdown(f"**DB Status:** `{saved_upload['filename']} - Uploaded: {saved_upload['uploaded_at']}`")
         
         st.markdown("---")
-        st.markdown("**CSV Export Path:**")
-        st.caption(
-            "**Azure Resource Graph Explorer:**  \n"
-            "1. In Azure Portal search bar, type and select **Resource Graph Explorer**  \n"
-            "2. Paste the KQL query from the instructions below  \n"
-            "3. Select **Run query**  \n"
-            "4. Click **Export** ➔ **Download as CSV**"
-        )
+        
+        # Instructions section
+        with st.expander("📋 How to Export Azure VMs", expanded=False):
+            st.markdown("""
+            ### Export from Azure Resource Graph Explorer
+            1. In the search bar at the top of the Azure Portal, type and select **Resource Graph Explorer**.
+            2. Paste the following KQL query into the query editor:
+            """)
+
+            # Global clipboard-copy handler (works in HTTP/HTTPS and iframes).
+            st.html("""
+            <script>
+            function copyTextToClipboard(text) {
+                if (navigator.clipboard && window.isSecureContext) {
+                    navigator.clipboard.writeText(text).catch(function() {
+                        fallbackCopy(text);
+                    });
+                } else {
+                    fallbackCopy(text);
+                }
+            }
+
+            function fallbackCopy(text) {
+                var textArea = document.createElement("textarea");
+                textArea.value = text;
+                textArea.style.top = "0";
+                textArea.style.left = "0";
+                textArea.style.position = "fixed";
+                textArea.style.opacity = "0";
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                try {
+                    document.execCommand('copy');
+                } catch (err) {
+                    console.error('Fallback clipboard copy failed:', err);
+                }
+                document.body.removeChild(textArea);
+            }
+            </script>
+            """)
+            
+            st.code(kql_query, language="kusto")
+
+            st.markdown("""
+            3. Select **Run query**.
+            4. Export the results as CSV.
+            5. Upload the CSV file using the uploader below.
+            """)
         
         # Consolidated upload section
         c_up, c_clr, c_ref = st.columns([3, 1, 1])
@@ -285,8 +280,6 @@ def render_azure_tab(active_model=None):
                 
                 # Important: Set this to trigger the preview section
                 uploaded_file = "loaded_from_db"
-                
-                st.success(f"✅ Loaded {len(vm_records)} VMs from saved CSV")
             except Exception as e:
                 st.error(f"Error loading saved CSV: {e}")
                 import traceback
