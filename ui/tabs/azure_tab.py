@@ -590,7 +590,7 @@ def render_azure_tab(active_model=None):
                     missing = data["missing"]
                     existing = data["existing"]
                     icon = "❌" if missing else "✅"
-                    header = f"{icon} {data['label']} — {len(missing)} missing / {len(existing)} existing"
+                    header = f"{icon} {data['label']} — {len(missing)} missing, {len(existing)} exist"
                     with st.expander(header, expanded=False):
                         det_a, det_b = st.columns(2)
                         with det_a:
@@ -1254,7 +1254,7 @@ def render_azure_tab(active_model=None):
                 missing = data["missing"]
                 existing = data["existing"]
                 icon = "❌" if missing else "✅"
-                header = f"{icon} {data['label']} — {len(missing)} missing / {len(existing)} existing"
+                header = f"{icon} {data['label']} — {len(missing)} missing, {len(existing)} exist"
                 with st.expander(header, expanded=False):
                     det_a, det_b = st.columns(2)
                     with det_a:
@@ -1542,41 +1542,65 @@ def render_azure_tab(active_model=None):
                     
                     st.info(f"{source_icon} **{source_text}**")
                     
-                    # Compact two-column layout with st.code for built-in copy functionality
+                    # Compact three-column layout with st.code for built-in copy functionality
                     key_suffix = clean_target.replace(' ', '_').replace('.', '_')
-                    col_left, col_right = st.columns(2)
+                    vm_col1, vm_col2, vm_col3 = st.columns(3)
                     
-                    with col_left:
+                    with vm_col1:
                         st.markdown("**Virtual Machine**")
                         st.caption("Name:")
                         st.code(str(vm_name), language="text")
-                        
                         st.caption("Role:")
                         st.code(str(vm_role), language="text")
-                        
                         st.caption("Status:")
                         st.code(str(vm_status), language="text")
-                        
                         st.caption("Description:")
                         st.code(str(vm_desc), language="text")
-                        
                         st.caption("Tags:")
                         st.code(str(vm_tags_display), language="text")
                         
+                        st.markdown("**Placement**")
+                        if vm_location and vm_location.startswith("Azure - "):
+                            vm_site = vm_location
+                        elif vm_location:
+                            raw_loc = _strip_azure_prefix(vm_location)
+                            vm_site = f"Azure - {raw_loc}"
+                        else:
+                            vm_site = "Azure - Unknown"
+                        st.caption("Site:")
+                        st.code(str(vm_site), language="text")
+                        st.caption("Cluster:")
+                        st.code(str(vm_cluster), language="text")
+                        st.caption("Device:")
+                        st.code(str(vm_device), language="text")
+                    
+                    with vm_col2:
                         st.markdown("**Tenancy**")
                         st.caption("Tenant group:")
                         st.code(str(vm_tenant_group), language="text")
-                        
                         st.caption("Tenant:")
                         st.code(str(vm_tenant), language="text")
                         
+                        st.markdown("**Management**")
+                        st.caption("Platform:")
+                        st.code(str(vm_platform), language="text")
+                        st.caption("Primary IPv4:")
+                        st.code(str(vm_ip), language="text")
+                    
+                    with vm_col3:
                         st.markdown("**Custom Fields**")
                         st.caption("Instance Type:")
                         st.code(str(vm_instance), language="text")
-                        
                         st.caption("Resource Groups:")
                         st.code(str(vm_rg), language="text")
                         
+                        st.markdown("**Ownership**")
+                        st.caption("Owner:")
+                        st.code(str(vm_owner), language="text")
+                        st.caption("Owner group:")
+                        st.code(str(vm_owner_group), language="text")
+                        
+                        # Display ALL other custom fields dynamically
                         if custom_fields:
                             displayed_fields = {'instance_type', 'instancetype', 'resource_group', 
                                                'resourcegroup', 'resource_groups', 'resourcegroups', 'owner'}
@@ -1597,36 +1621,3 @@ def render_azure_tab(active_model=None):
                                     if formatted_value and formatted_value != "---------":
                                         st.caption(f"{display_name}:")
                                         st.code(formatted_value, language="text")
-                    
-                    with col_right:
-                        st.markdown("**Placement**")
-                        if vm_location and vm_location.startswith("Azure - "):
-                            vm_site = vm_location
-                        elif vm_location:
-                            raw_loc = _strip_azure_prefix(vm_location)
-                            vm_site = f"Azure - {raw_loc}"
-                        else:
-                            vm_site = "Azure - Unknown"
-                        
-                        st.caption("Site:")
-                        st.code(str(vm_site), language="text")
-                        
-                        st.caption("Cluster:")
-                        st.code(str(vm_cluster), language="text")
-                        
-                        st.caption("Device:")
-                        st.code(str(vm_device), language="text")
-                        
-                        st.markdown("**Management**")
-                        st.caption("Platform:")
-                        st.code(str(vm_platform), language="text")
-                        
-                        st.caption("Primary IPv4:")
-                        st.code(str(vm_ip), language="text")
-                        
-                        st.markdown("**Ownership**")
-                        st.caption("Owner:")
-                        st.code(str(vm_owner), language="text")
-                        
-                        st.caption("Owner group:")
-                        st.code(str(vm_owner_group), language="text")
