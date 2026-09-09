@@ -161,6 +161,9 @@ def render_azure_tab(active_model=None):
     
     status_tag = f"🟢 ({vm_count} VMs in DB)" if vm_count > 0 else "⚪ (No data)"
     
+    # Initialize uploaded_file to None by default
+    uploaded_file = None
+    
     with st.expander(f"📥 Ingest Azure VM Data (CSV Export) {status_tag}", expanded=False):
         # Show description
         st.write("""
