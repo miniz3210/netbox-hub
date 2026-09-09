@@ -116,7 +116,8 @@ def get_azure_csv_upload() -> Optional[Dict[str, Any]]:
                 return None
             
             # Now convert to DataFrame
-            csv_data = pd.read_json(csv_json, orient='records')
+            # Use the already-parsed JSON to create DataFrame
+            csv_data = pd.DataFrame(parsed_json)
             print(f"[azure_csv_manager] Successfully converted to DataFrame: {len(csv_data)} rows, {len(csv_data.columns)} columns")
             
         except Exception as e:
