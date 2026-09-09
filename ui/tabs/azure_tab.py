@@ -944,6 +944,3 @@ def render_azure_tab(active_model=None):
             "text/csv",
             help="Download a sample CSV file with the correct format"
         )
-    
-        except Exception as e:
-                st.error(f"Error exporting: {str(e)}")
