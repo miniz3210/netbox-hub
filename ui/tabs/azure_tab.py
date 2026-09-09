@@ -177,7 +177,7 @@ def render_azure_tab(active_model=None):
         """)
         
         if saved_upload:
-            st.markdown(f"**DB Status:** `{saved_upload['filename']} - Uploaded: {saved_upload['uploaded_at']}`")
+            st.markdown(f"**DB Status:** `Source CSV`")
         
         st.markdown("---")
         
@@ -232,32 +232,37 @@ def render_azure_tab(active_model=None):
         
         st.markdown("---")
         
-        # Consolidated buttons section
-        c_clr, c_ref = st.columns([1, 1])
+        # Show saved CSV info
+        if saved_upload:
+            st.caption(f"**Azure CSV export:** `{saved_upload['filename']}` - Uploaded: {saved_upload['uploaded_at']}")
+        
+        # Consolidated upload section
+        c_up, c_clr, c_ref = st.columns([3, 1, 1])
+        with c_up:
+            uploaded_file = st.file_uploader(
+                "Upload Azure VM CSV file",
+                type=["csv"],
+                help="Upload the CSV file exported from Azure Resource Graph Explorer",
+                key="azure_csv_uploader",
+                label_visibility="collapsed"
+            )
         with c_clr:
-            if st.button("Clear", help="Remove saved CSV data", use_container_width=True, disabled=not saved_upload):
-                clear_azure_csv_upload()
-                # Clear session state
-                st.session_state.azure_vms_parsed = None
-                st.session_state.azure_vms_mapped = None
-                st.session_state.azure_metadata = None
-                st.session_state.azure_object_analysis = None
-                st.session_state.azure_dedup_cache = None
-                st.session_state.azure_preview_table_df = None
-                st.rerun()
+            if saved_upload:
+                if st.button("🗑️ Clear Azure CSV", key="clear_azure_csv_btn", help="Clear Azure CSV data", use_container_width=True):
+                    clear_azure_csv_upload()
+                    # Clear session state
+                    st.session_state.azure_vms_parsed = None
+                    st.session_state.azure_vms_mapped = None
+                    st.session_state.azure_metadata = None
+                    st.session_state.azure_object_analysis = None
+                    st.session_state.azure_dedup_cache = None
+                    st.session_state.azure_preview_table_df = None
+                    st.rerun()
         with c_ref:
-            if st.button("↻", help="Refresh data", use_container_width=True):
+            if st.button("🔄 Refresh", key="ref_azure_btn", use_container_width=True, help="Reload the view"):
                 # Clear preview table cache to force rebuild
                 st.session_state.azure_preview_table_df = None
                 st.rerun()
-    
-    # File uploader - OUTSIDE the expander so it's always available
-    uploaded_file = st.file_uploader(
-        "Upload Azure VM CSV file",
-        type=["csv"],
-        help="Upload the CSV file exported from Azure Resource Graph Explorer",
-        key="azure_csv_uploader"
-    )
     
     # Session state for parsed data
     if 'azure_vms_parsed' not in st.session_state:
