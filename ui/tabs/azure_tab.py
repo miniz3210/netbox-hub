@@ -664,7 +664,7 @@ def render_azure_tab(active_model=None):
                         key=f"dl_vms_import_{pd.Timestamp.now().strftime('%Y%m%d%H%M%S')}",
                     )
                 
-                vm_search_input = st.text_input("Enter VM Name / Hostname (e.g. ANZJDE001):", key="netbox_vm_search_query")
+                vm_search_input = st.text_input("Enter VM Name / Hostname:", placeholder="e.g., VM-APP-001", key="netbox_vm_search_query")
                 
                 if vm_search_input and vm_search_input.strip():
                     clean_target = vm_search_input.strip().lower()
@@ -812,23 +812,25 @@ def render_azure_tab(active_model=None):
                         st.info(f"{source_icon} **{source_text}**")
                         
                         # Compact two-column layout
+                        # Use clean_target as part of the key to ensure widgets refresh for each new search
+                        key_suffix = clean_target.replace(' ', '_').replace('.', '_')
                         col_left, col_right = st.columns(2)
                         
                         with col_left:
                             st.markdown("**Virtual Machine**")
-                            st.text_input("Name", value=str(vm_name), disabled=True, key="nb_vm_name", label_visibility="visible")
-                            st.text_input("Role", value=str(vm_role), disabled=True, key="nb_vm_role")
-                            st.text_input("Status", value=str(vm_status), disabled=True, key="nb_vm_status")
-                            st.text_input("Description", value=str(vm_desc), disabled=True, key="nb_vm_desc")
-                            st.text_input("Tags", value=str(vm_tags_display), disabled=True, key="nb_vm_tags")
+                            st.text_input("Name", value=str(vm_name), disabled=True, key=f"nb_vm_name_{key_suffix}", label_visibility="visible")
+                            st.text_input("Role", value=str(vm_role), disabled=True, key=f"nb_vm_role_{key_suffix}")
+                            st.text_input("Status", value=str(vm_status), disabled=True, key=f"nb_vm_status_{key_suffix}")
+                            st.text_input("Description", value=str(vm_desc), disabled=True, key=f"nb_vm_desc_{key_suffix}")
+                            st.text_input("Tags", value=str(vm_tags_display), disabled=True, key=f"nb_vm_tags_{key_suffix}")
                             
                             st.markdown("**Tenancy**")
-                            st.text_input("Tenant group", value=str(vm_tenant_group), disabled=True, key="nb_tenant_group")
-                            st.text_input("Tenant", value=str(vm_tenant), disabled=True, key="nb_tenant")
+                            st.text_input("Tenant group", value=str(vm_tenant_group), disabled=True, key=f"nb_tenant_group_{key_suffix}")
+                            st.text_input("Tenant", value=str(vm_tenant), disabled=True, key=f"nb_tenant_{key_suffix}")
                             
                             st.markdown("**Custom Fields**")
-                            st.text_input("Instance Type", value=str(vm_instance), disabled=True, key="nb_instance_type")
-                            st.text_input("Resource Groups", value=str(vm_rg), disabled=True, key="nb_rg")
+                            st.text_input("Instance Type", value=str(vm_instance), disabled=True, key=f"nb_instance_type_{key_suffix}")
+                            st.text_input("Resource Groups", value=str(vm_rg), disabled=True, key=f"nb_rg_{key_suffix}")
                         
                         with col_right:
                             st.markdown("**Placement**")
@@ -840,17 +842,17 @@ def render_azure_tab(active_model=None):
                                 vm_site = f"Azure - {raw_loc}"
                             else:
                                 vm_site = "Azure - Unknown"
-                            st.text_input("Site", value=str(vm_site), disabled=True, key="nb_site")
-                            st.text_input("Cluster", value=str(vm_cluster), disabled=True, key="nb_cluster")
-                            st.text_input("Device", value=str(vm_device), disabled=True, key="nb_device")
+                            st.text_input("Site", value=str(vm_site), disabled=True, key=f"nb_site_{key_suffix}")
+                            st.text_input("Cluster", value=str(vm_cluster), disabled=True, key=f"nb_cluster_{key_suffix}")
+                            st.text_input("Device", value=str(vm_device), disabled=True, key=f"nb_device_{key_suffix}")
                             
                             st.markdown("**Management**")
-                            st.text_input("Platform", value=str(vm_platform), disabled=True, key="nb_platform")
-                            st.text_input("Primary IPv4", value=str(vm_ip), disabled=True, key="nb_ipv4")
+                            st.text_input("Platform", value=str(vm_platform), disabled=True, key=f"nb_platform_{key_suffix}")
+                            st.text_input("Primary IPv4", value=str(vm_ip), disabled=True, key=f"nb_ipv4_{key_suffix}")
                             
                             st.markdown("**Ownership**")
-                            st.text_input("Owner", value=str(vm_owner), disabled=True, key="nb_owner")
-                            st.text_input("Owner group", value=str(vm_owner_group), disabled=True, key="nb_owner_group")
+                            st.text_input("Owner", value=str(vm_owner), disabled=True, key=f"nb_owner_{key_suffix}")
+                            st.text_input("Owner group", value=str(vm_owner_group), disabled=True, key=f"nb_owner_group_{key_suffix}")
                 
                 
         
@@ -899,7 +901,7 @@ def render_azure_tab(active_model=None):
     
     with col1:
         st.markdown("### 🔍 Check VM Status")
-        vm_name_check = st.text_input("Enter VM name to check", placeholder="e.g., ANZAPP002")
+        vm_name_check = st.text_input("Enter VM name to check", placeholder="e.g., VM-APP-002")
         if st.button("Check VM"):
             if vm_name_check:
                 existing = check_vm_exists_in_db(vm_name_check)
