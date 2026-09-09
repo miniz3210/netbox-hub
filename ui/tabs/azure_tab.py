@@ -585,30 +585,38 @@ def render_azure_tab(active_model=None):
                     })
                 st.dataframe(pd.DataFrame(summary_rows), width="stretch", hide_index=True)
 
-                # Detail per category
-                for key, data in analysis.items():
+                # Detail per category - display in 2 columns
+                analysis_items = list(analysis.items())
+                obj_col1, obj_col2 = st.columns(2)
+                
+                for idx, (key, data) in enumerate(analysis_items):
                     missing = data["missing"]
                     existing = data["existing"]
                     icon = "❌" if missing else "✅"
                     header = f"{icon} {data['label']} — {len(missing)} missing, {len(existing)} exist"
-                    with st.expander(header, expanded=False):
-                        det_a, det_b = st.columns(2)
-                        with det_a:
-                            st.markdown("**❌ Missing (needs import)**")
-                            if missing:
-                                for value in missing:
-                                    st.text(f"  • {value}")
-                            else:
-                                st.caption("None — all present in NetBox.")
-                        with det_b:
-                            st.markdown("**✅ Already in NetBox**")
-                            if existing:
-                                for value in existing[:20]:
-                                    st.text(f"  • {value}")
-                                if len(existing) > 20:
-                                    st.caption(f"... and {len(existing) - 20} more")
-                            else:
-                                st.caption("None found in the local NetBox data.")
+                    
+                    # Alternate between columns
+                    target_col = obj_col1 if idx % 2 == 0 else obj_col2
+                    
+                    with target_col:
+                        with st.expander(header, expanded=False):
+                            det_a, det_b = st.columns(2)
+                            with det_a:
+                                st.markdown("**❌ Missing (needs import)**")
+                                if missing:
+                                    for value in missing:
+                                        st.text(f"  • {value}")
+                                else:
+                                    st.caption("None — all present in NetBox.")
+                            with det_b:
+                                st.markdown("**✅ Already in NetBox**")
+                                if existing:
+                                    for value in existing[:20]:
+                                        st.text(f"  • {value}")
+                                    if len(existing) > 20:
+                                        st.caption(f"... and {len(existing) - 20} more")
+                                else:
+                                    st.caption("None found in the local NetBox data.")
 
                 # Import payloads for the missing objects only
                 st.divider()
@@ -1249,30 +1257,38 @@ def render_azure_tab(active_model=None):
                 })
             st.dataframe(pd.DataFrame(summary_rows), width="stretch", hide_index=True)
 
-            # Detail per category
-            for key, data in analysis.items():
+            # Detail per category - display in 2 columns
+            analysis_items = list(analysis.items())
+            obj_col1, obj_col2 = st.columns(2)
+            
+            for idx, (key, data) in enumerate(analysis_items):
                 missing = data["missing"]
                 existing = data["existing"]
                 icon = "❌" if missing else "✅"
                 header = f"{icon} {data['label']} — {len(missing)} missing, {len(existing)} exist"
-                with st.expander(header, expanded=False):
-                    det_a, det_b = st.columns(2)
-                    with det_a:
-                        st.markdown("**❌ Missing (needs import)**")
-                        if missing:
-                            for value in missing:
-                                st.text(f"  • {value}")
-                        else:
-                            st.caption("None — all present in NetBox.")
-                    with det_b:
-                        st.markdown("**✅ Already in NetBox**")
-                        if existing:
-                            for value in existing[:20]:
-                                st.text(f"  • {value}")
-                            if len(existing) > 20:
-                                st.caption(f"... and {len(existing) - 20} more")
-                        else:
-                            st.caption("None found in the local NetBox data.")
+                
+                # Alternate between columns
+                target_col = obj_col1 if idx % 2 == 0 else obj_col2
+                
+                with target_col:
+                    with st.expander(header, expanded=False):
+                        det_a, det_b = st.columns(2)
+                        with det_a:
+                            st.markdown("**❌ Missing (needs import)**")
+                            if missing:
+                                for value in missing:
+                                    st.text(f"  • {value}")
+                            else:
+                                st.caption("None — all present in NetBox.")
+                        with det_b:
+                            st.markdown("**✅ Already in NetBox**")
+                            if existing:
+                                for value in existing[:20]:
+                                    st.text(f"  • {value}")
+                                if len(existing) > 20:
+                                    st.caption(f"... and {len(existing) - 20} more")
+                            else:
+                                st.caption("None found in the local NetBox data.")
 
             # Import payloads for the missing objects only
             st.divider()
