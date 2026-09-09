@@ -305,9 +305,6 @@ def render_azure_tab(active_model=None):
             # Show preview
             st.success(f"✅ Parsed {len(vm_records)} Azure VMs (saved to database)")
             
-            # Trigger refresh to reload the page with saved data
-            st.rerun()
-            
             st.subheader("2️⃣ Preview Azure VMs")
 
             # Convert to DataFrame for display
