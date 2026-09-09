@@ -607,6 +607,19 @@ def render_azure_tab(active_model=None):
                     new_vm_records = [
                         vm for vm in vm_records if vm['name'] in metadata['new_vms']
                     ]
+                    
+                    # Enrich VM records with data from NetBox database if available
+                    for vm in new_vm_records:
+                        db_vm = check_vm_exists_in_db(vm['name'])
+                        if db_vm:
+                            # Merge owner field from database if not present in CSV
+                            if not vm.get('owner') and db_vm.get('owner'):
+                                vm['owner'] = db_vm['owner']
+                            # Also check custom_fields for owner
+                            if not vm.get('owner') and isinstance(db_vm.get('custom_fields'), dict):
+                                cf_owner = db_vm['custom_fields'].get('owner')
+                                if cf_owner:
+                                    vm['owner'] = cf_owner
                     instance_type_values = get_existing_custom_field_values(
                         INSTANCE_TYPE_FIELD, INSTANCE_TYPE_CHOICE_SET
                     )
