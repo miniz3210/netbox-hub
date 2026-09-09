@@ -239,8 +239,16 @@ def render_azure_tab(active_model=None):
         if saved_upload:
             st.caption(f"**Azure CSV export:** `{saved_upload['filename']}` - Uploaded: {saved_upload['uploaded_at']}")
         
-        # Consolidated buttons section (uploader moved outside)
-        c_clr, c_ref = st.columns([1, 1])
+        # Consolidated upload section
+        c_up, c_clr, c_ref = st.columns([3, 1, 1])
+        with c_up:
+            uploaded_file = st.file_uploader(
+                "Upload Azure VM CSV file",
+                type=["csv"],
+                help="Upload the CSV file exported from Azure Resource Graph Explorer",
+                key="azure_csv_uploader",
+                label_visibility="collapsed"
+            )
         with c_clr:
             if saved_upload:
                 if st.button("🗑️ Clear Azure CSV", key="clear_azure_csv_btn", help="Clear Azure CSV data", use_container_width=True):
@@ -258,14 +266,6 @@ def render_azure_tab(active_model=None):
                 # Clear preview table cache to force rebuild
                 st.session_state.azure_preview_table_df = None
                 st.rerun()
-    
-    # File uploader - moved outside expander to prevent variable issues
-    uploaded_file = st.file_uploader(
-        "Upload Azure VM CSV file",
-        type=["csv"],
-        help="Upload the CSV file exported from Azure Resource Graph Explorer",
-        key="azure_csv_uploader"
-    )
     
     # Session state for parsed data
     if 'azure_vms_parsed' not in st.session_state:
@@ -547,6 +547,7 @@ def render_azure_tab(active_model=None):
                 st.session_state["analyze_netbox_clicked"] = False
             if st.button("📋 Analyze NetBox Requirements", key="btn_analyze_netbox"):
                 st.session_state["analyze_netbox_clicked"] = True
+                st.rerun()
             
             if st.session_state.get("analyze_netbox_clicked", False):
                 with st.spinner("Analyzing NetBox requirements..."):
