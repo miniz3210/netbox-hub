@@ -495,5 +495,22 @@ def render_sidebar() -> str:
                         st.markdown(f"• ~~`{m_name}`~~: 🔴 **Fail**")
 
         st.caption(f"🔌 Routed via **OmniRoute** (`{OPENROUTER_BASE_URL}`)")
+        
+        # Version badge at the bottom of sidebar
+        st.markdown("---")
+        st.markdown(
+            f"""
+            <div style="text-align: left; padding: 8px 0;">
+                <span style="background: #1e293b; color: #38bdf8; padding: 5px 12px; 
+                             border-radius: 6px; font-size: 12px; 
+                             font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; 
+                             font-weight: 600; border: 1px solid #334155; 
+                             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); display: inline-block;">
+                    📦 NetBox Hub v{APP_VERSION}
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
     return active_model
