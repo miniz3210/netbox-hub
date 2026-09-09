@@ -221,6 +221,8 @@ def render_azure_tab(active_model=None):
             from core.db_manager import DB_PATH
             import sqlite3
             import os
+            import sys
+            from io import StringIO
             
             st.write(f"**Database path:** `{DB_PATH}`")
             st.write(f"**Database exists:** {os.path.exists(DB_PATH)}")
@@ -243,6 +245,36 @@ def render_azure_tab(active_model=None):
                         cursor.execute("SELECT id, filename, row_count, uploaded_at FROM azure_csv_uploads")
                         for row in cursor.fetchall():
                             st.write(f"**Found:** {row[1]} ({row[2]} rows) - {row[3]}")
+                        
+                        # Now test get_azure_csv_upload() with captured output
+                        st.write("---")
+                        st.write("**Testing get_azure_csv_upload():**")
+                        
+                        # Capture print statements
+                        old_stdout = sys.stdout
+                        sys.stdout = captured_output = StringIO()
+                        
+                        try:
+                            result = get_azure_csv_upload()
+                            
+                            # Restore stdout
+                            sys.stdout = old_stdout
+                            
+                            # Show captured logs
+                            logs = captured_output.getvalue()
+                            if logs:
+                                st.code(logs, language="text")
+                            
+                            # Show result
+                            if result:
+                                st.success(f"✅ Function returned: {result['filename']}, {result['row_count']} rows")
+                            else:
+                                st.error("❌ Function returned None")
+                        except Exception as e:
+                            sys.stdout = old_stdout
+                            st.error(f"❌ Function crashed: {e}")
+                            import traceback
+                            st.code(traceback.format_exc())
                 else:
                     st.warning("Table 'azure_csv_uploads' does not exist in database")
                 

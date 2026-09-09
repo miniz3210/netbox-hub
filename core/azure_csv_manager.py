@@ -76,6 +76,8 @@ def get_azure_csv_upload() -> Optional[Dict[str, Any]]:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
+        print("[azure_csv_manager] Attempting to fetch saved CSV...")
+        
         cursor.execute("""
             SELECT filename, uploaded_at, csv_data, row_count
             FROM azure_csv_uploads
@@ -92,22 +94,48 @@ def get_azure_csv_upload() -> Optional[Dict[str, Any]]:
         filename, uploaded_at, csv_json, row_count = row
         
         print(f"[azure_csv_manager] Found saved CSV: {filename}, {row_count} rows")
+        print(f"[azure_csv_manager] JSON data length: {len(csv_json) if csv_json else 0} bytes")
         
         # Convert JSON back to DataFrame
         try:
+            if not csv_json:
+                print("[azure_csv_manager] ERROR: csv_data is empty or None")
+                return None
+                
+            # First parse JSON to check if it's valid
+            import json
+            try:
+                parsed_json = json.loads(csv_json)
+                print(f"[azure_csv_manager] JSON parsed successfully, type: {type(parsed_json)}")
+                if isinstance(parsed_json, list):
+                    print(f"[azure_csv_manager] JSON is a list with {len(parsed_json)} items")
+                    if len(parsed_json) > 0:
+                        print(f"[azure_csv_manager] First item keys: {list(parsed_json[0].keys()) if isinstance(parsed_json[0], dict) else 'not a dict'}")
+            except json.JSONDecodeError as je:
+                print(f"[azure_csv_manager] ERROR: JSON is invalid: {je}")
+                return None
+            
+            # Now convert to DataFrame
             csv_data = pd.read_json(csv_json, orient='records')
-            print(f"[azure_csv_manager] Successfully converted JSON to DataFrame")
+            print(f"[azure_csv_manager] Successfully converted to DataFrame: {len(csv_data)} rows, {len(csv_data.columns)} columns")
+            
         except Exception as e:
             print(f"[azure_csv_manager] ERROR converting JSON to DataFrame: {e}")
+            import traceback
+            traceback.print_exc()
             return None
         
-        return {
+        result = {
             "filename": filename,
             "uploaded_at": uploaded_at,
             "csv_data": csv_data,
             "row_count": row_count,
             "exists": True
         }
+        
+        print(f"[azure_csv_manager] Returning result with {len(csv_data)} rows")
+        return result
+        
     except Exception as e:
         print(f"[azure_csv_manager] ERROR retrieving CSV: {e}")
         import traceback
