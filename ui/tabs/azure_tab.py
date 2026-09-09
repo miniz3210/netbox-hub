@@ -49,7 +49,7 @@ def render_azure_tab(active_model=None):
     st.header("☁️ Azure VM Import for NetBox")
     
     # KQL query stored for reference.
-        kql_query = '''Resources
+    kql_query = '''Resources
 | where type =~ "microsoft.compute/virtualmachines"
 | extend 
     vmSize = tostring(properties.hardwareProfile.vmSize),
