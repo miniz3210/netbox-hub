@@ -892,14 +892,40 @@ def set_backup_enabled(enabled: bool) -> None:
 
 
 def clear_backup_records() -> int:
+    """Clear all JSON backup data including related tables.
+    
+    This clears:
+    - backup_records (main backup table)
+    - backup_choice_values (custom field choices)
+    - backup_metadata (upload metadata)
+    - sites_records (sites populated from JSON)
+    - ipam_records (VLANs and prefixes from JSON)
+    - inventory_records (devices and VMs from JSON)
+    - All related sync_metadata entries
+    """
     init_backup_tables()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    
+    # Clear main backup tables
     cursor.execute("DELETE FROM backup_records")
     deleted = cursor.rowcount
     cursor.execute("DELETE FROM backup_choice_values")
     cursor.execute("DELETE FROM backup_metadata")
-    cursor.execute("DELETE FROM sync_metadata WHERE module = 'netbox_backup'")
+    
+    # Clear related data tables populated from JSON backup
+    cursor.execute("DELETE FROM sites_records")
+    cursor.execute("DELETE FROM ipam_records")
+    cursor.execute("DELETE FROM inventory_records")
+    
+    # Clear all related sync metadata
+    cursor.execute("""
+        DELETE FROM sync_metadata WHERE module IN (
+            'netbox_backup', 'ipam', 'naming', 'netbox_sites', 
+            'netbox_VLANs', 'netbox_prefixes', 'netbox_devices', 'netbox_virtual_machines'
+        )
+    """)
+    
     conn.commit()
     conn.close()
     return deleted

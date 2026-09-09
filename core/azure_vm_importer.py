@@ -140,7 +140,7 @@ def parse_azure_vm_csv(csv_path: str) -> Tuple[List[Dict[str, Any]], List[str]]:
 def check_vm_exists_in_db(vm_name: str) -> Optional[Dict[str, Any]]:
     """
     Check if a VM with the given name already exists in the database.
-    Returns enriched data from NetBox backup if available, falls back to inventory_records.
+    Prioritizes the most recently updated data source (JSON backup vs CSV).
     
     Args:
         vm_name: Virtual machine name
@@ -154,8 +154,20 @@ def check_vm_exists_in_db(vm_name: str) -> Optional[Dict[str, Any]]:
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # First try to get complete data from backup_records (NetBox JSON backup)
-    # Note: Site is stored in a separate column, not in summary
+    # Get timestamps for both data sources
+    cursor.execute("""
+        SELECT updated_at FROM sync_metadata WHERE module = 'netbox_backup'
+    """)
+    backup_timestamp_row = cursor.fetchone()
+    backup_timestamp = backup_timestamp_row[0] if backup_timestamp_row else ""
+    
+    cursor.execute("""
+        SELECT updated_at FROM sync_metadata WHERE module = 'netbox_virtual_machines'
+    """)
+    csv_timestamp_row = cursor.fetchone()
+    csv_timestamp = csv_timestamp_row[0] if csv_timestamp_row else ""
+    
+    # Try to get data from backup_records (NetBox JSON backup)
     cursor.execute("""
         SELECT site, summary
         FROM backup_records
@@ -166,6 +178,60 @@ def check_vm_exists_in_db(vm_name: str) -> Optional[Dict[str, Any]]:
     
     backup_row = cursor.fetchone()
     
+    # Try to get data from inventory_records (CSV upload)
+    cursor.execute("""
+        SELECT id, name, category, description, manufacturer, model_or_role, 
+               site, cluster, imported_at
+        FROM inventory_records
+        WHERE LOWER(name) = LOWER(?) AND category = 'vm'
+    """, (vm_name,))
+    
+    csv_row = cursor.fetchone()
+    
+    # Determine which source to use based on timestamps and data availability
+    use_csv = False
+    if csv_row and not backup_row:
+        # Only CSV data available
+        use_csv = True
+    elif backup_row and not csv_row:
+        # Only JSON backup data available
+        use_csv = False
+    elif backup_row and csv_row:
+        # Both available - compare timestamps to use the most recent
+        # Timestamps are in format "YYYY-MM-DD HH:MM:SS UTC"
+        use_csv = csv_timestamp > backup_timestamp
+    else:
+        # No data found in either source
+        conn.close()
+        return None
+    
+    # Process CSV data if it's newer or only source available
+    if use_csv and csv_row:
+        conn.close()
+        return {
+            'id': csv_row[0],
+            'name': csv_row[1],
+            'category': csv_row[2],
+            'description': csv_row[3],
+            'manufacturer': csv_row[4],
+            'role': csv_row[5],  # model_or_role maps to role
+            'site': csv_row[6],
+            'cluster': csv_row[7],
+            'imported_at': csv_row[8],
+            'tags': [],
+            'custom_fields': {},
+            'tenant': '',
+            'platform': '',
+            'primary_ip': '',
+            'primary_ip4': '',
+            'device': '',
+            'owner': '',
+            '_source': 'csv'  # Track which source was used
+        }
+    
+    # Process JSON backup data if it's newer or CSV is not available
+    backup_row = backup_row  # backup_row is already fetched above
+    # Process JSON backup data if it's newer or CSV is not available
     if backup_row:
         site_column, summary = backup_row
         
@@ -184,7 +250,8 @@ def check_vm_exists_in_db(vm_name: str) -> Optional[Dict[str, Any]]:
             'primary_ip': '',
             'primary_ip4': '',
             'device': '',
-            'owner': ''
+            'owner': '',
+            '_source': 'json'  # Track which source was used
         }
         
         # Parse summary line: "Role: JDE Application | Status: Active | Cluster: vCluster | Tags: tag1, tag2 | Custom Fields: key=value, key=value"
@@ -247,37 +314,8 @@ def check_vm_exists_in_db(vm_name: str) -> Optional[Dict[str, Any]]:
         conn.close()
         return vm_data
     
-    # Fallback to inventory_records (limited data)
-    cursor.execute("""
-        SELECT id, name, category, description, manufacturer, model_or_role, 
-               site, cluster, imported_at
-        FROM inventory_records
-        WHERE LOWER(name) = LOWER(?) AND category = 'vm'
-    """, (vm_name,))
-    
-    row = cursor.fetchone()
+    # No data found
     conn.close()
-    
-    if row:
-        return {
-            'id': row[0],
-            'name': row[1],
-            'category': row[2],
-            'description': row[3],
-            'manufacturer': row[4],
-            'role': row[5],  # model_or_role maps to role
-            'site': row[6],
-            'cluster': row[7],
-            'imported_at': row[8],
-            'tags': [],
-            'custom_fields': {},
-            'tenant': '',
-            'platform': '',
-            'primary_ip': '',
-            'primary_ip4': '',
-            'device': '',
-            'owner': ''
-        }
     return None
 
 
