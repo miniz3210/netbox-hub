@@ -173,6 +173,68 @@ def export_schema(registry: FieldRegistry, output_file: str):
     print(f"✓ Exported schema for {len(export_data)} object types to {output_file}")
 
 
+def discover_from_backup(registry: FieldRegistry, backup_file: str):
+    """Manually run schema discovery on an existing backup file."""
+    import time
+    from pathlib import Path
+    
+    if not Path(backup_file).exists():
+        print(f"✗ Backup file not found: {backup_file}")
+        sys.exit(1)
+    
+    print(f"Loading backup file: {backup_file}")
+    file_size_mb = Path(backup_file).stat().st_size / (1024 * 1024)
+    print(f"File size: {file_size_mb:.1f} MB")
+    print()
+    
+    # Load and parse backup
+    from core.backup_manager import _load_payload, _bucket_payload, _payload_source_info
+    
+    start_time = time.time()
+    print("[1/3] Parsing JSON...")
+    
+    with open(backup_file, 'rb') as f:
+        payload = _load_payload(f)
+    
+    parse_time = time.time() - start_time
+    print(f"✓ Parsed in {parse_time:.1f}s")
+    
+    print("\n[2/3] Bucketing data...")
+    buckets = _bucket_payload(payload)
+    source_info = _payload_source_info(payload)
+    
+    bucket_time = time.time() - start_time - parse_time
+    print(f"✓ Bucketed in {bucket_time:.1f}s")
+    print(f"  Found {len(buckets)} object types")
+    
+    # Run discovery
+    print("\n[3/3] Discovering schema...")
+    discover_start = time.time()
+    
+    netbox_version = source_info.get("netbox_version") if source_info else None
+    stats = registry.discover_schema_from_backup(buckets, netbox_version)
+    
+    discover_time = time.time() - discover_start
+    total_time = time.time() - start_time
+    
+    print(f"✓ Discovery completed in {discover_time:.1f}s")
+    print()
+    print("=" * 60)
+    print("Discovery Summary:")
+    print("=" * 60)
+    print(f"  Object types discovered:  {stats.get('objects_discovered', 0)}")
+    print(f"  Total fields discovered:  {stats.get('fields_discovered', 0)}")
+    print(f"  Custom fields found:      {stats.get('custom_fields_found', 0)}")
+    print(f"  Schemas updated:          {stats.get('updated_objects', 0)}")
+    print(f"  NetBox version:           {netbox_version or 'Unknown'}")
+    print()
+    print(f"Total time:                 {total_time:.1f}s")
+    print(f"  - JSON parsing:           {parse_time:.1f}s")
+    print(f"  - Data bucketing:         {bucket_time:.1f}s")
+    print(f"  - Schema discovery:       {discover_time:.1f}s")
+    print("=" * 60)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="NetBox Hub Field Configuration Manager",
@@ -230,6 +292,12 @@ Examples:
     export_parser.add_argument('--output', default='netbox_schema_export.json',
                               help='Output file path')
     
+    # Discover command
+    discover_parser = subparsers.add_parser('discover', 
+                                           help='Manually discover schema from backup file')
+    discover_parser.add_argument('backup_file', 
+                                help='Path to NetBox backup JSON file')
+    
     args = parser.parse_args()
     
     if not args.command:
@@ -261,6 +329,9 @@ Examples:
     
     elif args.command == 'export':
         export_schema(registry, args.output)
+    
+    elif args.command == 'discover':
+        discover_from_backup(registry, args.backup_file)
 
 
 if __name__ == '__main__':

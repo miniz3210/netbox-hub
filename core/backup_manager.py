@@ -824,7 +824,8 @@ def _ingest_backup_rows(
 
 # ── PUBLIC API ──────────────────────────────────────────────────────────
 
-def save_netbox_backup(file_bytes: Any, filename: str = "") -> Dict[str, Any]:
+def save_netbox_backup(file_bytes: Any, filename: str = "", 
+                      enable_schema_discovery: bool = False) -> Dict[str, Any]:
     """Ingest a NetBox master backup JSON file.
 
     Accepts both the legacy flat layout and the full API-walk layout produced by
@@ -832,7 +833,15 @@ def save_netbox_backup(file_bytes: Any, filename: str = "") -> Dict[str, Any]:
     (replacing existing records), stores a searchable row for every NetBox
     object, and records custom field choice sets.
     
-    Also performs automatic schema discovery to update the dynamic field registry.
+    Args:
+        file_bytes: File content (bytes or file-like object)
+        filename: Original filename for display
+        enable_schema_discovery: If True, runs schema discovery (adds ~1-3s for large files)
+                                Default False for fast uploads. Run manually with 
+                                'python field_manager.py discover' later if needed.
+    
+    Returns:
+        Dict with upload statistics
     """
     init_backup_tables()
 
@@ -849,19 +858,22 @@ def save_netbox_backup(file_bytes: Any, filename: str = "") -> Dict[str, Any]:
     inventory = _ingest_inventory(buckets)
     choice_values = _ingest_choice_values(buckets, uploaded_at)
     
-    # Auto-discover schema from backup data
-    from core.field_registry import FieldRegistry
-    from core.db_manager_wrapper import DatabaseManager
+    schema_stats = {}
     
-    try:
-        db_manager = DatabaseManager()
-        field_registry = FieldRegistry(db_manager)
-        netbox_version = source_info.get("netbox_version") if source_info else None
-        schema_stats = field_registry.discover_schema_from_backup(buckets, netbox_version)
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning(f"Schema discovery failed: {e}")
-        schema_stats = {}
+    # Optional schema discovery (disabled by default for speed)
+    if enable_schema_discovery:
+        try:
+            from core.field_registry import FieldRegistry
+            from core.db_manager_wrapper import DatabaseManager
+            
+            db_manager = DatabaseManager()
+            field_registry = FieldRegistry(db_manager)
+            netbox_version = source_info.get("netbox_version") if source_info else None
+            schema_stats = field_registry.discover_schema_from_backup(buckets, netbox_version)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Schema discovery failed: {e}")
+            schema_stats = {"error": str(e)}
 
     counts_payload = dict(object_counts)
     if source_info:

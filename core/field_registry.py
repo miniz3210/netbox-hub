@@ -34,18 +34,18 @@ class FieldRegistry:
         self._schema_version = None
         
     def discover_schema_from_backup(self, backup_data: Dict[str, List[Dict]], 
-                                   netbox_version: str = None) -> Dict[str, int]:
+                                   netbox_version: str = None,
+                                   max_object_types: int = 100) -> Dict[str, int]:
         """
         Automatically discover fields from NetBox backup JSON.
         
-        Analyzes the backup data structure to extract:
-        - Native object fields (from model structure)
-        - Custom fields (from extras_custom_fields)
-        - Object types and relationships
+        OPTIMIZED: Only analyzes custom field definitions and samples one record
+        per object type. Very fast even for large backups.
         
         Args:
             backup_data: Parsed NetBox backup JSON
             netbox_version: NetBox version string (e.g., "3.7.0")
+            max_object_types: Max object types to process (default 100)
             
         Returns:
             Dict with discovery statistics (objects_found, fields_discovered, etc.)
@@ -54,45 +54,61 @@ class FieldRegistry:
             "objects_discovered": 0,
             "fields_discovered": 0,
             "custom_fields_found": 0,
-            "updated_objects": 0
+            "updated_objects": 0,
+            "skipped_empty": 0
         }
         
-        logger.info(f"Starting schema discovery from backup (NetBox version: {netbox_version})")
+        logger.info(f"Starting fast schema discovery (NetBox version: {netbox_version})")
         
-        # Extract custom field definitions
+        # Extract custom field definitions (this is fast, only reads extras_custom_fields)
         custom_fields = self._extract_custom_fields(backup_data)
         stats["custom_fields_found"] = len(custom_fields)
         
-        # Discover fields for each object type
+        # Batch prepare database updates for speed
+        updates = []
+        processed = 0
+        
+        # Discover fields for each object type (only sample first record)
         for object_type, records in backup_data.items():
-            if not records or not isinstance(records, list):
+            if not records or not isinstance(records, list) or len(records) == 0:
+                stats["skipped_empty"] += 1
                 continue
+            
+            processed += 1
+            if processed > max_object_types:
+                break
                 
             stats["objects_discovered"] += 1
             
-            # Sample first record to discover field structure
-            sample_record = records[0] if records else {}
+            # Only sample first record - no need to analyze thousands
+            sample_record = records[0]
             discovered_fields = self._analyze_record_structure(sample_record, object_type)
             
             # Check if this object has custom fields
             object_custom_fields = custom_fields.get(object_type, [])
             
-            # Store or update schema
-            field_count = self._store_object_schema(
-                object_type=object_type,
-                native_fields=discovered_fields["native"],
-                custom_fields=object_custom_fields,
-                relationships=discovered_fields["relationships"],
-                netbox_version=netbox_version
-            )
+            # Prepare update (don't execute yet)
+            field_count = len(discovered_fields["native"]) + len(discovered_fields["relationships"]) + len(object_custom_fields)
+            updates.append({
+                "object_type": object_type,
+                "native_fields": discovered_fields["native"],
+                "custom_fields": object_custom_fields,
+                "relationships": discovered_fields["relationships"],
+                "netbox_version": netbox_version,
+                "field_count": field_count
+            })
             
             stats["fields_discovered"] += field_count
-            stats["updated_objects"] += 1
-            
+        
+        # Batch store all schemas at once
+        if updates:
+            self._batch_store_schemas(updates)
+            stats["updated_objects"] = len(updates)
+        
         # Clear cache to force reload
         self._cache.clear()
         
-        logger.info(f"Schema discovery complete: {stats}")
+        logger.info(f"Fast schema discovery complete: {stats}")
         return stats
     
     def _extract_custom_fields(self, backup_data: Dict) -> Dict[str, List[Dict]]:
@@ -246,6 +262,78 @@ class FieldRegistry:
         conn.commit()
         
         return len(all_fields) + len(custom_fields)
+    
+    def _batch_store_schemas(self, updates: List[Dict]) -> None:
+        """
+        Batch store multiple schemas at once for performance.
+        
+        Args:
+            updates: List of dicts with object_type, native_fields, custom_fields, etc.
+        """
+        if not updates:
+            return
+        
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
+        
+        now = datetime.utcnow().isoformat()
+        
+        # Get all existing schemas in one query
+        object_types = [u["object_type"] for u in updates]
+        placeholders = ",".join("?" * len(object_types))
+        cursor.execute(f"""
+            SELECT object_type, field_config FROM netbox_schema
+            WHERE object_type IN ({placeholders})
+        """, object_types)
+        
+        existing_configs = {row[0]: row[1] for row in cursor.fetchall()}
+        
+        # Prepare batch inserts and updates
+        inserts = []
+        update_queries = []
+        
+        for update in updates:
+            object_type = update["object_type"]
+            native_fields = update["native_fields"]
+            custom_fields = update["custom_fields"]
+            relationships = update["relationships"]
+            netbox_version = update["netbox_version"]
+            
+            all_fields = native_fields + relationships
+            field_config = {
+                "native_fields": {f["name"]: f for f in native_fields},
+                "relationships": {f["name"]: f for f in relationships},
+                "custom_fields": {f["name"]: f for f in custom_fields},
+                "display_fields": self._select_default_display_fields(all_fields, custom_fields)
+            }
+            
+            if object_type in existing_configs:
+                # Preserve user customizations
+                old_config = json.loads(existing_configs[object_type]) if existing_configs[object_type] else {}
+                if "display_fields" in old_config:
+                    field_config["display_fields"] = old_config["display_fields"]
+                
+                update_queries.append((json.dumps(field_config), netbox_version, now, object_type))
+            else:
+                inserts.append((object_type, json.dumps(field_config), netbox_version, now, now))
+        
+        # Execute batch operations
+        if update_queries:
+            cursor.executemany("""
+                UPDATE netbox_schema 
+                SET field_config = ?, netbox_version = ?, updated_at = ?
+                WHERE object_type = ?
+            """, update_queries)
+        
+        if inserts:
+            cursor.executemany("""
+                INSERT INTO netbox_schema 
+                (object_type, field_config, netbox_version, is_enabled, created_at, updated_at)
+                VALUES (?, ?, ?, 1, ?, ?)
+            """, inserts)
+        
+        conn.commit()
+        logger.info(f"Batch stored {len(inserts)} new and updated {len(update_queries)} existing schemas")
     
     def _select_default_display_fields(self, native_fields: List[Dict], 
                                       custom_fields: List[Dict]) -> List[Tuple[str, str]]:
