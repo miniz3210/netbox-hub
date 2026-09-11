@@ -393,34 +393,55 @@ def render_backup_uploader(scope_key: str) -> dict:
                     label = metadata["label"]
                     count = metadata["count"]
                     timestamp = metadata["timestamp"]
-                    source = metadata.get("source", "Unknown")
                     source_type = metadata.get("source_type", "json")
                     
                     # Determine icon based on source
-                    if source_type == "csv" or source.lower().endswith(".csv"):
+                    if source_type == "csv" or metadata.get("source", "").lower().endswith(".csv"):
                         icon = "📊"
                     else:
                         icon = "📦"
                     
-                    # Compact format: Label (count) icon
-                    st.caption(f"**{label}**: {count} {icon}")
+                    # Format timestamp as dd-mm-yy HH:mm
+                    try:
+                        from datetime import datetime
+                        if isinstance(timestamp, str):
+                            # Parse timestamp: "2026-09-11 09:31:52" or similar
+                            dt = datetime.fromisoformat(timestamp.replace("UTC", "").strip())
+                            compact_time = dt.strftime("%d-%m-%y %H:%M")
+                        else:
+                            compact_time = str(timestamp)
+                    except:
+                        compact_time = str(timestamp)[:16] if timestamp else "N/A"
+                    
+                    # Compact format: Label: count icon time
+                    st.caption(f"**{label}**: {count} {icon} `{compact_time}`")
             
             with col2:
                 for endpoint, metadata in sorted_objects[mid_point:]:
                     label = metadata["label"]
                     count = metadata["count"]
                     timestamp = metadata["timestamp"]
-                    source = metadata.get("source", "Unknown")
                     source_type = metadata.get("source_type", "json")
                     
                     # Determine icon based on source
-                    if source_type == "csv" or source.lower().endswith(".csv"):
+                    if source_type == "csv" or metadata.get("source", "").lower().endswith(".csv"):
                         icon = "📊"
                     else:
                         icon = "📦"
                     
-                    # Compact format: Label (count) icon
-                    st.caption(f"**{label}**: {count} {icon}")
+                    # Format timestamp as dd-mm-yy HH:mm
+                    try:
+                        from datetime import datetime
+                        if isinstance(timestamp, str):
+                            dt = datetime.fromisoformat(timestamp.replace("UTC", "").strip())
+                            compact_time = dt.strftime("%d-%m-%y %H:%M")
+                        else:
+                            compact_time = str(timestamp)
+                    except:
+                        compact_time = str(timestamp)[:16] if timestamp else "N/A"
+                    
+                    # Compact format: Label: count icon time
+                    st.caption(f"**{label}**: {count} {icon} `{compact_time}`")
             
             # Debug info
             with st.expander("🔍 Debug: Show all endpoints", expanded=False):
@@ -467,34 +488,56 @@ def render_backup_uploader(scope_key: str) -> dict:
                         label = set_data["label"]
                         field_key = set_data["field_key"]
                         count = set_data["count"]
-                        source = set_data.get("source", "Unknown")
+                        timestamp = set_data["timestamp"]
                         source_type = set_data.get("source_type", "json")
                         
                         # Determine icon based on source
-                        if source_type == "csv" or source.lower().endswith(".csv"):
+                        if source_type == "csv" or set_data.get("source", "").lower().endswith(".csv"):
                             icon = "📊"
                         else:
                             icon = "📦"
                         
-                        # Compact format: Label → field: count values icon
-                        st.caption(f"**{label}** → `{field_key}`: {count} {icon}")
+                        # Format timestamp as dd-mm-yy HH:mm
+                        try:
+                            from datetime import datetime
+                            if isinstance(timestamp, str):
+                                dt = datetime.fromisoformat(timestamp.replace("UTC", "").strip())
+                                compact_time = dt.strftime("%d-%m-%y %H:%M")
+                            else:
+                                compact_time = str(timestamp)
+                        except:
+                            compact_time = str(timestamp)[:16] if timestamp else "N/A"
+                        
+                        # Compact format: Label → field: count icon time
+                        st.caption(f"**{label}** → `{field_key}`: {count} {icon} `{compact_time}`")
                 
                 with col2:
                     for set_name, set_data in sorted_sets[mid_point:]:
                         label = set_data["label"]
                         field_key = set_data["field_key"]
                         count = set_data["count"]
-                        source = set_data.get("source", "Unknown")
+                        timestamp = set_data["timestamp"]
                         source_type = set_data.get("source_type", "json")
                         
                         # Determine icon based on source
-                        if source_type == "csv" or source.lower().endswith(".csv"):
+                        if source_type == "csv" or set_data.get("source", "").lower().endswith(".csv"):
                             icon = "📊"
                         else:
                             icon = "📦"
                         
-                        # Compact format: Label → field: count values icon
-                        st.caption(f"**{label}** → `{field_key}`: {count} {icon}")
+                        # Format timestamp as dd-mm-yy HH:mm
+                        try:
+                            from datetime import datetime
+                            if isinstance(timestamp, str):
+                                dt = datetime.fromisoformat(timestamp.replace("UTC", "").strip())
+                                compact_time = dt.strftime("%d-%m-%y %H:%M")
+                            else:
+                                compact_time = str(timestamp)
+                        except:
+                            compact_time = str(timestamp)[:16] if timestamp else "N/A"
+                        
+                        # Compact format: Label → field: count icon time
+                        st.caption(f"**{label}** → `{field_key}`: {count} {icon} `{compact_time}`")
     else:
         # Fall back to legacy static choice sets
         choice_sets = get_choice_set_summary()

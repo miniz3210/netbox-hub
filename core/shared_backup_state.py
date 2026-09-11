@@ -36,6 +36,7 @@ class SharedBackupState:
     def load_backup(cls, backup_data: Dict[str, Any], filename: str = "NetBox_Backup.json") -> BackupInspector:
         """
         Load a NetBox backup and update shared state.
+        Newer uploads override older data for matching endpoints.
         
         Args:
             backup_data: Parsed JSON backup data
@@ -48,9 +49,40 @@ class SharedBackupState:
         
         inspector = BackupInspector(backup_data, filename)
         
-        # Store inspector and refresh all registries
+        # Get new objects from inspector
+        new_objects = inspector.inspect_all_objects()
+        
+        # Get existing registry (may have CSV overrides)
+        existing_registry = st.session_state.get(cls.OBJECT_REGISTRY_KEY, {})
+        
+        # Merge: JSON data wins for any endpoint unless CSV is newer
+        from datetime import datetime
+        
+        for endpoint, new_metadata in new_objects.items():
+            new_timestamp = new_metadata.get("timestamp", "")
+            
+            if endpoint in existing_registry:
+                # Check if existing data is newer
+                existing_timestamp = existing_registry[endpoint].get("timestamp", "")
+                
+                try:
+                    new_dt = datetime.fromisoformat(new_timestamp.replace("UTC", "").strip())
+                    existing_dt = datetime.fromisoformat(existing_timestamp.replace("UTC", "").strip())
+                    
+                    # Keep newer data
+                    if new_dt >= existing_dt:
+                        existing_registry[endpoint] = new_metadata
+                    # else: keep existing (it's newer, e.g., from CSV uploaded after old JSON)
+                except:
+                    # If timestamp parsing fails, new data wins
+                    existing_registry[endpoint] = new_metadata
+            else:
+                # New endpoint, add it
+                existing_registry[endpoint] = new_metadata
+        
+        # Store inspector and updated registry
         st.session_state[cls.INSPECTOR_KEY] = inspector
-        st.session_state[cls.OBJECT_REGISTRY_KEY] = inspector.inspect_all_objects()
+        st.session_state[cls.OBJECT_REGISTRY_KEY] = existing_registry
         st.session_state[cls.CUSTOM_FIELDS_KEY] = inspector.inspect_custom_fields()
         st.session_state[cls.CHOICE_SETS_KEY] = inspector.inspect_choice_sets()
         
@@ -148,6 +180,7 @@ class SharedBackupState:
     def add_csv_override(cls, endpoint: str, count: int, source: str, timestamp: str):
         """
         Register a CSV override for an object type.
+        Latest upload wins - CSV overrides JSON only if CSV is newer.
         
         Args:
             endpoint: Object endpoint
@@ -156,20 +189,60 @@ class SharedBackupState:
             timestamp: Upload timestamp
         """
         cls.initialize()
-        overrides = st.session_state[cls.CSV_OVERRIDES_KEY]
-        overrides[endpoint] = {
-            "count": count,
-            "source": source,
-            "timestamp": timestamp
-        }
-        st.session_state[cls.CSV_OVERRIDES_KEY] = overrides
         
-        # Update object registry with CSV override
-        inspector = cls.get_inspector()
-        if inspector:
-            from core.dynamic_backup_inspector import merge_csv_overrides
-            merged = merge_csv_overrides(inspector, overrides)
-            st.session_state[cls.OBJECT_REGISTRY_KEY] = merged
+        from datetime import datetime
+        
+        # Get existing registry
+        registry = st.session_state.get(cls.OBJECT_REGISTRY_KEY, {})
+        
+        # Check if endpoint exists and compare timestamps
+        should_override = True
+        if endpoint in registry:
+            existing_timestamp = registry[endpoint].get("timestamp", "")
+            try:
+                csv_dt = datetime.fromisoformat(timestamp.replace("UTC", "").strip())
+                existing_dt = datetime.fromisoformat(existing_timestamp.replace("UTC", "").strip())
+                
+                # Only override if CSV is newer or equal
+                should_override = csv_dt >= existing_dt
+            except:
+                # If timestamp parsing fails, allow override
+                should_override = True
+        
+        if should_override:
+            if endpoint in registry:
+                # Update existing endpoint with CSV data
+                registry[endpoint]["count"] = count
+                registry[endpoint]["source"] = source
+                registry[endpoint]["timestamp"] = timestamp
+                registry[endpoint]["source_type"] = "csv"
+            else:
+                # Create new entry for CSV-only data
+                inspector = cls.get_inspector()
+                label = inspector._format_label(endpoint) if inspector else endpoint.replace("/", " ").replace("_", " ").title()
+                
+                registry[endpoint] = {
+                    "label": label,
+                    "count": count,
+                    "source": source,
+                    "timestamp": timestamp,
+                    "endpoint": endpoint,
+                    "sample_keys": [],
+                    "source_type": "csv",
+                    "data": []
+                }
+            
+            st.session_state[cls.OBJECT_REGISTRY_KEY] = registry
+            
+            # Also update CSV overrides tracking
+            overrides = st.session_state.get(cls.CSV_OVERRIDES_KEY, {})
+            overrides[endpoint] = {
+                "count": count,
+                "source": source,
+                "timestamp": timestamp,
+                "source_type": "csv"
+            }
+            st.session_state[cls.CSV_OVERRIDES_KEY] = overrides
     
     @classmethod
     def generate_backup_summary(cls) -> str:
