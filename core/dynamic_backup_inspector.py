@@ -382,9 +382,12 @@ class BackupInspector:
         
         return []
     
-    def generate_backup_contents_summary(self) -> str:
+    def generate_backup_contents_summary(self, include_source_filename: bool = False) -> str:
         """
         Generate a formatted summary of backup contents.
+        
+        Args:
+            include_source_filename: If True, include full source filename; if False, show icon only
         
         Returns:
             Markdown-formatted string summarizing all objects
@@ -395,8 +398,6 @@ class BackupInspector:
             return "No objects found in backup."
         
         lines = []
-        lines.append(f"**Backup contents** ({len(objects)} object types):")
-        lines.append("")
         
         # Sort by label for consistent display
         sorted_objects = sorted(objects.items(), key=lambda x: x[1]["label"])
@@ -404,9 +405,20 @@ class BackupInspector:
         for endpoint, metadata in sorted_objects:
             label = metadata["label"]
             count = metadata["count"]
-            source = metadata["source"]
+            source = metadata.get("source", "Unknown")
             timestamp = metadata["timestamp"]
-            lines.append(f"• **{label}** (`{endpoint}`): {count} — {source} {timestamp}")
+            source_type = metadata.get("source_type", "json")
+            
+            # Determine icon based on source
+            if source_type == "csv" or source.lower().endswith(".csv"):
+                icon = "📊"  # Excel/CSV icon
+            else:
+                icon = "📦"  # JSON backup icon
+            
+            if include_source_filename:
+                lines.append(f"• **{label}** (`{endpoint}`): {count} — {icon} {source} {timestamp}")
+            else:
+                lines.append(f"• **{label}** (`{endpoint}`): {count} — {icon} {timestamp}")
         
         return "\n".join(lines)
     

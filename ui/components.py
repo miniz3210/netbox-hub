@@ -381,8 +381,24 @@ def render_backup_uploader(scope_key: str) -> dict:
         object_count = len(object_registry)
         
         with st.expander(f"📊 Backup contents ({object_count} object types - dynamic)", expanded=False):
-            summary = SharedBackupState.generate_backup_summary()
-            st.markdown(summary)
+            # Display each object type as separate markdown lines
+            sorted_objects = sorted(object_registry.items(), key=lambda x: x[1]["label"])
+            
+            for endpoint, metadata in sorted_objects:
+                label = metadata["label"]
+                count = metadata["count"]
+                timestamp = metadata["timestamp"]
+                source = metadata.get("source", "Unknown")
+                source_type = metadata.get("source_type", "json")
+                
+                # Determine icon based on source
+                if source_type == "csv" or source.lower().endswith(".csv"):
+                    icon = "📊"  # Excel/CSV icon
+                else:
+                    icon = "📦"  # JSON backup icon
+                
+                # Format: Label (endpoint): count — icon timestamp
+                st.markdown(f"• **{label}** (`{endpoint}`): {count} — {icon} {timestamp}")
             
             # Debug info
             with st.expander("🔍 Debug: Show all endpoints", expanded=False):
