@@ -54,52 +54,87 @@ class BackupInspector:
             
         registry = {}
         
-        # Iterate through all top-level keys in the backup
-        for key, value in self.backup_data.items():
-            # Skip metadata keys
-            if key in ["_metadata", "metadata", "version", "timestamp"]:
-                continue
+        # Check if this is a NetBox PowerShell export format (with endpoints array)
+        if "endpoints" in self.backup_data and isinstance(self.backup_data["endpoints"], list):
+            # PowerShell export format: {"metadata": {...}, "endpoints": [{path, records}, ...]}
+            for endpoint_obj in self.backup_data["endpoints"]:
+                if not isinstance(endpoint_obj, dict):
+                    continue
                 
-            # Determine if this is an object collection
-            if isinstance(value, list):
-                count = len(value)
-                label = self._format_label(key)
+                path = endpoint_obj.get("path", "")
+                records = endpoint_obj.get("records", [])
                 
-                # Extract sample keys from first item
+                if not path:
+                    continue
+                
+                count = len(records)
+                label = self._format_label(path)
+                
+                # Extract sample keys from first record
                 sample_keys = []
-                if count > 0 and isinstance(value[0], dict):
-                    sample_keys = list(value[0].keys())[:10]  # First 10 keys
+                if count > 0 and isinstance(records[0], dict):
+                    sample_keys = list(records[0].keys())[:10]
                 
-                registry[key] = {
+                registry[path] = {
                     "label": label,
                     "count": count,
                     "source": self.source_filename,
                     "timestamp": self.ingestion_timestamp,
-                    "endpoint": key,
+                    "endpoint": path,
                     "sample_keys": sample_keys,
-                    "data": value  # Reference to actual data
+                    "data": records,
+                    "downloaded_count": endpoint_obj.get("downloaded_count", count),
+                    "expected_count": endpoint_obj.get("expected_count", count),
+                    "verified": endpoint_obj.get("verified", True)
                 }
-            elif isinstance(value, dict):
-                # Handle nested structure (e.g., {"dcim": {"devices": [...], "sites": [...]}})
-                for sub_key, sub_value in value.items():
-                    if isinstance(sub_value, list):
-                        count = len(sub_value)
-                        endpoint = f"{key}/{sub_key}"
-                        label = self._format_label(endpoint)
-                        
-                        sample_keys = []
-                        if count > 0 and isinstance(sub_value[0], dict):
-                            sample_keys = list(sub_value[0].keys())[:10]
-                        
-                        registry[endpoint] = {
-                            "label": label,
-                            "count": count,
-                            "source": self.source_filename,
-                            "timestamp": self.ingestion_timestamp,
-                            "endpoint": endpoint,
-                            "sample_keys": sample_keys,
-                            "data": sub_value
-                        }
+        else:
+            # Standard flat or nested JSON format
+            # Iterate through all top-level keys in the backup
+            for key, value in self.backup_data.items():
+                # Skip metadata keys
+                if key in ["_metadata", "metadata", "version", "timestamp"]:
+                    continue
+                    
+                # Determine if this is an object collection
+                if isinstance(value, list):
+                    count = len(value)
+                    label = self._format_label(key)
+                    
+                    # Extract sample keys from first item
+                    sample_keys = []
+                    if count > 0 and isinstance(value[0], dict):
+                        sample_keys = list(value[0].keys())[:10]  # First 10 keys
+                    
+                    registry[key] = {
+                        "label": label,
+                        "count": count,
+                        "source": self.source_filename,
+                        "timestamp": self.ingestion_timestamp,
+                        "endpoint": key,
+                        "sample_keys": sample_keys,
+                        "data": value  # Reference to actual data
+                    }
+                elif isinstance(value, dict):
+                    # Handle nested structure (e.g., {"dcim": {"devices": [...], "sites": [...]}})
+                    for sub_key, sub_value in value.items():
+                        if isinstance(sub_value, list):
+                            count = len(sub_value)
+                            endpoint = f"{key}/{sub_key}"
+                            label = self._format_label(endpoint)
+                            
+                            sample_keys = []
+                            if count > 0 and isinstance(sub_value[0], dict):
+                                sample_keys = list(sub_value[0].keys())[:10]
+                            
+                            registry[endpoint] = {
+                                "label": label,
+                                "count": count,
+                                "source": self.source_filename,
+                                "timestamp": self.ingestion_timestamp,
+                                "endpoint": endpoint,
+                                "sample_keys": sample_keys,
+                                "data": sub_value
+                            }
         
         self._object_registry = registry
         return registry
@@ -126,37 +161,67 @@ class BackupInspector:
             
         registry = {}
         
-        # Look for custom fields in common locations
-        cf_locations = [
-            "extras/custom-fields",
-            "extras/custom_fields",
-            "custom-fields",
-            "custom_fields"
-        ]
-        
-        for location in cf_locations:
-            data = self._get_nested_value(location)
-            if data and isinstance(data, list):
-                for field in data:
-                    if not isinstance(field, dict):
-                        continue
+        # Look for custom fields in PowerShell export format first
+        if "endpoints" in self.backup_data and isinstance(self.backup_data["endpoints"], list):
+            for endpoint_obj in self.backup_data["endpoints"]:
+                if not isinstance(endpoint_obj, dict):
+                    continue
+                
+                path = endpoint_obj.get("path", "")
+                if path in ["extras/custom-fields", "extras/custom_fields"]:
+                    records = endpoint_obj.get("records", [])
+                    for field in records:
+                        if not isinstance(field, dict):
+                            continue
+                            
+                        field_name = field.get("name") or field.get("slug") or field.get("key")
+                        if not field_name:
+                            continue
                         
-                    field_name = field.get("name") or field.get("slug") or field.get("key")
-                    if not field_name:
-                        continue
-                    
-                    registry[field_name] = {
-                        "name": field.get("name", field_name),
-                        "label": field.get("label", self._format_label(field_name)),
-                        "type": field.get("type", "text"),
-                        "object_types": field.get("object_types", []),
-                        "choices": field.get("choices", []),
-                        "required": field.get("required", False),
-                        "description": field.get("description", ""),
-                        "source": self.source_filename,
-                        "timestamp": self.ingestion_timestamp
-                    }
-                break  # Stop after finding custom fields
+                        registry[field_name] = {
+                            "name": field.get("name", field_name),
+                            "label": field.get("label", self._format_label(field_name)),
+                            "type": field.get("type", "text"),
+                            "object_types": field.get("object_types", []),
+                            "choices": field.get("choices", []),
+                            "required": field.get("required", False),
+                            "description": field.get("description", ""),
+                            "source": self.source_filename,
+                            "timestamp": self.ingestion_timestamp
+                        }
+                    break
+        else:
+            # Look for custom fields in standard format
+            cf_locations = [
+                "extras/custom-fields",
+                "extras/custom_fields",
+                "custom-fields",
+                "custom_fields"
+            ]
+            
+            for location in cf_locations:
+                data = self._get_nested_value(location)
+                if data and isinstance(data, list):
+                    for field in data:
+                        if not isinstance(field, dict):
+                            continue
+                            
+                        field_name = field.get("name") or field.get("slug") or field.get("key")
+                        if not field_name:
+                            continue
+                        
+                        registry[field_name] = {
+                            "name": field.get("name", field_name),
+                            "label": field.get("label", self._format_label(field_name)),
+                            "type": field.get("type", "text"),
+                            "object_types": field.get("object_types", []),
+                            "choices": field.get("choices", []),
+                            "required": field.get("required", False),
+                            "description": field.get("description", ""),
+                            "source": self.source_filename,
+                            "timestamp": self.ingestion_timestamp
+                        }
+                    break  # Stop after finding custom fields
         
         self._custom_fields_registry = registry
         return registry
@@ -183,50 +248,91 @@ class BackupInspector:
             
         registry = {}
         
-        # Look for choice sets in common locations
-        cs_locations = [
-            "extras/custom-field-choice-sets",
-            "extras/custom_field_choice_sets",
-            "custom-field-choice-sets",
-            "custom_field_choice_sets",
-            "choice-sets",
-            "choice_sets"
-        ]
-        
-        for location in cs_locations:
-            data = self._get_nested_value(location)
-            if data and isinstance(data, list):
-                for choice_set in data:
-                    if not isinstance(choice_set, dict):
-                        continue
-                    
-                    set_name = choice_set.get("name") or choice_set.get("slug")
-                    if not set_name:
-                        continue
-                    
-                    choices = choice_set.get("choices", [])
-                    extra_choices = choice_set.get("extra_choices", [])
-                    all_choices = choices + extra_choices
-                    
-                    # Extract choice values (might be list of dicts or list of strings)
-                    choice_values = []
-                    for choice in all_choices:
-                        if isinstance(choice, dict):
-                            choice_values.append(choice.get("value") or choice.get("name") or str(choice))
-                        else:
-                            choice_values.append(str(choice))
-                    
-                    registry[set_name] = {
-                        "name": set_name,
-                        "label": self._format_label(set_name),
-                        "field_key": choice_set.get("custom_field") or set_name.replace("_choices", "").replace("-choices", ""),
-                        "choices": choice_values,
-                        "count": len(choice_values),
-                        "source": self.source_filename,
-                        "timestamp": self.ingestion_timestamp,
-                        "raw_data": choice_set
-                    }
-                break  # Stop after finding choice sets
+        # Look for choice sets in PowerShell export format first
+        if "endpoints" in self.backup_data and isinstance(self.backup_data["endpoints"], list):
+            for endpoint_obj in self.backup_data["endpoints"]:
+                if not isinstance(endpoint_obj, dict):
+                    continue
+                
+                path = endpoint_obj.get("path", "")
+                if path in ["extras/custom-field-choice-sets", "extras/custom_field_choice_sets"]:
+                    records = endpoint_obj.get("records", [])
+                    for choice_set in records:
+                        if not isinstance(choice_set, dict):
+                            continue
+                        
+                        set_name = choice_set.get("name") or choice_set.get("slug")
+                        if not set_name:
+                            continue
+                        
+                        choices = choice_set.get("choices", [])
+                        extra_choices = choice_set.get("extra_choices", [])
+                        all_choices = choices + extra_choices
+                        
+                        # Extract choice values (might be list of dicts or list of strings)
+                        choice_values = []
+                        for choice in all_choices:
+                            if isinstance(choice, dict):
+                                choice_values.append(choice.get("value") or choice.get("name") or str(choice))
+                            else:
+                                choice_values.append(str(choice))
+                        
+                        registry[set_name] = {
+                            "name": set_name,
+                            "label": self._format_label(set_name),
+                            "field_key": choice_set.get("custom_field") or set_name.replace("_choices", "").replace("-choices", ""),
+                            "choices": choice_values,
+                            "count": len(choice_values),
+                            "source": self.source_filename,
+                            "timestamp": self.ingestion_timestamp,
+                            "raw_data": choice_set
+                        }
+                    break
+        else:
+            # Look for choice sets in standard format
+            cs_locations = [
+                "extras/custom-field-choice-sets",
+                "extras/custom_field_choice_sets",
+                "custom-field-choice-sets",
+                "custom_field_choice_sets",
+                "choice-sets",
+                "choice_sets"
+            ]
+            
+            for location in cs_locations:
+                data = self._get_nested_value(location)
+                if data and isinstance(data, list):
+                    for choice_set in data:
+                        if not isinstance(choice_set, dict):
+                            continue
+                        
+                        set_name = choice_set.get("name") or choice_set.get("slug")
+                        if not set_name:
+                            continue
+                        
+                        choices = choice_set.get("choices", [])
+                        extra_choices = choice_set.get("extra_choices", [])
+                        all_choices = choices + extra_choices
+                        
+                        # Extract choice values (might be list of dicts or list of strings)
+                        choice_values = []
+                        for choice in all_choices:
+                            if isinstance(choice, dict):
+                                choice_values.append(choice.get("value") or choice.get("name") or str(choice))
+                            else:
+                                choice_values.append(str(choice))
+                        
+                        registry[set_name] = {
+                            "name": set_name,
+                            "label": self._format_label(set_name),
+                            "field_key": choice_set.get("custom_field") or set_name.replace("_choices", "").replace("-choices", ""),
+                            "choices": choice_values,
+                            "count": len(choice_values),
+                            "source": self.source_filename,
+                            "timestamp": self.ingestion_timestamp,
+                            "raw_data": choice_set
+                        }
+                    break  # Stop after finding choice sets
         
         self._choice_sets_registry = registry
         return registry
@@ -236,7 +342,7 @@ class BackupInspector:
         Get the actual data for a specific object type.
         
         Args:
-            endpoint: Object endpoint (e.g., "dcim/devices", "ipam/prefixes")
+            endpoint: Object endpoint (e.g., "dcim/devices", "users/owners")
             
         Returns:
             List of objects
@@ -244,6 +350,13 @@ class BackupInspector:
         objects = self.inspect_all_objects()
         if endpoint in objects:
             return objects[endpoint].get("data", [])
+        
+        # Also try PowerShell export format with endpoints array
+        if "endpoints" in self.backup_data and isinstance(self.backup_data["endpoints"], list):
+            for endpoint_obj in self.backup_data["endpoints"]:
+                if endpoint_obj.get("path") == endpoint:
+                    return endpoint_obj.get("records", [])
+        
         return []
     
     def get_custom_field_choices(self, field_name: str) -> List[str]:
