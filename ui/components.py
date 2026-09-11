@@ -222,6 +222,7 @@ def _handle_backup_upload(uploader_key: str, scope_key: str) -> None:
             else:
                 # CSV/Excel - use universal uploader
                 from core.universal_uploader import UniversalUploader
+                from datetime import datetime
                 uploader = UniversalUploader()
                 
                 if hasattr(file_obj, "seek"):
@@ -233,6 +234,13 @@ def _handle_backup_upload(uploader_key: str, scope_key: str) -> None:
                 if upload_result['errors']:
                     st.session_state[error_key] = "\n".join(upload_result['errors'])
                     return
+                
+                # Update SharedBackupState for dynamic backup display
+                uploaded_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                for model_key, count in upload_result['by_model'].items():
+                    # Map model keys to endpoint paths for SharedBackupState
+                    endpoint = model_key.replace('.', '/')
+                    SharedBackupState.add_csv_override(endpoint, count, file_obj.name, uploaded_at)
                 
                 # Convert to standard result format
                 result = {
