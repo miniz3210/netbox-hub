@@ -175,6 +175,22 @@ def _handle_backup_upload(uploader_key: str, scope_key: str) -> None:
             if hasattr(file_obj, "seek"):
                 file_obj.seek(0)
             
+            # Read and parse JSON for dynamic inspection
+            import json
+            file_content = file_obj.read()
+            
+            # Reset file pointer for save_netbox_backup
+            if hasattr(file_obj, "seek"):
+                file_obj.seek(0)
+            
+            # Parse JSON and load into dynamic backup state
+            try:
+                backup_data = json.loads(file_content)
+                SharedBackupState.load_backup(backup_data, file_obj.name)
+            except json.JSONDecodeError:
+                # Not a valid JSON file, skip dynamic loading
+                pass
+            
             with st.spinner(f'Uploading {file_obj.name} ({file_size_mb:.1f} MB)...'):
                 result = save_netbox_backup(
                     file_obj, 
@@ -361,14 +377,22 @@ def render_backup_uploader(scope_key: str) -> dict:
     # Use dynamic inspection if available, otherwise fall back to legacy counts
     if SharedBackupState.has_backup():
         # Use dynamic inspection system
-        with st.expander("📊 Backup contents (dynamic)", expanded=False):
+        object_registry = SharedBackupState.get_object_registry()
+        object_count = len(object_registry)
+        
+        with st.expander(f"📊 Backup contents ({object_count} object types - dynamic)", expanded=False):
             summary = SharedBackupState.generate_backup_summary()
             st.markdown(summary)
+            
+            # Debug info
+            with st.expander("🔍 Debug: Show all endpoints", expanded=False):
+                for endpoint, metadata in sorted(object_registry.items()):
+                    st.text(f"{endpoint}: {metadata['count']} records")
     else:
         # Fall back to legacy static counts
         counts = get_backup_object_counts()
         if counts:
-            with st.expander(f"📊 Backup contents ({len(counts)} object types)", expanded=False):
+            with st.expander(f"📊 Backup contents ({len(counts)} object types - legacy)", expanded=False):
                 for object_type, (count, timestamp, source) in counts.items():
                     label = OBJECT_LABELS.get(object_type, object_type.replace("_", " ").title())
                     csv_filename = CSV_FILENAMES.get(object_type, "")
