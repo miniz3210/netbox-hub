@@ -260,6 +260,7 @@ def render_azure_tab(active_model=None):
                     st.session_state.azure_object_analysis = None
                     st.session_state.azure_dedup_cache = None
                     st.session_state.azure_preview_table_df = None
+                    st.session_state.azure_last_uploaded_file = None
                     st.rerun()
         with c_ref:
             if st.button("🔄 Refresh", key="ref_azure_btn", use_container_width=True, help="Reload the view"):
@@ -278,6 +279,8 @@ def render_azure_tab(active_model=None):
         st.session_state.azure_object_analysis = None
     if 'azure_dedup_cache' not in st.session_state:
         st.session_state.azure_dedup_cache = None
+    if 'azure_last_uploaded_file' not in st.session_state:
+        st.session_state.azure_last_uploaded_file = None
 
     # Load saved CSV on page refresh if no new upload
     if uploaded_file is None and saved_upload and st.session_state.azure_vms_parsed is None:
@@ -296,7 +299,17 @@ def render_azure_tab(active_model=None):
                 st.code(traceback.format_exc())
 
     # Parse and preview
-    if uploaded_file is not None and uploaded_file != "loaded_from_db":
+    # Check if this is a new file (different from last processed file)
+    current_file_id = None
+    if uploaded_file is not None:
+        # Create a unique identifier for the uploaded file
+        current_file_id = f"{uploaded_file.name}_{uploaded_file.size}"
+    
+    is_new_file = (uploaded_file is not None and 
+                   uploaded_file != "loaded_from_db" and 
+                   current_file_id != st.session_state.azure_last_uploaded_file)
+    
+    if is_new_file:
         try:
             # Clear previous state before parsing begins.
             st.session_state.azure_vms_parsed = None
@@ -304,6 +317,7 @@ def render_azure_tab(active_model=None):
             st.session_state.azure_metadata = None
             st.session_state.azure_object_analysis = None
             st.session_state.azure_dedup_cache = None
+            st.session_state.azure_preview_table_df = None
 
             # Save uploaded file temporarily
             temp_path = Path("data/temp_azure_upload.csv")
@@ -321,6 +335,9 @@ def render_azure_tab(active_model=None):
             # Save to database for persistence
             df_for_save = pd.DataFrame(vm_records)
             save_result = save_azure_csv_upload(uploaded_file.name, df_for_save)
+            
+            # Mark this file as processed
+            st.session_state.azure_last_uploaded_file = current_file_id
             
             # Trigger auto-refresh to reload with saved data
             st.rerun()

@@ -36,6 +36,10 @@ def parse_azure_vm_csv(csv_path: str) -> Tuple[List[Dict[str, Any]], List[str]]:
             reader = csv.DictReader(f)
             headers = {clean(header).lower(): header for header in (reader.fieldnames or [])}
             is_resource_graph = 'tenant' in headers or 'primaryipv4' in headers
+            
+            # Check if this is the new consolidated tag format
+            has_netbox_tags = 'netbox_tags' in headers
+            has_raw_tags_json = 'raw_tags_json' in headers
 
             aliases = {
                 'name': ('name',),
@@ -63,6 +67,8 @@ def parse_azure_vm_csv(csv_path: str) -> Tuple[List[Dict[str, Any]], List[str]]:
                 'tag_deployment_method': ('tag_deploymentmethod', 'tag_deployment_method'),
                 'tag_backup': ('tag_backup',),
                 'tags': ('tags',),
+                'netbox_tags': ('netbox_tags',),
+                'raw_tags_json': ('raw_tags_json',),
             }
 
             def value_for(row: Dict[str, Any], field: str) -> str:
@@ -88,8 +94,35 @@ def parse_azure_vm_csv(csv_path: str) -> Tuple[List[Dict[str, Any]], List[str]]:
                     if public_ip in {'-', ' -'}:
                         public_ip = ''
 
-                    role_val = value_for(row, 'role') or value_for(row, 'tag_application')
-                    tag_app = value_for(row, 'tag_application') or role_val
+                    # Handle new consolidated tag format or old individual tag columns
+                    if has_raw_tags_json:
+                        # Parse tags from Raw_Tags_JSON column
+                        raw_tags_str = value_for(row, 'raw_tags_json')
+                        try:
+                            raw_tags = json.loads(raw_tags_str) if raw_tags_str else {}
+                        except json.JSONDecodeError:
+                            raw_tags = {}
+                        
+                        # Extract individual tag values from JSON
+                        tag_app = raw_tags.get('Application', '')
+                        tag_env = raw_tags.get('Environment', '')
+                        tag_cost = raw_tags.get('CostCentre', '')
+                        tag_crit = raw_tags.get('BusinessCriticality', '')
+                        tag_deploy = raw_tags.get('Deploymentmethod', raw_tags.get('DeploymentMethod', ''))
+                        tag_backup = raw_tags.get('Backup', '')
+                        tag_owner = raw_tags.get('Owner', '')
+                    else:
+                        # Use old individual tag columns
+                        tag_app = value_for(row, 'tag_application')
+                        tag_env = value_for(row, 'tag_environment')
+                        tag_cost = value_for(row, 'tag_cost_centre')
+                        tag_crit = value_for(row, 'tag_business_criticality')
+                        tag_deploy = value_for(row, 'tag_deployment_method')
+                        tag_backup = value_for(row, 'tag_backup')
+                        tag_owner = ''
+
+                    role_val = value_for(row, 'role') or tag_app
+                    owner_val = value_for(row, 'owner') or tag_owner
 
                     vm_record = {
                         'name': vm_name,
@@ -105,19 +138,19 @@ def parse_azure_vm_csv(csv_path: str) -> Tuple[List[Dict[str, Any]], List[str]]:
                         'resource_link': value_for(row, 'resource_link'),
                         'vnet': value_for(row, 'vnet'),
                         'subnet': value_for(row, 'subnet'),
-                        'owner': value_for(row, 'owner'),
+                        'owner': owner_val,
                         'role': role_val,
                         'purpose': value_for(row, 'purpose'),
                         'organization': value_for(row, 'organization'),
                         'subscription_id': value_for(row, 'subscription_id'),
                         'tag_application': tag_app,
-                        'tag_environment': value_for(row, 'tag_environment'),
-                        'tag_cost_centre': value_for(row, 'tag_cost_centre'),
-                        'tag_business_criticality': value_for(row, 'tag_business_criticality'),
-                        'tag_deployment_method': value_for(row, 'tag_deployment_method'),
-                        'tag_backup': value_for(row, 'tag_backup'),
+                        'tag_environment': tag_env,
+                        'tag_cost_centre': tag_cost,
+                        'tag_business_criticality': tag_crit,
+                        'tag_deployment_method': tag_deploy,
+                        'tag_backup': tag_backup,
                         'tag_operating_system': value_for(row, 'operating_system'),
-                        'tags': value_for(row, 'tags'),
+                        'tags': value_for(row, 'netbox_tags') if has_netbox_tags else value_for(row, 'tags'),
                         'source': 'Azure Resource Graph CSV Import' if is_resource_graph else 'Azure CSV Import',
                         'imported_at': datetime.now().isoformat()
                     }
@@ -466,9 +499,9 @@ def _build_netbox_tags(vm: Dict[str, Any]) -> List[Dict[str, Any]]:
        - ``Tag_BusinessCriticality`` -> ``BusinessCriticality:<value>``
        - ``Tag_DeploymentMethod`` / ``Deploymentmethod`` -> ``Deploymentmethod:<value>``
        - ``Tag_Environment`` -> ``Environment:<value>``
-    3. Backup policy: raw value from ``Tag_Backup`` (e.g.
-       ``"Daily(BackupPolicy-AU-LowDataChange)"``). ``No Policy``, ``-``, empty
-       and ``null`` are excluded.
+    3. Backup policy: formatted as ``Backup:<value>`` (e.g.
+       ``"Backup:Daily(BackupPolicy-AU-LowDataChange)"`` or ``"Backup:No Policy"``).
+       Only standalone ``-``, empty, and ``null`` values are excluded.
     4. Each tag is emitted as ``{"name": ..., "slug": ...}``.
     """
     tag_names: List[str] = []
@@ -477,7 +510,7 @@ def _build_netbox_tags(vm: Dict[str, Any]) -> List[Dict[str, Any]]:
         if not name:
             return
         cleaned = str(name).strip()
-        if not cleaned or cleaned.lower() in {"-", "nan", "null", "none", "no policy"}:
+        if not cleaned or cleaned.lower() in {"-", "nan", "null", "none"}:
             return
         if cleaned not in tag_names:
             tag_names.append(cleaned)
@@ -489,6 +522,8 @@ def _build_netbox_tags(vm: Dict[str, Any]) -> List[Dict[str, Any]]:
     def add_kv_tag(key: str, val: Any) -> None:
         if val:
             v = str(val).strip()
+            # Allow "No Policy" as a valid value when it comes from tag_backup
+            # but exclude standalone placeholders
             if v and v.lower() not in {"-", "nan", "null", "none"}:
                 add_tag(f"{key}:{v}")
 
@@ -496,8 +531,13 @@ def _build_netbox_tags(vm: Dict[str, Any]) -> List[Dict[str, Any]]:
     add_kv_tag("Deploymentmethod", vm.get('tag_deployment_method'))
     add_kv_tag("Environment", vm.get('tag_environment'))
 
-    # 3. Backup policy — direct string, excluding placeholders.
-    add_tag(vm.get('tag_backup'))
+    # 3. Backup policy — formatted as "Backup:<value>", including "Backup:No Policy"
+    backup_val = vm.get('tag_backup')
+    if backup_val:
+        backup_str = str(backup_val).strip()
+        # Only exclude truly empty or placeholder values, but allow "No Policy"
+        if backup_str and backup_str.lower() not in {"-", "nan", "null", "none"}:
+            add_tag(f"Backup:{backup_str}")
 
     return [{"name": name, "slug": _slugify_tag(name)} for name in tag_names]
 
