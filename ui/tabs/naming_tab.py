@@ -67,8 +67,8 @@ You have DIRECT ACCESS to the complete inventory database. Analyze the user's re
 def apply_case(text: str, mode: str) -> str:
     return text.upper() if mode == "UPPERCASE" else text.lower()
 
-def handle_csv_upload():
-    uploaded_files = st.session_state.get("global_netbox_csv")
+def handle_csv_upload(uploader_key: str):
+    uploaded_files = st.session_state.get(uploader_key)
     if not uploaded_files:
         return
 
@@ -96,11 +96,11 @@ def handle_csv_upload():
     # Clear uploader and show success message if any data was ingested
     if total_devices > 0 or total_hypervisors > 0 or total_vms > 0:
         st.toast(f"✅ Ingested: {total_devices} Devices, {total_hypervisors} Hypervisors, {total_vms} VMs!", icon="🚀")
-        # Clear the uploader by resetting the key
-        st.session_state["global_netbox_csv"] = None
+        # Clear the uploader by incrementing the key
+        st.session_state["naming_csv_key"] = st.session_state.get("naming_csv_key", 0) + 1
     elif not errors:
         # No data ingested and no errors - clear uploader anyway
-        st.session_state["global_netbox_csv"] = None
+        st.session_state["naming_csv_key"] = st.session_state.get("naming_csv_key", 0) + 1
 
 def handle_csv_reset():
     clear_inventory_records()
@@ -176,12 +176,14 @@ def render_compact_toolbar(active_model):
         # Consolidated upload section
         c_up, c_clr, c_ref = st.columns([3, 1, 1])
         with c_up:
+            naming_key = f"global_netbox_csv_{st.session_state.get('naming_csv_key', 0)}"
             st.file_uploader(
                 "Upload CSV files or Excel",
                 type=["csv", "xlsx"],
                 accept_multiple_files=True,
-                key="global_netbox_csv",
+                key=naming_key,
                 on_change=handle_csv_upload,
+                args=(naming_key,),
                 label_visibility="collapsed"
             )
         with c_clr:
