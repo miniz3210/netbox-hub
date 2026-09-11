@@ -160,9 +160,19 @@ class UniversalUploader:
         classification = self._classify_columns(columns)
         
         if not classification:
+            # Provide helpful error with column info
+            column_preview = ", ".join(columns[:5])
+            if len(columns) > 5:
+                column_preview += f", ... ({len(columns)} total columns)"
+            
             raise ValueError(
-                f"Unable to classify file. Columns found: {columns}. "
-                f"Please upload a NetBox backup JSON first to initialize the schema registry."
+                f"Unable to automatically classify '{filename}'. "
+                f"The schema registry has not been initialized yet.\n\n"
+                f"📋 Detected columns: {column_preview}\n\n"
+                f"💡 **Solution:** Upload a NetBox backup JSON file first (via the main backup uploader). "
+                f"This will initialize the schema registry with all NetBox model signatures, "
+                f"then your CSV files will be automatically classified and routed.\n\n"
+                f"📖 **How to generate backup:** Use the PowerShell export scripts shown above, or export from NetBox directly."
             )
         
         model_key, confidence = classification
