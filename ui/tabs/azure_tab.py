@@ -59,7 +59,7 @@ def render_azure_tab(active_model=None):
         isnotempty(properties.osProfile.linuxConfiguration), "Linux",
         "Unknown"
     ),
-    // 1. Exact OS Name reported by the Azure VM Guest Agent (e.g. "Windows Server 2019 Datacenter")
+    // 1. Exact OS Name reported by the Azure VM Guest Agent
     guestOsName = tostring(properties.extended.instanceView.osName),
     guestOsVersion = tostring(properties.extended.instanceView.osVersion),
     // 2. Fallback to image reference if agent hasn't reported
@@ -67,19 +67,19 @@ def render_azure_tab(active_model=None):
     imgSku = tostring(properties.storageProfile.imageReference.sku),
     imgVersion = coalesce(tostring(properties.storageProfile.imageReference.exactVersion), tostring(properties.storageProfile.imageReference.version)),
     nicIds = properties.networkProfile.networkInterfaces,
-    // Extract Tags
+    
+    // Core functional tag bindings (case-insensitive coalescing)
+    tagRole = coalesce(tostring(tags["Role"]), tostring(tags["role"])),
+    tagApp = coalesce(tostring(tags["Application"]), tostring(tags["application"])),
     tagOrg = coalesce(tostring(tags["Organization"]), tostring(tags["organization"])),
     tagOwner = coalesce(tostring(tags["Owner"]), tostring(tags["owner"])),
     tagPurpose = coalesce(tostring(tags["Purpose"]), tostring(tags["purpose"])),
-    tagRole = coalesce(tostring(tags["Role"]), tostring(tags["role"])),
-    tagApp = coalesce(tostring(tags["Application"]), tostring(tags["application"])),
-    tagEnv = coalesce(tostring(tags["Environment"]), tostring(tags["environment"])),
-    tagCostCentre = coalesce(tostring(tags["CostCentre"]), tostring(tags["costcentre"])),
-    tagCrit = coalesce(tostring(tags["BusinessCriticality"]), tostring(tags["businesscriticality"])),
-    tagDeploy = coalesce(tostring(tags["Deploymentmethod"]), tostring(tags["deploymentmethod"])),
-    tagBackup = coalesce(tostring(tags["Backup"]), tostring(tags["backup"])),
+    
+    // Dynamic NetBox-ready Tag Formatter: converts any arbitrary tags into comma-separated "Key:Value" pairs
+    NetBoxTags = trim(@'[\s,]+', replace_regex(replace_regex(tostring(tags), @'[{}\"]', ''), @'[:,]', '\0 ')),
     RawTags = tostring(tags),
-    // Exact NetBox Site matching
+    
+    // NetBox Site matching
     NetBoxSite = case(
         location =~ "australiaeast", "Azure - Australia East",
         location =~ "australiasoutheast", "Azure - Australia Southeast",
@@ -89,7 +89,6 @@ def render_azure_tab(active_model=None):
         strcat("UNMAPPED - ", location)
     )
 | extend
-    // Formats Operating System exactly as shown on the Azure Portal Overview: "Windows (Windows Server 2019 Datacenter)"
     ExactOperatingSystem = case(
         isnotempty(guestOsName), strcat(baseOsType, " (", guestOsName, ")"),
         imgOffer =~ "sql2019-ws2019", "Windows (Windows Server 2019 Datacenter)",
@@ -127,13 +126,13 @@ def render_azure_tab(active_model=None):
     PrimaryIPv4 = take_any(PrimaryIPv4),
     VNet = take_any(VNetName),
     Subnet = take_any(SubnetName)
-    by id, name, ExactResourceGroupName, resourceGroup, location, NetBoxSite, SubscriptionName, subscriptionId, vmSize, baseOsType, ExactOperatingSystem, guestOsName, guestOsVersion, imgOffer, imgSku, imgVersion, tagOrg, tagOwner, tagPurpose, tagRole, tagApp, tagEnv, tagCostCentre, tagCrit, tagDeploy, tagBackup, RawTags
+    by id, name, ExactResourceGroupName, resourceGroup, location, NetBoxSite, SubscriptionName, subscriptionId, vmSize, baseOsType, ExactOperatingSystem, tagRole, tagApp, tagOrg, tagOwner, tagPurpose, NetBoxTags, RawTags
 | project 
     ['Name'] = name,
     ['Status'] = "active",
     ['Site'] = NetBoxSite,
     ['Tenant'] = SubscriptionName,
-    ['Role'] = coalesce(tagRole, tagApp),
+    ['Role'] = coalesce(tagRole, tagApp, "---------"),
     ['Operating_System'] = ExactOperatingSystem,
     ['Platform'] = iff(baseOsType =~ "Windows", "Windows Server", baseOsType),
     ['PrimaryIPv4'] = PrimaryIPv4,
@@ -144,13 +143,8 @@ def render_azure_tab(active_model=None):
     ['cf_Organization'] = tagOrg,
     ['cf_Owner'] = tagOwner,
     ['cf_Purpose'] = tagPurpose,
-    ['Tag_Application'] = tagApp,
-    ['Tag_Environment'] = tagEnv,
-    ['Tag_CostCentre'] = tagCostCentre,
-    ['Tag_BusinessCriticality'] = tagCrit,
-    ['Tag_DeploymentMethod'] = tagDeploy,
-    ['Tag_Backup'] = tagBackup,
-    ['Tags'] = RawTags'''
+    ['NetBox_Tags'] = NetBoxTags,
+    ['Raw_Tags_JSON'] = RawTags'''
     
     # File uploader section with status indicator
     st.subheader("1️⃣ Upload Azure VM CSV Export")
