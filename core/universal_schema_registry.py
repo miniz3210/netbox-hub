@@ -170,6 +170,9 @@ class UniversalSchemaRegistry:
         best_score = 0.0
         threshold = 0.3  # Minimum 30% overlap required
         
+        # Track top matches for debugging
+        top_matches = []
+        
         for model_key, signature in self.model_signatures.items():
             # Compute Jaccard similarity
             intersection = normalized_cols & signature
@@ -189,9 +192,23 @@ class UniversalSchemaRegistry:
             # Combined score: weighted average favoring coverage
             combined_score = 0.4 * jaccard_score + 0.6 * coverage_score
             
+            # Track for debugging
+            if combined_score > 0.1:  # Track any reasonable match
+                top_matches.append((model_key, combined_score, len(intersection)))
+            
             if combined_score > best_score and combined_score >= threshold:
                 best_score = combined_score
                 best_match = model_key
+        
+        # Debug: Print top 5 matches
+        import streamlit as st
+        if not best_match and top_matches:
+            top_matches.sort(key=lambda x: x[1], reverse=True)
+            debug_info = "\n".join([
+                f"  • {model}: {score:.1%} match ({count} common fields)"
+                for model, score, count in top_matches[:5]
+            ])
+            st.info(f"🔍 **Debug:** Top model matches:\n{debug_info}\n\nNone exceeded the 30% threshold.")
         
         return (best_match, best_score) if best_match else None
     
