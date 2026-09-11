@@ -299,33 +299,34 @@ class UniversalUploader:
         normalized_cols = {col.strip().lower().replace(" ", "_") for col in columns}
         
         # Define heuristic patterns for common NetBox models
+        # Use slash notation to match NetBox API endpoint conventions (ipam/ip-addresses, dcim/devices)
         heuristic_patterns = {
-            'ipam.ipaddress': {
+            'ipam/ip-addresses': {
                 'required': {'ip_address', 'status'},
                 'optional': {'vrf', 'tenant', 'dns_name', 'description', 'assigned'},
                 'threshold': 2  # Must have at least 2 required fields
             },
-            'ipam.prefix': {
+            'ipam/prefixes': {
                 'required': {'prefix', 'status'},
                 'optional': {'vrf', 'tenant', 'site', 'vlan', 'role', 'description'},
                 'threshold': 2
             },
-            'ipam.vlan': {
+            'ipam/vlans': {
                 'required': {'vid', 'name'},
                 'optional': {'site', 'group', 'tenant', 'status', 'role', 'description'},
                 'threshold': 2
             },
-            'dcim.site': {
+            'dcim/sites': {
                 'required': {'name', 'slug'},
                 'optional': {'status', 'region', 'tenant', 'facility', 'description'},
                 'threshold': 2
             },
-            'dcim.device': {
+            'dcim/devices': {
                 'required': {'name', 'device_type'},
                 'optional': {'site', 'location', 'rack', 'status', 'role', 'tenant', 'serial'},
                 'threshold': 2
             },
-            'virtualization.virtualmachine': {
+            'virtualization/virtual-machines': {
                 'required': {'name', 'status'},
                 'optional': {'cluster', 'site', 'tenant', 'platform', 'vcpus', 'memory', 'disk'},
                 'threshold': 2
