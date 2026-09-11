@@ -70,6 +70,7 @@ def apply_case(text: str, mode: str) -> str:
     return text.upper() if mode == "UPPERCASE" else text.lower()
 
 def handle_csv_upload(uploader_key: str):
+    """Universal file upload handler using dynamic schema classification."""
     uploaded_files = st.session_state.get(uploader_key)
     if not uploaded_files:
         return
@@ -77,60 +78,47 @@ def handle_csv_upload(uploader_key: str):
     if not isinstance(uploaded_files, list):
         uploaded_files = [uploaded_files]
 
-    total_devices = 0
-    total_hypervisors = 0
-    total_vms = 0
-    errors = []
-
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    for f in uploaded_files:
-        try:
-            counts = save_universal_csv(f, filename=f.name, clear_first=False)
-            dev_count = counts.get("device", 0)
-            hyp_count = counts.get("hypervisor", 0)
-            vm_count = counts.get("vm", 0)
-            total_devices += dev_count
-            total_hypervisors += hyp_count
-            total_vms += vm_count
-
-            # Register in shared backup state so "Backup contents" shows the compact
-            # dynamic format instead of falling back to the legacy static display.
-            fname_lower = f.name.lower()
-            if "virtual" in fname_lower or "vm" in fname_lower:
-                endpoint = "virtualization/virtual-machines"
-                total = vm_count
-            elif "device_types" in fname_lower or "device type" in fname_lower:
-                endpoint = "dcim/device-types"
-                total = dev_count
-            elif "device_roles" in fname_lower or "device role" in fname_lower:
-                endpoint = "dcim/device-roles"
-                total = dev_count
-            elif "platform" in fname_lower:
-                endpoint = "dcim/platforms"
-                total = dev_count
-            else:
-                # Everything else (devices, hypervisors) maps to dcim/devices
-                endpoint = "dcim/devices"
-                total = dev_count + hyp_count
-
-            if total > 0:
-                SharedBackupState.add_csv_override(endpoint, total, f.name, now)
-        except Exception as e:
-            errors.append(f"• **{f.name}**: {str(e)}")
-
-    if errors:
-        for err in errors:
-            st.error(err)
+    # Use universal uploader for automatic classification and routing
+    from core.universal_uploader import UniversalUploader
     
-    # Clear uploader and show success message if any data was ingested
-    if total_devices > 0 or total_hypervisors > 0 or total_vms > 0:
-        st.toast(f"✅ Ingested: {total_devices} Devices, {total_hypervisors} Hypervisors, {total_vms} VMs!", icon="🚀")
-        # Clear the uploader by incrementing the key
-        st.session_state["naming_csv_key"] = st.session_state.get("naming_csv_key", 0) + 1
-    elif not errors:
-        # No data ingested and no errors - clear uploader anyway
-        st.session_state["naming_csv_key"] = st.session_state.get("naming_csv_key", 0) + 1
+    try:
+        uploader = UniversalUploader()
+        results = uploader.process_uploaded_files(uploaded_files)
+        
+        if results['errors']:
+            for err in results['errors']:
+                st.error(err)
+        
+        if results['total_records'] > 0:
+            # Generate detailed toast message with model breakdown
+            model_breakdown = ", ".join([
+                f"{count} {model.split('.')[-1]}"
+                for model, count in sorted(results['by_model'].items())
+            ])
+            st.toast(f"✅ Ingested {results['total_records']} records: {model_breakdown}", icon="🚀")
+            
+            # Update SharedBackupState for dynamic backup display
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            for model_key, count in results['by_model'].items():
+                # Map model keys to endpoint paths for SharedBackupState
+                endpoint = model_key.replace('.', '/')
+                for file_obj in uploaded_files:
+                    SharedBackupState.add_csv_override(endpoint, count, file_obj.name, now)
+            
+            # Clear uploader by incrementing key
+            st.session_state["naming_csv_key"] = st.session_state.get("naming_csv_key", 0) + 1
+        elif not results['errors']:
+            # No data ingested and no errors - clear uploader anyway
+            st.session_state["naming_csv_key"] = st.session_state.get("naming_csv_key", 0) + 1
+            
+    except Exception as e:
+        st.error(f"❌ Upload failed: {str(e)}")
+        # Show helpful message if schema registry not initialized
+        if "schema registry" in str(e).lower() or "classify" in str(e).lower():
+            st.info(
+                "💡 **Tip:** Upload a NetBox backup JSON first to initialize the schema registry, "
+                "then CSV files will be automatically classified and routed."
+            )
 
 def handle_csv_reset():
     clear_inventory_records()

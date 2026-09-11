@@ -59,6 +59,7 @@ def handle_site_change():
             st.session_state["ipam_super_in"] = str(matched_super)
 
 def handle_ipam_file_upload():
+    """Universal file upload handler using dynamic schema classification."""
     uploader_key_val = st.session_state.get("uploader_key", 0)
     uploaded_files = st.session_state.get(f"ipam_multi_uploader_{uploader_key_val}")
     if not uploaded_files:
@@ -67,210 +68,47 @@ def handle_ipam_file_upload():
     if not isinstance(uploaded_files, list):
         uploaded_files = [uploaded_files]
 
-    total_scopes = 0
-    total_prefixes = 0
-    errors = []
-    uploaded_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    for file_obj in uploaded_files:
-        filename = file_obj.name.lower()
-        content = file_obj.getvalue()
-        
-        if filename.endswith(".xlsx"):
-            try:
-                wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
-                scope_records = []
-                ipam_records = []
-
-                if "Scope" in wb.sheetnames:
-                    ws_scope = wb["Scope"]
-                    for r in range(2, ws_scope.max_row + 1):
-                        s_id = ws_scope.cell(row=r, column=1).value
-                        s_name = ws_scope.cell(row=r, column=5).value
-                        s_slug = ws_scope.cell(row=r, column=6).value
-                        if s_name:
-                            scope_records.append({"id": s_id, "name": s_name, "slug": s_slug})
-                    if scope_records:
-                        cnt = save_sites_batch(scope_records, clear_first=False, source="Manual CSV Upload")
-                        total_scopes += cnt
-                        SharedBackupState.add_csv_override("organization/sites", cnt, file_obj.name, uploaded_at)
-
-                if "Prefixes" in wb.sheetnames:
-                    ws_pfx = wb["Prefixes"]
-                    for r in range(2, ws_pfx.max_row + 1):
-                        pfx_str = ws_pfx.cell(row=r, column=6).value
-                        scope_id_val = ws_pfx.cell(row=r, column=9).value
-                        vlan_val = ws_pfx.cell(row=r, column=12).value
-                        role_val = ws_pfx.cell(row=r, column=14).value
-                        desc_val = ws_pfx.cell(row=r, column=17).value
-                        if pfx_str and str(pfx_str).strip():
-                            ipam_records.append({
-                                "prefix_or_subnet": str(pfx_str).strip(),
-                                "scope_id": scope_id_val,
-                                "vlan_name": str(vlan_val or ""),
-                                "role": str(role_val or ""),
-                                "description": str(desc_val or "")
-                            })
-                    if ipam_records:
-                        cnt = save_ipam_records_batch(ipam_records, clear_first=False, source="Manual CSV Upload")
-                        total_prefixes += cnt
-                        SharedBackupState.add_csv_override("ipam/prefixes", cnt, file_obj.name, uploaded_at)
-            except Exception as e:
-                errors.append(f"• **{file_obj.name}**: {str(e)}")
-        else:
-            try:
-                # Use engine='python' and on_bad_lines='skip' for more robust parsing
-                # Also try to detect delimiter
-                import io
-                content_str = content.decode('utf-8', errors='replace')
-                first_line = content_str.splitlines()[0] if content_str else ""
-                delim = ','
-                if ';' in first_line and first_line.count(';') > first_line.count(','):
-                    delim = ';'
-                
-                df = pd.read_csv(io.StringIO(content_str), sep=delim)
-                cols = {str(c).lower().strip(): c for c in df.columns}
-                
-                # Detect file type based on columns and filename
-                filename_lower = filename.lower()
-                
-                # Check for device/VM files (not suitable for IPAM tab)
-                is_device_file = (
-                    "device" in filename_lower or 
-                    "device_types" in filename_lower or
-                    "device_roles" in filename_lower or
-                    "platforms" in filename_lower or
-                    any(col in cols for col in ["device_type", "device_role", "manufacturer", "model", "serial", "asset_tag"])
-                )
-                
-                is_vm_file = (
-                    "virtual" in filename_lower or 
-                    "vm" in filename_lower or
-                    any(col in cols for col in ["virtual_machine", "vcpus", "memory", "disk", "cluster"])
-                )
-                
-                # Reject device/VM files in IPAM tab
-                if is_device_file or is_vm_file:
-                    file_type = "device/naming" if is_device_file else "virtual machine/naming"
-                    raise ValueError(
-                        f"This appears to be a {file_type} CSV file. "
-                        f"Please upload it in the **🏷️ Naming** tab instead. "
-                        f"IPAM tab accepts: netbox_sites.csv, netbox_VLANs.csv, netbox_prefixes.csv"
-                    )
-
-                # Robust site format detection: distinguish from prefixes/VLANs
-                is_site_file = (
-                    ("name" in cols or "site" in cols or "location" in cols) and 
-                    not ("prefix" in cols or "prefixes" in cols or "vid" in cols or "vlan" in cols) and
-                    not is_device_file and not is_vm_file
-                )
-                if is_site_file:
-                    name_col = cols.get("name", cols.get("site", cols.get("location")))
-                    id_col = cols.get("id")
-                    slug_col = cols.get("slug")
-                    scope_records = []
-                    for idx, row in df.iterrows():
-                        s_name = str(row.get(name_col, "")).strip()
-                        s_id = row.get(id_col) if id_col and not pd.isna(row.get(id_col)) else (idx + 1)
-                        s_slug = str(row.get(slug_col, "")).strip()
-                        
-                        # Generate slug if missing
-                        if not s_slug and s_name:
-                            s_slug = slugify(s_name)
-                            
-                        if s_name and s_name.lower() != "nan":
-                            scope_records.append({"id": int(s_id) if str(s_id).isdigit() else s_id, "name": s_name, "slug": s_slug})
-                    if scope_records:
-                        cnt = save_sites_batch(scope_records, clear_first=False, source="Manual CSV Upload")
-                        total_scopes += cnt
-                        SharedBackupState.add_csv_override("organization/sites", cnt, file_obj.name, uploaded_at)
-                elif "prefixes" in cols or "prefix" in cols or "subnet" in cols or "vid" in cols or "vlan" in cols:
-                    st.toast(f"DEBUG: CSV Columns={list(cols.keys())}", icon="🔍")
-                    st.session_state["ipam_multi_uploader"] = None
-                    pfx_col = cols.get("prefixes", cols.get("prefix", cols.get("subnet")))
-                    vid_col = cols.get("vid", cols.get("vlan_id", cols.get("vlan", "")))
-                    vname_col = cols.get("vlan_name", cols.get("vlan name", cols.get("name", "")))
-                    site_col = cols.get("site", cols.get("site name", cols.get("location", cols.get("scope", ""))))
-                    role_col = cols.get("role", cols.get("role name", ""))
-                    desc_col = cols.get("description", cols.get("comments", cols.get("desc", "")))
-
-                    is_vlan_file = "vlan" in filename or "vlans" in filename or ("vid" in cols and not ("prefixes" in filename or "prefix" in filename))
-                    rec_type = "vlan" if is_vlan_file else "prefix"
-
-                    ipam_records = []
-                    # Robust CSV import: handle Pandas NaN correctly
-                    for _, row in df.iterrows():
-                        raw_prefixes = str(row.get(pfx_col, "")).strip() if pfx_col and not pd.isna(row.get(pfx_col)) else ""
-                        vid = str(row.get(vid_col, "")).strip() if vid_col and not pd.isna(row.get(vid_col)) else ""
-                        vname = str(row.get(vname_col, "")).strip() if vname_col and not pd.isna(row.get(vname_col)) else ""
-                        role_str = str(row.get(role_col, "")).strip() if role_col and not pd.isna(row.get(role_col)) else ""
-                        site_str = str(row.get(site_col, "")).strip() if site_col and not pd.isna(row.get(site_col)) else ""
-                        desc_str = str(row.get(desc_col, "")).strip() if desc_col and not pd.isna(row.get(desc_col)) else ""
-
-                        if not raw_prefixes or raw_prefixes.lower() == "nan":
-                            if rec_type == "vlan":
-                                if vid or vname:
-                                    ipam_records.append({
-                                        "prefix_or_subnet": "",
-                                        "vlan_id": vid if vid.isdigit() else None,
-                                        "vlan_name": vname if vname.lower() != "nan" else "",
-                                        "role": role_str if role_str.lower() != "nan" else "",
-                                        "site": site_str if site_str.lower() != "nan" else "",
-                                        "description": desc_str if desc_str.lower() != "nan" else "",
-                                        "record_type": "vlan"
-                                    })
-                            continue
-
-                        found_cidrs = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}/\d{1,2}\b', raw_prefixes)
-
-                        if found_cidrs:
-                            for cidr in found_cidrs:
-                                ipam_records.append({
-                                    "prefix_or_subnet": cidr,
-                                    "vlan_id": vid if vid.isdigit() else None,
-                                    "vlan_name": vname if vname.lower() != "nan" else "",
-                                    "role": role_str if role_str.lower() != "nan" else "",
-                                    "site": site_str if site_str.lower() != "nan" else "",
-                                    "description": desc_str if desc_str.lower() != "nan" else "",
-                                    "record_type": rec_type
-                                })
-                        elif "/" in raw_prefixes:
-                            ipam_records.append({
-                                "prefix_or_subnet": raw_prefixes,
-                                "vlan_id": vid if vid.isdigit() else None,
-                                "vlan_name": vname if vname.lower() != "nan" else "",
-                                "role": role_str if role_str.lower() != "nan" else "",
-                                "site": site_str if site_str.lower() != "nan" else "",
-                                "description": desc_str if desc_str.lower() != "nan" else "",
-                                "record_type": rec_type
-                            })
-
-                    if ipam_records:
-                        cnt = save_ipam_records_batch(ipam_records, clear_first=False, source="Manual CSV Upload")
-                        total_prefixes += cnt
-                        if is_vlan_file:
-                            SharedBackupState.add_csv_override("ipam/vlans", cnt, file_obj.name, uploaded_at)
-                        else:
-                            SharedBackupState.add_csv_override("ipam/prefixes", cnt, file_obj.name, uploaded_at)
-                    
-                    st.session_state["ipam_multi_uploader"] = None
-                else:
-                    raise ValueError(f"Unrecognized CSV format. Found columns: {list(cols.keys())}. Expected `netbox_sites.csv` columns (slug, name, id) or `netbox_prefixes.csv`/`netbox_VLANs.csv` columns (prefix, vlan, vid).")
-            except Exception as e:
-                errors.append(f"• **{file_obj.name}**: {str(e)}")
-
-    if errors:
-        for err in errors:
-            st.error(err)
+    # Use universal uploader for automatic classification and routing
+    from core.universal_uploader import UniversalUploader
     
-    # Clear uploader and show success message if any data was ingested
-    if total_scopes > 0 or total_prefixes > 0:
-        st.toast(f"✅ Ingested: {total_scopes} Sites, {total_prefixes} Prefixes!", icon="🚀")
-        # Clear the uploader by incrementing the key
-        st.session_state["uploader_key"] = st.session_state.get("uploader_key", 0) + 1
-    elif not errors:
-        # No data ingested and no errors - clear uploader anyway
-        st.session_state["uploader_key"] = st.session_state.get("uploader_key", 0) + 1
+    try:
+        uploader = UniversalUploader()
+        results = uploader.process_uploaded_files(uploaded_files)
+        
+        if results['errors']:
+            for err in results['errors']:
+                st.error(err)
+        
+        if results['total_records'] > 0:
+            # Generate detailed toast message
+            model_breakdown = ", ".join([
+                f"{count} {model.split('.')[-1]}"
+                for model, count in sorted(results['by_model'].items())
+            ])
+            st.toast(f"✅ Ingested {results['total_records']} records: {model_breakdown}", icon="🚀")
+            
+            # Update SharedBackupState for dynamic backup display
+            uploaded_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            for model_key, count in results['by_model'].items():
+                # Map model keys to endpoint paths for SharedBackupState
+                endpoint = model_key.replace('.', '/')
+                for file_obj in uploaded_files:
+                    SharedBackupState.add_csv_override(endpoint, count, file_obj.name, uploaded_at)
+            
+            # Clear uploader by incrementing key
+            st.session_state["uploader_key"] = st.session_state.get("uploader_key", 0) + 1
+        elif not results['errors']:
+            # No data ingested and no errors - clear uploader anyway
+            st.session_state["uploader_key"] = st.session_state.get("uploader_key", 0) + 1
+            
+    except Exception as e:
+        st.error(f"❌ Upload failed: {str(e)}")
+        # Show helpful message if schema registry not initialized
+        if "schema registry" in str(e).lower() or "classify" in str(e).lower():
+            st.info(
+                "💡 **Tip:** Upload a NetBox backup JSON first to initialize the schema registry, "
+                "then CSV files will be automatically classified and routed."
+            )
 
 
 def handle_ipam_db_reset():
