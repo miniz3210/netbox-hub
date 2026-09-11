@@ -269,18 +269,97 @@ class UniversalUploader:
     
     def _classify_columns(self, columns: List[str]) -> Optional[Tuple[str, float]]:
         """
-        Classify file columns using schema registry.
+        Classify file columns using schema registry with heuristic fallback.
         
         Returns:
             Tuple of (model_key, confidence_score) or None
         """
+        # First try schema registry classification
         if not self.registry:
             self._load_registry()
         
-        if not self.registry:
-            return None
+        if self.registry:
+            result = self.registry.classify_file(columns)
+            if result:
+                return result
         
-        return self.registry.classify_file(columns)
+        # Fallback: Use heuristic pattern matching for common NetBox exports
+        return self._classify_by_heuristics(columns)
+    
+    def _classify_by_heuristics(self, columns: List[str]) -> Optional[Tuple[str, float]]:
+        """
+        Classify files using heuristic pattern matching when schema registry fails.
+        
+        This handles common NetBox exports that might not be in the backup JSON.
+        
+        Returns:
+            Tuple of (model_key, confidence_score) or None
+        """
+        # Normalize columns for matching
+        normalized_cols = {col.strip().lower().replace(" ", "_") for col in columns}
+        
+        # Define heuristic patterns for common NetBox models
+        heuristic_patterns = {
+            'ipam.ipaddress': {
+                'required': {'ip_address', 'status'},
+                'optional': {'vrf', 'tenant', 'dns_name', 'description', 'assigned'},
+                'threshold': 2  # Must have at least 2 required fields
+            },
+            'ipam.prefix': {
+                'required': {'prefix', 'status'},
+                'optional': {'vrf', 'tenant', 'site', 'vlan', 'role', 'description'},
+                'threshold': 2
+            },
+            'ipam.vlan': {
+                'required': {'vid', 'name'},
+                'optional': {'site', 'group', 'tenant', 'status', 'role', 'description'},
+                'threshold': 2
+            },
+            'dcim.site': {
+                'required': {'name', 'slug'},
+                'optional': {'status', 'region', 'tenant', 'facility', 'description'},
+                'threshold': 2
+            },
+            'dcim.device': {
+                'required': {'name', 'device_type'},
+                'optional': {'site', 'location', 'rack', 'status', 'role', 'tenant', 'serial'},
+                'threshold': 2
+            },
+            'virtualization.virtualmachine': {
+                'required': {'name', 'status'},
+                'optional': {'cluster', 'site', 'tenant', 'platform', 'vcpus', 'memory', 'disk'},
+                'threshold': 2
+            }
+        }
+        
+        best_match = None
+        best_score = 0.0
+        
+        for model_key, pattern in heuristic_patterns.items():
+            required_matches = len(normalized_cols & pattern['required'])
+            optional_matches = len(normalized_cols & pattern['optional'])
+            total_pattern_fields = len(pattern['required']) + len(pattern['optional'])
+            
+            # Check if threshold is met
+            if required_matches < pattern['threshold']:
+                continue
+            
+            # Calculate confidence score
+            total_matches = required_matches + optional_matches
+            confidence = total_matches / total_pattern_fields
+            
+            # Boost confidence for required field matches
+            confidence += (required_matches / len(pattern['required'])) * 0.2
+            
+            if confidence > best_score:
+                best_score = confidence
+                best_match = model_key
+        
+        # Return match if confidence is above 30% (lower than registry threshold)
+        if best_match and best_score >= 0.30:
+            return (best_match, best_score)
+        
+        return None
     
     def _store_records(self, model_key: str, records: List[Dict[str, Any]], 
                       source_file: str, uploaded_at: str) -> int:
