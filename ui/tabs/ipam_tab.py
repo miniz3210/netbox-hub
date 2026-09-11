@@ -101,11 +101,12 @@ def handle_ipam_file_upload():
             
             # Update SharedBackupState for dynamic backup display
             uploaded_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # Build source file list for display
+            source_files = ", ".join([f.name for f in uploaded_files])
             for model_key, count in results['by_model'].items():
                 # Map model keys to endpoint paths for SharedBackupState
                 endpoint = model_key.replace('.', '/')
-                for file_obj in uploaded_files:
-                    SharedBackupState.add_csv_override(endpoint, count, file_obj.name, uploaded_at)
+                SharedBackupState.add_csv_override(endpoint, count, source_files, uploaded_at)
             
             # Clear uploader by incrementing key
             st.session_state["uploader_key"] = st.session_state.get("uploader_key", 0) + 1

@@ -111,11 +111,12 @@ def handle_csv_upload(uploader_key: str):
             
             # Update SharedBackupState for dynamic backup display
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # Build source file list for display
+            source_files = ", ".join([f.name for f in uploaded_files])
             for model_key, count in results['by_model'].items():
                 # Map model keys to endpoint paths for SharedBackupState
                 endpoint = model_key.replace('.', '/')
-                for file_obj in uploaded_files:
-                    SharedBackupState.add_csv_override(endpoint, count, file_obj.name, now)
+                SharedBackupState.add_csv_override(endpoint, count, source_files, now)
             
             # Clear uploader by incrementing key
             st.session_state["naming_csv_key"] = st.session_state.get("naming_csv_key", 0) + 1
