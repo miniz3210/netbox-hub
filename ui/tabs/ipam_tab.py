@@ -85,7 +85,19 @@ def handle_ipam_file_upload():
                 f"{count} {model.split('.')[-1]}"
                 for model, count in sorted(results['by_model'].items())
             ])
-            st.toast(f"✅ Ingested {results['total_records']} records: {model_breakdown}", icon="🚀")
+            
+            # Check for unclassified files
+            has_unclassified = any('unclassified' in model for model in results['by_model'].keys())
+            
+            if has_unclassified:
+                st.warning(
+                    f"⚠️ Stored {results['total_records']} records in unclassified table: {model_breakdown}\n\n"
+                    "💡 **Tip:** Upload a NetBox backup JSON first to enable automatic classification. "
+                    "The data is safely stored and can be re-classified later.",
+                    icon="⚠️"
+                )
+            else:
+                st.toast(f"✅ Ingested {results['total_records']} records: {model_breakdown}", icon="🚀")
             
             # Update SharedBackupState for dynamic backup display
             uploaded_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

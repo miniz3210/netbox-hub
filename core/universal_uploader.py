@@ -160,19 +160,48 @@ class UniversalUploader:
         classification = self._classify_columns(columns)
         
         if not classification:
-            # Provide helpful error with column info
+            # Fallback: Store in generic unclassified table when registry not initialized
+            if not self.registry or not self.registry.model_signatures:
+                # Schema registry not initialized - store in generic table
+                model_key = f"unclassified.{filename.replace('.csv', '').replace('.xlsx', '').replace(' ', '_').lower()}"
+                
+                # Convert DataFrame to records
+                records = []
+                for _, row in df.iterrows():
+                    record = {}
+                    for col in df.columns:
+                        value = row[col]
+                        # Handle pandas NaN
+                        if pd.isna(value):
+                            record[col] = None
+                        else:
+                            record[col] = value
+                    records.append(record)
+                
+                # Store in generic unclassified table
+                count = self._store_records(model_key, records, filename, uploaded_at)
+                
+                return {
+                    'record_count': count,
+                    'by_model': {model_key: count},
+                    'classified_as': model_key,
+                    'confidence': 0.0,
+                    'warning': 'Stored in unclassified table. Upload NetBox JSON to enable automatic classification.'
+                }
+            
+            # Registry exists but file doesn't match any model
             column_preview = ", ".join(columns[:5])
             if len(columns) > 5:
                 column_preview += f", ... ({len(columns)} total columns)"
             
             raise ValueError(
                 f"Unable to automatically classify '{filename}'. "
-                f"The schema registry has not been initialized yet.\n\n"
+                f"The file columns don't match any known NetBox model signatures.\n\n"
                 f"📋 Detected columns: {column_preview}\n\n"
-                f"💡 **Solution:** Upload a NetBox backup JSON file first (via the main backup uploader). "
-                f"This will initialize the schema registry with all NetBox model signatures, "
-                f"then your CSV files will be automatically classified and routed.\n\n"
-                f"📖 **How to generate backup:** Use the PowerShell export scripts shown above, or export from NetBox directly."
+                f"💡 **Possible solutions:**\n"
+                f"1. Check if this is a valid NetBox CSV export\n"
+                f"2. Upload a newer NetBox backup JSON that includes this model\n"
+                f"3. The file will be stored in an 'unclassified' table for manual review"
             )
         
         model_key, confidence = classification
