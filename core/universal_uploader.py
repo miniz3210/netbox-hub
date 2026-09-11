@@ -577,13 +577,40 @@ class UniversalUploader:
                 cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type}")
     
     def _sanitize_column_name(self, col_name: str) -> str:
-        """Sanitize column name for SQLite."""
+        """Sanitize column name for SQLite, handling reserved keywords."""
         # Replace special chars with underscores
         sanitized = re.sub(r'[^a-zA-Z0-9_]', '_', str(col_name))
         # Ensure it doesn't start with a number
-        if sanitized[0].isdigit():
+        if sanitized and sanitized[0].isdigit():
             sanitized = f"col_{sanitized}"
-        return sanitized.lower()
+        
+        sanitized_lower = sanitized.lower()
+        
+        # SQLite reserved keywords that must be quoted
+        sql_reserved_keywords = {
+            'abort', 'action', 'add', 'after', 'all', 'alter', 'analyze', 'and', 'as', 'asc',
+            'attach', 'autoincrement', 'before', 'begin', 'between', 'by', 'cascade', 'case',
+            'cast', 'check', 'collate', 'column', 'commit', 'conflict', 'constraint', 'create',
+            'cross', 'current', 'current_date', 'current_time', 'current_timestamp', 'database',
+            'default', 'deferrable', 'deferred', 'delete', 'desc', 'detach', 'distinct', 'do',
+            'drop', 'each', 'else', 'end', 'escape', 'except', 'exclusive', 'exists', 'explain',
+            'fail', 'filter', 'following', 'for', 'foreign', 'from', 'full', 'glob', 'group',
+            'having', 'if', 'ignore', 'immediate', 'in', 'index', 'indexed', 'initially', 'inner',
+            'insert', 'instead', 'intersect', 'into', 'is', 'isnull', 'join', 'key', 'left',
+            'like', 'limit', 'match', 'natural', 'no', 'not', 'nothing', 'notnull', 'null',
+            'of', 'offset', 'on', 'or', 'order', 'outer', 'over', 'partition', 'plan', 'pragma',
+            'primary', 'query', 'raise', 'range', 'recursive', 'references', 'regexp', 'reindex',
+            'release', 'rename', 'replace', 'restrict', 'right', 'rollback', 'row', 'rows',
+            'savepoint', 'select', 'set', 'table', 'temp', 'temporary', 'then', 'to', 'transaction',
+            'trigger', 'union', 'unique', 'update', 'using', 'vacuum', 'values', 'view', 'virtual',
+            'when', 'where', 'window', 'with', 'without'
+        }
+        
+        # If it's a reserved keyword, wrap it in quotes
+        if sanitized_lower in sql_reserved_keywords:
+            return f'"{sanitized_lower}"'
+        
+        return sanitized_lower
     
     def _infer_sql_type(self, value: Any) -> str:
         """Infer SQLite column type from value."""
