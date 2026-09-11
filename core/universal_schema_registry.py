@@ -166,17 +166,35 @@ class UniversalSchemaRegistry:
         # Normalize uploaded columns
         normalized_cols = {self._normalize_field_name(col) for col in columns}
         
+        # Special handling for common NetBox CSV export variations
+        # NetBox web UI exports use different column names than API field names
+        column_mappings = {
+            'ip_address': ['address', 'ip', 'ip_address'],  # CSV: "IP Address" → normalized: "ip_address"
+            'dns_name': ['dns_name', 'dns'],
+            'nat_(inside)': ['nat_inside', 'nat_inside_address'],
+            'nat_(outside)': ['nat_outside', 'nat_outside_address'],
+            'tenant_group': ['tenant_group', 'tenant.group'],
+            'owner_group': ['owner_group', 'custom_fields.owner_group'],
+            'owner': ['owner', 'custom_fields.owner'],
+        }
+        
+        # Add mapped aliases to normalized columns
+        expanded_cols = set(normalized_cols)
+        for csv_col in normalized_cols:
+            if csv_col in column_mappings:
+                expanded_cols.update(column_mappings[csv_col])
+        
         best_match = None
         best_score = 0.0
-        threshold = 0.3  # Minimum 30% overlap required
+        threshold = 0.25  # Lowered from 0.3 to 0.25 (25%) for better matching
         
         # Track top matches for debugging
         top_matches = []
         
         for model_key, signature in self.model_signatures.items():
-            # Compute Jaccard similarity
-            intersection = normalized_cols & signature
-            union = normalized_cols | signature
+            # Compute Jaccard similarity with expanded columns
+            intersection = expanded_cols & signature
+            union = expanded_cols | signature
             
             if len(union) == 0:
                 continue
@@ -193,22 +211,29 @@ class UniversalSchemaRegistry:
             combined_score = 0.4 * jaccard_score + 0.6 * coverage_score
             
             # Track for debugging
-            if combined_score > 0.1:  # Track any reasonable match
-                top_matches.append((model_key, combined_score, len(intersection)))
+            if combined_score > 0.05:  # Track any reasonable match
+                top_matches.append((model_key, combined_score, len(intersection), len(signature)))
             
             if combined_score > best_score and combined_score >= threshold:
                 best_score = combined_score
                 best_match = model_key
         
-        # Debug: Print top 5 matches
+        # Debug: Print top 5 matches if no match found
         import streamlit as st
         if not best_match and top_matches:
             top_matches.sort(key=lambda x: x[1], reverse=True)
             debug_info = "\n".join([
-                f"  • {model}: {score:.1%} match ({count} common fields)"
-                for model, score, count in top_matches[:5]
+                f"  • **{model}**: {score:.1%} match ({matched}/{total} fields)"
+                for model, score, matched, total in top_matches[:10]
             ])
-            st.info(f"🔍 **Debug:** Top model matches:\n{debug_info}\n\nNone exceeded the 30% threshold.")
+            st.info(
+                f"🔍 **Debug Info:** Top 10 model matches for your CSV:\n\n{debug_info}\n\n"
+                f"📊 Your CSV has {len(normalized_cols)} columns: {', '.join(sorted(list(normalized_cols)[:10]))}"
+                f"{', ...' if len(normalized_cols) > 10 else ''}\n\n"
+                f"⚠️ Best match was {top_matches[0][1]:.1%} but threshold is {threshold:.0%}. "
+                f"The file will be stored as unclassified.",
+                icon="🔍"
+            )
         
         return (best_match, best_score) if best_match else None
     
