@@ -264,6 +264,11 @@ def _handle_backup_upload(uploader_key: str, scope_key: str) -> None:
         st.session_state[result_key] = result
         # Keep the enable checkbox in step with the freshly ingested file.
         st.session_state[f"netbox_backup_enabled_{scope_key}"] = True
+        
+        # Clear the file uploader by incrementing the counter
+        # This forces Streamlit to re-render the uploader widget in a clean state
+        counter_key = f"backup_uploader_counter_{scope_key}"
+        st.session_state[counter_key] = st.session_state.get(counter_key, 0) + 1
 
 
 def _handle_backup_toggle(checkbox_key: str) -> None:
@@ -285,7 +290,13 @@ def render_backup_uploader(scope_key: str) -> dict:
     Assistant is allowed to read the backup. Returns the backup metadata dict.
     """
     meta = get_backup_metadata()
-    uploader_key = f"netbox_backup_uploader_{scope_key}"
+    
+    # Initialize uploader key counter if not present
+    counter_key = f"backup_uploader_counter_{scope_key}"
+    if counter_key not in st.session_state:
+        st.session_state[counter_key] = 0
+    
+    uploader_key = f"netbox_backup_uploader_{scope_key}_{st.session_state[counter_key]}"
     checkbox_key = f"netbox_backup_enabled_{scope_key}"
     result_key = f"backup_upload_result_{scope_key}"
     error_key = f"backup_upload_error_{scope_key}"

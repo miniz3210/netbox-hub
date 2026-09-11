@@ -586,7 +586,7 @@ class UniversalUploader:
         
         sanitized_lower = sanitized.lower()
         
-        # SQLite reserved keywords that must be quoted
+        # SQLite reserved keywords that must be escaped
         sql_reserved_keywords = {
             'abort', 'action', 'add', 'after', 'all', 'alter', 'analyze', 'and', 'as', 'asc',
             'attach', 'autoincrement', 'before', 'begin', 'between', 'by', 'cascade', 'case',
@@ -606,9 +606,10 @@ class UniversalUploader:
             'when', 'where', 'window', 'with', 'without'
         }
         
-        # If it's a reserved keyword, wrap it in quotes
+        # If it's a reserved keyword, add suffix to avoid conflicts
+        # This is safer than quoting as SQLite has complex quoting rules
         if sanitized_lower in sql_reserved_keywords:
-            return f'"{sanitized_lower}"'
+            return f'{sanitized_lower}_col'
         
         return sanitized_lower
     
