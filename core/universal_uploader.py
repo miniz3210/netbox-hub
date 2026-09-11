@@ -300,43 +300,55 @@ class UniversalUploader:
         """
         Classify based on filename patterns (e.g., 'netbox_devices.csv' -> 'dcim/devices').
         """
-        filename_lower = filename.lower().replace('.csv', '').replace('.xlsx', '')
+        filename_lower = filename.lower().replace('.csv', '').replace('.xlsx', '').replace('netbox_', '').replace('netbox-', '')
         
         # Map common filename patterns to NetBox endpoints
+        # Order matters: more specific patterns first, then generic ones
         filename_patterns = {
+            # Specific multi-word patterns first
+            'owner_group': 'tenancy/contact-groups',
+            'owner group': 'tenancy/contact-groups',
+            'tenant_group': 'tenancy/tenant-groups',
+            'tenant group': 'tenancy/tenant-groups',
+            'device_type': 'dcim/device-types',
+            'device type': 'dcim/device-types',
+            'device_role': 'dcim/device-roles',
+            'device role': 'dcim/device-roles',
+            'power_port': 'dcim/power-ports',
+            'power port': 'dcim/power-ports',
+            'console_port': 'dcim/console-ports',
+            'console port': 'dcim/console-ports',
+            'ip_address': 'ipam/ip-addresses',
+            'ip address': 'ipam/ip-addresses',
+            'ip-address': 'ipam/ip-addresses',
+            'virtual_machine': 'virtualization/virtual-machines',
+            'virtual machine': 'virtualization/virtual-machines',
+            'virtual-machine': 'virtualization/virtual-machines',
+            
+            # Generic single-word patterns
             'device': 'dcim/devices',
             'site': 'dcim/sites',
             'rack': 'dcim/racks',
             'location': 'dcim/locations',
             'manufacturer': 'dcim/manufacturers',
-            'device_type': 'dcim/device-types',
-            'device_role': 'dcim/device-roles',
             'platform': 'dcim/platforms',
             'interface': 'dcim/interfaces',
             'cable': 'dcim/cables',
-            'power_port': 'dcim/power-ports',
-            'console_port': 'dcim/console-ports',
-            'ip_address': 'ipam/ip-addresses',
-            'ip-address': 'ipam/ip-addresses',
             'prefix': 'ipam/prefixes',
             'vlan': 'ipam/vlans',
             'vrf': 'ipam/vrfs',
             'aggregate': 'ipam/aggregates',
             'rir': 'ipam/rirs',
-            'virtual_machine': 'virtualization/virtual-machines',
-            'virtual-machine': 'virtualization/virtual-machines',
             'cluster': 'virtualization/clusters',
             'tenant': 'tenancy/tenants',
-            'tenant_group': 'tenancy/tenant-groups',
             'contact': 'tenancy/contacts',
             'circuit': 'circuits/circuits',
             'provider': 'circuits/providers',
             'user': 'users/users',
-            'group': 'users/groups',
-            'owner': 'users/groups',  # owners often maps to groups
+            'group': 'users/groups',  # Only matches plain "group", not "owner group"
         }
         
-        # Check if any pattern matches the filename
+        # Check if any pattern matches the filename (exact match priority)
         for pattern, endpoint in filename_patterns.items():
             if pattern in filename_lower:
                 return (endpoint, 0.6)  # Moderate confidence from filename
@@ -347,6 +359,15 @@ class UniversalUploader:
         """
         Classify using common NetBox field patterns that appear across many models.
         """
+        # Check for owner groups specifically (has "owners" column)
+        if 'owners' in normalized_cols and 'name' in normalized_cols:
+            # This is likely owner groups (tenancy/contact groups)
+            return ('tenancy/contact-groups', 0.8)
+        
+        # Check for user groups specifically (has "users" or "permissions")
+        if ('users' in normalized_cols or 'users_count' in normalized_cols or 'permissions' in normalized_cols) and 'name' in normalized_cols:
+            return ('users/groups', 0.8)
+        
         # Common NetBox identifier patterns
         if 'id' in normalized_cols and 'name' in normalized_cols:
             # Generic NetBox object - try to infer type
@@ -361,7 +382,7 @@ class UniversalUploader:
             elif 'slug' in normalized_cols:
                 if 'facility' in normalized_cols or 'region' in normalized_cols:
                     return ('dcim/sites', 0.5)
-                elif 'group' in normalized_cols:
+                elif 'group_col' in normalized_cols or 'parent' in normalized_cols:
                     return ('tenancy/tenants', 0.5)
         
         # Check for unique field combinations
