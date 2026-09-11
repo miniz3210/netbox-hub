@@ -15,6 +15,7 @@ from core.backup_manager import (
     save_netbox_backup,
     set_backup_enabled,
 )
+from core.shared_backup_state import SharedBackupState
 
 CHAT_HEIGHT = 380
 
@@ -207,6 +208,7 @@ def _handle_backup_toggle(checkbox_key: str) -> None:
 
 def _handle_backup_clear(scope_key: str) -> None:
     clear_backup_records()
+    SharedBackupState.clear()  # Clear dynamic backup state
     st.session_state[f"backup_upload_result_{scope_key}"] = None
     st.session_state[f"backup_upload_error_{scope_key}"] = ""
     st.session_state.pop(f"netbox_backup_enabled_{scope_key}", None)
@@ -356,38 +358,62 @@ def render_backup_uploader(scope_key: str) -> dict:
             st.warning("⚠️ Backup is uploaded but excluded from AI Assistant lookups.", icon="⚠️")
 
     # Always show backup contents and choice sets (even if no JSON backup uploaded)
-    counts = get_backup_object_counts()
-    if counts:
-        with st.expander(f"📊 Backup contents ({len(counts)} object types)", expanded=False):
-            for object_type, (count, timestamp, source) in counts.items():
-                label = OBJECT_LABELS.get(object_type, object_type.replace("_", " ").title())
-                csv_filename = CSV_FILENAMES.get(object_type, "")
-                
-                if csv_filename:
-                    # Show with CSV filename for required data
-                    st.markdown(f"* **{label}** (`{csv_filename}`): `{count}` — {source} `{timestamp}`")
-                else:
-                    # Show without CSV filename for other data
-                    st.markdown(f"* **{label}**: `{count}` — {source} `{timestamp}`")
+    # Use dynamic inspection if available, otherwise fall back to legacy counts
+    if SharedBackupState.has_backup():
+        # Use dynamic inspection system
+        with st.expander("📊 Backup contents (dynamic)", expanded=False):
+            summary = SharedBackupState.generate_backup_summary()
+            st.markdown(summary)
+    else:
+        # Fall back to legacy static counts
+        counts = get_backup_object_counts()
+        if counts:
+            with st.expander(f"📊 Backup contents ({len(counts)} object types)", expanded=False):
+                for object_type, (count, timestamp, source) in counts.items():
+                    label = OBJECT_LABELS.get(object_type, object_type.replace("_", " ").title())
+                    csv_filename = CSV_FILENAMES.get(object_type, "")
+                    
+                    if csv_filename:
+                        # Show with CSV filename for required data
+                        st.markdown(f"* **{label}** (`{csv_filename}`): `{count}` — {source} `{timestamp}`")
+                    else:
+                        # Show without CSV filename for other data
+                        st.markdown(f"* **{label}**: `{count}` — {source} `{timestamp}`")
 
-    choice_sets = get_choice_set_summary()
-    if choice_sets:
-        with st.expander(
-            f"⚙️ Custom field choice sets ({len(choice_sets)})", expanded=False
-        ):
-            st.caption(
-                "Read from `extras/custom-field-choice-sets`. These are the "
-                "authoritative values used when checking whether an Instance Type "
-                "or Resource Group already exists in NetBox."
-            )
-            for row in choice_sets:
-                fields = row.get("fields") or "—"
-                timestamp = row.get("uploaded_at") or "Unknown"
-                source = row.get("source", "NetBox Backup")
-                st.markdown(
-                    f"* **{row['choice_set']}** → `{fields}`: "
-                    f"`{row['value_count']}` values — {source} `{timestamp}`"
+    # Show custom field choice sets dynamically
+    if SharedBackupState.has_backup():
+        choice_sets = SharedBackupState.get_choice_sets()
+        if choice_sets:
+            with st.expander(
+                f"⚙️ Custom field choice sets ({len(choice_sets)})", expanded=False
+            ):
+                st.caption(
+                    "Dynamically discovered from backup. These are the "
+                    "authoritative values used when checking whether custom field values "
+                    "already exist in NetBox."
                 )
+                summary = SharedBackupState.generate_choice_sets_summary()
+                st.markdown(summary)
+    else:
+        # Fall back to legacy static choice sets
+        choice_sets = get_choice_set_summary()
+        if choice_sets:
+            with st.expander(
+                f"⚙️ Custom field choice sets ({len(choice_sets)})", expanded=False
+            ):
+                st.caption(
+                    "Read from `extras/custom-field-choice-sets`. These are the "
+                    "authoritative values used when checking whether an Instance Type "
+                    "or Resource Group already exists in NetBox."
+                )
+                for row in choice_sets:
+                    fields = row.get("fields") or "—"
+                    timestamp = row.get("uploaded_at") or "Unknown"
+                    source = row.get("source", "NetBox Backup")
+                    st.markdown(
+                        f"* **{row['choice_set']}** → `{fields}`: "
+                        f"`{row['value_count']}` values — {source} `{timestamp}`"
+                    )
 
     return meta
 
