@@ -180,6 +180,20 @@ def render_compact_toolbar(active_model):
     tick_vms = " ✅" if vm_count > 0 else ""
     
     with st.expander(f"📥 Ingest NetBox Data (Backup / CSV) {status_tag}", expanded=False):
+        # Schema Registry Status Check
+        from core.universal_schema_registry import UniversalSchemaRegistry
+        registry = UniversalSchemaRegistry.load_from_session_state()
+        
+        if registry and registry.model_signatures:
+            model_count = len(registry.model_signatures)
+            st.success(f"✅ **Schema Registry Active:** {model_count} NetBox models loaded. CSV files will be automatically classified.", icon="🔍")
+        else:
+            st.warning(
+                "⚠️ **Schema Registry Not Initialized:** CSV files will be stored in 'unclassified' tables. "
+                "Upload a NetBox backup JSON below to enable automatic classification.",
+                icon="⚠️"
+            )
+        
         if total_recs > 0:
             # Get metadata for devices and VMs
             meta_devices = get_sync_metadata("netbox_devices")

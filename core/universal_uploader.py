@@ -31,6 +31,13 @@ class UniversalUploader:
     def _load_registry(self) -> None:
         """Load schema registry from session state if available."""
         self.registry = UniversalSchemaRegistry.load_from_session_state()
+        
+        # Debug: Check if registry is actually populated
+        if self.registry and hasattr(self.registry, 'model_signatures'):
+            sig_count = len(self.registry.model_signatures) if self.registry.model_signatures else 0
+            if sig_count == 0:
+                # Registry exists but is empty - treat as uninitialized
+                self.registry = None
     
     def process_uploaded_files(self, uploaded_files: List[Any]) -> Dict[str, Any]:
         """
