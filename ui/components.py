@@ -190,7 +190,9 @@ def _handle_backup_upload(uploader_key: str, scope_key: str) -> None:
             if is_json:
                 # Parse JSON and load into dynamic backup state + schema registry
                 try:
-                    backup_data = json.loads(file_content)
+                    # Handle UTF-8 BOM if present (common in Windows-generated files)
+                    content_str = file_content.decode('utf-8-sig')
+                    backup_data = json.loads(content_str)
                     SharedBackupState.load_backup(backup_data, file_obj.name)
                     
                     # Initialize universal schema registry from backup
@@ -201,6 +203,9 @@ def _handle_backup_upload(uploader_key: str, scope_key: str) -> None:
                     st.toast(f"✅ Schema registry initialized with {len(registry.model_signatures)} model signatures", icon="🔍")
                 except json.JSONDecodeError as e:
                     st.session_state[error_key] = f"**{file_obj.name}**: Invalid JSON - {e}"
+                    return
+                except UnicodeDecodeError as e:
+                    st.session_state[error_key] = f"**{file_obj.name}**: File encoding error - {e}"
                     return
                 
                 # Reset for save_netbox_backup

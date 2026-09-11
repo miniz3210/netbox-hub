@@ -318,7 +318,8 @@ def initialize_schema_registry_from_uploaded_file(uploaded_file) -> UniversalSch
         Initialized UniversalSchemaRegistry
     """
     content = uploaded_file.read()
-    backup_data = json.loads(content.decode('utf-8'))
+    # Handle UTF-8 BOM if present (common in Windows-generated JSON files)
+    backup_data = json.loads(content.decode('utf-8-sig'))
     
     registry = UniversalSchemaRegistry()
     registry.introspect_backup_json(backup_data)
