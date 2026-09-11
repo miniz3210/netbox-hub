@@ -413,8 +413,14 @@ def render_backup_uploader(scope_key: str) -> dict:
                     except:
                         compact_time = str(timestamp)[:16] if timestamp else "N/A"
                     
-                    # Compact format: Label: count icon time
-                    st.caption(f"**{label}**: {count} {icon} `{compact_time}`")
+                    # Compact format: Label: count icon endpoint time
+                    ep = metadata.get("endpoint", "")
+                    example = ""
+                    if ep and "/" in ep:
+                        # Show last two path segments for context (e.g. "users/config")
+                        parts = ep.split("/")
+                        example = f" (`{parts[-2]}/{parts[-1]}`)" if len(parts) >= 2 else f" (`{ep}`)"
+                    st.caption(f"**{label}**: {count} {icon}{example} `{compact_time}`")
             
             with col2:
                 for endpoint, metadata in sorted_objects[mid_point:]:
@@ -440,8 +446,13 @@ def render_backup_uploader(scope_key: str) -> dict:
                     except:
                         compact_time = str(timestamp)[:16] if timestamp else "N/A"
                     
-                    # Compact format: Label: count icon time
-                    st.caption(f"**{label}**: {count} {icon} `{compact_time}`")
+                    # Compact format: Label: count icon endpoint time
+                    ep = metadata.get("endpoint", "")
+                    example = ""
+                    if ep and "/" in ep:
+                        parts = ep.split("/")
+                        example = f" (`{parts[-2]}/{parts[-1]}`)" if len(parts) >= 2 else f" (`{ep}`)"
+                    st.caption(f"**{label}**: {count} {icon}{example} `{compact_time}`")
             
             # Debug info
             with st.expander("🔍 Debug: Show all endpoints", expanded=False):
