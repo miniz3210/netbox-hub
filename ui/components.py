@@ -183,21 +183,64 @@ def _handle_backup_upload(uploader_key: str, scope_key: str) -> None:
             if hasattr(file_obj, "seek"):
                 file_obj.seek(0)
             
-            # Parse JSON and load into dynamic backup state
-            try:
-                backup_data = json.loads(file_content)
-                SharedBackupState.load_backup(backup_data, file_obj.name)
-            except json.JSONDecodeError:
-                # Not a valid JSON file, skip dynamic loading
-                pass
+            # Check if JSON or CSV/Excel
+            filename_lower = file_obj.name.lower()
+            is_json = filename_lower.endswith('.json')
             
-            with st.spinner(f'Uploading {file_obj.name} ({file_size_mb:.1f} MB)...'):
-                result = save_netbox_backup(
-                    file_obj, 
-                    filename=file_obj.name,
-                    enable_schema_discovery=False,  # Fast upload
-                    progress_callback=progress_callback
-                )
+            if is_json:
+                # Parse JSON and load into dynamic backup state + schema registry
+                try:
+                    backup_data = json.loads(file_content)
+                    SharedBackupState.load_backup(backup_data, file_obj.name)
+                    
+                    # Initialize universal schema registry from backup
+                    from core.universal_schema_registry import initialize_schema_registry_from_uploaded_file
+                    if hasattr(file_obj, "seek"):
+                        file_obj.seek(0)
+                    registry = initialize_schema_registry_from_uploaded_file(file_obj)
+                    st.toast(f"✅ Schema registry initialized with {len(registry.model_signatures)} model signatures", icon="🔍")
+                except json.JSONDecodeError as e:
+                    st.session_state[error_key] = f"**{file_obj.name}**: Invalid JSON - {e}"
+                    return
+                
+                # Reset for save_netbox_backup
+                if hasattr(file_obj, "seek"):
+                    file_obj.seek(0)
+                
+                with st.spinner(f'Uploading {file_obj.name} ({file_size_mb:.1f} MB)...'):
+                    result = save_netbox_backup(
+                        file_obj, 
+                        filename=file_obj.name,
+                        enable_schema_discovery=False,  # Fast upload
+                        progress_callback=progress_callback
+                    )
+            else:
+                # CSV/Excel - use universal uploader
+                from core.universal_uploader import UniversalUploader
+                uploader = UniversalUploader()
+                
+                if hasattr(file_obj, "seek"):
+                    file_obj.seek(0)
+                
+                with st.spinner(f'Processing {file_obj.name} via universal uploader...'):
+                    upload_result = uploader.process_uploaded_files([file_obj])
+                
+                if upload_result['errors']:
+                    st.session_state[error_key] = "\n".join(upload_result['errors'])
+                    return
+                
+                # Convert to standard result format
+                result = {
+                    'total': upload_result['total_records'],
+                    'object_types': len(upload_result['by_model']),
+                    'sites': upload_result['by_model'].get('organization.sites', 0),
+                    'ipam': sum(v for k, v in upload_result['by_model'].items() if 'ipam' in k),
+                    'devices': upload_result['by_model'].get('dcim.devices', 0),
+                    'vms': upload_result['by_model'].get('virtualization.virtualmachines', 0)
+                }
+                
+                summary = uploader.get_processing_summary(upload_result)
+                st.toast(summary, icon="✅")
             
             # Clear progress indicators
             if file_size_mb > 10:
@@ -242,11 +285,11 @@ def render_backup_uploader(scope_key: str) -> dict:
     result_key = f"backup_upload_result_{scope_key}"
     error_key = f"backup_upload_error_{scope_key}"
 
-    st.markdown("**Upload NetBox Backup JSON or CSV files**")
+    st.markdown("**Upload NetBox Backup JSON or CSV files (Universal Auto-Router)**")
     st.caption(
-        "Upload the JSON backup produced by PowerShell export scripts, or manually upload "
-        "individual CSV files from NetBox. JSON backup (recommended) provides complete data with "
-        "relationships intact. CSV upload allows selective updates of specific object types."
+        "Upload the JSON backup produced by PowerShell export scripts to initialize the schema registry, "
+        "then upload any CSV/Excel files which will be automatically classified and routed. "
+        "No hardcoded routing rules - the system dynamically adapts to any NetBox version."
     )
 
     # Get both scripts
@@ -297,17 +340,17 @@ def render_backup_uploader(scope_key: str) -> dict:
         "Both support `-PageSize 1000` and `-OutputDirectory .` options."
     )
 
-    st.markdown("**Step 2 — Upload JSON backup file:**")
+    st.markdown("**Step 2 — Upload JSON backup or CSV/Excel files:**")
     st.file_uploader(
-        "Upload NetBox backup JSON file",
-        type=["json"],
-        accept_multiple_files=False,
+        "Upload NetBox backup JSON, CSV, or Excel files",
+        type=["json", "csv", "xlsx"],
+        accept_multiple_files=True,
         key=uploader_key,
         on_change=_handle_backup_upload,
         args=(uploader_key, scope_key),
         label_visibility="collapsed",
     )
-    st.caption("CSV files can be uploaded through the individual object type sections below in 'Backup contents'.")
+    st.caption("JSON backup initializes the schema registry. CSV/Excel files are automatically classified and routed based on their columns.")
 
     error = st.session_state.get(error_key)
     if error:
