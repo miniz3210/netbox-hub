@@ -7,6 +7,7 @@ from utils.formatters import (
     normalize_vmnic_list
 )
 from core.naming_engine import verify_and_suggest_with_ai
+from datetime import datetime
 from core.db_manager import (
     save_universal_csv, 
     get_records_by_category, 
@@ -18,6 +19,7 @@ from core.db_manager import (
     get_file_sync_metadata
 )
 from core.session_manager import SessionStateManager as SSM
+from core.shared_backup_state import SharedBackupState
 from ui.components import render_ai_chat, render_backup_uploader
 
 def build_naming_system_prompt(prompt: str) -> str:
@@ -80,12 +82,40 @@ def handle_csv_upload(uploader_key: str):
     total_vms = 0
     errors = []
 
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
     for f in uploaded_files:
         try:
             counts = save_universal_csv(f, filename=f.name, clear_first=False)
-            total_devices += counts.get("device", 0)
-            total_hypervisors += counts.get("hypervisor", 0)
-            total_vms += counts.get("vm", 0)
+            dev_count = counts.get("device", 0)
+            hyp_count = counts.get("hypervisor", 0)
+            vm_count = counts.get("vm", 0)
+            total_devices += dev_count
+            total_hypervisors += hyp_count
+            total_vms += vm_count
+
+            # Register in shared backup state so "Backup contents" shows the compact
+            # dynamic format instead of falling back to the legacy static display.
+            fname_lower = f.name.lower()
+            if "virtual" in fname_lower or "vm" in fname_lower:
+                endpoint = "virtualization/virtual-machines"
+                total = vm_count
+            elif "device_types" in fname_lower or "device type" in fname_lower:
+                endpoint = "dcim/device-types"
+                total = dev_count
+            elif "device_roles" in fname_lower or "device role" in fname_lower:
+                endpoint = "dcim/device-roles"
+                total = dev_count
+            elif "platform" in fname_lower:
+                endpoint = "dcim/platforms"
+                total = dev_count
+            else:
+                # Everything else (devices, hypervisors) maps to dcim/devices
+                endpoint = "dcim/devices"
+                total = dev_count + hyp_count
+
+            if total > 0:
+                SharedBackupState.add_csv_override(endpoint, total, f.name, now)
         except Exception as e:
             errors.append(f"• **{f.name}**: {str(e)}")
 

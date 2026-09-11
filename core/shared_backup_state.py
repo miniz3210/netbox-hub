@@ -96,8 +96,12 @@ class SharedBackupState:
     
     @classmethod
     def has_backup(cls) -> bool:
-        """Check if a backup is loaded."""
-        return cls.get_inspector() is not None
+        """Check if a backup is loaded or CSV overrides exist."""
+        cls.initialize()
+        if cls.get_inspector() is not None:
+            return True
+        registry = st.session_state.get(cls.OBJECT_REGISTRY_KEY, {})
+        return bool(registry)
     
     @classmethod
     def get_object_registry(cls) -> Dict[str, Dict[str, Any]]:

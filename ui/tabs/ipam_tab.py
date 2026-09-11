@@ -1,6 +1,7 @@
 import io
 import re
 import ipaddress
+from datetime import datetime
 from typing import Dict, List
 import streamlit as st
 import pandas as pd
@@ -42,7 +43,7 @@ from core.db_manager import (get_all_site_names,
     get_ipam_records_by_site,
     get_full_site_inventory_summary
 )
-
+from core.shared_backup_state import SharedBackupState
 from utils.formatters import to_title_case_preserve_acronyms
 from ui.components import render_ai_chat, render_backup_uploader
 
@@ -69,6 +70,7 @@ def handle_ipam_file_upload():
     total_scopes = 0
     total_prefixes = 0
     errors = []
+    uploaded_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     for file_obj in uploaded_files:
         filename = file_obj.name.lower()
@@ -91,6 +93,7 @@ def handle_ipam_file_upload():
                     if scope_records:
                         cnt = save_sites_batch(scope_records, clear_first=False, source="Manual CSV Upload")
                         total_scopes += cnt
+                        SharedBackupState.add_csv_override("organization/sites", cnt, file_obj.name, uploaded_at)
 
                 if "Prefixes" in wb.sheetnames:
                     ws_pfx = wb["Prefixes"]
@@ -111,6 +114,7 @@ def handle_ipam_file_upload():
                     if ipam_records:
                         cnt = save_ipam_records_batch(ipam_records, clear_first=False, source="Manual CSV Upload")
                         total_prefixes += cnt
+                        SharedBackupState.add_csv_override("ipam/prefixes", cnt, file_obj.name, uploaded_at)
             except Exception as e:
                 errors.append(f"• **{file_obj.name}**: {str(e)}")
         else:
@@ -179,6 +183,7 @@ def handle_ipam_file_upload():
                     if scope_records:
                         cnt = save_sites_batch(scope_records, clear_first=False, source="Manual CSV Upload")
                         total_scopes += cnt
+                        SharedBackupState.add_csv_override("organization/sites", cnt, file_obj.name, uploaded_at)
                 elif "prefixes" in cols or "prefix" in cols or "subnet" in cols or "vid" in cols or "vlan" in cols:
                     st.toast(f"DEBUG: CSV Columns={list(cols.keys())}", icon="🔍")
                     st.session_state["ipam_multi_uploader"] = None
@@ -243,6 +248,10 @@ def handle_ipam_file_upload():
                     if ipam_records:
                         cnt = save_ipam_records_batch(ipam_records, clear_first=False, source="Manual CSV Upload")
                         total_prefixes += cnt
+                        if is_vlan_file:
+                            SharedBackupState.add_csv_override("ipam/vlans", cnt, file_obj.name, uploaded_at)
+                        else:
+                            SharedBackupState.add_csv_override("ipam/prefixes", cnt, file_obj.name, uploaded_at)
                     
                     st.session_state["ipam_multi_uploader"] = None
                 else:
