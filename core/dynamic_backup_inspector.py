@@ -422,9 +422,12 @@ class BackupInspector:
         
         return "\n".join(lines)
     
-    def generate_choice_sets_summary(self) -> str:
+    def generate_choice_sets_summary(self, include_source_filename: bool = False) -> str:
         """
         Generate a formatted summary of custom field choice sets.
+        
+        Args:
+            include_source_filename: If True, include full source filename; if False, show icon only
         
         Returns:
             Markdown-formatted string summarizing all choice sets
@@ -435,8 +438,6 @@ class BackupInspector:
             return "No custom field choice sets found in backup."
         
         lines = []
-        lines.append(f"**Custom field choice sets** ({len(choice_sets)}):")
-        lines.append("")
         
         # Sort by name for consistent display
         sorted_sets = sorted(choice_sets.items(), key=lambda x: x[1]["name"])
@@ -445,9 +446,20 @@ class BackupInspector:
             label = set_data["label"]
             field_key = set_data["field_key"]
             count = set_data["count"]
-            source = set_data["source"]
+            source = set_data.get("source", "Unknown")
             timestamp = set_data["timestamp"]
-            lines.append(f"• **{label}** → `{field_key}` : {count} values — {source} {timestamp}")
+            source_type = set_data.get("source_type", "json")
+            
+            # Determine icon based on source
+            if source_type == "csv" or source.lower().endswith(".csv"):
+                icon = "📊"  # Excel/CSV icon
+            else:
+                icon = "📦"  # JSON backup icon
+            
+            if include_source_filename:
+                lines.append(f"• **{label}** → `{field_key}` : {count} values — {icon} {source} {timestamp}")
+            else:
+                lines.append(f"• **{label}** → `{field_key}` : {count} values — {icon} {timestamp}")
         
         return "\n".join(lines)
     

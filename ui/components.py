@@ -381,24 +381,46 @@ def render_backup_uploader(scope_key: str) -> dict:
         object_count = len(object_registry)
         
         with st.expander(f"📊 Backup contents ({object_count} object types - dynamic)", expanded=False):
-            # Display each object type as separate markdown lines
+            # Display in 2 columns for compact view
             sorted_objects = sorted(object_registry.items(), key=lambda x: x[1]["label"])
             
-            for endpoint, metadata in sorted_objects:
-                label = metadata["label"]
-                count = metadata["count"]
-                timestamp = metadata["timestamp"]
-                source = metadata.get("source", "Unknown")
-                source_type = metadata.get("source_type", "json")
-                
-                # Determine icon based on source
-                if source_type == "csv" or source.lower().endswith(".csv"):
-                    icon = "📊"  # Excel/CSV icon
-                else:
-                    icon = "📦"  # JSON backup icon
-                
-                # Format: Label (endpoint): count — icon timestamp
-                st.markdown(f"• **{label}** (`{endpoint}`): {count} — {icon} {timestamp}")
+            # Split into two columns
+            col1, col2 = st.columns(2)
+            mid_point = (len(sorted_objects) + 1) // 2  # Round up for odd numbers
+            
+            with col1:
+                for endpoint, metadata in sorted_objects[:mid_point]:
+                    label = metadata["label"]
+                    count = metadata["count"]
+                    timestamp = metadata["timestamp"]
+                    source = metadata.get("source", "Unknown")
+                    source_type = metadata.get("source_type", "json")
+                    
+                    # Determine icon based on source
+                    if source_type == "csv" or source.lower().endswith(".csv"):
+                        icon = "📊"
+                    else:
+                        icon = "📦"
+                    
+                    # Compact format: Label (count) icon
+                    st.caption(f"**{label}**: {count} {icon}")
+            
+            with col2:
+                for endpoint, metadata in sorted_objects[mid_point:]:
+                    label = metadata["label"]
+                    count = metadata["count"]
+                    timestamp = metadata["timestamp"]
+                    source = metadata.get("source", "Unknown")
+                    source_type = metadata.get("source_type", "json")
+                    
+                    # Determine icon based on source
+                    if source_type == "csv" or source.lower().endswith(".csv"):
+                        icon = "📊"
+                    else:
+                        icon = "📦"
+                    
+                    # Compact format: Label (count) icon
+                    st.caption(f"**{label}**: {count} {icon}")
             
             # Debug info
             with st.expander("🔍 Debug: Show all endpoints", expanded=False):
@@ -432,8 +454,47 @@ def render_backup_uploader(scope_key: str) -> dict:
                     "authoritative values used when checking whether custom field values "
                     "already exist in NetBox."
                 )
-                summary = SharedBackupState.generate_choice_sets_summary()
-                st.markdown(summary)
+                
+                # Display in 2 columns for compact view
+                sorted_sets = sorted(choice_sets.items(), key=lambda x: x[1]["name"])
+                
+                # Split into two columns
+                col1, col2 = st.columns(2)
+                mid_point = (len(sorted_sets) + 1) // 2  # Round up for odd numbers
+                
+                with col1:
+                    for set_name, set_data in sorted_sets[:mid_point]:
+                        label = set_data["label"]
+                        field_key = set_data["field_key"]
+                        count = set_data["count"]
+                        source = set_data.get("source", "Unknown")
+                        source_type = set_data.get("source_type", "json")
+                        
+                        # Determine icon based on source
+                        if source_type == "csv" or source.lower().endswith(".csv"):
+                            icon = "📊"
+                        else:
+                            icon = "📦"
+                        
+                        # Compact format: Label → field: count values icon
+                        st.caption(f"**{label}** → `{field_key}`: {count} {icon}")
+                
+                with col2:
+                    for set_name, set_data in sorted_sets[mid_point:]:
+                        label = set_data["label"]
+                        field_key = set_data["field_key"]
+                        count = set_data["count"]
+                        source = set_data.get("source", "Unknown")
+                        source_type = set_data.get("source_type", "json")
+                        
+                        # Determine icon based on source
+                        if source_type == "csv" or source.lower().endswith(".csv"):
+                            icon = "📊"
+                        else:
+                            icon = "📦"
+                        
+                        # Compact format: Label → field: count values icon
+                        st.caption(f"**{label}** → `{field_key}`: {count} {icon}")
     else:
         # Fall back to legacy static choice sets
         choice_sets = get_choice_set_summary()
