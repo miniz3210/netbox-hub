@@ -197,19 +197,50 @@ class UniversalUploader:
                 }
             
             # Registry exists but file doesn't match any model
+            # Get debug info from registry
+            normalized_cols = {self.registry._normalize_field_name(col) for col in columns}
+            
+            # Compute matches for debugging
+            top_matches = []
+            for model_key, signature in self.registry.model_signatures.items():
+                intersection = normalized_cols & signature
+                if len(normalized_cols) > 0:
+                    coverage = len(intersection) / len(normalized_cols)
+                    if coverage > 0.05:  # Track 5%+ matches
+                        top_matches.append((model_key, coverage, len(intersection), len(signature)))
+            
+            top_matches.sort(key=lambda x: x[1], reverse=True)
+            
+            # Build detailed error message with debug info
             column_preview = ", ".join(columns[:5])
             if len(columns) > 5:
                 column_preview += f", ... ({len(columns)} total columns)"
             
-            raise ValueError(
+            error_msg = (
                 f"Unable to automatically classify '{filename}'. "
                 f"The file columns don't match any known NetBox model signatures.\n\n"
                 f"📋 Detected columns: {column_preview}\n\n"
+            )
+            
+            if top_matches:
+                debug_info = "\n".join([
+                    f"  • {model}: {score:.1%} coverage ({matched}/{total} fields match)"
+                    for model, score, matched, total in top_matches[:5]
+                ])
+                error_msg += (
+                    f"🔍 **Top 5 closest matches:**\n{debug_info}\n\n"
+                    f"⚠️ Best match was {top_matches[0][1]:.1%} but threshold is 25%.\n\n"
+                )
+            
+            error_msg += (
                 f"💡 **Possible solutions:**\n"
                 f"1. Check if this is a valid NetBox CSV export\n"
-                f"2. Upload a newer NetBox backup JSON that includes this model\n"
-                f"3. The file will be stored in an 'unclassified' table for manual review"
+                f"2. Verify the NetBox backup JSON includes IP addresses (ipam/ip-addresses endpoint)\n"
+                f"3. Lower the threshold or add custom column mappings\n"
+                f"4. The file will be stored in an 'unclassified' table for manual review"
             )
+            
+            raise ValueError(error_msg)
         
         model_key, confidence = classification
         
