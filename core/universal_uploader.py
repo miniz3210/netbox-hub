@@ -197,50 +197,25 @@ class UniversalUploader:
                 }
             
             # Registry exists but file doesn't match any model
-            # Get debug info from registry
-            normalized_cols = {self.registry._normalize_field_name(col) for col in columns}
-            
-            # Compute matches for debugging
-            top_matches = []
-            for model_key, signature in self.registry.model_signatures.items():
-                intersection = normalized_cols & signature
-                if len(normalized_cols) > 0:
-                    coverage = len(intersection) / len(normalized_cols)
-                    if coverage > 0.05:  # Track 5%+ matches
-                        top_matches.append((model_key, coverage, len(intersection), len(signature)))
-            
-            top_matches.sort(key=lambda x: x[1], reverse=True)
-            
-            # Build detailed error message with debug info
-            column_preview = ", ".join(columns[:5])
-            if len(columns) > 5:
-                column_preview += f", ... ({len(columns)} total columns)"
-            
-            error_msg = (
-                f"Unable to automatically classify '{filename}'. "
-                f"The file columns don't match any known NetBox model signatures.\n\n"
-                f"📋 Detected columns: {column_preview}\n\n"
+            # Use intelligent fallback classification with detailed logging
+            fallback_result = self._classify_with_intelligent_fallback(
+                filename, columns, normalized_cols
             )
             
-            if top_matches:
-                debug_info = "\n".join([
-                    f"  • {model}: {score:.1%} coverage ({matched}/{total} fields match)"
-                    for model, score, matched, total in top_matches[:5]
-                ])
-                error_msg += (
-                    f"🔍 **Top 5 closest matches:**\n{debug_info}\n\n"
-                    f"⚠️ Best match was {top_matches[0][1]:.1%} but threshold is 25%.\n\n"
-                )
+            if fallback_result:
+                return fallback_result
             
-            error_msg += (
-                f"💡 **Possible solutions:**\n"
-                f"1. Check if this is a valid NetBox CSV export\n"
-                f"2. Verify the NetBox backup JSON includes IP addresses (ipam/ip-addresses endpoint)\n"
-                f"3. Lower the threshold or add custom column mappings\n"
-                f"4. The file will be stored in an 'unclassified' table for manual review"
+            # Last resort: Store as unclassified but don't raise an error
+            # This ensures the file is never rejected
+            model_key = self._generate_unclassified_model_key(filename)
+            st.warning(
+                f"⚠️ **'{filename}' could not be automatically classified**\n\n"
+                f"📋 Detected columns: {', '.join(columns[:5])}"
+                f"{f', ... ({len(columns)} total)' if len(columns) > 5 else ''}\n\n"
+                f"✅ The file will be stored as `{model_key}` for manual review and can be queried by the AI assistant.",
+                icon="⚠️"
             )
-            
-            raise ValueError(error_msg)
+            return (model_key, 0.0)
         
         model_key, confidence = classification
         
@@ -286,6 +261,133 @@ class UniversalUploader:
         # Fallback: Use heuristic pattern matching for common NetBox exports
         return self._classify_by_heuristics(columns)
     
+    def _classify_with_intelligent_fallback(self, filename: str, columns: List[str], 
+                                           normalized_cols: Set[str]) -> Optional[Tuple[str, float]]:
+        """
+        Intelligent fallback classification using multiple strategies.
+        
+        Args:
+            filename: Original filename
+            columns: Raw column names
+            normalized_cols: Normalized column name set
+            
+        Returns:
+            Tuple of (model_key, confidence_score) or None
+        """
+        # Strategy 1: Try filename-based classification
+        filename_result = self._classify_by_filename(filename)
+        if filename_result:
+            return filename_result
+        
+        # Strategy 2: Try NetBox common field patterns
+        pattern_result = self._classify_by_common_netbox_patterns(normalized_cols)
+        if pattern_result:
+            return pattern_result
+        
+        # Strategy 3: Try registry fuzzy matching with lower threshold
+        if self.registry:
+            for model_key, signature in self.registry.model_signatures.items():
+                intersection = normalized_cols & signature
+                if len(normalized_cols) > 0:
+                    coverage = len(intersection) / len(normalized_cols)
+                    # Lower threshold to 15% for fallback
+                    if coverage >= 0.15:
+                        return (model_key, coverage)
+        
+        return None
+    
+    def _classify_by_filename(self, filename: str) -> Optional[Tuple[str, float]]:
+        """
+        Classify based on filename patterns (e.g., 'netbox_devices.csv' -> 'dcim/devices').
+        """
+        filename_lower = filename.lower().replace('.csv', '').replace('.xlsx', '')
+        
+        # Map common filename patterns to NetBox endpoints
+        filename_patterns = {
+            'device': 'dcim/devices',
+            'site': 'dcim/sites',
+            'rack': 'dcim/racks',
+            'location': 'dcim/locations',
+            'manufacturer': 'dcim/manufacturers',
+            'device_type': 'dcim/device-types',
+            'device_role': 'dcim/device-roles',
+            'platform': 'dcim/platforms',
+            'interface': 'dcim/interfaces',
+            'cable': 'dcim/cables',
+            'power_port': 'dcim/power-ports',
+            'console_port': 'dcim/console-ports',
+            'ip_address': 'ipam/ip-addresses',
+            'ip-address': 'ipam/ip-addresses',
+            'prefix': 'ipam/prefixes',
+            'vlan': 'ipam/vlans',
+            'vrf': 'ipam/vrfs',
+            'aggregate': 'ipam/aggregates',
+            'rir': 'ipam/rirs',
+            'virtual_machine': 'virtualization/virtual-machines',
+            'virtual-machine': 'virtualization/virtual-machines',
+            'cluster': 'virtualization/clusters',
+            'tenant': 'tenancy/tenants',
+            'tenant_group': 'tenancy/tenant-groups',
+            'contact': 'tenancy/contacts',
+            'circuit': 'circuits/circuits',
+            'provider': 'circuits/providers',
+            'user': 'users/users',
+            'group': 'users/groups',
+            'owner': 'users/groups',  # owners often maps to groups
+        }
+        
+        # Check if any pattern matches the filename
+        for pattern, endpoint in filename_patterns.items():
+            if pattern in filename_lower:
+                return (endpoint, 0.6)  # Moderate confidence from filename
+        
+        return None
+    
+    def _classify_by_common_netbox_patterns(self, normalized_cols: Set[str]) -> Optional[Tuple[str, float]]:
+        """
+        Classify using common NetBox field patterns that appear across many models.
+        """
+        # Common NetBox identifier patterns
+        if 'id' in normalized_cols and 'name' in normalized_cols:
+            # Generic NetBox object - try to infer type
+            if 'ip' in normalized_cols or 'address' in normalized_cols:
+                return ('ipam/ip-addresses', 0.5)
+            elif 'prefix' in normalized_cols or 'cidr' in normalized_cols:
+                return ('ipam/prefixes', 0.5)
+            elif 'vid' in normalized_cols or 'vlan_id' in normalized_cols:
+                return ('ipam/vlans', 0.5)
+            elif 'device_type' in normalized_cols or 'serial' in normalized_cols:
+                return ('dcim/devices', 0.5)
+            elif 'slug' in normalized_cols:
+                if 'facility' in normalized_cols or 'region' in normalized_cols:
+                    return ('dcim/sites', 0.5)
+                elif 'group' in normalized_cols:
+                    return ('tenancy/tenants', 0.5)
+        
+        # Check for unique field combinations
+        if 'vid' in normalized_cols and ('name' in normalized_cols or 'vlan_name' in normalized_cols):
+            return ('ipam/vlans', 0.7)
+        
+        if 'username' in normalized_cols or 'email' in normalized_cols:
+            return ('users/users', 0.7)
+        
+        if 'asn' in normalized_cols:
+            return ('ipam/asns', 0.7)
+        
+        if 'circuit_id' in normalized_cols:
+            return ('circuits/circuits', 0.7)
+        
+        return None
+    
+    def _generate_unclassified_model_key(self, filename: str) -> str:
+        """
+        Generate a descriptive model key for unclassified files.
+        """
+        base_name = filename.replace('.csv', '').replace('.xlsx', '').replace(' ', '_').lower()
+        # Remove 'netbox_' prefix if present for cleaner naming
+        base_name = re.sub(r'^netbox[-_]', '', base_name)
+        return f"unclassified/{base_name}"
+    
     def _classify_by_heuristics(self, columns: List[str]) -> Optional[Tuple[str, float]]:
         """
         Classify files using heuristic pattern matching when schema registry fails.
@@ -330,6 +432,26 @@ class UniversalUploader:
                 'required': {'name', 'status'},
                 'optional': {'cluster', 'site', 'tenant', 'platform', 'vcpus', 'memory', 'disk'},
                 'threshold': 2
+            },
+            'users/groups': {
+                'required': {'name'},
+                'optional': {'description', 'users', 'permissions'},
+                'threshold': 1
+            },
+            'users/users': {
+                'required': {'username'},
+                'optional': {'email', 'first_name', 'last_name', 'is_active', 'is_staff', 'groups'},
+                'threshold': 1
+            },
+            'tenancy/tenant-groups': {
+                'required': {'name', 'slug'},
+                'optional': {'description', 'parent'},
+                'threshold': 1
+            },
+            'tenancy/tenants': {
+                'required': {'name', 'slug'},
+                'optional': {'group', 'description', 'comments'},
+                'threshold': 1
             }
         }
         
