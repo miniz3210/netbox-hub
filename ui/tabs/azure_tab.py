@@ -755,7 +755,7 @@ def render_azure_tab(active_model=None):
                     )
                 
                 st.divider()
-                st.markdown("### 🔍 VM Input Helper")
+                st.markdown("### 🔍 Netbox Helper")
                 vm_search_input = st.text_input("Enter VM Name / Hostname", placeholder="e.g., VM-APP-001", key="netbox_vm_search_query", label_visibility="collapsed")
                 
                 if vm_search_input and vm_search_input.strip():
@@ -1425,7 +1425,7 @@ def render_azure_tab(active_model=None):
                 )
             
             st.divider()
-            st.markdown("### 🔍 VM Input Helper")
+            st.markdown("### 🔍 Netbox Helper")
             vm_search_input = st.text_input("Enter VM Name / Hostname", placeholder="e.g., VM-APP-001", key="netbox_vm_search_query_loaded", label_visibility="collapsed")
             
             if vm_search_input and vm_search_input.strip():
