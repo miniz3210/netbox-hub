@@ -1,0 +1,14 @@
+.env
+__pycache__/
+*.pyc
+output_yamls/
+netbox_devicetypes.zip
+netbox_all_assets.zip
+.venv/
+venv/
+data/netbox_hub.db
+data/catalog_cache/
+data/NetBox_Backup_*.json
+data/*.json
+data/*.csv
+archive/
