@@ -483,7 +483,7 @@ def _render_backup_contents_section(scope_key: str, meta: dict) -> None:
         object_registry = SharedBackupState.get_object_registry()
         object_count = len(object_registry)
         
-        with st.expander(f"📊 Backup contents ({object_count} object types - dynamic)", expanded=False):
+        with st.expander(f"📋 Backup contents ({object_count} object types - dynamic)", expanded=False):
             st.caption("🟡 = Essential endpoint (minimal backup) | 📦 = JSON backup | 📊 = CSV upload")
             
             # Group endpoints by prefix (dcim/, ipam/, extras/, etc.)
@@ -583,11 +583,12 @@ def _render_backup_contents_section(scope_key: str, meta: dict) -> None:
                 
                 # Create a row with remove button if CSV
                 if is_csv:
-                    col_text, col_btn = st.columns([9, 1])
+                    col_text, col_btn = st.columns([19, 1])
                     with col_text:
                         st.caption(f"**{label}**: {count} {icon}{essential_marker}{example} `{compact_time}`")
                     with col_btn:
-                        if st.button("✕", key=f"remove_{endpoint}_{scope_key}", help=f"Remove {label}"):
+                        st.markdown("<div style='margin-top:-8px'></div>", unsafe_allow_html=True)
+                        if st.button("×", key=f"remove_{endpoint}_{scope_key}", help=f"Remove {label}"):
                             _handle_remove_csv_entry(endpoint, scope_key)
                             st.rerun()
                 else:
