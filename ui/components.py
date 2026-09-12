@@ -667,6 +667,9 @@ def _render_choice_sets_section() -> None:
                         else:
                             icon = "📦"
                         
+                        # Custom field choice sets are essential (extras/custom-field-choice-sets)
+                        essential_marker = " 🟡"
+                        
                         # Format timestamp as dd-mm-yy HH:mm
                         try:
                             from datetime import datetime
@@ -679,7 +682,7 @@ def _render_choice_sets_section() -> None:
                             compact_time = str(timestamp)[:16] if timestamp else "N/A"
                         
                         # Compact format: Label → field: count icon time
-                        st.caption(f"**{label}** → `{field_key}`: {count} {icon} `{compact_time}`")
+                        st.caption(f"**{label}** → `{field_key}`: {count} {icon}{essential_marker} `{compact_time}`")
                 
                 with col2:
                     for set_name, set_data in sorted_sets[mid_point:]:
@@ -695,6 +698,9 @@ def _render_choice_sets_section() -> None:
                         else:
                             icon = "📦"
                         
+                        # Custom field choice sets are essential (extras/custom-field-choice-sets)
+                        essential_marker = " 🟡"
+                        
                         # Format timestamp as dd-mm-yy HH:mm
                         try:
                             from datetime import datetime
@@ -707,7 +713,7 @@ def _render_choice_sets_section() -> None:
                             compact_time = str(timestamp)[:16] if timestamp else "N/A"
                         
                         # Compact format: Label → field: count icon time
-                        st.caption(f"**{label}** → `{field_key}`: {count} {icon} `{compact_time}`")
+                        st.caption(f"**{label}** → `{field_key}`: {count} {icon}{essential_marker} `{compact_time}`")
     else:
         # Fall back to legacy static choice sets
         choice_sets = get_choice_set_summary()
