@@ -17,17 +17,19 @@ logger = logging.getLogger("netbox-hub")
 class BackupInspector:
     """Dynamically inspect and parse NetBox backup JSON files."""
     
-    def __init__(self, backup_data: Dict[str, Any], source_filename: str = "NetBox_Backup.json"):
+    def __init__(self, backup_data: Dict[str, Any], source_filename: str = "NetBox_Backup.json", 
+                 ingestion_timestamp: Optional[str] = None):
         """
         Initialize the backup inspector.
         
         Args:
             backup_data: Parsed JSON backup data
             source_filename: Original filename for tracking
+            ingestion_timestamp: Optional timestamp to preserve (for restoration from DB)
         """
         self.backup_data = backup_data
         self.source_filename = source_filename
-        self.ingestion_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.ingestion_timestamp = ingestion_timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self._object_registry = {}
         self._custom_fields_registry = {}
         self._choice_sets_registry = {}

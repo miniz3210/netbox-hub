@@ -1138,13 +1138,13 @@ def restore_backup_to_session_state():
         
         logger.info(f"Decompressed backup JSON: {len(backup_json_compressed)/1024/1024:.1f} MB -> {len(backup_json_bytes)/1024/1024:.1f} MB")
         
-        # Create BackupInspector with restored data
+        # Create BackupInspector with restored data, preserving original timestamp
         from core.dynamic_backup_inspector import BackupInspector
         filename = meta.get("filename", "NetBox Backup")
-        inspector = BackupInspector(backup_data, filename)
+        original_timestamp = meta.get("uploaded_at", "")  # Preserve original upload time
         
-        # Load into SharedBackupState (this will populate the object registry with full data)
-        SharedBackupState.load_backup(backup_data, filename)
+        # Load into SharedBackupState with preserved timestamp
+        SharedBackupState.load_backup(backup_data, filename, ingestion_timestamp=original_timestamp)
         
         # Also restore the schema registry for CSV classification
         try:

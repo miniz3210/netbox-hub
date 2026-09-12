@@ -33,7 +33,8 @@ class SharedBackupState:
             st.session_state[cls.CSV_OVERRIDES_KEY] = {}
     
     @classmethod
-    def load_backup(cls, backup_data: Dict[str, Any], filename: str = "NetBox_Backup.json") -> BackupInspector:
+    def load_backup(cls, backup_data: Dict[str, Any], filename: str = "NetBox_Backup.json", 
+                   ingestion_timestamp: str = None) -> BackupInspector:
         """
         Load a NetBox backup and update shared state.
         Newer uploads override older data for matching endpoints.
@@ -41,13 +42,14 @@ class SharedBackupState:
         Args:
             backup_data: Parsed JSON backup data
             filename: Original filename for tracking
+            ingestion_timestamp: Optional timestamp to preserve (for restoration from DB)
             
         Returns:
             BackupInspector instance
         """
         cls.initialize()
         
-        inspector = BackupInspector(backup_data, filename)
+        inspector = BackupInspector(backup_data, filename, ingestion_timestamp=ingestion_timestamp)
         
         # Get new objects from inspector
         new_objects = inspector.inspect_all_objects()
@@ -205,6 +207,14 @@ class SharedBackupState:
         
         return False
     
+    @staticmethod
+    def normalize_endpoint(endpoint: str) -> str:
+        """
+        Normalize endpoint format to handle kebab-case vs snake_case variations.
+        Converts to kebab-case (e.g., ip_addresses -> ip-addresses).
+        """
+        return endpoint.replace('_', '-')
+    
     @classmethod
     def add_csv_override(cls, endpoint: str, count: int, source: str, timestamp: str):
         """
@@ -221,13 +231,23 @@ class SharedBackupState:
         
         from datetime import datetime
         
+        # Normalize endpoint to handle kebab-case vs snake_case
+        normalized_endpoint = cls.normalize_endpoint(endpoint)
+        
         # Get existing registry
         registry = st.session_state.get(cls.OBJECT_REGISTRY_KEY, {})
         
+        # Check if a normalized version already exists in registry
+        existing_key = None
+        for key in registry:
+            if cls.normalize_endpoint(key) == normalized_endpoint:
+                existing_key = key
+                break
+        
         # Check if endpoint exists and compare timestamps
         should_override = True
-        if endpoint in registry:
-            existing_timestamp = registry[endpoint].get("timestamp", "")
+        if existing_key:
+            existing_timestamp = registry[existing_key].get("timestamp", "")
             try:
                 csv_dt = datetime.fromisoformat(timestamp.replace("UTC", "").strip())
                 existing_dt = datetime.fromisoformat(existing_timestamp.replace("UTC", "").strip())
@@ -239,23 +259,32 @@ class SharedBackupState:
                 should_override = True
         
         if should_override:
-            if endpoint in registry:
-                # Update existing endpoint with CSV data
-                registry[endpoint]["count"] = count
-                registry[endpoint]["source"] = source
-                registry[endpoint]["timestamp"] = timestamp
-                registry[endpoint]["source_type"] = "csv"
+            # If updating existing endpoint, remove old key if format changed
+            if existing_key and existing_key != normalized_endpoint:
+                del registry[existing_key]
+            
+            if existing_key or normalized_endpoint in registry:
+                # Update existing endpoint with CSV data (use normalized format)
+                target_key = normalized_endpoint
+                if target_key not in registry and existing_key:
+                    registry[target_key] = registry.get(existing_key, {})
+                
+                registry[target_key]["count"] = count
+                registry[target_key]["source"] = source
+                registry[target_key]["timestamp"] = timestamp
+                registry[target_key]["source_type"] = "csv"
+                registry[target_key]["endpoint"] = normalized_endpoint
             else:
                 # Create new entry for CSV-only data
                 inspector = cls.get_inspector()
-                label = inspector._format_label(endpoint) if inspector else endpoint.replace("/", " ").replace("_", " ").title()
+                label = inspector._format_label(normalized_endpoint) if inspector else normalized_endpoint.replace("/", " ").replace("-", " ").replace("_", " ").title()
                 
-                registry[endpoint] = {
+                registry[normalized_endpoint] = {
                     "label": label,
                     "count": count,
                     "source": source,
                     "timestamp": timestamp,
-                    "endpoint": endpoint,
+                    "endpoint": normalized_endpoint,
                     "sample_keys": [],
                     "source_type": "csv"
                 }
@@ -264,7 +293,7 @@ class SharedBackupState:
             
             # Also update CSV overrides tracking
             overrides = st.session_state.get(cls.CSV_OVERRIDES_KEY, {})
-            overrides[endpoint] = {
+            overrides[normalized_endpoint] = {
                 "count": count,
                 "source": source,
                 "timestamp": timestamp,
