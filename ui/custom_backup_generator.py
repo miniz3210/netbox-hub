@@ -46,7 +46,7 @@ def _toggle_endpoint(endpoint_path: str):
     st.session_state[STATE_IS_CUSTOM] = selected != default_essential
 
 
-def _select_all_in_category(category: str):
+def _select_all_in_category(category: str, scope_key: str):
     """Select all endpoints in a category."""
     selected = st.session_state[STATE_SELECTED_ENDPOINTS]
     for endpoint in NETBOX_ENDPOINTS[category]:
@@ -55,10 +55,13 @@ def _select_all_in_category(category: str):
     # Mark as custom if not equal to default minimal
     default_essential = set(get_essential_endpoints())
     st.session_state[STATE_IS_CUSTOM] = selected != default_essential
-    st.rerun()
+    
+    # Increment refresh counter to force checkbox re-render
+    counter_key = f"checkbox_refresh_{scope_key}"
+    st.session_state[counter_key] = st.session_state.get(counter_key, 0) + 1
 
 
-def _deselect_all_in_category(category: str):
+def _deselect_all_in_category(category: str, scope_key: str):
     """Deselect all endpoints in a category."""
     selected = st.session_state[STATE_SELECTED_ENDPOINTS]
     for endpoint in NETBOX_ENDPOINTS[category]:
@@ -67,7 +70,10 @@ def _deselect_all_in_category(category: str):
     # Mark as custom if not equal to default minimal
     default_essential = set(get_essential_endpoints())
     st.session_state[STATE_IS_CUSTOM] = selected != default_essential
-    st.rerun()
+    
+    # Increment refresh counter to force checkbox re-render
+    counter_key = f"checkbox_refresh_{scope_key}"
+    st.session_state[counter_key] = st.session_state.get(counter_key, 0) + 1
 
 
 def _generate_custom_script(selected_endpoints: Set[str]) -> str:
@@ -244,11 +250,13 @@ def render_custom_backup_selector(scope_key: str = "naming") -> None:
             
             with col_sel_all:
                 if st.button("✅ All", key=f"btn_select_all_{category}_{scope_key}", use_container_width=True):
-                    _select_all_in_category(category)
+                    _select_all_in_category(category, scope_key)
+                    st.rerun()
             
             with col_sel_none:
                 if st.button("❌ None", key=f"btn_deselect_all_{category}_{scope_key}", use_container_width=True):
-                    _deselect_all_in_category(category)
+                    _deselect_all_in_category(category, scope_key)
+                    st.rerun()
             
             st.markdown("")
             
@@ -297,15 +305,18 @@ def _render_endpoint_checkbox(endpoint: dict, selected_endpoints: Set[str], scop
     if is_essential:
         label = f"🟡 {label}"
     
-    # Unique key for checkbox
-    checkbox_key = f"chk_endpoint_{endpoint_path.replace('/', '_')}_{scope_key}"
+    # Unique key for checkbox - include a counter to force refresh after bulk operations
+    refresh_counter = st.session_state.get(f"checkbox_refresh_{scope_key}", 0)
+    checkbox_key = f"chk_endpoint_{endpoint_path.replace('/', '_')}_{scope_key}_{refresh_counter}"
     
-    # Render checkbox with callback
+    # Render checkbox - check if value changed
     checked = st.checkbox(
         label,
         value=is_selected,
         key=checkbox_key,
-        help=f"{endpoint['description']} ({endpoint_path})",
-        on_change=_toggle_endpoint,
-        args=(endpoint_path,)
+        help=f"{endpoint['description']} ({endpoint_path})"
     )
+    
+    # Handle state change
+    if checked != is_selected:
+        _toggle_endpoint(endpoint_path)
