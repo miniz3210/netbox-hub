@@ -239,14 +239,10 @@ def render_custom_backup_selector(scope_key: str = "naming") -> None:
     # Endpoint selection interface - organized by category
     st.markdown("##### 📋 Select Endpoints by Category")
     
-    # Build tab labels with counts
-    tab_labels = []
-    for category, endpoints in NETBOX_ENDPOINTS.items():
-        category_selected = sum(1 for ep in endpoints if ep["path"] in selected_endpoints)
-        total_in_category = len(endpoints)
-        tab_labels.append(f"{category} ({category_selected}/{total_in_category})")
+    # Build tab labels WITHOUT counts to avoid confusion with delayed updates
+    tab_labels = list(NETBOX_ENDPOINTS.keys())
     
-    # Create tabs for each category with counts
+    # Create tabs for each category
     category_tabs = st.tabs(tab_labels)
     
     for idx, (category, endpoints) in enumerate(NETBOX_ENDPOINTS.items()):
@@ -255,7 +251,7 @@ def render_custom_backup_selector(scope_key: str = "naming") -> None:
             col_header, col_sel_all, col_sel_none = st.columns([4, 1, 1])
             
             with col_header:
-                # Count selected in this category
+                # Count selected in this category - shown in header inside tab
                 category_selected = sum(1 for ep in endpoints if ep["path"] in selected_endpoints)
                 category_essential = sum(1 for ep in endpoints if ep["essential"])
                 st.markdown(f"**{category}** — {category_selected}/{len(endpoints)} selected ({category_essential} essential)")
@@ -263,12 +259,12 @@ def render_custom_backup_selector(scope_key: str = "naming") -> None:
             with col_sel_all:
                 if st.button("✅ All", key=f"btn_select_all_{category}_{scope_key}", use_container_width=True):
                     _select_all_in_category(category, scope_key)
-                    # Note: No st.rerun() to avoid jumping back to first tab
+                    st.rerun()
             
             with col_sel_none:
                 if st.button("❌ None", key=f"btn_deselect_all_{category}_{scope_key}", use_container_width=True):
                     _deselect_all_in_category(category, scope_key)
-                    # Note: No st.rerun() to avoid jumping back to first tab
+                    st.rerun()
             
             st.markdown("")
             
@@ -332,5 +328,4 @@ def _render_endpoint_checkbox(endpoint: dict, selected_endpoints: Set[str], scop
     # Handle state change
     if checked != is_selected:
         _toggle_endpoint(endpoint_path)
-        # Note: No st.rerun() to avoid jumping back to first tab
-        # Counts will update on next interaction or tab switch
+        st.rerun()
