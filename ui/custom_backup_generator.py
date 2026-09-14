@@ -332,4 +332,5 @@ def _render_endpoint_checkbox(endpoint: dict, selected_endpoints: Set[str], scop
     # Handle state change
     if checked != is_selected:
         _toggle_endpoint(endpoint_path)
-        st.rerun()
+        # Note: No st.rerun() to avoid jumping back to first tab
+        # Counts will update on next interaction or tab switch
