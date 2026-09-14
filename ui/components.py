@@ -345,14 +345,7 @@ def _render_json_backup_section(scope_key: str, meta: dict, json_uploader_key: s
     st.markdown("**Step 1 — Generate & Upload NetBox JSON Backup (PowerShell)**")
     st.caption("Customize which NetBox endpoints to include in your PowerShell backup script, then upload the generated JSON to initialize the schema registry.")
     
-    st.markdown("**📝 Usage Instructions:**")
-    st.code(
-        '.\\netbox-export-full.ps1 -NetBoxUrl "https://netbox.example.com" -ApiToken "<TOKEN>"',
-        language="powershell",
-    )
-    st.caption("Replace the script name with the downloaded file. All scripts support `-PageSize 1000` and `-OutputDirectory .` options.")
-    
-    # Show custom backup generator
+    # Show custom backup generator (includes dynamic usage instructions)
     st.markdown("---")
     from ui.custom_backup_generator import render_custom_backup_selector
     render_custom_backup_selector(scope_key)

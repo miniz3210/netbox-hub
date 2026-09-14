@@ -242,6 +242,12 @@ def render_custom_backup_selector(scope_key: str = "naming") -> None:
             help=f"Download {filename} with {selected_count} selected endpoints"
         )
     
+    # Dynamic usage instructions based on preset selection
+    st.markdown("**📝 Usage Instructions:**")
+    usage_script = f'.\\{filename} -NetBoxUrl "https://netbox.example.com" -ApiToken "<TOKEN>"'
+    st.code(usage_script, language="powershell")
+    st.caption("All scripts support `-PageSize 1000` and `-OutputDirectory .` options.")
+    
     # View script checkbox - only show in Custom mode
     if preset_choice == "Custom":
         view_script = st.checkbox(
