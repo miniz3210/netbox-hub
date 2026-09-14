@@ -349,7 +349,7 @@ def _render_json_backup_section(scope_key: str, meta: dict, json_uploader_key: s
     st.markdown("**Step 1 — Generate & Upload NetBox JSON Backup (PowerShell)**")
     st.caption("Upload JSON backup to initialize the schema registry and enable automatic CSV classification.")
     
-    col_full, col_min = st.columns(2)
+    col_full, col_min, col_custom = st.columns(3)
     
     with col_full:
         st.markdown("**Full Backup (All Data)**")
@@ -363,7 +363,7 @@ def _render_json_backup_section(scope_key: str, meta: dict, json_uploader_key: s
             file_name="netbox-export-full.ps1",
             mime="text/plain",
             key=f"dl_export_full_ps1_{scope_key}",
-            width="stretch",
+            use_container_width=True,
         )
         with st.expander("📄 View netbox-export-full.ps1", expanded=False):
             st.code(export_script_full, language="powershell")
@@ -380,15 +380,40 @@ def _render_json_backup_section(scope_key: str, meta: dict, json_uploader_key: s
             file_name="netbox-export-min.ps1",
             mime="text/plain",
             key=f"dl_export_min_ps1_{scope_key}",
-            width="stretch",
+            use_container_width=True,
         )
         with st.expander("📄 View netbox-export-min.ps1", expanded=False):
             st.code(export_script_min, language="powershell")
     
+    with col_custom:
+        st.markdown("**Custom Backup (Customize)**")
+        st.caption("Select specific endpoints to include in your backup script.")
+        if st.button(
+            "🎨 Customize Endpoints...",
+            key=f"btn_customize_backup_{scope_key}",
+            use_container_width=True,
+            help="Open interactive endpoint selector"
+        ):
+            st.session_state[f"show_custom_backup_{scope_key}"] = True
+    
+    # Show custom backup generator if button was clicked
+    if st.session_state.get(f"show_custom_backup_{scope_key}", False):
+        st.markdown("---")
+        from ui.custom_backup_generator import render_custom_backup_selector
+        
+        with st.expander("🎨 Custom Backup Script Generator", expanded=True):
+            render_custom_backup_selector(scope_key)
+            
+            # Close button
+            if st.button("✅ Done", key=f"btn_close_custom_{scope_key}"):
+                st.session_state[f"show_custom_backup_{scope_key}"] = False
+                st.rerun()
+    
     st.caption(
         "**Full backup** exports all 145+ endpoints (audit logs, jobs, users, plugins). "
         "**Minimal backup** exports 68 essential endpoints only (sites, devices, IPAM, VMs, config). "
-        "Both support `-PageSize 1000` and `-OutputDirectory .` options."
+        "**Custom backup** lets you choose exactly which endpoints to include. "
+        "All scripts support `-PageSize 1000` and `-OutputDirectory .` options."
     )
 
     # JSON Upload Section
