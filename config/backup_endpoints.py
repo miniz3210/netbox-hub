@@ -51,9 +51,10 @@ def _parse_essential_endpoints_from_script() -> Set[str]:
         array_content = match.group(1)
         
         # Extract all quoted endpoint paths
-        # Match patterns like "dcim/sites", "ipam/vlans" etc.
+        # Match patterns like "dcim/sites", "ipam/vlans", "circuits/circuit-group-assignments" etc.
         # Exclude: application/json, http://, https://, etc.
-        endpoints = re.findall(r'"((?:dcim|ipam|virtualization|tenancy|circuits|vpn|wireless|extras|users|core)/[a-z-]+(?:-[a-z]+)*)"', array_content)
+        # Pattern explanation: category / word (-word)*
+        endpoints = re.findall(r'"((?:dcim|ipam|virtualization|tenancy|circuits|vpn|wireless|extras|users|core)/[a-z]+(?:-[a-z]+)*)"', array_content)
         
         return set(endpoints)
     
@@ -166,13 +167,18 @@ def _generate_description(endpoint_path: str) -> str:
         "tenancy/contacts": "Contact records",
         "tenancy/contact-assignments": "Object-to-contact associations",
         
-        # Circuits
+        # Circuits (complete descriptions for all 11 endpoints)
         "circuits/providers": "Service providers",
         "circuits/provider-accounts": "Provider account details",
         "circuits/provider-networks": "Provider network infrastructure",
         "circuits/circuit-types": "Circuit classifications",
         "circuits/circuits": "Communication circuits",
         "circuits/circuit-terminations": "Circuit endpoints",
+        "circuits/circuit-groups": "Circuit groupings",
+        "circuits/circuit-group-assignments": "Circuit-to-group assignments",
+        "circuits/virtual-circuits": "Virtual circuit instances",
+        "circuits/virtual-circuit-types": "Virtual circuit classifications",
+        "circuits/virtual-circuit-terminations": "Virtual circuit endpoints",
         
         # VPN
         "vpn/tunnels": "VPN tunnel instances",
@@ -245,7 +251,8 @@ def _discover_all_endpoints() -> Set[str]:
             content = f.read()
             # Extract endpoint references - only match valid NetBox API patterns
             # Pattern: category/endpoint-name where category is one of the valid ones
-            pattern = r'"((?:' + '|'.join(valid_categories) + r')/[a-z-]+(?:-[a-z]+)*)"'
+            # Matches: dcim/sites, circuits/circuit-group-assignments, etc.
+            pattern = r'"((?:' + '|'.join(valid_categories) + r')/[a-z]+(?:-[a-z]+)*)"'
             endpoints = re.findall(pattern, content)
             discovered.update(endpoints)
     except:
@@ -284,9 +291,12 @@ def _discover_all_endpoints() -> Set[str]:
         "tenancy/tenant-groups", "tenancy/tenants", "tenancy/contact-groups",
         "tenancy/contact-roles", "tenancy/contacts", "tenancy/contact-assignments",
         
-        # Circuits
+        # Circuits (complete list with all 11 endpoints)
         "circuits/providers", "circuits/provider-accounts", "circuits/provider-networks",
         "circuits/circuit-types", "circuits/circuits", "circuits/circuit-terminations",
+        "circuits/circuit-groups", "circuits/circuit-group-assignments",
+        "circuits/virtual-circuits", "circuits/virtual-circuit-types", 
+        "circuits/virtual-circuit-terminations",
         
         # VPN
         "vpn/tunnels", "vpn/tunnel-groups", "vpn/tunnel-terminations",
