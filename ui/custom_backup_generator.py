@@ -239,34 +239,31 @@ def render_custom_backup_selector(scope_key: str = "naming") -> None:
     # Endpoint selection interface - organized by category
     st.markdown("##### 📋 Select Endpoints by Category")
     
-    # Build tab labels with counts
-    tab_labels = []
+    # Use expanders instead of tabs to preserve state across reruns
     for category, endpoints in NETBOX_ENDPOINTS.items():
+        # Count selected in this category
         category_selected = sum(1 for ep in endpoints if ep["path"] in selected_endpoints)
+        category_essential = sum(1 for ep in endpoints if ep["essential"])
         total_in_category = len(endpoints)
-        tab_labels.append(f"{category} ({category_selected}/{total_in_category})")
-    
-    # Create tabs for each category with counts
-    category_tabs = st.tabs(tab_labels)
-    
-    for idx, (category, endpoints) in enumerate(NETBOX_ENDPOINTS.items()):
-        with category_tabs[idx]:
-            # Category header with select all/none buttons
-            col_header, col_sel_all, col_sel_none = st.columns([4, 1, 1])
-            
-            with col_header:
-                # Count selected in this category
-                category_selected = sum(1 for ep in endpoints if ep["path"] in selected_endpoints)
-                category_essential = sum(1 for ep in endpoints if ep["essential"])
-                st.markdown(f"**{category}** — {category_selected}/{len(endpoints)} selected ({category_essential} essential)")
+        
+        # Build expander title with counts
+        expander_title = f"**{category}** ({category_selected}/{total_in_category} selected, {category_essential} essential)"
+        
+        # Determine if expander should be expanded by default (expand first one or any with selections)
+        is_first = category == list(NETBOX_ENDPOINTS.keys())[0]
+        should_expand = is_first or category_selected > 0
+        
+        with st.expander(expander_title, expanded=should_expand):
+            # Action buttons row
+            col_sel_all, col_sel_none = st.columns([1, 1])
             
             with col_sel_all:
-                if st.button("✅ All", key=f"btn_select_all_{category}_{scope_key}", use_container_width=True):
+                if st.button("✅ Select All", key=f"btn_select_all_{category}_{scope_key}", use_container_width=True):
                     _select_all_in_category(category, scope_key)
                     st.rerun()
             
             with col_sel_none:
-                if st.button("❌ None", key=f"btn_deselect_all_{category}_{scope_key}", use_container_width=True):
+                if st.button("❌ Deselect All", key=f"btn_deselect_all_{category}_{scope_key}", use_container_width=True):
                     _deselect_all_in_category(category, scope_key)
                     st.rerun()
             
