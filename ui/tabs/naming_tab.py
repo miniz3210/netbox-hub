@@ -385,8 +385,8 @@ def render_naming_tab(active_model):
                 l_port_short = normalize_port_shortname(l_port_raw)
                 r_port_short = normalize_port_shortname(r_port_raw)
 
-                uplink_desc_local = f"Uplink from {l_dev}_{l_port_short} to {r_dev}_{r_port_short}" if l_dev and l_port_raw and r_dev and r_port_raw else "Uplink from <Local> to <Remote>"
-                uplink_desc_remote = f"Uplink from {r_dev}_{r_port_short} to {l_dev}_{l_port_short}" if l_dev and l_port_raw and r_dev and r_port_raw else "Uplink from <Remote> to <Local>"
+                uplink_desc_local = f"to {r_dev}_{r_port_short} [Uplink]" if r_dev and r_port_raw else "to <Remote_Device>_<Remote_Port> [Uplink]"
+                uplink_desc_remote = f"to {l_dev}_{l_port_short} [Uplink]" if l_dev and l_port_raw else "to <Local_Device>_<Local_Port> [Uplink]"
 
                 st.caption(f"On Local Device (`{l_dev or 'LOCAL'}`):")
                 st.code(uplink_desc_local, language="text")
@@ -405,7 +405,7 @@ def render_naming_tab(active_model):
                 
                 display_reference_box(
                     category_key="device",
-                    default_lines="Uplink from SWUSNYC01-0_Gi1/0/48 to SWUSNYC02-0_Gi1/0/48\nUplink from FWUSNYC01_Te1/0/1 to SWUSNYC01-0_Te1/0/1",
+                    default_lines="to SWUSNYC02-0_Gi1/0/48 [Uplink]\nto FWUSNYC01_Te1/0/1 [Uplink]\nto Huawei-Core_XGE0/0/31 [Uplink]",
                     label="Switch Uplink Interface",
                     site_filter=c_site
                 )
@@ -438,13 +438,12 @@ def render_naming_tab(active_model):
                 )
             
             elif p_cat == "Switch Port-Channel (Logical)":
-                local_po_id = st.text_input("Local Port-Channel ID", value="Po1", placeholder="e.g. Po1, Po10", key="pc_local_id").strip()
+                local_po_id = st.text_input("Local Port-Channel ID", value="LAG1", placeholder="e.g. LAG1, LAG2, Po1", key="pc_local_id").strip()
                 r_dev_po = st.text_input("Remote Device Hostname", value="", placeholder="e.g. SWUSNYC02-0", key="pc_rd").strip()
-                remote_po_id = st.text_input("Remote Port-Channel ID", value="Po1", placeholder="e.g. Po1, Po10", key="pc_remote_id").strip()
                 trunk_info = st.text_input("Trunk Info (Optional)", value="", placeholder="e.g. VLANs 10,20,30", key="pc_trunk").strip()
 
                 trunk_suffix = f" {trunk_info}" if trunk_info else ""
-                po_desc = f"{local_po_id} to {r_dev_po}_{remote_po_id} Trunk{trunk_suffix}" if r_dev_po else f"{local_po_id} to <Remote_Device>_<Remote_Po> Trunk"
+                po_desc = f"{local_po_id} to {r_dev_po}{trunk_suffix}" if r_dev_po else f"{local_po_id} to <Remote_Device>"
 
                 st.caption(f"Generated Port-Channel Description:")
                 st.code(po_desc, language="text")
@@ -461,7 +460,7 @@ def render_naming_tab(active_model):
                 
                 display_reference_box(
                     category_key="device",
-                    default_lines="Po1 to SWUSNYC02-0_Po1 Trunk VLANs 10,20,30\nPo10 to FWUSNYC01_Po10 Trunk All\nPo5 to SWUSLONCORE01_Po5 Trunk",
+                    default_lines="LAG1 to SWUSNYC02-0 VLANs 10,20,30\nLAG2 to FWUSNYC01\nLAG5 to SWUSLONCORE01 All VLANs",
                     label="Port-Channel Interface",
                     site_filter=c_site
                 )
