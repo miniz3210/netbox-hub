@@ -220,6 +220,10 @@ def _generate_description(endpoint_path: str) -> str:
         "core/data-files": "Imported data files",
         "core/jobs": "Background job definitions",
         "core/object-types": "NetBox content types and object definitions",
+        "core/background-queues": "Background task queues",
+        "core/background-tasks": "Background task instances",
+        "core/background-workers": "Background worker processes",
+        "core/object-changes": "Object change history and audit logs",
     }
     
     return descriptions.get(endpoint_path, f"NetBox {_generate_label(endpoint_path)}")
@@ -316,8 +320,10 @@ def _discover_all_endpoints() -> Set[str]:
         # Users - 4 endpoints
         "users/users", "users/groups", "users/permissions", "users/tokens",
         
-        # Core - 4 endpoints (complete list)
+        # Core - 8 endpoints (complete list)
         "core/data-sources", "core/data-files", "core/jobs", "core/object-types",
+        "core/background-queues", "core/background-tasks", "core/background-workers",
+        "core/object-changes",
     }
     
     # Merge discovered and fallback
