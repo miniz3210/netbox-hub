@@ -26,10 +26,15 @@ def _initialize_session_state():
         st.session_state[STATE_IS_CUSTOM] = False
 
 
-def _reset_to_default_minimal():
+def _reset_to_default_minimal(scope_key: str):
     """Reset selection to the 64 essential endpoints."""
     st.session_state[STATE_SELECTED_ENDPOINTS] = set(get_essential_endpoints())
     st.session_state[STATE_IS_CUSTOM] = False
+    
+    # Increment refresh counter to force checkbox re-render
+    counter_key = f"checkbox_refresh_{scope_key}"
+    st.session_state[counter_key] = st.session_state.get(counter_key, 0) + 1
+    
     st.toast("✅ Reset to default minimal backup (64 endpoints)", icon="🔄")
 
 
@@ -197,7 +202,7 @@ def render_custom_backup_selector(scope_key: str = "naming") -> None:
             help="Reset to the 64 essential endpoints",
             type="secondary" if not is_custom else "primary"
         ):
-            _reset_to_default_minimal()
+            _reset_to_default_minimal(scope_key)
             st.rerun()
     
     with col_download:
@@ -234,8 +239,15 @@ def render_custom_backup_selector(scope_key: str = "naming") -> None:
     # Endpoint selection interface - organized by category
     st.markdown("##### 📋 Select Endpoints by Category")
     
-    # Create tabs for each category
-    category_tabs = st.tabs(list(NETBOX_ENDPOINTS.keys()))
+    # Build tab labels with counts
+    tab_labels = []
+    for category, endpoints in NETBOX_ENDPOINTS.items():
+        category_selected = sum(1 for ep in endpoints if ep["path"] in selected_endpoints)
+        total_in_category = len(endpoints)
+        tab_labels.append(f"{category} ({category_selected}/{total_in_category})")
+    
+    # Create tabs for each category with counts
+    category_tabs = st.tabs(tab_labels)
     
     for idx, (category, endpoints) in enumerate(NETBOX_ENDPOINTS.items()):
         with category_tabs[idx]:
