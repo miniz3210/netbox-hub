@@ -219,6 +219,7 @@ def _generate_description(endpoint_path: str) -> str:
         "core/data-sources": "External data sources",
         "core/data-files": "Imported data files",
         "core/jobs": "Background job definitions",
+        "core/object-types": "NetBox content types and object definitions",
     }
     
     return descriptions.get(endpoint_path, f"NetBox {_generate_label(endpoint_path)}")
@@ -261,7 +262,7 @@ def _discover_all_endpoints() -> Set[str]:
     # Fallback: comprehensive manual list of known endpoints (as of NetBox 3.x/4.x)
     # This ensures we have a complete list even if scripts can't be parsed
     fallback_endpoints = {
-        # DCIM
+        # DCIM - 36 endpoints
         "dcim/regions", "dcim/site-groups", "dcim/sites", "dcim/locations",
         "dcim/rack-roles", "dcim/rack-groups", "dcim/rack-types", "dcim/racks",
         "dcim/manufacturers", "dcim/platforms", "dcim/device-roles", "dcim/device-types",
@@ -274,49 +275,49 @@ def _discover_all_endpoints() -> Set[str]:
         "dcim/front-port-templates", "dcim/front-ports", "dcim/rear-port-templates",
         "dcim/rear-ports", "dcim/virtual-chassis", "dcim/virtual-device-contexts",
         
-        # IPAM
+        # IPAM - 17 endpoints
         "ipam/rirs", "ipam/asn-ranges", "ipam/asns", "ipam/aggregates",
         "ipam/roles", "ipam/vrfs", "ipam/prefixes", "ipam/ip-ranges",
         "ipam/ip-addresses", "ipam/vlan-groups", "ipam/vlans",
         "ipam/service-templates", "ipam/services", "ipam/fhrp-groups",
         "ipam/fhrp-group-assignments", "ipam/l2vpns", "ipam/l2vpn-terminations",
         
-        # Virtualization
+        # Virtualization - 7 endpoints
         "virtualization/cluster-types", "virtualization/cluster-groups",
         "virtualization/clusters", "virtualization/virtual-machine-types",
         "virtualization/virtual-machines", "virtualization/interfaces",
         "virtualization/virtual-disks",
         
-        # Tenancy
+        # Tenancy - 6 endpoints
         "tenancy/tenant-groups", "tenancy/tenants", "tenancy/contact-groups",
         "tenancy/contact-roles", "tenancy/contacts", "tenancy/contact-assignments",
         
-        # Circuits (complete list with all 11 endpoints)
+        # Circuits - 11 endpoints (complete list)
         "circuits/providers", "circuits/provider-accounts", "circuits/provider-networks",
         "circuits/circuit-types", "circuits/circuits", "circuits/circuit-terminations",
         "circuits/circuit-groups", "circuits/circuit-group-assignments",
         "circuits/virtual-circuits", "circuits/virtual-circuit-types", 
         "circuits/virtual-circuit-terminations",
         
-        # VPN
+        # VPN - 8 endpoints
         "vpn/tunnels", "vpn/tunnel-groups", "vpn/tunnel-terminations",
         "vpn/ike-policies", "vpn/ike-proposals", "vpn/ipsec-policies",
         "vpn/ipsec-proposals", "vpn/ipsec-profiles",
         
-        # Wireless
+        # Wireless - 3 endpoints
         "wireless/wireless-lan-groups", "wireless/wireless-lans", "wireless/wireless-links",
         
-        # Extras
+        # Extras - 12 endpoints
         "extras/tags", "extras/custom-fields", "extras/custom-field-choice-sets",
         "extras/config-contexts", "extras/config-templates", "extras/custom-links",
         "extras/export-templates", "extras/saved-filters", "extras/webhooks",
         "extras/event-rules", "extras/image-attachments", "extras/journal-entries",
         
-        # Users
+        # Users - 4 endpoints
         "users/users", "users/groups", "users/permissions", "users/tokens",
         
-        # Core
-        "core/data-sources", "core/data-files", "core/jobs",
+        # Core - 4 endpoints (complete list)
+        "core/data-sources", "core/data-files", "core/jobs", "core/object-types",
     }
     
     # Merge discovered and fallback
