@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Set
 import streamlit as st
-from config.backup_endpoints import NETBOX_ENDPOINTS, get_essential_endpoints, get_endpoint_count
+from config.backup_endpoints import NETBOX_ENDPOINTS, get_essential_endpoints, get_endpoint_count, get_all_endpoints
 
 
 # Session state keys
