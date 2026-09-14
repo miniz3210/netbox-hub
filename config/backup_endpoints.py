@@ -51,7 +51,9 @@ def _parse_essential_endpoints_from_script() -> Set[str]:
         array_content = match.group(1)
         
         # Extract all quoted endpoint paths
-        endpoints = re.findall(r'"([a-z-]+/[a-z-]+)"', array_content)
+        # Match patterns like "dcim/sites", "ipam/vlans" etc.
+        # Exclude: application/json, http://, https://, etc.
+        endpoints = re.findall(r'"((?:dcim|ipam|virtualization|tenancy|circuits|vpn|wireless|extras|users|core)/[a-z-]+(?:-[a-z]+)*)"', array_content)
         
         return set(endpoints)
     
@@ -231,13 +233,20 @@ def _discover_all_endpoints() -> Set[str]:
     
     discovered = set()
     
+    # Valid NetBox API categories (prevents false matches like "application/json")
+    valid_categories = {
+        'dcim', 'ipam', 'virtualization', 'tenancy', 'circuits', 
+        'vpn', 'wireless', 'extras', 'users', 'core'
+    }
+    
     # Try to discover from full backup script comments/documentation
     try:
         with open(full_script_path, 'r', encoding='utf-8-sig') as f:
             content = f.read()
-            # Extract any endpoint references from comments or code
-            # This is a best-effort discovery
-            endpoints = re.findall(r'"([a-z-]+/[a-z-]+)"', content)
+            # Extract endpoint references - only match valid NetBox API patterns
+            # Pattern: category/endpoint-name where category is one of the valid ones
+            pattern = r'"((?:' + '|'.join(valid_categories) + r')/[a-z-]+(?:-[a-z]+)*)"'
+            endpoints = re.findall(pattern, content)
             discovered.update(endpoints)
     except:
         pass
@@ -318,6 +327,12 @@ def _build_endpoint_registry() -> Dict[str, List[EndpointInfo]]:
     essential_set = _parse_essential_endpoints_from_script()
     all_endpoints = _discover_all_endpoints()
     
+    # Valid NetBox API categories (prevents false matches)
+    valid_categories = {
+        'dcim', 'ipam', 'virtualization', 'tenancy', 'circuits', 
+        'vpn', 'wireless', 'extras', 'users', 'core'
+    }
+    
     # Organize endpoints by category
     registry: Dict[str, List[EndpointInfo]] = {}
     
@@ -327,7 +342,13 @@ def _build_endpoint_registry() -> Dict[str, List[EndpointInfo]]:
         if len(parts) < 2:
             continue
         
-        category = parts[0].upper()
+        category_lower = parts[0].lower()
+        
+        # Skip invalid categories
+        if category_lower not in valid_categories:
+            continue
+        
+        category = category_lower.upper()
         
         # Initialize category if not exists
         if category not in registry:
