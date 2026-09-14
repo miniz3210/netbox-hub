@@ -372,8 +372,8 @@ def render_naming_tab(active_model):
         with col_b:
             st.markdown("#### 🔌 Switch & Firewall Interface Formatter")
             p_cat = st.radio("Interface Type", [
-                "Switch Uplink (Inter-Switch)", "Switch LAG Member Port (LACP)", 
-                "Switch Port-Channel (Logical)", "Switch Access Port (Endpoint)", "Firewall Security Zone Interface"
+                "Switch Uplink (Inter-Switch)", "Switch Port-Channel (Logical)", 
+                "Switch LAG Member Port (LACP)", "Switch Access Port (Endpoint)", "Firewall Security Zone Interface"
             ], key="p_cat_sel")
             
             if p_cat == "Switch Uplink (Inter-Switch)":
@@ -385,8 +385,8 @@ def render_naming_tab(active_model):
                 l_port_short = normalize_port_shortname(l_port_raw)
                 r_port_short = normalize_port_shortname(r_port_raw)
 
-                uplink_desc_local = f"to {r_dev}_{r_port_short} [Uplink]" if r_dev and r_port_raw else "to <Remote_Device>_<Remote_Port> [Uplink]"
-                uplink_desc_remote = f"to {l_dev}_{l_port_short} [Uplink]" if l_dev and l_port_raw else "to <Local_Device>_<Local_Port> [Uplink]"
+                uplink_desc_local = f"Uplink_to_{r_dev}_{r_port_short}" if r_dev and r_port_raw else "Uplink_to_<Remote_Device>_<Remote_Port>"
+                uplink_desc_remote = f"Uplink_to_{l_dev}_{l_port_short}" if l_dev and l_port_raw else "Uplink_to_<Local_Device>_<Local_Port>"
 
                 st.caption(f"On Local Device (`{l_dev or 'LOCAL'}`):")
                 st.code(uplink_desc_local, language="text")
@@ -405,7 +405,7 @@ def render_naming_tab(active_model):
                 
                 display_reference_box(
                     category_key="device",
-                    default_lines="to SWUSNYC02-0_Gi1/0/48 [Uplink]\nto FWUSNYC01_Te1/0/1 [Uplink]\nto Huawei-Core_XGE0/0/31 [Uplink]",
+                    default_lines="Uplink_to_SWUSNYC02-0_Gi1/0/48\nUplink_to_FWUSNYC01_Te1/0/1\nUplink_to_Huawei-Core_XGE0/0/31",
                     label="Switch Uplink Interface",
                     site_filter=c_site
                 )

@@ -7,7 +7,7 @@ DEFAULT_RULES = {
     "branch_switch": "SW<Country><State><Site><Zone><Seq>-<StackID> / VS<Country><State><Site><Seq>-<StackID>",
     "branch_ap": "WAP<Country><State><Site><Seq>",
     "branch_security": "FW<Country><State><Site><Vendor><Seq> / ION<Country><State><Site><Seq>",
-    "switch_uplink_desc": "to <Remote_Device>_<Remote_Port_Short> [Uplink]",
+    "switch_uplink_desc": "Uplink_to_<Remote_Device>_<Remote_Port_Short>",
     "switch_lag_member": "LACP to <Remote_Device>_<Remote_Port_Short>",
     "switch_port_channel": "<Local_Po> to <Remote_Device> <Trunk_Info>",
     "switch_access_desc": "<VLAN_Name> - <Host/Device>_<Port>",
