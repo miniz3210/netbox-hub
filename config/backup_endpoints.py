@@ -2,7 +2,7 @@
 NetBox Backup Endpoint Configuration
 
 Defines all available NetBox API endpoints grouped by category, with markers
-for the 68 essential endpoints included in the minimal backup preset.
+for the 64 essential endpoints included in the minimal backup preset.
 
 Used by the custom backup script generator UI to allow users to select which
 endpoints to include in their PowerShell export scripts.
@@ -15,7 +15,7 @@ class EndpointInfo(TypedDict):
     """Metadata for a NetBox API endpoint."""
     path: str
     label: str
-    essential: bool  # True if part of the 68 essential endpoints
+    essential: bool  # True if part of the 64 essential endpoints
     description: str
 
 
@@ -156,7 +156,7 @@ NETBOX_ENDPOINTS: Dict[str, List[EndpointInfo]] = {
 
 
 def get_essential_endpoints() -> List[str]:
-    """Return list of the 68 essential endpoint paths."""
+    """Return list of the 64 essential endpoint paths."""
     essential = []
     for category, endpoints in NETBOX_ENDPOINTS.items():
         for endpoint in endpoints:

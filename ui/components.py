@@ -411,7 +411,7 @@ def _render_json_backup_section(scope_key: str, meta: dict, json_uploader_key: s
     
     st.caption(
         "**Full backup** exports all 145+ endpoints (audit logs, jobs, users, plugins). "
-        "**Minimal backup** exports 68 essential endpoints only (sites, devices, IPAM, VMs, config). "
+        "**Minimal backup** exports 64 essential endpoints only (sites, devices, IPAM, VMs, config). "
         "**Custom backup** lets you choose exactly which endpoints to include. "
         "All scripts support `-PageSize 1000` and `-OutputDirectory .` options."
     )

@@ -3,7 +3,7 @@ Custom NetBox Backup Script Generator UI
 
 Interactive component that allows users to customize which NetBox endpoints
 are included in their PowerShell export script. Provides checkboxes for all
-available endpoints with visual indicators for the 68 essential endpoints,
+available endpoints with visual indicators for the 64 essential endpoints,
 and a "Reset to Default Minimal" button.
 """
 
@@ -27,10 +27,10 @@ def _initialize_session_state():
 
 
 def _reset_to_default_minimal():
-    """Reset selection to the 68 essential endpoints."""
+    """Reset selection to the 64 essential endpoints."""
     st.session_state[STATE_SELECTED_ENDPOINTS] = set(get_essential_endpoints())
     st.session_state[STATE_IS_CUSTOM] = False
-    st.toast("✅ Reset to default minimal backup (68 endpoints)", icon="🔄")
+    st.toast("✅ Reset to default minimal backup (64 endpoints)", icon="🔄")
 
 
 def _toggle_endpoint(endpoint_path: str):
@@ -55,6 +55,7 @@ def _select_all_in_category(category: str):
     # Mark as custom if not equal to default minimal
     default_essential = set(get_essential_endpoints())
     st.session_state[STATE_IS_CUSTOM] = selected != default_essential
+    st.rerun()
 
 
 def _deselect_all_in_category(category: str):
@@ -66,6 +67,7 @@ def _deselect_all_in_category(category: str):
     # Mark as custom if not equal to default minimal
     default_essential = set(get_essential_endpoints())
     st.session_state[STATE_IS_CUSTOM] = selected != default_essential
+    st.rerun()
 
 
 def _generate_custom_script(selected_endpoints: Set[str]) -> str:
@@ -152,7 +154,7 @@ def render_custom_backup_selector(scope_key: str = "naming") -> None:
     Provides an interactive interface where users can:
     - View all available NetBox endpoints grouped by category
     - Select/deselect endpoints with checkboxes
-    - See visual indicators for the 68 essential endpoints (gold coin icon)
+    - See visual indicators for the 64 essential endpoints (gold coin icon)
     - Reset to the default minimal backup
     - Download a customized PowerShell export script
     
@@ -186,7 +188,7 @@ def render_custom_backup_selector(scope_key: str = "naming") -> None:
             "🔄 Reset to Default Minimal",
             key=f"btn_reset_backup_{scope_key}",
             use_container_width=True,
-            help="Reset to the 68 essential endpoints",
+            help="Reset to the 64 essential endpoints",
             type="secondary" if not is_custom else "primary"
         ):
             _reset_to_default_minimal()
@@ -243,12 +245,10 @@ def render_custom_backup_selector(scope_key: str = "naming") -> None:
             with col_sel_all:
                 if st.button("✅ All", key=f"btn_select_all_{category}_{scope_key}", use_container_width=True):
                     _select_all_in_category(category)
-                    st.rerun()
             
             with col_sel_none:
                 if st.button("❌ None", key=f"btn_deselect_all_{category}_{scope_key}", use_container_width=True):
                     _deselect_all_in_category(category)
-                    st.rerun()
             
             st.markdown("")
             
