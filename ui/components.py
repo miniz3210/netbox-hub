@@ -342,60 +342,21 @@ def _handle_csv_clear(scope_key: str) -> None:
 def _render_json_backup_section(scope_key: str, meta: dict, json_uploader_key: str, 
                                 checkbox_key: str, result_key: str, error_key: str) -> None:
     """Render Step 1: JSON Backup upload, PowerShell scripts, and status display."""
-    # Get full backup script
-    export_script_full = get_netbox_export_script("full")
-
     st.markdown("**Step 1 — Generate & Upload NetBox JSON Backup (PowerShell)**")
-    st.caption("Upload JSON backup to initialize the schema registry and enable automatic CSV classification.")
+    st.caption("Customize which NetBox endpoints to include in your PowerShell backup script, then upload the generated JSON to initialize the schema registry.")
     
-    col_full, col_custom = st.columns(2)
-    
-    with col_full:
-        st.markdown("**Full Backup (All Data)**")
-        st.code(
-            '.\\netbox-export-full.ps1 -NetBoxUrl "https://netbox.example.com" -ApiToken "<TOKEN>"',
-            language="powershell",
-        )
-        st.download_button(
-            "⬇️ Download netbox-export-full.ps1",
-            export_script_full,
-            file_name="netbox-export-full.ps1",
-            mime="text/plain",
-            key=f"dl_export_full_ps1_{scope_key}",
-            use_container_width=True,
-        )
-        with st.expander("📄 View netbox-export-full.ps1", expanded=False):
-            st.code(export_script_full, language="powershell")
-    
-    with col_custom:
-        st.markdown("**Custom Backup (Minimal or Custom)**")
-        st.caption("Generate backup script with selected endpoints. Defaults to 64 essential endpoints.")
-        if st.button(
-            "🎨 Customize Endpoints & Download...",
-            key=f"btn_customize_backup_{scope_key}",
-            use_container_width=True,
-            help="Select endpoints and generate custom backup script"
-        ):
-            st.session_state[f"show_custom_backup_{scope_key}"] = True
-    
-    # Show custom backup generator if button was clicked
-    if st.session_state.get(f"show_custom_backup_{scope_key}", False):
-        st.markdown("---")
-        from ui.custom_backup_generator import render_custom_backup_selector
-        
-        with st.expander("🎨 Custom Backup Script Generator", expanded=True):
-            render_custom_backup_selector(scope_key)
-            
-            # Close button
-            if st.button("✅ Done", key=f"btn_close_custom_{scope_key}"):
-                st.session_state[f"show_custom_backup_{scope_key}"] = False
-                st.rerun()
-    
-    st.caption(
-        "**Full backup** exports all 145+ endpoints (audit logs, jobs, users, plugins). "
-        "**Custom backup** lets you choose endpoints (defaults to 64 essential: sites, devices, IPAM, VMs, config). "
-        "All scripts support `-PageSize 1000` and `-OutputDirectory .` options."
+    st.markdown("**📝 Usage Instructions:**")
+    st.code(
+        '.\\netbox-export-full.ps1 -NetBoxUrl "https://netbox.example.com" -ApiToken "<TOKEN>"',
+        language="powershell",
     )
+    st.caption("Replace the script name with the downloaded file. All scripts support `-PageSize 1000` and `-OutputDirectory .` options.")
+    
+    # Show custom backup generator
+    st.markdown("---")
+    from ui.custom_backup_generator import render_custom_backup_selector
+    render_custom_backup_selector(scope_key)
+    st.markdown("---")
 
     # JSON Upload Section
     st.file_uploader(

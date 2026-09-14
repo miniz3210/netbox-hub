@@ -178,41 +178,56 @@ def render_custom_backup_selector(scope_key: str = "naming") -> None:
     is_custom = st.session_state[STATE_IS_CUSTOM]
     
     counts = get_endpoint_count()
+    all_endpoints = get_all_endpoints()
     selected_count = len(selected_endpoints)
     
-    # Dynamic title based on whether it's custom or default minimal
-    if is_custom:
-        backup_type = "Custom Backup"
-        status_icon = "🎨"
-    else:
-        backup_type = "Minimal Backup (Essential Only)"
-        status_icon = "🟡"
+    # Preset selector row
+    col_preset, col_download, col_view = st.columns([2, 2, 2])
     
-    st.markdown(f"**{status_icon} {backup_type}** — {selected_count} of {counts['total']} endpoints selected")
-    st.caption("Customize which NetBox endpoints to include in your PowerShell export script. 🟡 = Essential endpoint (recommended minimal set)")
-    
-    # Action buttons row
-    col_reset, col_download, col_view = st.columns([2, 2, 2])
-    
-    with col_reset:
-        if st.button(
-            "🔄 Reset to Default Minimal",
-            key=f"btn_reset_backup_{scope_key}",
-            use_container_width=True,
-            help="Reset to the 64 essential endpoints",
-            type="secondary" if not is_custom else "primary"
-        ):
-            _reset_to_default_minimal(scope_key)
+    with col_preset:
+        # Determine current preset based on selection
+        if selected_count == counts['total']:
+            default_preset = "Full (112 endpoints)"
+        elif selected_count == counts['essential']:
+            default_preset = "Minimal (64 endpoints)"
+        else:
+            default_preset = "Custom"
+        
+        preset_choice = st.selectbox(
+            "Backup Preset",
+            ["Full (112 endpoints)", "Minimal (64 endpoints)", "Custom"],
+            index=["Full (112 endpoints)", "Minimal (64 endpoints)", "Custom"].index(default_preset),
+            key=f"backup_preset_{scope_key}",
+            help="Select a preset or choose Custom to manually select endpoints"
+        )
+        
+        # Apply preset when changed
+        if preset_choice == "Full (112 endpoints)" and selected_count != counts['total']:
+            st.session_state[STATE_SELECTED_ENDPOINTS] = set(all_endpoints)
+            st.session_state[STATE_IS_CUSTOM] = False
+            st.rerun()
+        elif preset_choice == "Minimal (64 endpoints)" and selected_count != counts['essential']:
+            st.session_state[STATE_SELECTED_ENDPOINTS] = set(get_essential_endpoints())
+            st.session_state[STATE_IS_CUSTOM] = False
             st.rerun()
     
     with col_download:
+        # Determine filename based on selection
+        if selected_count == counts['total']:
+            filename = "netbox-export-full.ps1"
+            button_label = "⬇️ Download PowerShell Script"
+        elif selected_count == counts['essential']:
+            filename = "netbox-export-min.ps1"
+            button_label = "⬇️ Download PowerShell Script"
+        else:
+            filename = "netbox-export-cus.ps1"
+            button_label = "⬇️ Download PowerShell Script"
+        
         # Generate custom script
         custom_script = _generate_custom_script(selected_endpoints)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"netbox-export-custom_{timestamp}.ps1"
         
         st.download_button(
-            "⬇️ Download Custom Script",
+            button_label,
             data=custom_script,
             file_name=filename,
             mime="text/plain",
@@ -235,6 +250,7 @@ def render_custom_backup_selector(scope_key: str = "naming") -> None:
             st.code(custom_script, language="powershell", line_numbers=False)
     
     st.markdown("---")
+    st.caption(f"**Selected:** {selected_count} of {counts['total']} endpoints | 🟡 = Essential endpoint (64 recommended for minimal backup)")
     
     # Endpoint selection interface - organized by category
     st.markdown("##### 📋 Select Endpoints by Category")
