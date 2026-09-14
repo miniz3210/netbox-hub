@@ -181,8 +181,8 @@ def render_custom_backup_selector(scope_key: str = "naming") -> None:
     all_endpoints = get_all_endpoints()
     selected_count = len(selected_endpoints)
     
-    # Preset selector row
-    col_preset, col_download, col_view = st.columns([2, 2, 2])
+    # Preset selector row - single row with proper alignment
+    col_preset, col_download = st.columns([1, 1])
     
     with col_preset:
         # Determine current preset based on selection
@@ -205,98 +205,107 @@ def render_custom_backup_selector(scope_key: str = "naming") -> None:
         if preset_choice == "Full (112 endpoints)" and selected_count != counts['total']:
             st.session_state[STATE_SELECTED_ENDPOINTS] = set(all_endpoints)
             st.session_state[STATE_IS_CUSTOM] = False
+            # Increment refresh counter to force checkbox re-render
+            counter_key = f"checkbox_refresh_{scope_key}"
+            st.session_state[counter_key] = st.session_state.get(counter_key, 0) + 1
             st.rerun()
         elif preset_choice == "Minimal (64 endpoints)" and selected_count != counts['essential']:
             st.session_state[STATE_SELECTED_ENDPOINTS] = set(get_essential_endpoints())
             st.session_state[STATE_IS_CUSTOM] = False
+            # Increment refresh counter to force checkbox re-render
+            counter_key = f"checkbox_refresh_{scope_key}"
+            st.session_state[counter_key] = st.session_state.get(counter_key, 0) + 1
             st.rerun()
     
     with col_download:
+        # Add spacing to align with selectbox
+        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+        
         # Determine filename based on selection
         if selected_count == counts['total']:
             filename = "netbox-export-full.ps1"
-            button_label = "⬇️ Download PowerShell Script"
         elif selected_count == counts['essential']:
             filename = "netbox-export-min.ps1"
-            button_label = "⬇️ Download PowerShell Script"
         else:
             filename = "netbox-export-cus.ps1"
-            button_label = "⬇️ Download PowerShell Script"
         
         # Generate custom script
         custom_script = _generate_custom_script(selected_endpoints)
         
         st.download_button(
-            button_label,
+            "⬇️ Download PowerShell Script",
             data=custom_script,
             file_name=filename,
             mime="text/plain",
             key=f"btn_download_custom_{scope_key}",
             use_container_width=True,
-            help=f"Download PowerShell script with {selected_count} selected endpoints"
+            help=f"Download {filename} with {selected_count} selected endpoints"
         )
     
-    with col_view:
+    # View script checkbox - only show in Custom mode
+    if preset_choice == "Custom":
         view_script = st.checkbox(
-            "👁️ View Script",
+            "👁️ View Generated Script",
             key=f"chk_view_script_{scope_key}",
             help="Show generated PowerShell script code"
         )
-    
-    # Show script preview if requested
-    if view_script:
-        with st.expander("📄 Generated PowerShell Script", expanded=True):
-            custom_script = _generate_custom_script(selected_endpoints)
-            st.code(custom_script, language="powershell", line_numbers=False)
+        
+        # Show script preview if requested
+        if view_script:
+            with st.expander("📄 Generated PowerShell Script", expanded=True):
+                custom_script = _generate_custom_script(selected_endpoints)
+                st.code(custom_script, language="powershell", line_numbers=False)
     
     st.markdown("---")
     st.caption(f"**Selected:** {selected_count} of {counts['total']} endpoints | 🟡 = Essential endpoint (64 recommended for minimal backup)")
     
-    # Endpoint selection interface - organized by category
-    st.markdown("##### 📋 Select Endpoints by Category")
-    
-    # Build tab labels WITHOUT counts to avoid confusion with delayed updates
-    tab_labels = list(NETBOX_ENDPOINTS.keys())
-    
-    # Create tabs for each category
-    category_tabs = st.tabs(tab_labels)
-    
-    for idx, (category, endpoints) in enumerate(NETBOX_ENDPOINTS.items()):
-        with category_tabs[idx]:
-            # Category header with select all/none buttons
-            col_header, col_sel_all, col_sel_none = st.columns([4, 1, 1])
-            
-            with col_header:
-                # Count selected in this category - shown in header inside tab
-                category_selected = sum(1 for ep in endpoints if ep["path"] in selected_endpoints)
-                category_essential = sum(1 for ep in endpoints if ep["essential"])
-                st.markdown(f"**{category}** — {category_selected}/{len(endpoints)} selected ({category_essential} essential)")
-            
-            with col_sel_all:
-                if st.button("✅ All", key=f"btn_select_all_{category}_{scope_key}", use_container_width=True):
-                    _select_all_in_category(category, scope_key)
-                    st.rerun()
-            
-            with col_sel_none:
-                if st.button("❌ None", key=f"btn_deselect_all_{category}_{scope_key}", use_container_width=True):
-                    _deselect_all_in_category(category, scope_key)
-                    st.rerun()
-            
-            st.markdown("")
-            
-            # Render endpoints in 2 columns for compact display
-            col1, col2 = st.columns(2)
-            
-            # Split endpoints into two columns
-            mid_point = (len(endpoints) + 1) // 2
-            
-            with col1:
-                for endpoint in endpoints[:mid_point]:
-                    _render_endpoint_checkbox(endpoint, selected_endpoints, scope_key)
-            
-            with col2:
-                for endpoint in endpoints[mid_point:]:
-                    _render_endpoint_checkbox(endpoint, selected_endpoints, scope_key)
+    # Only show endpoint selection interface in Custom mode
+    if preset_choice == "Custom":
+        # Endpoint selection interface - organized by category
+        st.markdown("##### 📋 Select Endpoints by Category")
+        
+        # Build tab labels WITHOUT counts to avoid confusion with delayed updates
+        tab_labels = list(NETBOX_ENDPOINTS.keys())
+        
+        # Create tabs for each category
+        category_tabs = st.tabs(tab_labels)
+        
+        for idx, (category, endpoints) in enumerate(NETBOX_ENDPOINTS.items()):
+            with category_tabs[idx]:
+                # Category header with select all/none buttons
+                col_header, col_sel_all, col_sel_none = st.columns([4, 1, 1])
+                
+                with col_header:
+                    # Count selected in this category - shown in header inside tab
+                    category_selected = sum(1 for ep in endpoints if ep["path"] in selected_endpoints)
+                    category_essential = sum(1 for ep in endpoints if ep["essential"])
+                    st.markdown(f"**{category}** — {category_selected}/{len(endpoints)} selected ({category_essential} essential)")
+                
+                with col_sel_all:
+                    if st.button("✅ All", key=f"btn_select_all_{category}_{scope_key}", use_container_width=True):
+                        _select_all_in_category(category, scope_key)
+                        st.rerun()
+                
+                with col_sel_none:
+                    if st.button("❌ None", key=f"btn_deselect_all_{category}_{scope_key}", use_container_width=True):
+                        _deselect_all_in_category(category, scope_key)
+                        st.rerun()
+                
+                st.markdown("")
+                
+                # Render endpoints in 2 columns for compact display
+                col1, col2 = st.columns(2)
+                
+                # Split endpoints into two columns
+                mid_point = (len(endpoints) + 1) // 2
+                
+                with col1:
+                    for endpoint in endpoints[:mid_point]:
+                        _render_endpoint_checkbox(endpoint, selected_endpoints, scope_key)
+                
+                with col2:
+                    for endpoint in endpoints[mid_point:]:
+                        _render_endpoint_checkbox(endpoint, selected_endpoints, scope_key)
     
     # Summary footer
     st.markdown("---")
