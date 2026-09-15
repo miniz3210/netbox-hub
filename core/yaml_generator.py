@@ -58,25 +58,44 @@ STRICT SPECIFICATION RULES:
    model: <exact model name>
    slug: <mandatory lowercase slug with manufacturer prefix, e.g. {mfg.lower()}-<model-slug>>
    part_number: <hardware part number or clean model SKU>
-   u_height: <rack units: 0 for MicroServer/tower/desktop; 1, 2, 4 for standard rack servers>
-   is_full_depth: <false for MicroServer/tower/desktop/compact; true only for deep 19" rack chassis>
-   airflow: <front-to-rear / passive / rear-to-front>
+   u_height: <rack units: 0 for desktop/compact; 1 for standard 1U switch/server>
+   is_full_depth: <false for compact devices; true only for deep 19" rack chassis>
+   airflow: <front-to-rear / passive / rear-to-front / left-to-right>
    weight: <accurate numeric weight in kg>
    weight_unit: kg
 
-3. Hardware Component Accuracy:
-   - power-ports:
-     * Compact/MicroServer/Tower: Single PSU (e.g. 150W or 200W). Name: 'PSU1' or 'Power Port 1', type: 'iec-60320-c14'.
-     * Enterprise Rack Servers (1U/2U): Dual redundant PSUs (e.g. PSU1, PSU2).
-   - console-ports:
-     * Include ONLY if the physical chassis has a dedicated external Serial/RS-232 (de-9 or RJ-45) management port. Do NOT include for towers/microservers that only have VGA/USB/iLO.
-   - interfaces:
-     * Count onboard physical NICs accurately from datasheet (e.g. MicroServer Gen8 has EXACTLY 2 physical NICs: GigabitEthernet1, GigabitEthernet2 or NIC1, NIC2 — DO NOT add 4 NICs).
-     * Include dedicated Out-Of-Band Management (e.g. name: 'iLO' / 'iDRAC', type: 1000base-t, mgmt_only: true).
-   - module-bays:
-     * Include only real expansion slots present (e.g. PCIe1 for low-profile slots).
+3. DEVICE TYPE DETECTION - Identify the device category first:
 
-4. Output Restrictions:
+   A. NETWORK SWITCHES (e.g., Cisco Catalyst, Huawei S-series, Arista, Juniper EX):
+      - Decode model number for port configuration (e.g., "S1720X-32XWR" = 32 ports, X=10G):
+        * Look for port count in model name (24, 48, 32, 16, 8)
+        * "X" or "XG" prefix typically means 10GbE
+        * "G" prefix typically means 1GbE
+        * Check for SFP/SFP+/QSFP indicators in model name
+      - console-ports: Typically one RJ-45 console port (name: 'console', type: rj-45)
+      - power-ports: Based on form factor (desktop switches: 1 PSU; enterprise: 1-2 PSUs)
+      - interfaces: 
+        * Use exact port count from datasheet
+        * Naming convention: GigabitEthernet0/0/N for 1G, XGigabitEthernet0/0/N for 10G (Huawei)
+        * Naming convention: GigabitEthernetN for 1G, TenGigabitEthernetN for 10G (Cisco)
+        * Port types: 1000base-t (copper 1G), 1000base-x-sfp (SFP 1G), 10gbase-t (copper 10G), 10gbase-x-sfpp (SFP+ 10G), 25gbase-x-sfp28 (SFP28 25G)
+        * Include management interface if separate (name: 'MGMT' or 'Management1', type: 1000base-t, mgmt_only: true)
+
+   B. SERVERS (e.g., HP DL360, Dell PowerEdge, Supermicro):
+      - power-ports:
+        * Compact/MicroServer/Tower: Single PSU (e.g. 150W or 200W). Name: 'PSU1', type: 'iec-60320-c14'.
+        * Enterprise Rack Servers (1U/2U): Dual redundant PSUs (e.g. PSU1, PSU2).
+      - console-ports:
+        * Include ONLY if the physical chassis has a dedicated external Serial/RS-232 (de-9 or RJ-45) management port.
+      - interfaces:
+        * Count onboard physical NICs accurately from datasheet (e.g. MicroServer Gen8 has EXACTLY 2 NICs).
+        * Include dedicated Out-Of-Band Management (e.g. name: 'iLO' / 'iDRAC', type: 1000base-t, mgmt_only: true).
+      - module-bays:
+        * Include only real expansion slots present (e.g. PCIe1 for low-profile slots).
+
+4. CRITICAL: Research the EXACT specifications from official datasheets. Do NOT guess port counts or types.
+
+5. Output Restrictions:
    - DO NOT invent URLs or include a 'comments' block.
    - Output ONLY raw valid YAML starting with '---'.
 """
