@@ -60,7 +60,12 @@ def clean_ai_yaml(text: str) -> str:
     # Ensure u_height is float format
     text = re.sub(r"^u_height:\s*(\d+)$", r"u_height: \1.0", text, flags=re.MULTILINE)
     
-    return text.strip()
+    # Ensure YAML starts with --- (NetBox requirement)
+    text = text.strip()
+    if not text.startswith("---"):
+        text = "---\n" + text
+    
+    return text
 
 def generate_device_yaml(mfg: str, model: str, model_name: str) -> str:
     prompt = f"""
