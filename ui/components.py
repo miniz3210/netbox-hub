@@ -550,9 +550,9 @@ def _render_backup_contents_section(scope_key: str, meta: dict) -> None:
                 
                 # CSV entries in orange color, JSON in default color
                 if is_csv:
-                    # Use HTML for orange color
+                    # Use HTML for orange color with proper vertical alignment
                     st.markdown(
-                        f'<p style="color: #fb923c; font-size: 0.875rem; line-height: 1.25rem; margin: 0;">'
+                        f'<p style="color: #fb923c; font-size: 0.875rem; line-height: 1.25rem; margin: 0; margin-bottom: 0.5rem;">'
                         f'<strong>{label}</strong>: {count} {icon}{essential_marker}{example} <code style="background: rgba(251, 146, 60, 0.1); padding: 2px 4px; border-radius: 3px;">{compact_time}</code>'
                         f'</p>',
                         unsafe_allow_html=True
@@ -638,7 +638,9 @@ def _render_backup_contents_section(scope_key: str, meta: dict) -> None:
                     col_clear, col_done = st.columns([1, 1])
                     
                     with col_clear:
-                        if st.button("🗑️ Clear All CSV", key=f"btn_clear_all_csv_{scope_key}", use_container_width=True, help="Remove all CSV endpoints at once"):
+                        # Show count in the Clear All CSV button
+                        csv_count = len(csv_endpoints)
+                        if st.button(f"🗑️ Clear All CSV ({csv_count})", key=f"btn_clear_all_csv_{scope_key}", use_container_width=True, help=f"Remove all {csv_count} CSV endpoints at once"):
                             # Clear all CSV entries
                             count = SharedBackupState.clear_csv_only()
                             if count > 0:
@@ -773,31 +775,12 @@ def _render_choice_sets_section() -> None:
 
 
 def _render_csv_upload_section(scope_key: str, csv_uploader_key: str) -> None:
-    """Render Step 2: CSV/Excel upload with confirmation UI and Clear button in header."""
+    """Render Step 2: CSV/Excel upload with confirmation UI."""
     st.markdown("---")
     
-    # Header with Clear All CSV button on same row
-    # Check if there are any CSV entries
-    registry = SharedBackupState.get_object_registry()
-    csv_count = sum(1 for metadata in registry.values() 
-                   if metadata.get("source_type") == "csv" or 
-                      metadata.get("source", "").lower().endswith((".csv", ".xlsx")))
-    
-    col_header, col_clear = st.columns([4, 1])
-    with col_header:
-        st.markdown("**Step 2 — Upload CSV/Excel Files (Auto-Classified)**")
-        st.caption("Upload individual CSV/Excel exports. Files are automatically classified and routed based on their columns.")
-    with col_clear:
-        if csv_count > 0:
-            if st.button(
-                f"🗑️ Clear All CSV ({csv_count})",
-                key=f"btn_clear_csv_{scope_key}",
-                on_click=_handle_csv_clear,
-                args=(scope_key,),
-                help="Clear all CSV data (preserves JSON backup)",
-                use_container_width=True
-            ):
-                st.rerun()
+    # Header without Clear All CSV button
+    st.markdown("**Step 2 — Upload CSV/Excel Files (Auto-Classified)**")
+    st.caption("Upload individual CSV/Excel exports. Files are automatically classified and routed based on their columns.")
     
     # Check if there are pending files awaiting confirmation
     pending_key = f"csv_pending_confirmation_{scope_key}"
