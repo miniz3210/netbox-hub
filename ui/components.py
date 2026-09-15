@@ -443,15 +443,27 @@ def _render_backup_contents_section(scope_key: str, meta: dict) -> None:
         object_registry = SharedBackupState.get_object_registry()
         object_count = len(object_registry)
         
+        # Initialize CSV selection state
+        csv_selection_key = f"csv_selection_{scope_key}"
+        if csv_selection_key not in st.session_state:
+            st.session_state[csv_selection_key] = set()
+        
         with st.expander(f"📋 Backup contents ({object_count} object types - dynamic)", expanded=False):
             st.caption("🟡 = Essential endpoint (minimal backup) | 📦 = JSON backup | 📊 = CSV upload")
             
             # Group endpoints by prefix (dcim/, ipam/, extras/, etc.)
             grouped_objects = {}
             ungrouped_objects = []
+            csv_endpoints = []  # Track CSV endpoints for selection
             
             for endpoint, metadata in object_registry.items():
                 ep = str(endpoint)
+                source_type = metadata.get("source_type", "json")
+                is_csv = source_type == "csv" or metadata.get("source", "").lower().endswith((".csv", ".xlsx"))
+                
+                if is_csv:
+                    csv_endpoints.append(endpoint)
+                
                 if "/" in ep:
                     prefix = ep.split("/")[0]
                     if prefix not in grouped_objects:
@@ -541,16 +553,17 @@ def _render_backup_contents_section(scope_key: str, meta: dict) -> None:
                 # Show endpoint path in parentheses
                 example = f" ({ep})" if ep else ""
                 
-                # Create a row with remove button if CSV
+                # Create a row with checkbox if CSV
                 if is_csv:
-                    col_text, col_btn = st.columns([19, 1])
+                    col_chk, col_text = st.columns([0.5, 19.5])
+                    with col_chk:
+                        is_selected = endpoint in st.session_state[csv_selection_key]
+                        if st.checkbox("", value=is_selected, key=f"chk_{endpoint}_{scope_key}", label_visibility="collapsed"):
+                            st.session_state[csv_selection_key].add(endpoint)
+                        else:
+                            st.session_state[csv_selection_key].discard(endpoint)
                     with col_text:
                         st.caption(f"**{label}**: {count} {icon}{essential_marker}{example} `{compact_time}`")
-                    with col_btn:
-                        st.markdown("<div style='margin-top:-8px'></div>", unsafe_allow_html=True)
-                        if st.button("×", key=f"remove_{endpoint}_{scope_key}", help=f"Remove {label}"):
-                            _handle_remove_csv_entry(endpoint, scope_key)
-                            st.rerun()
                 else:
                     st.caption(f"**{label}**: {count} {icon}{essential_marker}{example} `{compact_time}`")
             
@@ -575,6 +588,37 @@ def _render_backup_contents_section(scope_key: str, meta: dict) -> None:
                             st.markdown(f"**{prefix.upper()}/**")
                             current_prefix = prefix
                     render_item(endpoint, metadata)
+            
+            # Add "Clear Selected CSV" button at the bottom if there are CSV entries
+            if csv_endpoints:
+                st.markdown("---")
+                col_info, col_btn = st.columns([3, 1])
+                with col_info:
+                    selected_count = len(st.session_state[csv_selection_key])
+                    if selected_count > 0:
+                        st.caption(f"✅ {selected_count} CSV endpoint(s) selected")
+                    else:
+                        st.caption(f"📊 {len(csv_endpoints)} CSV endpoint(s) available")
+                with col_btn:
+                    if st.button(
+                        f"🗑️ Clear Selected ({selected_count})" if selected_count > 0 else "🗑️ Clear Selected",
+                        key=f"btn_clear_selected_csv_{scope_key}",
+                        disabled=selected_count == 0,
+                        use_container_width=True,
+                        help="Remove selected CSV endpoints"
+                    ):
+                        # Remove all selected CSV entries
+                        removed_count = 0
+                        for endpoint in list(st.session_state[csv_selection_key]):
+                            if SharedBackupState.remove_csv_entry(endpoint):
+                                removed_count += 1
+                        
+                        # Clear selection
+                        st.session_state[csv_selection_key] = set()
+                        
+                        if removed_count > 0:
+                            st.toast(f"🗑️ Removed {removed_count} CSV endpoint(s)", icon="✅")
+                        st.rerun()
     else:
         # Fall back to legacy static counts
         counts = get_backup_object_counts()
