@@ -43,6 +43,19 @@ def clean_ai_yaml(text: str) -> str:
     text = re.sub(r"type:\s*10gbase-x-sfp\b", "type: 10gbase-x-sfpp", text)
     text = re.sub(r"type:\s*1gbase-t\b", "type: 1000base-t", text)
     text = re.sub(r"type:\s*1gbase-x-sfp\b", "type: 1000base-x-sfp", text)
+    
+    # Fix hyphenated field names to use underscores (NetBox standard)
+    text = re.sub(r"^console-ports:", "console_ports:", text, flags=re.MULTILINE)
+    text = re.sub(r"^power-ports:", "power_ports:", text, flags=re.MULTILINE)
+    text = re.sub(r"^module-bays:", "module_bays:", text, flags=re.MULTILINE)
+    text = re.sub(r"^device-bays:", "device_bays:", text, flags=re.MULTILINE)
+    text = re.sub(r"^inventory-items:", "inventory_items:", text, flags=re.MULTILINE)
+    text = re.sub(r"^front-ports:", "front_ports:", text, flags=re.MULTILINE)
+    text = re.sub(r"^rear-ports:", "rear_ports:", text, flags=re.MULTILINE)
+    
+    # Ensure u_height is float format
+    text = re.sub(r"^u_height:\s*(\d+)$", r"u_height: \1.0", text, flags=re.MULTILINE)
+    
     return text.strip()
 
 def generate_device_yaml(mfg: str, model: str, model_name: str) -> str:
