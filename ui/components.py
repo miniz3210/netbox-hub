@@ -564,6 +564,8 @@ def _render_backup_contents_section(scope_key: str, meta: dict) -> None:
                     col_chk, col_text = st.columns([0.3, 19.7])
                     
                     with col_chk:
+                        # Add negative margin to move checkbox up and align with text
+                        st.markdown('<div style="margin-top: -0.5rem;"></div>', unsafe_allow_html=True)
                         if st.checkbox("", value=is_selected, key=f"chk_{endpoint}_{scope_key}", label_visibility="collapsed"):
                             st.session_state[csv_selection_key].add(endpoint)
                         else:
@@ -572,7 +574,7 @@ def _render_backup_contents_section(scope_key: str, meta: dict) -> None:
                     with col_text:
                         # CSV entries in orange/amber color using HTML
                         st.markdown(
-                            f'<p style="color: #fb923c; font-size: 0.875rem; line-height: 1.25rem; margin: 0;">'
+                            f'<p style="color: #fb923c; font-size: 0.875rem; line-height: 1.25rem; margin: 0; padding-top: 0.1rem;">'
                             f'{text_content.replace("**", "<strong>").replace("**", "</strong>")}'
                             f'</p>',
                             unsafe_allow_html=True
