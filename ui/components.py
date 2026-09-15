@@ -582,7 +582,7 @@ def _render_backup_contents_section(scope_key: str, meta: dict) -> None:
                             current_prefix = prefix
                     render_item(endpoint, metadata)
             
-            # Add "Edit CSV" button at the bottom if there are CSV entries
+            # Add "Manage CSV" button at the bottom if there are CSV entries
             if csv_endpoints:
                 st.markdown("---")
                 col_info, col_btn = st.columns([3, 1])
@@ -590,14 +590,14 @@ def _render_backup_contents_section(scope_key: str, meta: dict) -> None:
                     st.caption(f"📊 {len(csv_endpoints)} CSV endpoint(s)")
                 with col_btn:
                     edit_mode_key = f"csv_edit_mode_{scope_key}"
-                    if st.button("✏️ Edit CSV", key=f"btn_edit_csv_{scope_key}", use_container_width=True):
+                    if st.button("📊 Manage CSV", key=f"btn_manage_csv_{scope_key}", use_container_width=True):
                         st.session_state[edit_mode_key] = True
                         st.rerun()
                 
-                # Show CSV editing interface if in edit mode
+                # Show CSV management interface if in edit mode
                 if st.session_state.get(edit_mode_key, False):
                     st.markdown("---")
-                    st.markdown("**📊 Edit CSV Endpoints** — Select entries to remove:")
+                    st.markdown("**📊 Manage CSV Endpoints** — Remove individual entries or clear all:")
                     
                     # Sort CSV endpoints by label for easy browsing
                     csv_endpoints.sort(key=lambda x: x[1]["label"])
@@ -633,11 +633,23 @@ def _render_backup_contents_section(scope_key: str, meta: dict) -> None:
                                     st.toast(f"🗑️ Removed {label}", icon="✅")
                                 st.rerun()
                     
-                    # Done button to exit edit mode
+                    # Action buttons at the bottom
                     st.markdown("---")
-                    if st.button("✅ Done", key=f"btn_done_edit_{scope_key}", type="primary", use_container_width=True):
-                        st.session_state[edit_mode_key] = False
-                        st.rerun()
+                    col_clear, col_done = st.columns([1, 1])
+                    
+                    with col_clear:
+                        if st.button("🗑️ Clear All CSV", key=f"btn_clear_all_csv_{scope_key}", use_container_width=True, help="Remove all CSV endpoints at once"):
+                            # Clear all CSV entries
+                            count = SharedBackupState.clear_csv_only()
+                            if count > 0:
+                                st.toast(f"🗑️ Cleared {count} CSV endpoint(s)", icon="✅")
+                            st.session_state[edit_mode_key] = False
+                            st.rerun()
+                    
+                    with col_done:
+                        if st.button("✅ Done", key=f"btn_done_manage_{scope_key}", type="primary", use_container_width=True):
+                            st.session_state[edit_mode_key] = False
+                            st.rerun()
     else:
         # Fall back to legacy static counts
         counts = get_backup_object_counts()
