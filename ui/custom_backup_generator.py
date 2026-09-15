@@ -284,20 +284,6 @@ def render_custom_backup_selector(scope_key: str = "naming") -> None:
     st.code(usage_script, language="powershell")
     st.caption("All scripts support `-PageSize 1000` and `-OutputDirectory .` options.")
     
-    # View script checkbox - only show in Custom mode
-    if preset_choice == "Custom":
-        view_script = st.checkbox(
-            "👁️ View Generated Script",
-            key=f"chk_view_script_{scope_key}",
-            help="Show generated PowerShell script code"
-        )
-        
-        # Show script preview if requested
-        if view_script:
-            with st.expander("📄 Generated PowerShell Script", expanded=True):
-                custom_script = _generate_custom_script(selected_endpoints)
-                st.code(custom_script, language="powershell", line_numbers=False)
-    
     st.markdown("---")
     st.caption(f"**Selected:** {selected_count} of {counts['total']} endpoints | 🟡 = Essential endpoint (64 recommended for minimal backup)")
     
