@@ -223,7 +223,7 @@ class SharedBackupState:
     @classmethod
     def remove_csv_entry(cls, endpoint: str):
         """
-        Remove a specific CSV entry from the object registry.
+        Remove a specific CSV entry from the object registry and database.
         
         Args:
             endpoint: Object endpoint to remove (e.g., "users/owner-groups")
@@ -239,8 +239,31 @@ class SharedBackupState:
             
             # Only allow removing CSV entries, not JSON backup entries
             if source_type == "csv" or metadata.get("source", "").lower().endswith((".csv", ".xlsx")):
+                # Remove from session state
                 del registry[endpoint]
                 st.session_state[cls.OBJECT_REGISTRY_KEY] = registry
+                
+                # Also remove from CSV overrides tracking
+                overrides = st.session_state.get(cls.CSV_OVERRIDES_KEY, {})
+                if endpoint in overrides:
+                    del overrides[endpoint]
+                    st.session_state[cls.CSV_OVERRIDES_KEY] = overrides
+                
+                # Remove from database - drop the dynamic table
+                from core.db_manager import DB_PATH
+                import sqlite3
+                try:
+                    # Convert endpoint to table name: "users/owner-groups" -> "dynamic_users_owner_groups"
+                    table_name = "dynamic_" + endpoint.replace("/", "_").replace("-", "_")
+                    
+                    conn = sqlite3.connect(DB_PATH)
+                    cursor = conn.cursor()
+                    cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
+                    conn.commit()
+                    conn.close()
+                except Exception:
+                    pass  # Ignore errors if table doesn't exist
+                
                 return True
         
         return False
@@ -377,7 +400,7 @@ class SharedBackupState:
     
     @classmethod
     def clear_csv_only(cls):
-        """Clear only CSV entries, preserving JSON backup data."""
+        """Clear only CSV entries, preserving JSON backup data. Also removes from database."""
         cls.initialize()
         
         registry = st.session_state.get(cls.OBJECT_REGISTRY_KEY, {})
@@ -389,11 +412,35 @@ class SharedBackupState:
                metadata.get("source", "").lower().endswith((".csv", ".xlsx"))
         ]
         
+        # Remove from session state
         for endpoint in csv_endpoints:
             del registry[endpoint]
         
         st.session_state[cls.OBJECT_REGISTRY_KEY] = registry
         st.session_state[cls.CSV_OVERRIDES_KEY] = {}
+        
+        # Remove from database - drop all dynamic_* tables
+        from core.db_manager import DB_PATH
+        import sqlite3
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            
+            # Get all dynamic_* tables
+            cursor.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name LIKE 'dynamic_%'
+            """)
+            dynamic_tables = cursor.fetchall()
+            
+            # Drop each dynamic table
+            for (table_name,) in dynamic_tables:
+                cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
+            
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass  # Ignore errors
         
         return len(csv_endpoints)
     
