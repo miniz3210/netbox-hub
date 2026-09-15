@@ -26,8 +26,20 @@ def _initialize_session_state():
         st.session_state[STATE_IS_CUSTOM] = False
 
 
-def _reset_to_default_minimal(scope_key: str):
-    """Reset selection to the 64 essential endpoints."""
+def _reset_to_full(scope_key: str):
+    """Reset selection to all 112 endpoints (Full backup)."""
+    st.session_state[STATE_SELECTED_ENDPOINTS] = set(get_all_endpoints())
+    st.session_state[STATE_IS_CUSTOM] = False
+    
+    # Increment refresh counter to force checkbox re-render
+    counter_key = f"checkbox_refresh_{scope_key}"
+    st.session_state[counter_key] = st.session_state.get(counter_key, 0) + 1
+    
+    st.toast("✅ Reset to Full backup (dynamic discovery - all endpoints)", icon="🔄")
+
+
+def _reset_to_minimal(scope_key: str):
+    """Reset selection to the 64 essential endpoints (Minimal backup)."""
     st.session_state[STATE_SELECTED_ENDPOINTS] = set(get_essential_endpoints())
     st.session_state[STATE_IS_CUSTOM] = False
     
@@ -35,7 +47,7 @@ def _reset_to_default_minimal(scope_key: str):
     counter_key = f"checkbox_refresh_{scope_key}"
     st.session_state[counter_key] = st.session_state.get(counter_key, 0) + 1
     
-    st.toast("✅ Reset to default minimal backup (64 endpoints)", icon="🔄")
+    st.toast("✅ Reset to Minimal backup (64 essential endpoints)", icon="🔄")
 
 
 def _toggle_endpoint(endpoint_path: str):
@@ -81,9 +93,36 @@ def _deselect_all_in_category(category: str, scope_key: str):
     st.session_state[counter_key] = st.session_state.get(counter_key, 0) + 1
 
 
-def _generate_custom_script(selected_endpoints: Set[str]) -> str:
-    """Generate a custom PowerShell export script based on selected endpoints."""
+def _generate_custom_script(selected_endpoints: Set[str], counts: dict) -> str:
+    """Generate a custom PowerShell export script based on selected endpoints.
     
+    Args:
+        selected_endpoints: Set of endpoint paths to include
+        counts: Dict with 'total' and 'essential' endpoint counts
+        
+    Returns:
+        PowerShell script content
+    """
+    
+    # FULL PRESET: Return the original dynamic discovery script
+    if len(selected_endpoints) == counts['total']:
+        full_script_path = Path(__file__).resolve().parent.parent / "data" / "netbox-export-full.ps1"
+        try:
+            with open(full_script_path, 'r', encoding='utf-8-sig') as f:
+                return f.read()
+        except Exception as e:
+            return f"# Error reading full backup script: {e}\n"
+    
+    # MINIMAL PRESET: Return the original minimal script
+    if len(selected_endpoints) == counts['essential']:
+        minimal_script_path = Path(__file__).resolve().parent.parent / "data" / "netbox-export-min.ps1"
+        try:
+            with open(minimal_script_path, 'r', encoding='utf-8-sig') as f:
+                return f.read()
+        except Exception as e:
+            return f"# Error reading minimal backup script: {e}\n"
+    
+    # CUSTOM PRESET: Generate modified script with user's selection
     # Read the base minimal script as a template
     base_script_path = Path(__file__).resolve().parent.parent / "data" / "netbox-export-min.ps1"
     
@@ -117,9 +156,6 @@ def _generate_custom_script(selected_endpoints: Set[str]) -> str:
     # Replace the $MinimalEndpoints array in the base script
     # Find the start and end of the original array definition
     import re
-    pattern = r'\$MinimalEndpoints = @\([^)]*\)'
-    
-    # Use a more robust pattern that handles multi-line arrays
     pattern = r'\$MinimalEndpoints\s*=\s*@\([^)]+\)'
     
     custom_script = re.sub(
@@ -229,8 +265,8 @@ def render_custom_backup_selector(scope_key: str = "naming") -> None:
         else:
             filename = "netbox-export-cus.ps1"
         
-        # Generate custom script
-        custom_script = _generate_custom_script(selected_endpoints)
+        # Generate custom script (pass counts for preset detection)
+        custom_script = _generate_custom_script(selected_endpoints, counts)
         
         st.download_button(
             "⬇️ Download PowerShell Script",
@@ -278,8 +314,8 @@ def render_custom_backup_selector(scope_key: str = "naming") -> None:
         
         for idx, (category, endpoints) in enumerate(NETBOX_ENDPOINTS.items()):
             with category_tabs[idx]:
-                # Category header with select all/none buttons
-                col_header, col_sel_all, col_sel_none = st.columns([4, 1, 1])
+                # Category header with select all/none/reset buttons
+                col_header, col_sel_all, col_sel_none, col_reset_full, col_reset_min = st.columns([4, 1, 1, 1.2, 1.2])
                 
                 with col_header:
                     # Count selected in this category - shown in header inside tab
@@ -288,13 +324,23 @@ def render_custom_backup_selector(scope_key: str = "naming") -> None:
                     st.markdown(f"**{category}** — {category_selected}/{len(endpoints)} selected ({category_essential} essential)")
                 
                 with col_sel_all:
-                    if st.button("✅ All", key=f"btn_select_all_{category}_{scope_key}", use_container_width=True):
+                    if st.button("✅ All", key=f"btn_select_all_{category}_{scope_key}", use_container_width=True, help="Select all endpoints in this category"):
                         _select_all_in_category(category, scope_key)
                         st.rerun()
                 
                 with col_sel_none:
-                    if st.button("❌ None", key=f"btn_deselect_all_{category}_{scope_key}", use_container_width=True):
+                    if st.button("❌ None", key=f"btn_deselect_all_{category}_{scope_key}", use_container_width=True, help="Deselect all endpoints in this category"):
                         _deselect_all_in_category(category, scope_key)
+                        st.rerun()
+                
+                with col_reset_full:
+                    if st.button("🔄 Full", key=f"btn_reset_full_{category}_{scope_key}", use_container_width=True, help="Reset to Full backup (all 112 endpoints)"):
+                        _reset_to_full(scope_key)
+                        st.rerun()
+                
+                with col_reset_min:
+                    if st.button("🔄 Minimal", key=f"btn_reset_min_{category}_{scope_key}", use_container_width=True, help="Reset to Minimal backup (64 essential endpoints)"):
+                        _reset_to_minimal(scope_key)
                         st.rerun()
                 
                 st.markdown("")
