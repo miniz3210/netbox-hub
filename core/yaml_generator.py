@@ -17,7 +17,7 @@ def clean_ai_yaml(text: str) -> str:
     lines = text.strip().splitlines()
     mfg_idx = next((i for i, l in enumerate(lines) if re.match(r"^\s*manufacturer\s*:", l, re.I)), -1)
     if mfg_idx != -1:
-        lines = lines[mfg_idx:] if lines[mfg_idx - 1].strip() == "---" else ["---"] + lines[mfg_idx:]
+        lines = lines[mfg_idx:] if mfg_idx > 0 and lines[mfg_idx - 1].strip() == "---" else ["---"] + lines[mfg_idx:]
         text = "\n".join(lines)
     elif "---" in text:
         parts = text.split("---")
@@ -29,6 +29,10 @@ def clean_ai_yaml(text: str) -> str:
     # Strip hallucinated comment URLs, reasoning artifacts, and non-YAML lines
     cleaned_lines = []
     for line in text.splitlines():
+        # Preserve the --- header
+        if line.strip() == "---":
+            cleaned_lines.append(line)
+            continue
         if re.match(r"^\s*comments\s*:", line, re.I) or "http://" in line or "https://" in line:
             continue
         if re.match(r"^(Note:|Explanation:|Here is|\*\*Note)", line.strip(), re.I):
