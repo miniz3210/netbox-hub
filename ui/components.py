@@ -443,18 +443,13 @@ def _render_backup_contents_section(scope_key: str, meta: dict) -> None:
         object_registry = SharedBackupState.get_object_registry()
         object_count = len(object_registry)
         
-        # Initialize CSV selection state
-        csv_selection_key = f"csv_selection_{scope_key}"
-        if csv_selection_key not in st.session_state:
-            st.session_state[csv_selection_key] = set()
-        
         with st.expander(f"📋 Backup contents ({object_count} object types - dynamic)", expanded=False):
             st.caption("🟡 = Essential endpoint (minimal backup) | 📦 = JSON backup | 📊 = CSV upload")
             
             # Group endpoints by prefix (dcim/, ipam/, extras/, etc.)
             grouped_objects = {}
             ungrouped_objects = []
-            csv_endpoints = []  # Track CSV endpoints for selection
+            csv_endpoints = []  # Track CSV endpoints
             
             for endpoint, metadata in object_registry.items():
                 ep = str(endpoint)
@@ -462,7 +457,7 @@ def _render_backup_contents_section(scope_key: str, meta: dict) -> None:
                 is_csv = source_type == "csv" or metadata.get("source", "").lower().endswith((".csv", ".xlsx"))
                 
                 if is_csv:
-                    csv_endpoints.append(endpoint)
+                    csv_endpoints.append((endpoint, metadata))
                 
                 if "/" in ep:
                     prefix = ep.split("/")[0]
@@ -553,38 +548,17 @@ def _render_backup_contents_section(scope_key: str, meta: dict) -> None:
                 # Show endpoint path in parentheses
                 example = f" ({ep})" if ep else ""
                 
-                # Format the text
-                text_content = f"**{label}**: {count} {icon}{essential_marker}{example} `{compact_time}`"
-                
-                # Create a row with checkbox if CSV (using minimal column width for checkbox)
+                # CSV entries in orange color, JSON in default color
                 if is_csv:
-                    is_selected = endpoint in st.session_state[csv_selection_key]
-                    
-                    # Use a container with flexbox CSS for perfect alignment
-                    container_html = f"""
-                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 0.5rem;">
-                        <div style="flex-shrink: 0;">
-                    """
-                    st.markdown(container_html, unsafe_allow_html=True)
-                    
-                    # Render checkbox inline
-                    if st.checkbox("", value=is_selected, key=f"chk_{endpoint}_{scope_key}", label_visibility="collapsed"):
-                        st.session_state[csv_selection_key].add(endpoint)
-                    else:
-                        st.session_state[csv_selection_key].discard(endpoint)
-                    
-                    # Close checkbox div and add text
-                    text_html = f"""
-                        </div>
-                        <div style="flex: 1; color: #fb923c; font-size: 0.875rem; line-height: 1.25rem;">
-                            {text_content.replace("**", "<strong>").replace("**", "</strong>")}
-                        </div>
-                    </div>
-                    """
-                    st.markdown(text_html, unsafe_allow_html=True)
+                    # Use HTML for orange color
+                    st.markdown(
+                        f'<p style="color: #fb923c; font-size: 0.875rem; line-height: 1.25rem; margin: 0;">'
+                        f'<strong>{label}</strong>: {count} {icon}{essential_marker}{example} <code style="background: rgba(251, 146, 60, 0.1); padding: 2px 4px; border-radius: 3px;">{compact_time}</code>'
+                        f'</p>',
+                        unsafe_allow_html=True
+                    )
                 else:
-                    # JSON backup entries in default color (white/gray)
-                    st.caption(text_content)
+                    st.caption(f"**{label}**: {count} {icon}{essential_marker}{example} `{compact_time}`")
             
             with col1:
                 current_prefix = None
@@ -608,35 +582,61 @@ def _render_backup_contents_section(scope_key: str, meta: dict) -> None:
                             current_prefix = prefix
                     render_item(endpoint, metadata)
             
-            # Add "Clear Selected CSV" button at the bottom if there are CSV entries
+            # Add "Edit CSV" button at the bottom if there are CSV entries
             if csv_endpoints:
                 st.markdown("---")
                 col_info, col_btn = st.columns([3, 1])
                 with col_info:
-                    selected_count = len(st.session_state[csv_selection_key])
-                    if selected_count > 0:
-                        st.caption(f"✅ {selected_count} CSV endpoint(s) selected")
-                    else:
-                        st.caption(f"📊 {len(csv_endpoints)} CSV endpoint(s) available")
+                    st.caption(f"📊 {len(csv_endpoints)} CSV endpoint(s)")
                 with col_btn:
-                    if st.button(
-                        f"🗑️ Clear Selected ({selected_count})" if selected_count > 0 else "🗑️ Clear Selected",
-                        key=f"btn_clear_selected_csv_{scope_key}",
-                        disabled=selected_count == 0,
-                        use_container_width=True,
-                        help="Remove selected CSV endpoints"
-                    ):
-                        # Remove all selected CSV entries
-                        removed_count = 0
-                        for endpoint in list(st.session_state[csv_selection_key]):
-                            if SharedBackupState.remove_csv_entry(endpoint):
-                                removed_count += 1
+                    edit_mode_key = f"csv_edit_mode_{scope_key}"
+                    if st.button("✏️ Edit CSV", key=f"btn_edit_csv_{scope_key}", use_container_width=True):
+                        st.session_state[edit_mode_key] = True
+                        st.rerun()
+                
+                # Show CSV editing interface if in edit mode
+                if st.session_state.get(edit_mode_key, False):
+                    st.markdown("---")
+                    st.markdown("**📊 Edit CSV Endpoints** — Select entries to remove:")
+                    
+                    # Sort CSV endpoints by label for easy browsing
+                    csv_endpoints.sort(key=lambda x: x[1]["label"])
+                    
+                    # Display CSV endpoints with remove buttons
+                    for endpoint, metadata in csv_endpoints:
+                        label = metadata["label"]
+                        count = metadata["count"]
+                        ep = metadata.get("endpoint", "")
+                        timestamp = metadata["timestamp"]
                         
-                        # Clear selection
-                        st.session_state[csv_selection_key] = set()
+                        # Format timestamp
+                        try:
+                            if isinstance(timestamp, str):
+                                dt = datetime.fromisoformat(timestamp.replace("UTC", "").strip())
+                                compact_time = dt.strftime("%d-%m-%y %H:%M")
+                            else:
+                                compact_time = str(timestamp)
+                        except:
+                            compact_time = str(timestamp)[:16] if timestamp else "N/A"
                         
-                        if removed_count > 0:
-                            st.toast(f"🗑️ Removed {removed_count} CSV endpoint(s)", icon="✅")
+                        col_text, col_btn = st.columns([9, 1])
+                        with col_text:
+                            st.markdown(
+                                f'<p style="color: #fb923c; font-size: 0.875rem; margin: 0.25rem 0;">'
+                                f'<strong>{label}</strong>: {count} 📊 ({ep}) <code style="background: rgba(251, 146, 60, 0.1); padding: 2px 4px; border-radius: 3px;">{compact_time}</code>'
+                                f'</p>',
+                                unsafe_allow_html=True
+                            )
+                        with col_btn:
+                            if st.button("×", key=f"remove_{endpoint}_{scope_key}", help=f"Remove {label}"):
+                                if SharedBackupState.remove_csv_entry(endpoint):
+                                    st.toast(f"🗑️ Removed {label}", icon="✅")
+                                st.rerun()
+                    
+                    # Done button to exit edit mode
+                    st.markdown("---")
+                    if st.button("✅ Done", key=f"btn_done_edit_{scope_key}", type="primary", use_container_width=True):
+                        st.session_state[edit_mode_key] = False
                         st.rerun()
     else:
         # Fall back to legacy static counts
