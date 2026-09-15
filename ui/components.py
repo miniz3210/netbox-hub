@@ -560,25 +560,28 @@ def _render_backup_contents_section(scope_key: str, meta: dict) -> None:
                 if is_csv:
                     is_selected = endpoint in st.session_state[csv_selection_key]
                     
-                    # Use columns with minimal spacing for checkbox
-                    col_chk, col_text = st.columns([0.3, 19.7])
+                    # Use a container with flexbox CSS for perfect alignment
+                    container_html = f"""
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 0.5rem;">
+                        <div style="flex-shrink: 0;">
+                    """
+                    st.markdown(container_html, unsafe_allow_html=True)
                     
-                    with col_chk:
-                        # Add negative margin to move checkbox up and align with text
-                        st.markdown('<div style="margin-top: -0.5rem;"></div>', unsafe_allow_html=True)
-                        if st.checkbox("", value=is_selected, key=f"chk_{endpoint}_{scope_key}", label_visibility="collapsed"):
-                            st.session_state[csv_selection_key].add(endpoint)
-                        else:
-                            st.session_state[csv_selection_key].discard(endpoint)
+                    # Render checkbox inline
+                    if st.checkbox("", value=is_selected, key=f"chk_{endpoint}_{scope_key}", label_visibility="collapsed"):
+                        st.session_state[csv_selection_key].add(endpoint)
+                    else:
+                        st.session_state[csv_selection_key].discard(endpoint)
                     
-                    with col_text:
-                        # CSV entries in orange/amber color using HTML
-                        st.markdown(
-                            f'<p style="color: #fb923c; font-size: 0.875rem; line-height: 1.25rem; margin: 0; padding-top: 0.1rem;">'
-                            f'{text_content.replace("**", "<strong>").replace("**", "</strong>")}'
-                            f'</p>',
-                            unsafe_allow_html=True
-                        )
+                    # Close checkbox div and add text
+                    text_html = f"""
+                        </div>
+                        <div style="flex: 1; color: #fb923c; font-size: 0.875rem; line-height: 1.25rem;">
+                            {text_content.replace("**", "<strong>").replace("**", "</strong>")}
+                        </div>
+                    </div>
+                    """
+                    st.markdown(text_html, unsafe_allow_html=True)
                 else:
                     # JSON backup entries in default color (white/gray)
                     st.caption(text_content)
