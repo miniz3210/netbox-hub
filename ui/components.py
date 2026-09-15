@@ -553,41 +553,33 @@ def _render_backup_contents_section(scope_key: str, meta: dict) -> None:
                 # Show endpoint path in parentheses
                 example = f" ({ep})" if ep else ""
                 
-                # Create a row with checkbox if CSV
+                # Format the text
+                text_content = f"**{label}**: {count} {icon}{essential_marker}{example} `{compact_time}`"
+                
+                # Create a row with checkbox if CSV (using minimal column width for checkbox)
                 if is_csv:
                     is_selected = endpoint in st.session_state[csv_selection_key]
                     
-                    # Use HTML/CSS for proper alignment and color coding
-                    checkbox_html = f"""
-                        <div style="display: flex; align-items: center; margin-bottom: -1rem;">
-                            <div style="margin-right: 8px;">
-                    """
+                    # Use columns with minimal spacing for checkbox
+                    col_chk, col_text = st.columns([0.3, 19.7])
                     
-                    st.markdown(checkbox_html, unsafe_allow_html=True)
+                    with col_chk:
+                        if st.checkbox("", value=is_selected, key=f"chk_{endpoint}_{scope_key}", label_visibility="collapsed"):
+                            st.session_state[csv_selection_key].add(endpoint)
+                        else:
+                            st.session_state[csv_selection_key].discard(endpoint)
                     
-                    # Checkbox in inline container
-                    if st.checkbox("", value=is_selected, key=f"chk_{endpoint}_{scope_key}", label_visibility="collapsed"):
-                        st.session_state[csv_selection_key].add(endpoint)
-                    else:
-                        st.session_state[csv_selection_key].discard(endpoint)
-                    
-                    # Close the HTML container and add colored text
-                    close_html = f"""
-                            </div>
-                        </div>
-                    """
-                    st.markdown(close_html, unsafe_allow_html=True)
-                    
-                    # CSV entries in orange/amber color
-                    st.markdown(
-                        f'<p style="color: #fb923c; font-size: 0.875rem; line-height: 1.25rem; margin-top: -2.5rem; margin-left: 2.2rem; margin-bottom: 0.5rem;">'
-                        f'<strong>{label}</strong>: {count} {icon}{essential_marker}{example} <code style="background: rgba(251, 146, 60, 0.1); padding: 2px 4px; border-radius: 3px;">{compact_time}</code>'
-                        f'</p>',
-                        unsafe_allow_html=True
-                    )
+                    with col_text:
+                        # CSV entries in orange/amber color using HTML
+                        st.markdown(
+                            f'<p style="color: #fb923c; font-size: 0.875rem; line-height: 1.25rem; margin: 0;">'
+                            f'{text_content.replace("**", "<strong>").replace("**", "</strong>")}'
+                            f'</p>',
+                            unsafe_allow_html=True
+                        )
                 else:
                     # JSON backup entries in default color (white/gray)
-                    st.caption(f"**{label}**: {count} {icon}{essential_marker}{example} `{compact_time}`")
+                    st.caption(text_content)
             
             with col1:
                 current_prefix = None
