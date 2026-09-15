@@ -72,8 +72,8 @@ STRICT SPECIFICATION RULES:
         * "X" or "XG" prefix typically means 10GbE
         * "G" prefix typically means 1GbE
         * Check for SFP/SFP+/QSFP indicators in model name
-      - console-ports: Typically one RJ-45 console port (name: 'console', type: rj-45)
-      - power-ports: Based on form factor (desktop switches: 1 PSU; enterprise: 1-2 PSUs)
+      - console_ports: Typically one RJ-45 console port (name: 'console', type: rj-45)
+      - power_ports: Based on form factor (desktop switches: 1 PSU; enterprise: 1-2 PSUs)
       - interfaces: 
         * Use exact port count from datasheet
         * Naming convention: GigabitEthernet0/0/N for 1G, XGigabitEthernet0/0/N for 10G (Huawei)
@@ -82,10 +82,10 @@ STRICT SPECIFICATION RULES:
         * Include management interface if separate (name: 'MGMT' or 'Management1', type: 1000base-t, mgmt_only: true)
 
    B. SERVERS (e.g., HP DL360, Dell PowerEdge, Supermicro):
-      - power-ports:
+      - power_ports:
         * Compact/MicroServer/Tower: Single PSU (e.g. 150W or 200W). Name: 'PSU1', type: 'iec-60320-c14'.
         * Enterprise Rack Servers (1U/2U): Dual redundant PSUs (e.g. PSU1, PSU2).
-      - console-ports:
+      - console_ports:
         * Include ONLY if the physical chassis has a dedicated external Serial/RS-232 (de-9 or RJ-45) management port.
       - interfaces:
         * Count onboard physical NICs accurately from datasheet (e.g. MicroServer Gen8 has EXACTLY 2 NICs).
