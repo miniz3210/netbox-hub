@@ -1,0 +1,12 @@
+# 防止打包檔自己打包自己 (無窮遞迴 / 體積爆表)
+project-prompt.md
+repomix-output.*
+
+# 大型壓縮檔 (即使沒被 .gitignore 阻擋，也不應打包給 AI)
+netbox_devicetypes.zip
+netbox_all_assets.zip
+
+# 輸出 YAML/資料快取/歸檔目錄
+output_yamls/
+data/catalog_cache/
+archive/

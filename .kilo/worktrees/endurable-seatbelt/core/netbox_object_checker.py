@@ -1,0 +1,512 @@
+"""
+NetBox Object Existence Checker & Import Script Generator
+
+Compares the NetBox objects required by an Azure VM export against what already
+exists in the local NetBox Hub database (populated from a NetBox backup or CSV
+export), reports what is missing, and renders the import payloads NetBox expects.
+
+Object sources in the local database:
+  - Tenants          -> backup_records.object_type = 'tenancy_tenants'
+  - Sites            -> sites_records + backup_records 'dcim_sites'
+  - Platforms        -> backup_records 'dcim_platforms'
+  - Clusters         -> backup_records 'virtualization_clusters'
+  - Instance Types   -> 'Instance Type Set' choice set (custom field instance_type)
+  - Resource Groups  -> 'Resource Group Set' choice set (custom field resource_group)
+
+Choice values come from `backup_choice_values`, which a full API-walk backup
+populates from `extras/custom-field-choice-sets`. When that table is empty (older
+flat backup with no choice-set endpoint), the checker falls back to scraping the
+`Custom Fields:` text off each VM/device summary.
+"""
+
+import csv
+import io
+import logging
+import re
+import sqlite3
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+from core.db_manager import DB_PATH, init_db
+
+logger = logging.getLogger("netbox-hub")
+
+# Custom field names carrying Azure metadata on NetBox virtual machines
+INSTANCE_TYPE_FIELD = "instance_type"
+RESOURCE_GROUP_FIELD = "resource_group"
+OWNER_FIELD = "owner"
+TAG_APPLICATION_FIELD = "application"
+TAG_ENVIRONMENT_FIELD = "environment"
+TAG_COST_CENTRE_FIELD = "cost_centre"
+TAG_BUSINESS_CRITICALITY_FIELD = "business_criticality"
+TAG_DEPLOYMENT_METHOD_FIELD = "deployment_method"
+TAG_BACKUP_FIELD = "backup"
+
+# NetBox choice sets backing those custom fields
+INSTANCE_TYPE_CHOICE_SET = "Instance Type Set"
+RESOURCE_GROUP_CHOICE_SET = "Resource Group Set"
+OWNER_CHOICE_SET = "Owner Set"
+TAG_APPLICATION_CHOICE_SET = "Application Set"
+TAG_ENVIRONMENT_CHOICE_SET = "Environment Set"
+TAG_COST_CENTRE_CHOICE_SET = "Cost Centre Set"
+TAG_BUSINESS_CRITICALITY_CHOICE_SET = "Business Criticality Set"
+TAG_DEPLOYMENT_METHOD_CHOICE_SET = "Deployment Method Set"
+TAG_BACKUP_CHOICE_SET = "Backup Set"
+
+# Azure "OPERATING SYSTEM" values map onto existing NetBox platform names
+PLATFORM_ALIASES = {
+    "windows": "Windows Server",
+    "windows server": "Windows Server",
+    "linux": "Linux",
+}
+
+
+def slugify(text: str) -> str:
+    """NetBox-compatible slug: lowercase, single-hyphen separated, alphanumeric only."""
+    if not text:
+        return ""
+    text = str(text).lower().strip()
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    return text.strip("-")
+
+
+def normalize_platform_name(os_name: str) -> str:
+    """Map an Azure OS string onto the NetBox platform naming used in this tenant."""
+    clean = (os_name or "").strip()
+    if not clean:
+        return ""
+    return PLATFORM_ALIASES.get(clean.lower(), clean)
+
+
+def _fetch_backup_names(object_type: str) -> Set[str]:
+    """Return the set of object names of one type held in the ingested backup."""
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT name FROM backup_records WHERE object_type = ? AND name IS NOT NULL AND name != ''",
+            (object_type,),
+        )
+        return {row[0].strip() for row in cursor.fetchall() if row[0] and row[0].strip()}
+    except sqlite3.Error as exc:
+        logger.warning("Backup lookup failed for %s: %s", object_type, exc)
+        return set()
+    finally:
+        conn.close()
+
+
+def _parse_custom_fields(summary: str) -> Dict[str, str]:
+    """Pull the `Custom Fields: key=value, key=value` tail out of a backup summary."""
+    if not summary:
+        return {}
+    match = re.search(r"Custom Fields:\s*(.*)$", summary)
+    if not match:
+        return {}
+
+    fields: Dict[str, str] = {}
+    for pair in match.group(1).split(","):
+        if "=" not in pair:
+            continue
+        key, value = pair.split("=", 1)
+        key = key.strip().lower()
+        value = value.strip()
+        if key and value:
+            fields[key] = value
+    return fields
+
+
+def get_existing_custom_field_values(field_name: str, choice_set: str = "") -> Set[str]:
+    """Resolve the values a custom field can already hold in NetBox.
+
+    Prefers the authoritative choice set ingested from
+    `extras/custom-field-choice-sets`; falls back to scraping the per-object
+    `Custom Fields:` summary text when no choice set was captured.
+    """
+    values = _fetch_choice_values(field_name, choice_set)
+    if values:
+        return values
+    return _scrape_custom_field_values(field_name)
+
+
+def _fetch_choice_values(field_name: str, choice_set: str = "") -> Set[str]:
+    """Read values from the ingested NetBox custom field choice sets."""
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    values: Set[str] = set()
+    try:
+        cursor.execute(
+            "SELECT value FROM backup_choice_values WHERE LOWER(field_name) = ?",
+            (field_name.strip().lower(),),
+        )
+        values.update(row[0].strip() for row in cursor.fetchall() if row[0] and row[0].strip())
+
+        if not values and choice_set:
+            cursor.execute(
+                "SELECT value FROM backup_choice_values WHERE LOWER(choice_set) = ?",
+                (choice_set.strip().lower(),),
+            )
+            values.update(row[0].strip() for row in cursor.fetchall() if row[0] and row[0].strip())
+    except sqlite3.Error as exc:
+        # Table absent on databases that predate choice-set ingest.
+        logger.debug("Choice set lookup unavailable for %s: %s", field_name, exc)
+    finally:
+        conn.close()
+    return values
+
+
+def _scrape_custom_field_values(field_name: str) -> Set[str]:
+    """Collect the distinct values a VM custom field already holds in NetBox."""
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    values: Set[str] = set()
+    try:
+        cursor.execute(
+            """
+            SELECT summary FROM backup_records
+            WHERE object_type IN ('virtualization_virtual_machines', 'dcim_devices')
+              AND summary LIKE '%Custom Fields:%'
+            """
+        )
+        target = field_name.strip().lower()
+        for (summary,) in cursor.fetchall():
+            value = _parse_custom_fields(summary).get(target)
+            if value:
+                values.add(value)
+    except sqlite3.Error as exc:
+        logger.warning("Custom field lookup failed for %s: %s", field_name, exc)
+    finally:
+        conn.close()
+    return values
+
+
+def get_existing_tenants() -> Set[str]:
+    """Tenant names already present in NetBox."""
+    return _fetch_backup_names("tenancy_tenants")
+
+
+def get_existing_platforms() -> Set[str]:
+    """Platform names already present in NetBox."""
+    return _fetch_backup_names("dcim_platforms")
+
+
+def get_existing_clusters() -> Set[str]:
+    """Cluster names already present in NetBox."""
+    return _fetch_backup_names("virtualization_clusters")
+
+
+def get_existing_roles() -> Set[str]:
+    """Device/VM Role names already present in NetBox."""
+    return _fetch_backup_names("dcim_device_roles")
+
+
+def get_existing_sites() -> Set[str]:
+    """Site names from both the sites table and the ingested backup."""
+    sites = _fetch_backup_names("dcim_sites")
+
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT name FROM sites_records WHERE name IS NOT NULL AND name != ''")
+        sites.update(row[0].strip() for row in cursor.fetchall() if row[0] and row[0].strip())
+    except sqlite3.Error as exc:
+        logger.warning("Site lookup failed: %s", exc)
+    finally:
+        conn.close()
+    return sites
+
+
+def _split_existing_missing(
+    required: List[str], existing: Set[str]
+) -> Tuple[List[str], List[str]]:
+    """Case-insensitively partition required values into (existing, missing)."""
+    existing_lower = {value.strip().lower() for value in existing}
+    found: List[str] = []
+    missing: List[str] = []
+    for value in required:
+        clean = (value or "").strip()
+        if not clean:
+            continue
+        if clean.lower() in existing_lower:
+            found.append(clean)
+        else:
+            missing.append(clean)
+    return sorted(set(found)), sorted(set(missing))
+
+
+def analyze_netbox_objects(metadata: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Compare the objects an Azure export needs against the local NetBox database.
+
+    Args:
+        metadata: the metadata dict produced by ``map_azure_to_netbox``.
+
+    Returns:
+        Mapping of category key -> {label, netbox_object, existing, missing, total}.
+    """
+    site_names = [f"Azure - {loc}" for loc in metadata.get("locations", [])]
+    platform_names = [
+        normalize_platform_name(os_name) for os_name in metadata.get("platforms", [])
+    ]
+
+    checks = [
+        ("tenants", "Tenants (Subscriptions)", "tenancy.tenant",
+         list(metadata.get("subscriptions", [])), get_existing_tenants()),
+        ("sites", "Sites (Locations)", "dcim.site",
+         site_names, get_existing_sites()),
+        ("platforms", "Platforms (Operating Systems)", "dcim.platform",
+         platform_names, get_existing_platforms()),
+        ("instance_types", "Instance Type Set (Custom Field Choices)", "extras.customfieldchoiceset",
+         list(metadata.get("sizes", [])),
+         get_existing_custom_field_values(INSTANCE_TYPE_FIELD, INSTANCE_TYPE_CHOICE_SET)),
+        ("resource_groups", "Resource Group Set (Custom Field Choices)", "extras.customfieldchoiceset",
+         list(metadata.get("resource_groups", [])),
+         get_existing_custom_field_values(RESOURCE_GROUP_FIELD, RESOURCE_GROUP_CHOICE_SET)),
+        ("owners", "Owners", "users.owner",
+         list(metadata.get("owners", [])),
+         _fetch_backup_names("users_owner")),
+        ("roles", "Roles (Applications)", "dcim.devicerole",
+         list(metadata.get("roles", [])), get_existing_roles()),
+        ("tag_environments", "Environment Tags", "extras.tag",
+         list(metadata.get("tag_environments", [])), _fetch_backup_names("extras_tags")),
+        ("tag_cost_centres", "Cost Centre Tags", "extras.tag",
+         list(metadata.get("tag_cost_centres", [])), _fetch_backup_names("extras_tags")),
+        ("tag_business_criticalities", "Business Criticality Tags", "extras.tag",
+         list(metadata.get("tag_business_criticalities", [])), _fetch_backup_names("extras_tags")),
+        ("tag_deployment_methods", "Deployment Method Tags", "extras.tag",
+         list(metadata.get("tag_deployment_methods", [])), _fetch_backup_names("extras_tags")),
+        ("tag_backups", "Backup Tags", "extras.tag",
+         list(metadata.get("tag_backups", [])), _fetch_backup_names("extras_tags")),
+        ("tag_operating_systems", "Operating System Tags", "extras.tag",
+         list(metadata.get("tag_operating_systems", [])), _fetch_backup_names("extras_tags")),
+    ]
+
+    results: Dict[str, Dict[str, Any]] = {}
+    for key, label, netbox_object, required, existing in checks:
+        found, missing = _split_existing_missing(required, existing)
+        results[key] = {
+            "label": label,
+            "netbox_object": netbox_object,
+            "existing": found,
+            "missing": missing,
+            "total": len(found) + len(missing),
+        }
+    return results
+
+
+def generate_tenants_csv(
+    tenant_names: List[str], description: str = "Azure Subscription"
+) -> str:
+    """Render the `name,slug,description` CSV NetBox expects for tenant import."""
+    lines = ["name,slug,description"]
+    for name in tenant_names:
+        clean = (name or "").strip()
+        if not clean:
+            continue
+        lines.append(f"{clean},{slugify(clean)},{description}")
+    return "\n".join(lines)
+
+
+def generate_sites_csv(site_names: List[str], region: str = "Azure", group: str = "Cloud") -> str:
+    """Render the site import CSV for the missing cloud sites."""
+    lines = ["name,slug,status,region,group"]
+    for name in site_names:
+        clean = (name or "").strip()
+        if not clean:
+            continue
+        lines.append(f"{clean},{slugify(clean)},active,{region},{group}")
+    return "\n".join(lines)
+
+
+def generate_platforms_csv(platform_names: List[str]) -> str:
+    """Render the platform import CSV for the missing platforms."""
+    lines = ["name,slug"]
+    for name in platform_names:
+        clean = (name or "").strip()
+        if not clean:
+            continue
+        lines.append(f"{clean},{slugify(clean)}")
+    return "\n".join(lines)
+
+
+def generate_choice_set(values: List[str]) -> str:
+    """Render `value:label` lines for a NetBox custom field choice set."""
+    lines = []
+    for value in values:
+        clean = (value or "").strip()
+        if not clean:
+            continue
+        lines.append(f"{clean}:{clean}")
+    return "\n".join(lines)
+
+
+def generate_import_scripts(analysis: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, str]]:
+    """Build the import payload for every category that still has missing objects.
+
+    Returns:
+        Mapping of category key -> {label, format, filename, content, count}.
+    """
+    scripts: Dict[str, Dict[str, str]] = {}
+
+    tenants = analysis.get("tenants", {}).get("missing", [])
+    if tenants:
+        scripts["tenants"] = {
+            "label": "Tenants",
+            "format": "csv",
+            "filename": "netbox-tenants-import.csv",
+            "content": generate_tenants_csv(tenants),
+            "count": len(tenants),
+            "instructions": "NetBox → Organization → Tenants → Import → paste as CSV",
+        }
+
+    sites = analysis.get("sites", {}).get("missing", [])
+    if sites:
+        scripts["sites"] = {
+            "label": "Sites",
+            "format": "csv",
+            "filename": "netbox-sites-import.csv",
+            "content": generate_sites_csv(sites),
+            "count": len(sites),
+            "instructions": "NetBox → Organization → Sites → Import → paste as CSV",
+        }
+
+    platforms = analysis.get("platforms", {}).get("missing", [])
+    if platforms:
+        scripts["platforms"] = {
+            "label": "Platforms",
+            "format": "csv",
+            "filename": "netbox-platforms-import.csv",
+            "content": generate_platforms_csv(platforms),
+            "count": len(platforms),
+            "instructions": "NetBox → Devices → Platforms → Import → paste as CSV",
+        }
+
+    instance_types = analysis.get("instance_types", {}).get("missing", [])
+    if instance_types:
+        scripts["instance_types"] = {
+            "label": "Instance Type Set",
+            "format": "choices",
+            "filename": "netbox-instance-type-choices.txt",
+            "content": generate_choice_set(instance_types),
+            "count": len(instance_types),
+            "instructions": (
+                "NetBox → Customization → Custom Field Choice Sets → Instance Type "
+                "→ Extra choices → append these lines"
+            ),
+        }
+
+    resource_groups = analysis.get("resource_groups", {}).get("missing", [])
+    if resource_groups:
+        scripts["resource_groups"] = {
+            "label": "Resource Group Set",
+            "format": "choices",
+            "filename": "netbox-resource-group-choices.txt",
+            "content": generate_choice_set(resource_groups),
+            "count": len(resource_groups),
+            "instructions": (
+                "NetBox → Customization → Custom Field Choice Sets → Resource Group "
+                "→ Extra choices → append these lines"
+            ),
+        }
+
+    owners = analysis.get("owners", {}).get("missing", [])
+    if owners:
+        scripts["owners"] = {
+            "label": "Owners",
+            "format": "csv",
+            "filename": "netbox-owners-import.csv",
+            "content": generate_owners_csv(owners),
+            "count": len(owners),
+            "instructions": "NetBox → Admin → Ownership → Owners → Import → paste as CSV",
+        }
+
+    roles = analysis.get("roles", {}).get("missing", [])
+    if roles:
+        scripts["roles"] = {
+            "label": "Roles (Applications)",
+            "format": "csv",
+            "filename": "netbox-roles-import.csv",
+            "content": generate_roles_csv(roles),
+            "count": len(roles),
+            "instructions": "NetBox → Organization → Device Roles (or Devices → Device Roles) → Import → paste as CSV",
+        }
+
+    tag_categories = [
+        ("tag_environments", "Environment Tags", "netbox-environment-tags.csv"),
+        ("tag_cost_centres", "Cost Centre Tags", "netbox-cost-centre-tags.csv"),
+        ("tag_business_criticalities", "Business Criticality Tags", "netbox-business-criticality-tags.csv"),
+        ("tag_deployment_methods", "Deployment Method Tags", "netbox-deployment-method-tags.csv"),
+        ("tag_backups", "Backup Tags", "netbox-backup-tags.csv"),
+    ]
+    for key, label, filename in tag_categories:
+        missing = analysis.get(key, {}).get("missing", [])
+        if missing:
+            scripts[key] = {
+                "label": label,
+                "format": "csv",
+                "filename": filename,
+                "content": generate_tags_csv(missing),
+                "count": len(missing),
+                "instructions": "NetBox → Organization → Tags → Import → paste as CSV",
+            }
+
+    return scripts
+
+
+def generate_roles_csv(role_names: List[str]) -> str:
+    """Render the `name,slug,color` CSV NetBox expects for device/VM role import."""
+    output = io.StringIO(newline="")
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow(["name", "slug", "color"])
+    for name in role_names:
+        clean = (name or "").strip()
+        if clean:
+            writer.writerow([clean, slugify(clean), "ffffff"])
+    return output.getvalue().rstrip("\n")
+
+
+def generate_tags_csv(tag_names: List[str]) -> str:
+    """Render the `name,slug,color,weight` CSV NetBox expects for tag import."""
+    output = io.StringIO(newline="")
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow(["name", "slug", "color", "weight"])
+    for name in tag_names:
+        clean = (name or "").strip()
+        if clean:
+            writer.writerow([clean, slugify(clean), "ffffff", 1000])
+    return output.getvalue().rstrip("\n")
+
+
+def generate_owners_csv(owner_names: List[str]) -> str:
+    """Render the `name` CSV NetBox expects for users.owner import."""
+    output = io.StringIO(newline="")
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow(["name"])
+    seen = set()
+    for name in owner_names:
+        clean = re.sub(r"\s+", " ", (name or "").strip())
+        if clean and clean not in seen:
+            seen.add(clean)
+            writer.writerow([clean])
+    return output.getvalue().rstrip("\n")
+
+
+def generate_combined_import_bundle(scripts: Dict[str, Dict[str, str]]) -> str:
+    """Concatenate every generated payload into one annotated text bundle."""
+    if not scripts:
+        return "# All required NetBox objects already exist. Nothing to import.\n"
+
+    blocks: List[str] = [
+        "# NetBox Import Bundle - generated by NetBox Hub",
+        "# Each section below is pasted into its own NetBox import form.",
+        "",
+    ]
+    for data in scripts.values():
+        blocks.append("=" * 70)
+        blocks.append(f"{data['label']}:  ({data['count']} missing)")
+        blocks.append(f"# {data['instructions']}")
+        blocks.append("=" * 70)
+        blocks.append(data["content"])
+        blocks.append("")
+    return "\n".join(blocks)

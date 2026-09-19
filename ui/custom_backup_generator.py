@@ -1,0 +1,394 @@
+"""
+Custom NetBox Backup Script Generator UI
+
+Interactive component that allows users to customize which NetBox endpoints
+are included in their PowerShell export script. Provides checkboxes for all
+available endpoints with visual indicators for the 64 essential endpoints,
+and a "Reset to Default Minimal" button.
+"""
+
+from datetime import datetime
+from pathlib import Path
+from typing import List, Set
+import streamlit as st
+from config.backup_endpoints import NETBOX_ENDPOINTS, get_essential_endpoints, get_endpoint_count, get_all_endpoints
+
+
+# Session state keys
+STATE_SELECTED_ENDPOINTS = "custom_backup_selected_endpoints"
+STATE_IS_CUSTOM = "custom_backup_is_custom"
+
+
+def _initialize_session_state():
+    """Initialize session state with default minimal backup (68 essential endpoints)."""
+    if STATE_SELECTED_ENDPOINTS not in st.session_state:
+        st.session_state[STATE_SELECTED_ENDPOINTS] = set(get_essential_endpoints())
+        st.session_state[STATE_IS_CUSTOM] = False
+
+
+def _reset_to_full(scope_key: str):
+    """Reset selection to all 112 endpoints (Full backup)."""
+    st.session_state[STATE_SELECTED_ENDPOINTS] = set(get_all_endpoints())
+    st.session_state[STATE_IS_CUSTOM] = False
+    
+    # Increment refresh counter to force checkbox re-render
+    counter_key = f"checkbox_refresh_{scope_key}"
+    st.session_state[counter_key] = st.session_state.get(counter_key, 0) + 1
+    
+    st.toast("✅ Reset to Full backup (dynamic discovery - all endpoints)", icon="🔄")
+
+
+def _reset_to_minimal(scope_key: str):
+    """Reset selection to the 64 essential endpoints (Minimal backup)."""
+    st.session_state[STATE_SELECTED_ENDPOINTS] = set(get_essential_endpoints())
+    st.session_state[STATE_IS_CUSTOM] = False
+    
+    # Increment refresh counter to force checkbox re-render
+    counter_key = f"checkbox_refresh_{scope_key}"
+    st.session_state[counter_key] = st.session_state.get(counter_key, 0) + 1
+    
+    st.toast("✅ Reset to Minimal backup (64 essential endpoints)", icon="🔄")
+
+
+def _toggle_endpoint(endpoint_path: str):
+    """Toggle an endpoint selection on/off."""
+    selected = st.session_state[STATE_SELECTED_ENDPOINTS]
+    if endpoint_path in selected:
+        selected.remove(endpoint_path)
+    else:
+        selected.add(endpoint_path)
+    
+    # Check if current selection differs from default minimal
+    default_essential = set(get_essential_endpoints())
+    st.session_state[STATE_IS_CUSTOM] = selected != default_essential
+
+
+def _select_all_in_category(category: str, scope_key: str):
+    """Select all endpoints in a category."""
+    selected = st.session_state[STATE_SELECTED_ENDPOINTS]
+    for endpoint in NETBOX_ENDPOINTS[category]:
+        selected.add(endpoint["path"])
+    
+    # Mark as custom if not equal to default minimal
+    default_essential = set(get_essential_endpoints())
+    st.session_state[STATE_IS_CUSTOM] = selected != default_essential
+    
+    # Increment refresh counter to force checkbox re-render
+    counter_key = f"checkbox_refresh_{scope_key}"
+    st.session_state[counter_key] = st.session_state.get(counter_key, 0) + 1
+
+
+def _deselect_all_in_category(category: str, scope_key: str):
+    """Deselect all endpoints in a category."""
+    selected = st.session_state[STATE_SELECTED_ENDPOINTS]
+    for endpoint in NETBOX_ENDPOINTS[category]:
+        selected.discard(endpoint["path"])
+    
+    # Mark as custom if not equal to default minimal
+    default_essential = set(get_essential_endpoints())
+    st.session_state[STATE_IS_CUSTOM] = selected != default_essential
+    
+    # Increment refresh counter to force checkbox re-render
+    counter_key = f"checkbox_refresh_{scope_key}"
+    st.session_state[counter_key] = st.session_state.get(counter_key, 0) + 1
+
+
+def _generate_custom_script(selected_endpoints: Set[str], counts: dict) -> str:
+    """Generate a custom PowerShell export script based on selected endpoints.
+    
+    Args:
+        selected_endpoints: Set of endpoint paths to include
+        counts: Dict with 'total' and 'essential' endpoint counts
+        
+    Returns:
+        PowerShell script content
+    """
+    
+    # FULL PRESET: Return the original dynamic discovery script
+    if len(selected_endpoints) == counts['total']:
+        full_script_path = Path(__file__).resolve().parent.parent / "data" / "netbox-export-full.ps1"
+        try:
+            with open(full_script_path, 'r', encoding='utf-8-sig') as f:
+                return f.read()
+        except Exception as e:
+            return f"# Error reading full backup script: {e}\n"
+    
+    # MINIMAL PRESET: Return the original minimal script
+    if len(selected_endpoints) == counts['essential']:
+        minimal_script_path = Path(__file__).resolve().parent.parent / "data" / "netbox-export-min.ps1"
+        try:
+            with open(minimal_script_path, 'r', encoding='utf-8-sig') as f:
+                return f.read()
+        except Exception as e:
+            return f"# Error reading minimal backup script: {e}\n"
+    
+    # CUSTOM PRESET: Generate modified script with user's selection
+    # Read the base minimal script as a template
+    base_script_path = Path(__file__).resolve().parent.parent / "data" / "netbox-export-min.ps1"
+    
+    try:
+        with open(base_script_path, 'r', encoding='utf-8-sig') as f:
+            base_script = f.read()
+    except Exception as e:
+        return f"# Error reading base script: {e}\n"
+    
+    # Generate the custom endpoint list
+    sorted_endpoints = sorted(selected_endpoints)
+    endpoint_array_lines = ['$MinimalEndpoints = @(']
+    
+    # Group by category for better organization
+    for category in NETBOX_ENDPOINTS.keys():
+        category_endpoints = [ep["path"] for ep in NETBOX_ENDPOINTS[category] 
+                            if ep["path"] in selected_endpoints]
+        if category_endpoints:
+            endpoint_array_lines.append(f'    # {category}')
+            for ep in sorted(category_endpoints):
+                endpoint_array_lines.append(f'    "{ep}",')
+    
+    # Remove trailing comma from last endpoint
+    if endpoint_array_lines[-1].endswith(','):
+        endpoint_array_lines[-1] = endpoint_array_lines[-1][:-1]
+    
+    endpoint_array_lines.append(')')
+    
+    custom_endpoint_section = '\n'.join(endpoint_array_lines)
+    
+    # Replace the $MinimalEndpoints array in the base script
+    # Find the start and end of the original array definition
+    import re
+    pattern = r'\$MinimalEndpoints\s*=\s*@\([^)]+\)'
+    
+    custom_script = re.sub(
+        pattern,
+        custom_endpoint_section,
+        base_script,
+        flags=re.DOTALL
+    )
+    
+    # Update the description to indicate custom backup
+    custom_script = custom_script.replace(
+        'NetBox Minimal Backup - Essential Data Only',
+        f'NetBox Custom Backup - {len(selected_endpoints)} Selected Endpoints'
+    )
+    custom_script = custom_script.replace(
+        'backup_type          = "minimal"',
+        'backup_type          = "custom"'
+    )
+    custom_script = custom_script.replace(
+        'description          = "Minimal NetBox backup containing only essential data for restore"',
+        f'description          = "Custom NetBox backup with {len(selected_endpoints)} selected endpoints"'
+    )
+    custom_script = custom_script.replace(
+        'NetBox_Minimal_Backup_$TimeStamp.json',
+        'NetBox_Custom_Backup_$TimeStamp.json'
+    )
+    custom_script = custom_script.replace(
+        'NETBOX MINIMAL BACKUP',
+        'NETBOX CUSTOM BACKUP'
+    )
+    custom_script = custom_script.replace(
+        'MINIMAL BACKUP SUMMARY',
+        'CUSTOM BACKUP SUMMARY'
+    )
+    
+    return custom_script
+
+
+def render_custom_backup_selector(scope_key: str = "naming") -> None:
+    """
+    Render the custom backup script generator UI.
+    
+    Provides an interactive interface where users can:
+    - View all available NetBox endpoints grouped by category
+    - Select/deselect endpoints with checkboxes
+    - See visual indicators for the 64 essential endpoints (gold coin icon)
+    - Reset to the default minimal backup
+    - Download a customized PowerShell export script
+    
+    Args:
+        scope_key: Unique identifier for this UI instance (e.g., "ipam", "naming")
+    """
+    _initialize_session_state()
+    
+    selected_endpoints = st.session_state[STATE_SELECTED_ENDPOINTS]
+    is_custom = st.session_state[STATE_IS_CUSTOM]
+    
+    counts = get_endpoint_count()
+    all_endpoints = get_all_endpoints()
+    selected_count = len(selected_endpoints)
+    
+    # Preset selector row - single row with proper alignment
+    col_preset, col_download = st.columns([1, 1])
+    
+    with col_preset:
+        # Determine current preset based on selection
+        if selected_count == counts['total']:
+            default_preset = "Full (112 endpoints)"
+        elif selected_count == counts['essential']:
+            default_preset = "Minimal (64 endpoints)"
+        else:
+            default_preset = "Custom"
+        
+        preset_choice = st.selectbox(
+            "Backup Preset",
+            ["Full (112 endpoints)", "Minimal (64 endpoints)", "Custom"],
+            index=["Full (112 endpoints)", "Minimal (64 endpoints)", "Custom"].index(default_preset),
+            key=f"backup_preset_{scope_key}",
+            help="Select a preset or choose Custom to manually select endpoints"
+        )
+        
+        # Apply preset when changed
+        if preset_choice == "Full (112 endpoints)" and selected_count != counts['total']:
+            st.session_state[STATE_SELECTED_ENDPOINTS] = set(all_endpoints)
+            st.session_state[STATE_IS_CUSTOM] = False
+            # Increment refresh counter to force checkbox re-render
+            counter_key = f"checkbox_refresh_{scope_key}"
+            st.session_state[counter_key] = st.session_state.get(counter_key, 0) + 1
+            st.rerun()
+        elif preset_choice == "Minimal (64 endpoints)" and selected_count != counts['essential']:
+            st.session_state[STATE_SELECTED_ENDPOINTS] = set(get_essential_endpoints())
+            st.session_state[STATE_IS_CUSTOM] = False
+            # Increment refresh counter to force checkbox re-render
+            counter_key = f"checkbox_refresh_{scope_key}"
+            st.session_state[counter_key] = st.session_state.get(counter_key, 0) + 1
+            st.rerun()
+    
+    with col_download:
+        # Add spacing to align with selectbox
+        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+        
+        # Determine filename based on selection
+        if selected_count == counts['total']:
+            filename = "netbox-export-full.ps1"
+        elif selected_count == counts['essential']:
+            filename = "netbox-export-min.ps1"
+        else:
+            filename = "netbox-export-cus.ps1"
+        
+        # Generate custom script (pass counts for preset detection)
+        custom_script = _generate_custom_script(selected_endpoints, counts)
+        
+        st.download_button(
+            "⬇️ Download PowerShell Script",
+            data=custom_script,
+            file_name=filename,
+            mime="text/plain",
+            key=f"btn_download_custom_{scope_key}",
+            use_container_width=True,
+            help=f"Download {filename} with {selected_count} selected endpoints"
+        )
+    
+    # Dynamic usage instructions based on preset selection
+    st.markdown("**📝 Usage Instructions:**")
+    usage_script = f'.\\{filename} -NetBoxUrl "https://netbox.example.com" -ApiToken "<TOKEN>"'
+    st.code(usage_script, language="powershell")
+    st.caption("All scripts support `-PageSize 1000` and `-OutputDirectory .` options.")
+    
+    st.markdown("---")
+    st.caption(f"**Selected:** {selected_count} of {counts['total']} endpoints | 🟡 = Essential endpoint (64 recommended for minimal backup)")
+    
+    # Only show endpoint selection interface in Custom mode
+    if preset_choice == "Custom":
+        # Endpoint selection interface - organized by category
+        st.markdown("##### 📋 Select Endpoints by Category")
+        
+        # Build tab labels WITHOUT counts to avoid confusion with delayed updates
+        tab_labels = list(NETBOX_ENDPOINTS.keys())
+        
+        # Create tabs for each category
+        category_tabs = st.tabs(tab_labels)
+        
+        for idx, (category, endpoints) in enumerate(NETBOX_ENDPOINTS.items()):
+            with category_tabs[idx]:
+                # Category header with select all/none/reset buttons
+                col_header, col_sel_all, col_sel_none, col_reset_full, col_reset_min = st.columns([4, 1, 1, 1.2, 1.2])
+                
+                with col_header:
+                    # Count selected in this category - shown in header inside tab
+                    category_selected = sum(1 for ep in endpoints if ep["path"] in selected_endpoints)
+                    category_essential = sum(1 for ep in endpoints if ep["essential"])
+                    st.markdown(f"**{category}** — {category_selected}/{len(endpoints)} selected ({category_essential} essential)")
+                
+                with col_sel_all:
+                    if st.button("✅ All", key=f"btn_select_all_{category}_{scope_key}", use_container_width=True, help="Select all endpoints in this category"):
+                        _select_all_in_category(category, scope_key)
+                        st.rerun()
+                
+                with col_sel_none:
+                    if st.button("❌ None", key=f"btn_deselect_all_{category}_{scope_key}", use_container_width=True, help="Deselect all endpoints in this category"):
+                        _deselect_all_in_category(category, scope_key)
+                        st.rerun()
+                
+                with col_reset_full:
+                    if st.button("🔄 Full", key=f"btn_reset_full_{category}_{scope_key}", use_container_width=True, help="Reset to Full backup (all 112 endpoints)"):
+                        _reset_to_full(scope_key)
+                        st.rerun()
+                
+                with col_reset_min:
+                    if st.button("🔄 Minimal", key=f"btn_reset_min_{category}_{scope_key}", use_container_width=True, help="Reset to Minimal backup (64 essential endpoints)"):
+                        _reset_to_minimal(scope_key)
+                        st.rerun()
+                
+                st.markdown("")
+                
+                # Render endpoints in 2 columns for compact display
+                col1, col2 = st.columns(2)
+                
+                # Split endpoints into two columns
+                mid_point = (len(endpoints) + 1) // 2
+                
+                with col1:
+                    for endpoint in endpoints[:mid_point]:
+                        _render_endpoint_checkbox(endpoint, selected_endpoints, scope_key)
+                
+                with col2:
+                    for endpoint in endpoints[mid_point:]:
+                        _render_endpoint_checkbox(endpoint, selected_endpoints, scope_key)
+    
+    # Summary footer
+    st.markdown("---")
+    essential_count = counts['essential']
+    essential_selected = sum(1 for ep in get_essential_endpoints() if ep in selected_endpoints)
+    
+    col_summary1, col_summary2, col_summary3 = st.columns(3)
+    
+    with col_summary1:
+        st.metric("Total Selected", f"{selected_count}/{counts['total']}")
+    
+    with col_summary2:
+        st.metric("Essential Selected", f"{essential_selected}/{essential_count}")
+    
+    with col_summary3:
+        if is_custom:
+            st.metric("Backup Type", "Custom", delta="Modified")
+        else:
+            st.metric("Backup Type", "Minimal", delta="Default")
+
+
+def _render_endpoint_checkbox(endpoint: dict, selected_endpoints: Set[str], scope_key: str):
+    """Render a single endpoint checkbox with appropriate styling."""
+    endpoint_path = endpoint["path"]
+    is_selected = endpoint_path in selected_endpoints
+    is_essential = endpoint["essential"]
+    
+    # Build label with essential indicator
+    label = endpoint["label"]
+    if is_essential:
+        label = f"🟡 {label}"
+    
+    # Unique key for checkbox - include a counter to force refresh after bulk operations
+    refresh_counter = st.session_state.get(f"checkbox_refresh_{scope_key}", 0)
+    checkbox_key = f"chk_endpoint_{endpoint_path.replace('/', '_')}_{scope_key}_{refresh_counter}"
+    
+    # Render checkbox - check if value changed
+    checked = st.checkbox(
+        label,
+        value=is_selected,
+        key=checkbox_key,
+        help=f"{endpoint['description']} ({endpoint_path})"
+    )
+    
+    # Handle state change
+    if checked != is_selected:
+        _toggle_endpoint(endpoint_path)
+        st.rerun()

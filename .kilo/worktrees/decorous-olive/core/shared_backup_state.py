@@ -1,0 +1,482 @@
+"""
+Shared Backup State Manager
+Provides unified backup inspection state across IPAM and Naming tabs.
+"""
+
+import streamlit as st
+from typing import Dict, Any, Optional, List
+from core.dynamic_backup_inspector import BackupInspector, load_backup_from_file, load_backup_from_json_string
+
+
+class SharedBackupState:
+    """Manages shared backup inspection state across tabs."""
+    
+    # Session state keys
+    INSPECTOR_KEY = "netbox_backup_inspector"
+    OBJECT_REGISTRY_KEY = "netbox_object_registry"
+    CUSTOM_FIELDS_KEY = "netbox_custom_fields"
+    CHOICE_SETS_KEY = "netbox_choice_sets"
+    CSV_OVERRIDES_KEY = "netbox_csv_overrides"
+    
+    @classmethod
+    def initialize(cls):
+        """Initialize session state keys if not present."""
+        if cls.INSPECTOR_KEY not in st.session_state:
+            st.session_state[cls.INSPECTOR_KEY] = None
+        if cls.OBJECT_REGISTRY_KEY not in st.session_state:
+            st.session_state[cls.OBJECT_REGISTRY_KEY] = {}
+        if cls.CUSTOM_FIELDS_KEY not in st.session_state:
+            st.session_state[cls.CUSTOM_FIELDS_KEY] = {}
+        if cls.CHOICE_SETS_KEY not in st.session_state:
+            st.session_state[cls.CHOICE_SETS_KEY] = {}
+        if cls.CSV_OVERRIDES_KEY not in st.session_state:
+            st.session_state[cls.CSV_OVERRIDES_KEY] = {}
+    
+    @classmethod
+    def load_backup(cls, backup_data: Dict[str, Any], filename: str = "NetBox_Backup.json", 
+                   ingestion_timestamp: str = None) -> BackupInspector:
+        """
+        Load a NetBox backup and update shared state with intelligent merge strategy.
+        
+        Precedence Rules:
+        1. Full backup (145+ endpoints) serves as the BASE LAYER - always loaded completely
+        2. Minimal backup (64 endpoints) - overrides only its endpoints if newer
+        3. CSV uploads - override only the specific uploaded endpoint if newer
+        4. For any query, if data isn't in the newer upload, fallback to Full backup
+        
+        This ensures Full backup provides complete coverage, while allowing targeted
+        updates via Minimal backups or CSV files.
+        
+        Args:
+            backup_data: Parsed JSON backup data
+            filename: Original filename for tracking
+            ingestion_timestamp: Optional timestamp to preserve (for restoration from DB)
+            
+        Returns:
+            BackupInspector instance
+        """
+        cls.initialize()
+        
+        inspector = BackupInspector(backup_data, filename, ingestion_timestamp=ingestion_timestamp)
+        
+        # Get new objects from inspector
+        new_objects = inspector.inspect_all_objects()
+        
+        # Determine backup type based on endpoint count
+        new_endpoint_count = len(new_objects)
+        is_full_backup = new_endpoint_count >= 100  # Full backup has 145+ endpoints
+        is_minimal_backup = 50 <= new_endpoint_count < 100  # Minimal has ~64 endpoints
+        
+        # Get existing registry (may contain Full backup + CSV overrides)
+        existing_registry = st.session_state.get(cls.OBJECT_REGISTRY_KEY, {})
+        
+        # STRATEGY 1: Full backup upload - Replace everything (it's the new base layer)
+        if is_full_backup:
+            # Full backup becomes the new base - all its data wins
+            st.session_state[cls.OBJECT_REGISTRY_KEY] = new_objects.copy()
+            
+            # Preserve any CSV overrides that are newer than the Full backup
+            from datetime import datetime
+            for endpoint, existing_meta in existing_registry.items():
+                if existing_meta.get("source_type") == "csv":
+                    # CSV override exists, check if it's newer than Full backup
+                    csv_timestamp = existing_meta.get("timestamp", "")
+                    
+                    if endpoint in new_objects:
+                        full_timestamp = new_objects[endpoint].get("timestamp", "")
+                        try:
+                            csv_dt = datetime.fromisoformat(csv_timestamp.replace("UTC", "").strip())
+                            full_dt = datetime.fromisoformat(full_timestamp.replace("UTC", "").strip())
+                            
+                            # Keep CSV if newer than Full
+                            if csv_dt > full_dt:
+                                st.session_state[cls.OBJECT_REGISTRY_KEY][endpoint] = existing_meta
+                        except:
+                            pass
+        
+        # STRATEGY 2: Minimal/CSV upload - Selective override with timestamp check
+        else:
+            from datetime import datetime
+            
+            for endpoint, new_metadata in new_objects.items():
+                new_timestamp = new_metadata.get("timestamp", "")
+                
+                if endpoint in existing_registry:
+                    # Endpoint exists - check which is newer
+                    existing_timestamp = existing_registry[endpoint].get("timestamp", "")
+                    
+                    try:
+                        new_dt = datetime.fromisoformat(new_timestamp.replace("UTC", "").strip())
+                        existing_dt = datetime.fromisoformat(existing_timestamp.replace("UTC", "").strip())
+                        
+                        # Newer data wins (whether from Minimal or CSV)
+                        if new_dt >= existing_dt:
+                            existing_registry[endpoint] = new_metadata
+                        # else: keep existing (it's newer, e.g., from CSV uploaded after old JSON)
+                    except:
+                        # If timestamp parsing fails, new data wins
+                        existing_registry[endpoint] = new_metadata
+                else:
+                    # New endpoint not in registry - add it
+                    # This shouldn't happen with Full as base, but handles edge cases
+                    existing_registry[endpoint] = new_metadata
+        
+        # Store inspector (always the most recent upload, for metadata/inspection)
+        st.session_state[cls.INSPECTOR_KEY] = inspector
+        st.session_state[cls.CUSTOM_FIELDS_KEY] = inspector.inspect_custom_fields()
+        st.session_state[cls.CHOICE_SETS_KEY] = inspector.inspect_choice_sets()
+        
+        return inspector
+    
+    @classmethod
+    def get_inspector(cls) -> Optional[BackupInspector]:
+        """Get the current backup inspector instance."""
+        cls.initialize()
+        return st.session_state.get(cls.INSPECTOR_KEY)
+    
+    @classmethod
+    def has_backup(cls) -> bool:
+        """Check if a backup is loaded or CSV overrides exist."""
+        cls.initialize()
+        if cls.get_inspector() is not None:
+            return True
+        registry = st.session_state.get(cls.OBJECT_REGISTRY_KEY, {})
+        return bool(registry)
+    
+    @classmethod
+    def get_object_registry(cls) -> Dict[str, Dict[str, Any]]:
+        """
+        Get the complete object registry.
+        
+        Returns:
+            Dictionary mapping endpoints to object metadata
+        """
+        cls.initialize()
+        return st.session_state.get(cls.OBJECT_REGISTRY_KEY, {})
+    
+    @classmethod
+    def get_custom_fields(cls) -> Dict[str, Dict[str, Any]]:
+        """
+        Get all custom field definitions.
+        
+        Returns:
+            Dictionary mapping field names to definitions
+        """
+        cls.initialize()
+        return st.session_state.get(cls.CUSTOM_FIELDS_KEY, {})
+    
+    @classmethod
+    def get_choice_sets(cls) -> Dict[str, Dict[str, Any]]:
+        """
+        Get all custom field choice sets.
+        
+        Returns:
+            Dictionary mapping choice set names to definitions
+        """
+        cls.initialize()
+        return st.session_state.get(cls.CHOICE_SETS_KEY, {})
+    
+    @classmethod
+    def get_field_choices(cls, field_name: str) -> List[str]:
+        """
+        Get choice values for a specific custom field.
+        
+        Args:
+            field_name: Custom field name/key
+            
+        Returns:
+            List of choice values
+        """
+        inspector = cls.get_inspector()
+        if inspector:
+            return inspector.get_custom_field_choices(field_name)
+        
+        # Fallback: check cached choice sets
+        choice_sets = cls.get_choice_sets()
+        for set_data in choice_sets.values():
+            if set_data.get("field_key") == field_name:
+                return set_data.get("choices", [])
+        
+        # Fallback: check cached custom fields
+        custom_fields = cls.get_custom_fields()
+        if field_name in custom_fields:
+            return custom_fields[field_name].get("choices", [])
+        
+        return []
+    
+    @classmethod
+    def get_object_count(cls, endpoint: str) -> int:
+        """
+        Get the count for a specific object type.
+        
+        Args:
+            endpoint: Object endpoint (e.g., "dcim/devices")
+            
+        Returns:
+            Object count
+        """
+        registry = cls.get_object_registry()
+        if endpoint in registry:
+            return registry[endpoint].get("count", 0)
+        return 0
+    
+    @classmethod
+    def remove_csv_entry(cls, endpoint: str):
+        """
+        Remove a specific CSV entry from the object registry and database.
+        
+        Args:
+            endpoint: Object endpoint to remove (e.g., "users/owner-groups")
+        """
+        cls.initialize()
+        
+        registry = st.session_state.get(cls.OBJECT_REGISTRY_KEY, {})
+        
+        # Only remove if it's a CSV entry (not from JSON backup)
+        if endpoint in registry:
+            metadata = registry[endpoint]
+            source_type = metadata.get("source_type", "json")
+            
+            # Only allow removing CSV entries, not JSON backup entries
+            if source_type == "csv" or metadata.get("source", "").lower().endswith((".csv", ".xlsx")):
+                # Remove from session state
+                del registry[endpoint]
+                st.session_state[cls.OBJECT_REGISTRY_KEY] = registry
+                
+                # Also remove from CSV overrides tracking
+                overrides = st.session_state.get(cls.CSV_OVERRIDES_KEY, {})
+                if endpoint in overrides:
+                    del overrides[endpoint]
+                    st.session_state[cls.CSV_OVERRIDES_KEY] = overrides
+                
+                # Remove from database - drop the dynamic table
+                from core.db_manager import DB_PATH
+                import sqlite3
+                try:
+                    # Convert endpoint to table name: "users/owner-groups" -> "dynamic_users_owner_groups"
+                    table_name = "dynamic_" + endpoint.replace("/", "_").replace("-", "_")
+                    
+                    conn = sqlite3.connect(DB_PATH)
+                    cursor = conn.cursor()
+                    cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
+                    conn.commit()
+                    conn.close()
+                except Exception:
+                    pass  # Ignore errors if table doesn't exist
+                
+                return True
+        
+        return False
+    
+    @staticmethod
+    def normalize_endpoint(endpoint: str) -> str:
+        """
+        Normalize endpoint format to handle kebab-case vs snake_case variations.
+        Converts to kebab-case (e.g., ip_addresses -> ip-addresses).
+        """
+        return endpoint.replace('_', '-')
+    
+    @classmethod
+    def add_csv_override(cls, endpoint: str, count: int, source: str, timestamp: str):
+        """
+        Register a CSV override for an object type.
+        Latest upload wins - CSV overrides JSON only if CSV is newer.
+        
+        Args:
+            endpoint: Object endpoint
+            count: Record count from CSV
+            source: CSV source filename
+            timestamp: Upload timestamp
+        """
+        cls.initialize()
+        
+        from datetime import datetime
+        
+        # Normalize endpoint to handle kebab-case vs snake_case
+        normalized_endpoint = cls.normalize_endpoint(endpoint)
+        
+        # Get existing registry
+        registry = st.session_state.get(cls.OBJECT_REGISTRY_KEY, {})
+        
+        # Check if a normalized version already exists in registry
+        existing_key = None
+        for key in registry:
+            if cls.normalize_endpoint(key) == normalized_endpoint:
+                existing_key = key
+                break
+        
+        # Check if endpoint exists and compare timestamps
+        should_override = True
+        if existing_key:
+            existing_timestamp = registry[existing_key].get("timestamp", "")
+            try:
+                csv_dt = datetime.fromisoformat(timestamp.replace("UTC", "").strip())
+                existing_dt = datetime.fromisoformat(existing_timestamp.replace("UTC", "").strip())
+                
+                # Only override if CSV is newer or equal
+                should_override = csv_dt >= existing_dt
+            except:
+                # If timestamp parsing fails, allow override
+                should_override = True
+        
+        if should_override:
+            # If updating existing endpoint, remove old key if format changed
+            if existing_key and existing_key != normalized_endpoint:
+                del registry[existing_key]
+            
+            if existing_key or normalized_endpoint in registry:
+                # Update existing endpoint with CSV data (use normalized format)
+                target_key = normalized_endpoint
+                if target_key not in registry and existing_key:
+                    registry[target_key] = registry.get(existing_key, {})
+                
+                registry[target_key]["count"] = count
+                registry[target_key]["source"] = source
+                registry[target_key]["timestamp"] = timestamp
+                registry[target_key]["source_type"] = "csv"
+                registry[target_key]["endpoint"] = normalized_endpoint
+            else:
+                # Create new entry for CSV-only data
+                inspector = cls.get_inspector()
+                label = inspector._format_label(normalized_endpoint) if inspector else normalized_endpoint.replace("/", " ").replace("-", " ").replace("_", " ").title()
+                
+                registry[normalized_endpoint] = {
+                    "label": label,
+                    "count": count,
+                    "source": source,
+                    "timestamp": timestamp,
+                    "endpoint": normalized_endpoint,
+                    "sample_keys": [],
+                    "source_type": "csv"
+                }
+            
+            st.session_state[cls.OBJECT_REGISTRY_KEY] = registry
+            
+            # Also update CSV overrides tracking
+            overrides = st.session_state.get(cls.CSV_OVERRIDES_KEY, {})
+            overrides[normalized_endpoint] = {
+                "count": count,
+                "source": source,
+                "timestamp": timestamp,
+                "source_type": "csv"
+            }
+            st.session_state[cls.CSV_OVERRIDES_KEY] = overrides
+    
+    @classmethod
+    def generate_backup_summary(cls) -> str:
+        """
+        Generate formatted backup contents summary.
+        
+        Returns:
+            Markdown-formatted summary
+        """
+        inspector = cls.get_inspector()
+        if inspector:
+            return inspector.generate_backup_contents_summary()
+        return "No backup loaded."
+    
+    @classmethod
+    def generate_choice_sets_summary(cls) -> str:
+        """
+        Generate formatted choice sets summary.
+        
+        Returns:
+            Markdown-formatted summary
+        """
+        inspector = cls.get_inspector()
+        if inspector:
+            return inspector.generate_choice_sets_summary()
+        return "No choice sets found."
+    
+    @classmethod
+    def clear(cls):
+        """Clear all backup state."""
+        cls.initialize()
+        st.session_state[cls.INSPECTOR_KEY] = None
+        st.session_state[cls.OBJECT_REGISTRY_KEY] = {}
+        st.session_state[cls.CUSTOM_FIELDS_KEY] = {}
+        st.session_state[cls.CHOICE_SETS_KEY] = {}
+        st.session_state[cls.CSV_OVERRIDES_KEY] = {}
+    
+    @classmethod
+    def clear_csv_only(cls):
+        """Clear only CSV entries, preserving JSON backup data. Also removes from database."""
+        cls.initialize()
+        
+        registry = st.session_state.get(cls.OBJECT_REGISTRY_KEY, {})
+        
+        # Remove only CSV entries
+        csv_endpoints = [
+            endpoint for endpoint, metadata in registry.items()
+            if metadata.get("source_type") == "csv" or 
+               metadata.get("source", "").lower().endswith((".csv", ".xlsx"))
+        ]
+        
+        # Remove from session state
+        for endpoint in csv_endpoints:
+            del registry[endpoint]
+        
+        st.session_state[cls.OBJECT_REGISTRY_KEY] = registry
+        st.session_state[cls.CSV_OVERRIDES_KEY] = {}
+        
+        # Remove from database - drop all dynamic_* tables
+        from core.db_manager import DB_PATH
+        import sqlite3
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            
+            # Get all dynamic_* tables
+            cursor.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name LIKE 'dynamic_%'
+            """)
+            dynamic_tables = cursor.fetchall()
+            
+            # Drop each dynamic table
+            for (table_name,) in dynamic_tables:
+                cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
+            
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass  # Ignore errors
+        
+        return len(csv_endpoints)
+    
+    @classmethod
+    def get_objects_by_type(cls, endpoint: str) -> List[Dict[str, Any]]:
+        """
+        Get actual object data for a specific endpoint.
+        
+        Args:
+            endpoint: Object endpoint (e.g., "dcim/devices")
+            
+        Returns:
+            List of objects
+        """
+        inspector = cls.get_inspector()
+        if inspector:
+            return inspector.get_object_data(endpoint)
+        return []
+    
+    @classmethod
+    def get_custom_field_for_object_type(cls, object_type: str) -> Dict[str, Dict[str, Any]]:
+        """
+        Get all custom fields applicable to a specific object type.
+        
+        Args:
+            object_type: Object type (e.g., "dcim.device", "virtualization.virtualmachine")
+            
+        Returns:
+            Dictionary of applicable custom fields
+        """
+        all_fields = cls.get_custom_fields()
+        applicable = {}
+        
+        for field_name, field_def in all_fields.items():
+            object_types = field_def.get("object_types", [])
+            if not object_types or object_type in object_types:
+                applicable[field_name] = field_def
+        
+        return applicable
