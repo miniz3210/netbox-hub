@@ -338,14 +338,20 @@ def generate_netbox_vlans_csv(site_name: str, rows: List[Dict[str, Any]]) -> str
         lines.append(f"{vid},\"{vname}\",active,\"{clean}\",\"{clean} VLAN Group\",\"{desc}\",\"{role_val}\"")
     return "\n".join(lines)
 
-def generate_netbox_prefixes_csv(site_name: str, scope_id: str, supernet_str: str, rows: List[Dict[str, Any]]) -> str:
+def generate_netbox_prefixes_csv(
+    site_name: str,
+    scope_id: str,
+    supernet_str: str,
+    rows: List[Dict[str, Any]],
+    include_site_subnet: bool = True,
+) -> str:
     clean = format_branch_display(site_name)
     clean_supernet = sanitize_cidr(supernet_str)
     scope_val = scope_id if scope_id else "<SCOPE_ID>"
     lines = ["prefix,status,scope_type,scope_id,vlan_group,vlan,role,description"]
     
     # 1. Top-Level Supernet Container
-    if clean_supernet and "/" in clean_supernet:
+    if include_site_subnet and clean_supernet and "/" in clean_supernet:
         try:
             sup_net = ipaddress.ip_network(clean_supernet, strict=False)
             bound_str = calculate_subnet_boundary_str(sup_net)
