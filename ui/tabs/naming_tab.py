@@ -986,8 +986,30 @@ def _render_token_pattern(pattern, variables, key, case_mode):
             )
         values[token] = value.strip()
 
-    rendered = _TOKEN_RE.sub(lambda match: values.get(match.group(1), ""), pattern)
+    rendered = _TOKEN_RE.sub(
+        lambda match: values.get(match.group(1)) or match.group(0),
+        pattern,
+    )
     return apply_case(rendered, case_mode)
+
+
+def _render_pattern_card(patterns, variables, key, case_mode, title=None, widget_suffix=""):
+    """Render a configured pattern with only the tokens it actually uses."""
+    pattern = patterns.get(key, "")
+    options = _pattern_options(pattern)
+    if not options:
+        st.warning(f"No pattern configured for `{key}`.")
+        return ""
+    selected = options[0]
+    if len(options) > 1:
+        selected = st.selectbox("Pattern Variant", options, key=f"naming_variant_{key}_{widget_suffix}")
+    if title:
+        st.markdown(f"#### {title}")
+    return _render_token_pattern(selected, variables, f"{key}_{widget_suffix}", case_mode)
+
+
+def _render_reference(category_key, label):
+    display_reference_box(category_key, "Configured pattern output examples", label)
 
 
 def render_naming_tab(active_model):
@@ -1011,33 +1033,63 @@ def render_naming_tab(active_model):
 
     patterns, variables = _structured_naming_rules(raw_rules)
     if "1. Network" in naming_cat:
-        keys = ["branch_switch", "branch_ap", "branch_security", "switch_uplink_desc", "switch_uplink_local", "switch_uplink_remote",
-                "switch_lag_member", "switch_port_channel", "switch_access_desc", "firewall_interface"]
-        category_key, asset_type = "device", "Network/Security Asset"
+        st.markdown("##### Location & Site Code Assistant")
+        loc_col, code_col = st.columns([2, 1])
+        with loc_col:
+            location = st.text_input("Input Location / City", placeholder="e.g. Sydney, London, Dallas", key="dynamic_location")
+        with code_col:
+            suggested = compute_suggested_site_code(location) if location else ""
+            st.info(f"Suggested Site Code: **`{suggested or '----'}`**")
+        st.markdown("---")
+        left, right = st.columns(2)
+        with left:
+            st.markdown("#### Universal Device Hostname Generator")
+            device_keys = [key for key in ("branch_switch", "branch_ap", "branch_security") if patterns.get(key)]
+            device_key = st.selectbox("Device Type / Pattern", device_keys, format_func=lambda k: k.replace("_", " ").title(), key="dynamic_device_pattern")
+            device_output = _render_pattern_card(patterns, variables, device_key, case_mode, widget_suffix="device")
+            st.caption("Generated Device Hostname:")
+            st.code(device_output, language="text")
+            _render_reference("device", "Switch")
+            if st.button("AI Verify / Suggest Device", key="ai_dynamic_device"):
+                st.info(verify_and_suggest_with_ai(device_output, active_model, "Network/Security Device", "device"))
+        with right:
+            st.markdown("#### Switch & Firewall Interface Formatter")
+            interface_keys = [key for key in ("switch_uplink_local", "switch_uplink_desc", "switch_lag_member", "switch_port_channel", "switch_access_desc", "firewall_interface") if patterns.get(key)]
+            interface_key = st.radio("Interface Type", interface_keys, format_func=lambda k: k.replace("_", " ").title(), key="dynamic_interface_pattern")
+            if interface_key in ("switch_uplink_local", "switch_uplink_desc"):
+                local_output = _render_pattern_card(patterns, variables, interface_key, case_mode, widget_suffix="local")
+                remote_key = "switch_uplink_remote" if patterns.get("switch_uplink_remote") else interface_key
+                remote_output = _render_pattern_card(patterns, variables, remote_key, case_mode, widget_suffix="remote")
+                st.caption("On Local Device (LOCAL):")
+                st.code(local_output, language="text")
+                st.caption("On Remote Device (REMOTE):")
+                st.code(remote_output, language="text")
+            else:
+                output = _render_pattern_card(patterns, variables, interface_key, case_mode, widget_suffix="interface")
+                st.caption("Generated Interface Description:")
+                st.code(output, language="text")
+            _render_reference("device", "Interface")
     elif "2. Hosts" in naming_cat:
-        keys = ["esxi_host", "vm_host"]
-        category_key, asset_type = "hypervisor", "Host or Virtual Machine"
+        left, right = st.columns(2)
+        with left:
+            output = _render_pattern_card(patterns, variables, "esxi_host", case_mode, "ESXi Hypervisor Hostname", "esxi")
+            st.code(output, language="text")
+            _render_reference("hypervisor", "Hypervisor")
+        with right:
+            output = _render_pattern_card(patterns, variables, "vm_host", case_mode, "Virtual Machine Hostname", "vm")
+            st.code(output, language="text")
+            _render_reference("vm", "Virtual Machine")
     else:
-        keys = ["esxi_uplink", "esxi_portgroup", "esxi_portgroup_name", "esxi_portgroup_desc", "esxi_vmkernel", "esxi_vmkernel_name", "esxi_vmkernel_desc"]
-        category_key, asset_type = "device", "ESXi Network Description"
-
-    configured = [(key, patterns.get(key)) for key in keys if patterns.get(key)]
-    if not configured:
-        st.warning("No naming patterns are configured for this asset class.")
-        return
-
-    labels = {key: key.replace("_", " ").title() for key, _ in configured}
-    selected_key = st.selectbox("Naming Pattern", [key for key, _ in configured],
-                                format_func=lambda key: labels[key], key="naming_pattern_selector")
-    options = _pattern_options(patterns[selected_key])
-    selected_pattern = st.selectbox("Pattern Variant", options, key=f"naming_variant_{selected_key}") if len(options) > 1 else options[0]
-    generated = _render_token_pattern(selected_pattern, variables, selected_key, case_mode)
-
-    st.caption("Generated Name / Description:")
-    st.code(generated, language="text")
-    if st.button("🤖 AI Verify / Suggest", key="ai_verify_generic_naming"):
-        with st.spinner("Auditing against NetBox Data & standards..."):
-            st.info(verify_and_suggest_with_ai(
-                generated, active_model, asset_type=f"{asset_type}: {labels[selected_key]}",
-                category_key=category_key, site_filter="",
-            ))
+        auto_correct = st.checkbox("Auto-Correct VMware Syntax", value=True, key="dynamic_vmware_autocorrect")
+        columns = st.columns(3)
+        with columns[0]:
+            output = _render_pattern_card(patterns, variables, "esxi_uplink", case_mode, "Physical Uplink", "uplink")
+            st.code(output, language="text")
+        with columns[1]:
+            _render_pattern_card(patterns, variables, "esxi_portgroup_name", case_mode, "Port Group Name", "pg_name")
+            output = _render_pattern_card(patterns, variables, "esxi_portgroup_desc", case_mode, "Port Group Description", "pg_desc")
+            st.code(output, language="text")
+        with columns[2]:
+            _render_pattern_card(patterns, variables, "esxi_vmkernel_name", case_mode, "VMkernel Name", "vmk_name")
+            output = _render_pattern_card(patterns, variables, "esxi_vmkernel_desc", case_mode, "VMkernel Description", "vmk_desc")
+            st.code(output, language="text")

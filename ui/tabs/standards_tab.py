@@ -72,7 +72,7 @@ def _editor_model(raw):
         if isinstance(values, dict):
             for key, value in values.items():
                 if key in PATTERN_KEYS:
-                model["patterns"][key] = str(value)
+                    model["patterns"][key] = str(value)
                 model["naming_patterns"][key] = str(value)
     return model
 
@@ -363,9 +363,11 @@ def render_standards_tab(active_model):
                     # Force immediate rerun
                     st.rerun()
         '''
-                except Exception as e:
-                    st.error(f"❌ Failed to save: {str(e)}")
-            
+                if False:
+                    st.error("Legacy standards form is disabled.")
+
+            if False:
+                reset = False
             if reset:
                 from config.naming_rules import DEFAULT_RULES
                 save_naming_rules(DEFAULT_RULES, source="Reset to Defaults")
