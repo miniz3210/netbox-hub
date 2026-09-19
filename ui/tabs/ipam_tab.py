@@ -670,19 +670,6 @@ def render_ipam_tab(active_model: str):
     csv_site = generate_netbox_site_csv(display_site)
     csv_group = generate_netbox_vlan_group_csv(display_site, scope_id)
     csv_vlans = generate_netbox_vlans_csv(display_site, computed_rows)
-    include_site_subnet = st.checkbox(
-        "Include site subnet in Prefixes CSV",
-        value=True,
-        help="Add the top-level site supernet, such as 10.27.0.0/20, to the exported prefixes.",
-        key="ipam_include_site_subnet",
-    )
-    csv_prefixes = generate_netbox_prefixes_csv(
-        display_site,
-        scope_id,
-        supernet_in,
-        computed_rows,
-        include_site_subnet=include_site_subnet,
-    )
 
     c1, c2 = st.columns(2)
     with c1:
@@ -696,5 +683,22 @@ def render_ipam_tab(active_model: str):
         st.markdown("**2. Import VLAN Group (`ipam.vlangroup`)**")
         st.code(csv_group, language="csv")
 
-        st.markdown("**4. Import Prefixes (`ipam.prefix`)**")
+        prefix_title, prefix_option = st.columns([2.2, 1.8])
+        with prefix_title:
+            st.markdown("**4. Import Prefixes (`ipam.prefix`)**")
+        with prefix_option:
+            st.checkbox(
+                "Include site subnet in Prefixes CSV",
+                value=True,
+                help="Add the top-level site supernet.",
+                key="ipam_include_site_subnet",
+            )
+        include_site_subnet = st.session_state.get("ipam_include_site_subnet", True)
+        csv_prefixes = generate_netbox_prefixes_csv(
+            display_site,
+            scope_id,
+            supernet_in,
+            computed_rows,
+            include_site_subnet=include_site_subnet,
+        )
         st.code(csv_prefixes, language="csv")
