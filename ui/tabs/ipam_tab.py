@@ -141,6 +141,13 @@ def handle_ipam_db_reset():
         del st.session_state["ipam_super_in"]
     st.toast("🗑️ Database Cleared. Restored default templates.", icon="🧹")
 
+
+def build_vlan_description(site_name: str, role: str, vlan_id) -> str:
+    """Build the editor's default VLAN description from current row values."""
+    branch = format_branch_display(site_name) or "Site"
+    clean_role = str(role or "Data").strip()
+    return f"{branch} {clean_role} -- VLAN {vlan_id}" if vlan_id else f"{branch} {clean_role}"
+
 def load_ipam_records_from_db(site_name: str) -> bool:
     """Load IPAM allocation rows for a site straight from the local database.
 
@@ -555,10 +562,17 @@ def render_ipam_tab(active_model: str):
     for row_idx_str, changes in edited_cells.items():
         row_idx = int(row_idx_str)
         if row_idx < len(raw_rows):
+            # Role and VLAN ID edits must use the current site and row values.
+            # Looking up by role alone can return a stale description from another
+            # site (for example, "Auckland Management -- VLAN 5").
             if "Role" in changes and "VLAN Name" not in changes:
                 changes["VLAN Name"] = changes["Role"]
-                if "VLAN Description" not in changes:
-                    changes["VLAN Description"] = lookup_role_description(changes["Role"])
+            if ("Role" in changes or "VLAN ID" in changes) and "VLAN Description" not in changes:
+                next_role = changes.get("Role", raw_rows[row_idx].get("Role", ""))
+                next_vlan_id = changes.get("VLAN ID", raw_rows[row_idx].get("VLAN ID"))
+                changes["VLAN Description"] = build_vlan_description(
+                    site_name, next_role, next_vlan_id
+                )
             # Apply Title Case formatting to Role and Description
             if "Role" in changes:
                 changes["Role"] = to_title_case_preserve_acronyms(changes["Role"])
