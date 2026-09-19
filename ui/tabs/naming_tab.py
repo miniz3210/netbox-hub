@@ -993,6 +993,34 @@ def _render_token_pattern(pattern, variables, key, case_mode):
     return apply_case(rendered, case_mode)
 
 
+def _render_shared_token_inputs(patterns, variables, keys, widget_key, case_mode):
+    """Render one deduplicated token form and return values plus output strings."""
+    tokens = []
+    for key in keys:
+        for token in _TOKEN_RE.findall(patterns.get(key, "")):
+            if token not in tokens:
+                tokens.append(token)
+    values = {}
+    columns = st.columns(2) if tokens else []
+    for index, token in enumerate(tokens):
+        metadata = variables.get(token, {}) if isinstance(variables, dict) else {}
+        metadata = metadata if isinstance(metadata, dict) else {"label": str(metadata)}
+        with columns[index % 2] if columns else st.container():
+            values[token] = st.text_input(
+                str(metadata.get("label", token.replace("_", " "))),
+                placeholder=str(metadata.get("placeholder", "")),
+                key=f"naming_shared_{widget_key}_{token}",
+            ).strip()
+    outputs = {}
+    for key in keys:
+        pattern = patterns.get(key, "")
+        outputs[key] = apply_case(
+            _TOKEN_RE.sub(lambda match: values.get(match.group(1)) or match.group(0), pattern),
+            case_mode,
+        )
+    return values, outputs
+
+
 def _render_pattern_card(patterns, variables, key, case_mode, title=None, widget_suffix=""):
     """Render a configured pattern with only the tokens it actually uses."""
     pattern = patterns.get(key, "")
@@ -1057,9 +1085,17 @@ def render_naming_tab(active_model):
             interface_keys = [key for key in ("switch_uplink_local", "switch_uplink_desc", "switch_lag_member", "switch_port_channel", "switch_access_desc", "firewall_interface") if patterns.get(key)]
             interface_key = st.radio("Interface Type", interface_keys, format_func=lambda k: k.replace("_", " ").title(), key="dynamic_interface_pattern")
             if interface_key in ("switch_uplink_local", "switch_uplink_desc"):
-                local_output = _render_pattern_card(patterns, variables, interface_key, case_mode, widget_suffix="local")
-                remote_key = "switch_uplink_remote" if patterns.get("switch_uplink_remote") else interface_key
-                remote_output = _render_pattern_card(patterns, variables, remote_key, case_mode, widget_suffix="remote")
+                local_key = "switch_uplink_local" if patterns.get("switch_uplink_local") else "switch_uplink_desc"
+                remote_pattern = patterns.get("switch_uplink_remote")
+                if not remote_pattern:
+                    remote_pattern = re.sub(r"Remote", "Local", patterns.get(local_key, ""), flags=re.IGNORECASE)
+                shared_patterns = dict(patterns)
+                shared_patterns["switch_uplink_remote"] = remote_pattern
+                _, uplink_outputs = _render_shared_token_inputs(
+                    shared_patterns, variables, [local_key, "switch_uplink_remote"], "uplink", case_mode
+                )
+                local_output = uplink_outputs[local_key]
+                remote_output = uplink_outputs["switch_uplink_remote"]
                 st.caption("On Local Device (LOCAL):")
                 st.code(local_output, language="text")
                 st.caption("On Remote Device (REMOTE):")

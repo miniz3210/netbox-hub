@@ -363,19 +363,6 @@ def render_standards_tab(active_model):
                     # Force immediate rerun
                     st.rerun()
         '''
-                if False:
-                    st.error("Legacy standards form is disabled.")
-
-            if False:
-                reset = False
-            if reset:
-                from config.naming_rules import DEFAULT_RULES
-                save_naming_rules(DEFAULT_RULES, source="Reset to Defaults")
-                st.session_state["naming_rules"] = DEFAULT_RULES.copy()
-                # Set flag for success message
-                st.session_state["standards_reset"] = True
-                # Force immediate rerun
-                st.rerun()
     
     # Tab 2: View Full Prompt (Read-Only)
     with tab2:
