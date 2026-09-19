@@ -1,0 +1,13 @@
+streamlit
+requests
+pandas
+openpyxl
+Flask
+flask-cors
+waitress
+python-dotenv
+tornado
+pyyaml
+# google-genai
+# groq
+# openai

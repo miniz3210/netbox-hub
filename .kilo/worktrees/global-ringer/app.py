@@ -1,0 +1,162 @@
+"""
+NetBox Universal Library Hub - Main Application
+Streamlit UI definition.
+Version 2.4.0
+"""
+
+import logging
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+import streamlit as st
+from dotenv import load_dotenv
+
+from config.constants import APP_VERSION, APP_NAME
+from core.catalog import get_repo_catalog
+from core.db_manager import init_db
+from core.exceptions import GitHubCatalogError
+from core.session_manager import SessionStateManager as SSM
+from ui.components import render_sidebar
+
+st.set_page_config(
+    page_title=f"{APP_NAME} v{APP_VERSION}",
+    page_icon="⚡",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger("netbox-hub")
+
+init_db()
+
+# Load naming rules on startup using Session State Manager
+if not SSM.get_naming_rules_loaded():
+    from config.naming_rules import load_naming_rules
+    SSM.set_naming_rules(load_naming_rules())
+    SSM.set_naming_rules_loaded(True)
+
+active_model = render_sidebar()
+
+# Lazy-load catalog inside session state so it doesn't block the UI on first paint.
+catalog = SSM.get_catalog()
+if catalog is None:
+    try:
+        with st.spinner("Indexing NetBox devicetype-library from GitHub..."):
+            SSM.set_catalog(get_repo_catalog())
+    except GitHubCatalogError as exc:
+        logger.exception("GitHub catalog failed to load")
+        SSM.set_catalog(None)
+        st.error(f"❌ Failed to load official GitHub catalog: {exc}")
+    
+    catalog = SSM.get_catalog()
+
+
+def _device_tab(catalog, active_model):
+    from ui.tabs.device_tab import render_device_tab as _fn
+
+    _fn(catalog, active_model)
+
+
+def _module_tab(catalog, active_model):
+    from ui.tabs.module_tab import render_module_tab as _fn
+
+    _fn(catalog, active_model)
+
+
+def _rack_tab(catalog, active_model):
+    from ui.tabs.rack_tab import render_rack_tab as _fn
+
+    _fn(catalog, active_model)
+
+
+def _image_tab(catalog, _active_model):
+    from ui.tabs.image_tab import render_image_tab as _fn
+
+    _fn(catalog)
+
+
+def _batch_tab(catalog, active_model):
+    from ui.tabs.batch_tab import render_batch_tab as _fn
+
+    _fn(catalog, active_model)
+
+
+def _ipam_tab(active_model):
+    from ui.tabs.ipam_tab import render_ipam_tab as _fn
+
+    _fn(active_model)
+
+
+def _naming_tab(active_model):
+    from ui.tabs.naming_tab import render_naming_tab as _fn
+
+    _fn(active_model)
+
+
+def _standards_tab(active_model):
+    from ui.tabs.standards_tab import render_standards_tab as _fn
+
+    _fn(active_model)
+
+
+def _azure_tab(active_model):
+    from ui.tabs.azure_tab import render_azure_tab as _fn
+
+    _fn(active_model)
+
+
+# Tab registry: (label, renderer, requires_catalog)
+TABS: List[Tuple[str, Callable, bool]] = [
+    ("🖥️ Device Types", _device_tab, True),
+    ("🧩 Module Types", _module_tab, True),
+    ("🗄️ Rack Types", _rack_tab, True),
+    ("🎨 Images", _image_tab, True),
+    ("📦 Batch", _batch_tab, True),
+    ("🌐 IPAM", _ipam_tab, False),
+    ("🏷️ Naming", _naming_tab, False),
+    ("☁️ Azure VMs", _azure_tab, False),
+    ("📖 Standards", _standards_tab, False),
+]
+
+
+def _render_tab(label: str, renderer: Callable, requires_catalog: bool) -> None:
+    """Render a single tab with error handling and catalog guard."""
+    try:
+        if requires_catalog:
+            if catalog is None:
+                st.info("🔒 This tab requires the GitHub catalog. Please retry later.")
+                return
+            renderer(catalog, active_model)
+        else:
+            renderer(active_model)
+    except Exception as exc:
+        logger.exception("Tab '%s' crashed", label)
+        st.error(f"❌ Tab '{label}' failed: {exc}")
+
+
+# Initialize tab state in session
+if "active_tab_index" not in st.session_state:
+    st.session_state.active_tab_index = 0
+
+# Use radio buttons for tab selection to preserve state across reruns
+tab_labels = [label for label, _, _ in TABS]
+selected_tab = st.radio(
+    "Select Tab",
+    options=tab_labels,
+    index=st.session_state.active_tab_index,
+    horizontal=True,
+    key="tab_selector",
+    label_visibility="collapsed"
+)
+
+# Update active tab index
+st.session_state.active_tab_index = tab_labels.index(selected_tab)
+
+# Render the selected tab
+selected_label, selected_renderer, selected_needs_catalog = TABS[st.session_state.active_tab_index]
+_render_tab(selected_label, selected_renderer, selected_needs_catalog)

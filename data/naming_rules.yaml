@@ -1,0 +1,16 @@
+{
+  "branch_switch": "SW<Country><State><Site><Zone><Seq>-<StackID> / VS<Country><State><Site><Seq>-<StackID>",
+  "branch_ap": "WAP<Country><State><Site><Seq>",
+  "branch_security": "FW<Country><State><Site><Vendor><Seq> / ION<Country><State><Site><Seq>",
+  "switch_uplink_desc": "Uplink_to_<Remote_Device>_<Remote_Port_Short>",
+  "switch_lag_member": "LACP_to_<Remote_Device>_<Remote_Port_Short>",
+  "switch_port_channel": "<Local_Po_ID>_to_<Remote_Device>",
+  "switch_access_desc": "<VLAN_Name> - <Device>_<Port>",
+  "firewall_interface": "<Role_Zone>_<VLAN_ID>",
+  "esxi_host": "<site><role/esx><seq>.<domain> (Valid domains: ${CORP_DOMAIN_IT} for IT/Corp, ${CORP_DOMAIN_OT_PRIMARY} or ${CORP_DOMAIN_OT_SECONDARY} for OT/Industrial, ${CORP_DOMAIN_LOCAL} for Branch/Local, or shortname without domain)",
+  "vm_host": "<Country><Site><Role><Seq> (e.g. AURFLWOTAPP01, AUGLOSFS01) or <Site><Role><Seq> (e.g. PWSAFS001, ESCPDC01, NYCCVI01)",
+  "esxi_uplink": "<vmnic> - <vSwitch> <Purpose> <Status>",
+  "esxi_portgroup": "<PortGroup> [<Active_vmnics> Active / <Standby_vmnics> Standby]",
+  "esxi_vmkernel": "<Purpose> Network - <vSwitch> (<Active_vmnics> Active / <Standby_vmnics> Standby)",
+  "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)"
+}
