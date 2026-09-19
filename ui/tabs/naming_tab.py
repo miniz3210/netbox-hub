@@ -1,3 +1,4 @@
+import re
 import streamlit as st
 from utils.formatters import (
     compute_suggested_site_code, 
@@ -252,7 +253,7 @@ def render_compact_toolbar(active_model):
 
     return case_mode
 
-def render_naming_tab(active_model):
+def _legacy_render_naming_tab(active_model):
     st.subheader("🏷️ Standardized Infrastructure Naming Generator")
     st.caption("Generate and validate standardized hostnames for network devices, servers, VMs, and ESXi configurations using AI-powered naming conventions aligned with your NetBox inventory data.")
     
@@ -931,3 +932,112 @@ def render_naming_tab(active_model):
             st.code(clean_vmk_name if clean_vmk_name else "<vmk>", language="text")
             st.caption("Generated VMkernel Description:")
             st.code(fallback_disp, language="text")
+
+
+_TOKEN_RE = re.compile(r"<([^<>]+)>")
+
+
+def _structured_naming_rules(raw_rules):
+    """Return patterns and variable metadata from structured or legacy rules."""
+    if not isinstance(raw_rules, dict):
+        return {}, {}
+    patterns = raw_rules.get("naming_patterns") or raw_rules.get("patterns")
+    variables = raw_rules.get("pattern_variables") or {}
+    if isinstance(patterns, dict) and any(isinstance(value, dict) for value in patterns.values()):
+        patterns = {
+            pattern_key: pattern_value
+            for group in patterns.values() if isinstance(group, dict)
+            for pattern_key, pattern_value in group.items()
+        }
+    if not isinstance(patterns, dict):
+        # load_naming_rules currently returns the legacy flat mapping.
+        patterns = {
+            key: value for key, value in raw_rules.items()
+            if isinstance(value, str)
+        }
+    return patterns, variables if isinstance(variables, dict) else {}
+
+
+def _pattern_options(pattern):
+    if not isinstance(pattern, str):
+        return []
+    cleaned = re.sub(r"\s*\([^)]*\)", "", pattern).strip()
+    return [part.strip() for part in re.split(r"\s+(?:or|/|\|)\s+", cleaned) if part.strip()]
+
+
+def _render_token_pattern(pattern, variables, key, case_mode):
+    """Render one configured pattern; empty values intentionally retain literals."""
+    tokens = list(dict.fromkeys(_TOKEN_RE.findall(pattern)))
+    values = {}
+    columns = st.columns(2) if tokens else []
+    for index, token in enumerate(tokens):
+        metadata = variables.get(token, {}) if isinstance(variables, dict) else {}
+        if isinstance(metadata, str):
+            metadata = {"label": metadata}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        label = metadata.get("label", token.replace("_", " "))
+        default = str(metadata.get("default", ""))
+        placeholder = metadata.get("placeholder", "")
+        with columns[index % 2] if columns else st.container():
+            value = st.text_input(
+                str(label), value=default, placeholder=str(placeholder),
+                key=f"naming_token_{key}_{index}_{token}"
+            )
+        values[token] = value.strip()
+
+    rendered = _TOKEN_RE.sub(lambda match: values.get(match.group(1), ""), pattern)
+    return apply_case(rendered, case_mode)
+
+
+def render_naming_tab(active_model):
+    """Render all naming asset classes from configured tokenized patterns."""
+    st.subheader("🏷️ Standardized Infrastructure Naming Generator")
+    st.caption("Generate and validate standardized names from the naming rules configured in Standards.")
+
+    from config.naming_rules import load_naming_rules
+    raw_rules = load_naming_rules()
+    st.session_state["naming_rules"] = raw_rules
+    case_mode = render_compact_toolbar(active_model)
+    naming_cat = st.radio(
+        "Select Asset Class",
+        [
+            "1. Network & Security Devices (Switches, APs, Firewalls, Routers)",
+            "2. Hosts & Virtual Machines (ESXi & VMs)",
+            "3. ESXi Network Descriptions (vmnic, PortGroup, VMkernel)",
+        ], horizontal=True, key="naming_asset_class",
+    )
+    st.markdown("---")
+
+    patterns, variables = _structured_naming_rules(raw_rules)
+    if "1. Network" in naming_cat:
+        keys = ["branch_switch", "branch_ap", "branch_security", "switch_uplink_desc", "switch_uplink_local", "switch_uplink_remote",
+                "switch_lag_member", "switch_port_channel", "switch_access_desc", "firewall_interface"]
+        category_key, asset_type = "device", "Network/Security Asset"
+    elif "2. Hosts" in naming_cat:
+        keys = ["esxi_host", "vm_host"]
+        category_key, asset_type = "hypervisor", "Host or Virtual Machine"
+    else:
+        keys = ["esxi_uplink", "esxi_portgroup", "esxi_portgroup_name", "esxi_portgroup_desc", "esxi_vmkernel", "esxi_vmkernel_name", "esxi_vmkernel_desc"]
+        category_key, asset_type = "device", "ESXi Network Description"
+
+    configured = [(key, patterns.get(key)) for key in keys if patterns.get(key)]
+    if not configured:
+        st.warning("No naming patterns are configured for this asset class.")
+        return
+
+    labels = {key: key.replace("_", " ").title() for key, _ in configured}
+    selected_key = st.selectbox("Naming Pattern", [key for key, _ in configured],
+                                format_func=lambda key: labels[key], key="naming_pattern_selector")
+    options = _pattern_options(patterns[selected_key])
+    selected_pattern = st.selectbox("Pattern Variant", options, key=f"naming_variant_{selected_key}") if len(options) > 1 else options[0]
+    generated = _render_token_pattern(selected_pattern, variables, selected_key, case_mode)
+
+    st.caption("Generated Name / Description:")
+    st.code(generated, language="text")
+    if st.button("🤖 AI Verify / Suggest", key="ai_verify_generic_naming"):
+        with st.spinner("Auditing against NetBox Data & standards..."):
+            st.info(verify_and_suggest_with_ai(
+                generated, active_model, asset_type=f"{asset_type}: {labels[selected_key]}",
+                category_key=category_key, site_filter="",
+            ))

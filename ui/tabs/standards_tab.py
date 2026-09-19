@@ -1,9 +1,189 @@
+import re
 import streamlit as st
 from config.naming_rules import (
     load_naming_rules, save_naming_rules, export_rules_as_prompt,
-    load_history, restore_from_history, clear_history
+    load_history, restore_from_history, clear_history, CATEGORIES,
+    PATTERN_KEYS, DEFAULT_PATTERN_VARIABLES, DEFAULT_RULES
 )
 from core.naming_engine import parse_prompt_to_rules
+
+TOKEN_RE = re.compile(r"<([A-Za-z][A-Za-z0-9_]*)>")
+
+
+def _records(value):
+    """Convert data_editor output to records across Streamlit versions."""
+    if hasattr(value, "to_dict"):
+        return value.to_dict("records")
+    return value or []
+
+
+def _structured_rules(raw):
+    """Return the editor model while accepting legacy flat rules during migration."""
+    raw = raw if isinstance(raw, dict) else {}
+    patterns = raw.get("naming_patterns") if isinstance(raw.get("naming_patterns"), dict) else raw.get("patterns")
+    patterns = patterns if isinstance(patterns, dict) else {}
+    if not patterns:
+        patterns = {key: raw.get(key, DEFAULT_RULES.get(key, "")) for key in PATTERN_KEYS}
+    patterns = {key: str(patterns.get(key, "")) for key in PATTERN_KEYS}
+
+    variables = raw.get("pattern_variables")
+    if isinstance(variables, dict):
+        if all(isinstance(value, dict) and "label" in value for value in variables.values()):
+            grouped = {}
+            for token, metadata in variables.items():
+                grouped.setdefault(str(metadata.get("category", "custom")), []).append(str(token))
+            variables = grouped
+        else:
+            variables = {str(category): [str(token) for token in values]
+                         for category, values in variables.items() if isinstance(values, (list, tuple))}
+    else:
+        variables = {category: list(tokens) for category, tokens in DEFAULT_PATTERN_VARIABLES.items()}
+
+    categories = {category: {} for category in CATEGORIES}
+    stored_categories = raw.get("categories")
+    if isinstance(stored_categories, dict):
+        for category, values in stored_categories.items():
+            if category in categories and isinstance(values, dict):
+                categories[category].update({str(key): str(value) for key, value in values.items()})
+    for key, value in patterns.items():
+        category = _PATTERN_CATEGORY.get(key, "netbox_hardware")
+        categories[category].setdefault(key, value)
+    metadata = raw.get("pattern_variables") if isinstance(raw.get("pattern_variables"), dict) else {}
+    if not all(isinstance(value, dict) for value in metadata.values()):
+        metadata = {}
+    return {"categories": categories, "pattern_variables": variables,
+            "variable_metadata": metadata, "naming_patterns": patterns, "patterns": patterns}
+
+
+_PATTERN_CATEGORY = {
+    "branch_switch": "network_security", "branch_ap": "network_security", "branch_security": "network_security",
+    "switch_uplink_desc": "interface_descriptions", "switch_uplink_local": "interface_descriptions", "switch_uplink_remote": "interface_descriptions", "switch_lag_member": "interface_descriptions",
+    "switch_port_channel": "interface_descriptions", "switch_access_desc": "interface_descriptions",
+    "firewall_interface": "interface_descriptions", "esxi_host": "hypervisors_virtual_machines",
+    "vm_host": "hypervisors_virtual_machines", "esxi_uplink": "esxi_network",
+    "esxi_portgroup": "esxi_network", "esxi_portgroup_name": "esxi_network", "esxi_portgroup_desc": "esxi_network", "esxi_vmkernel": "esxi_network", "esxi_vmkernel_name": "esxi_network", "esxi_vmkernel_desc": "esxi_network", "netbox_server_yaml": "netbox_hardware",
+}
+
+
+def _editor_model(raw):
+    model = _structured_rules(raw)
+    # Flatten category values into the canonical pattern map for editable rows.
+    for category, values in model["categories"].items():
+        if isinstance(values, dict):
+            for key, value in values.items():
+                if key in PATTERN_KEYS:
+                model["patterns"][key] = str(value)
+                model["naming_patterns"][key] = str(value)
+    return model
+
+
+def _token_warnings(model):
+    known = set(model.get("variable_metadata", {})) or {token for values in model["pattern_variables"].values() for token in values}
+    warnings = {}
+    for key, pattern in model["patterns"].items():
+        undefined = sorted(set(TOKEN_RE.findall(pattern)) - known)
+        if undefined:
+            warnings[key] = undefined
+    return warnings
+
+
+def _render_editor(current_rules):
+    model = _editor_model(current_rules)
+    registered = st.session_state.get("standards_registered_tokens", [])
+    if registered:
+        model["pattern_variables"].setdefault("custom", [])
+        model["pattern_variables"]["custom"] = list(dict.fromkeys(
+            model["pattern_variables"]["custom"] + registered
+        ))
+    st.markdown("##### Structured Naming Rules")
+    st.caption("Edit reusable pattern tokens and category-specific naming patterns. Changes are saved explicitly.")
+
+    st.markdown("#### Pattern Variables")
+    variable_rows = []
+    for category, tokens in model["pattern_variables"].items():
+        for token in tokens:
+            metadata = model.get("variable_metadata", {}).get(token, {})
+            variable_rows.append({"category": metadata.get("category", category), "token": token,
+                                  "label": metadata.get("label", token.replace("_", " ")),
+                                  "placeholder": metadata.get("placeholder", "")})
+    edited_variables = st.data_editor(
+        variable_rows, num_rows="dynamic", hide_index=True, use_container_width=True,
+         column_config={"category": st.column_config.TextColumn("Category", required=True),
+                        "token": st.column_config.TextColumn("Token (without angle brackets)", required=True),
+                        "label": st.column_config.TextColumn("UI Label", required=True),
+                        "placeholder": st.column_config.TextColumn("UI Placeholder")},
+        key="standards_pattern_variables",
+    )
+    variables = {}
+    variable_metadata = {}
+    variable_errors = []
+    for row in _records(edited_variables):
+        category, token = str(row.get("category", "")).strip(), str(row.get("token", "")).strip()
+        if not category and not token:
+            continue
+        if not category or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", token):
+            variable_errors.append(f"Invalid variable row: {category or '(missing category)'} / {token or '(missing token)'}")
+        else:
+            variables.setdefault(category, []).append(token)
+            variable_metadata[token] = {
+                "label": str(row.get("label", "") or token.replace("_", " ")).strip(),
+                "placeholder": str(row.get("placeholder", "") or "").strip(),
+                "category": category,
+            }
+
+    st.markdown("#### Naming Patterns")
+    patterns = {}
+    for category, title in CATEGORIES.items():
+        st.markdown(f"**{title}**")
+        keys = [key for key in model["patterns"] if _PATTERN_CATEGORY.get(key) == category]
+        rows = [{"name": key, "pattern": model["patterns"].get(key, "")} for key in keys]
+        rows = st.data_editor(
+            rows, num_rows="dynamic", hide_index=True, use_container_width=True,
+            column_config={"name": st.column_config.TextColumn("Pattern name", required=True),
+                           "pattern": st.column_config.TextColumn("Pattern", required=True)},
+            key=f"standards_patterns_{category}",
+        )
+        for row in _records(rows):
+            name = str(row.get("name", "")).strip()
+            if name:
+                patterns[name] = str(row.get("pattern", ""))
+
+    candidate = {"categories": {category: {key: value for key, value in patterns.items()
+                                             if _PATTERN_CATEGORY.get(key) == category}
+                                  for category in CATEGORIES},
+                 "pattern_variables": variable_metadata, "naming_patterns": patterns, "patterns": patterns}
+    warnings = _token_warnings(candidate)
+    if warnings:
+        st.warning("Undefined tokens are referenced by active patterns.")
+        for key, tokens in warnings.items():
+            st.write(f"`{key}`: " + ", ".join(f"`<{token}>`" for token in tokens))
+            for token in tokens:
+                if st.button(f"Register <{token}>", key=f"register_token_{key}_{token}"):
+                    registered = st.session_state.setdefault("standards_registered_tokens", [])
+                    if token not in registered:
+                        registered.append(token)
+                    st.rerun()
+    for error in variable_errors:
+        st.error(error)
+
+    col_save, col_reset = st.columns([3, 1])
+    with col_save:
+        if st.button("Save Changes", type="primary", use_container_width=True, key="save_structured_standards"):
+            if variable_errors:
+                st.error("Fix invalid pattern variable rows before saving.")
+            else:
+                save_naming_rules(candidate, source="Manual Edit")
+                st.session_state["naming_rules"] = candidate
+                st.session_state["standards_saved"] = True
+                st.rerun()
+    with col_reset:
+        if st.button("Reset to Defaults", use_container_width=True, key="reset_structured_standards"):
+            defaults = _editor_model(DEFAULT_RULES)
+            save_naming_rules(defaults, source="Reset to Defaults")
+            st.session_state["naming_rules"] = defaults
+            st.session_state["standards_reset"] = True
+            st.rerun()
+
 
 def render_standards_tab(active_model):
     st.subheader("📖 Infrastructure Naming Standards Configuration")
@@ -28,12 +208,10 @@ def render_standards_tab(active_model):
     # Create tabs for different editing modes
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["📝 Edit Standards", "📄 View Full Prompt", "📘 Pattern Variables Reference", "🤖 AI Import", "📜 Change History"])
     
-    # Tab 1: Editable Form Interface
+    # Tab 1: Structured editable model
     with tab1:
-        st.markdown("##### Edit Naming Patterns")
-        st.info("💡 Modify the naming patterns below. Changes are saved when you click 'Save Changes'. Use the **Pattern Variables Reference** tab to see all available variables.")
-        
-        with st.form("naming_standards_form"):
+        _render_editor(current_rules)
+        '''
             st.markdown("#### 1. Network & Security Devices")
             col1, col2 = st.columns(2)
             
@@ -184,6 +362,7 @@ def render_standards_tab(active_model):
                     st.session_state["standards_saved"] = True
                     # Force immediate rerun
                     st.rerun()
+        '''
                 except Exception as e:
                     st.error(f"❌ Failed to save: {str(e)}")
             
@@ -448,7 +627,7 @@ def render_standards_tab(active_model):
                             st.session_state["naming_rules"] = extracted
                             st.success("✅ Standards updated successfully from AI parsing!")
                             st.rerun()
-                        except Exception as e:
+                except Exception as e:
                             st.error(f"❌ Failed to parse prompt: {str(e)}")
                             st.info("💡 Try providing more detailed descriptions of your naming patterns.")
                 else:
@@ -492,7 +671,8 @@ ESXi Hosts:
                 if st.button("🗑️ Clear History", use_container_width=True):
                     clear_history()
                     st.success("✅ History cleared!")
-                    st.rerun()
+                st.rerun()
+        """
             
             st.markdown("---")
             
