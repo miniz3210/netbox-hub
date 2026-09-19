@@ -616,7 +616,7 @@ def render_standards_tab(active_model):
                             st.session_state["naming_rules"] = extracted
                             st.success("✅ Standards updated successfully from AI parsing!")
                             st.rerun()
-                except Exception as e:
+                        except Exception as e:
                             st.error(f"❌ Failed to parse prompt: {str(e)}")
                             st.info("💡 Try providing more detailed descriptions of your naming patterns.")
                 else:
@@ -660,8 +660,7 @@ ESXi Hosts:
                 if st.button("🗑️ Clear History", use_container_width=True):
                     clear_history()
                     st.success("✅ History cleared!")
-                st.rerun()
-        """
+                    st.rerun()
             
             st.markdown("---")
             
