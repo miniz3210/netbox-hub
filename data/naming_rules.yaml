@@ -22,4 +22,4 @@ pattern_variables:
   device_hostname: [Country, State, Site, Zone, Vendor, Seq, StackID]
   interface_descriptions: [Local_Device, Local_Port, Local_Port_Short, Remote_Device, Remote_Port, Remote_Port_Short, Local_Po_ID, VLAN_ID, VLAN_Name, Device, Port, Role_Zone]
   hypervisors: [site, role, esx, seq, domain, Country, Site, Role]
-  esxi_network: [vmnic, vSwitch, Purpose, Status, PortGroup, Active_vmnics, Standby_vmnics]
+  esxi_network: [vmnic, vSwitch, Purpose, Status, PortGroup, pg_network, vmk, Active_vmnics, Standby_vmnics]

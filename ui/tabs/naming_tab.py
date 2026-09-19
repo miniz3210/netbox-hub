@@ -955,6 +955,12 @@ def _structured_naming_rules(raw_rules):
             key: value for key, value in raw_rules.items()
             if isinstance(value, str)
         }
+    if not isinstance(patterns, dict):
+        patterns = {}
+    patterns.setdefault("esxi_portgroup_name", "PG-<pg_network>")
+    patterns.setdefault("esxi_portgroup_desc", patterns.get("esxi_portgroup", "<vSwitch> (<Active_vmnics> Active / <Standby_vmnics> Standby)"))
+    patterns.setdefault("esxi_vmkernel_name", "<vmk>")
+    patterns.setdefault("esxi_vmkernel_desc", patterns.get("esxi_vmkernel", "<Purpose> (<vSwitch>)"))
     return patterns, variables if isinstance(variables, dict) else {}
 
 
@@ -1119,13 +1125,25 @@ def render_naming_tab(active_model):
         auto_correct = st.checkbox("Auto-Correct VMware Syntax", value=True, key="dynamic_vmware_autocorrect")
         columns = st.columns(3)
         with columns[0]:
-            output = _render_pattern_card(patterns, variables, "esxi_uplink", case_mode, "Physical Uplink", "uplink")
+            st.markdown("#### 1. Physical Uplink (PCIeX/PortX)")
+            output = _render_pattern_card(patterns, variables, "esxi_uplink", case_mode, widget_suffix="uplink")
+            st.caption("Generated Physical Uplink Description:")
             st.code(output, language="text")
         with columns[1]:
-            _render_pattern_card(patterns, variables, "esxi_portgroup_name", case_mode, "Port Group Name", "pg_name")
-            output = _render_pattern_card(patterns, variables, "esxi_portgroup_desc", case_mode, "Port Group Description", "pg_desc")
+            st.markdown("#### 2. Port Group Teaming (Network)")
+            name_output = _render_pattern_card(patterns, variables, "esxi_portgroup_name", case_mode, widget_suffix="pg_name")
+            desc_output = _render_pattern_card(patterns, variables, "esxi_portgroup_desc", case_mode, widget_suffix="pg_desc")
+            st.caption("Generated Port Group Name:")
+            st.code(name_output, language="text")
+            st.caption("Generated Port Group Description:")
+            output = desc_output
             st.code(output, language="text")
         with columns[2]:
-            _render_pattern_card(patterns, variables, "esxi_vmkernel_name", case_mode, "VMkernel Name", "vmk_name")
-            output = _render_pattern_card(patterns, variables, "esxi_vmkernel_desc", case_mode, "VMkernel Description", "vmk_desc")
+            st.markdown("#### 3. VMkernel Adapter (vmk)")
+            name_output = _render_pattern_card(patterns, variables, "esxi_vmkernel_name", case_mode, widget_suffix="vmk_name")
+            desc_output = _render_pattern_card(patterns, variables, "esxi_vmkernel_desc", case_mode, widget_suffix="vmk_desc")
+            st.caption("Generated vmk Name:")
+            st.code(name_output, language="text")
+            st.caption("Generated VMkernel Description:")
+            output = desc_output
             st.code(output, language="text")

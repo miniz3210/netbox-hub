@@ -66,11 +66,11 @@ DEFAULT_RULES = {
     "vm_host": "<Country><Site><Role><Seq> (e.g. AURFLWOTAPP01, AUGLOSFS01) or <Site><Role><Seq> (e.g. PWSAFS001, ESCPDC01, NYCCVI01)",
     "esxi_uplink": "<vmnic> - <vSwitch> <Purpose> <Status>",
     "esxi_portgroup": "<PortGroup> [<Active_vmnics> Active / <Standby_vmnics> Standby]",
-    "esxi_portgroup_name": "PG-<PortGroup>",
-    "esxi_portgroup_desc": "<PortGroup> (<Active_vmnics> Active / <Standby_vmnics> Standby)",
+    "esxi_portgroup_name": "PG-<pg_network>",
+    "esxi_portgroup_desc": "<vSwitch> (<Active_vmnics> Active / <Standby_vmnics> Standby)",
     "esxi_vmkernel": "<Purpose> Network - <vSwitch> (<Active_vmnics> Active / <Standby_vmnics> Standby)",
-    "esxi_vmkernel_name": "<Purpose>-<Seq>",
-    "esxi_vmkernel_desc": "<Purpose> Network - <vSwitch> (<Active_vmnics> Active / <Standby_vmnics> Standby)",
+    "esxi_vmkernel_name": "<vmk>",
+    "esxi_vmkernel_desc": "<Purpose> (<vSwitch>)",
     "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
 }
 
@@ -90,7 +90,8 @@ _TOKEN_DEFAULTS = {
     "domain": ("Domain Name", "e.g. corp.example.com"), "Role": ("Workload Role", "e.g. app"),
     "vmnic": ("vmnic Name", "e.g. vmnic0"), "vSwitch": ("vSwitch Name", "e.g. vSwitch0"),
     "Purpose": ("Purpose / Service", "e.g. Management"), "Status": ("Status", "e.g. Active Uplink"),
-    "PortGroup": ("Port Group", "e.g. vSwitch0"), "Active_vmnics": ("Active vmnics", "e.g. vmnic0"),
+    "PortGroup": ("Port Group", "e.g. vSwitch0"), "pg_network": ("Network", "e.g. VM Network"),
+    "vmk": ("vmk Name", "e.g. vmk0"), "Active_vmnics": ("Active vmnics", "e.g. vmnic0"),
     "Standby_vmnics": ("Standby vmnics", "e.g. vmnic1"),
 }
 _TOKEN_CATEGORIES = {
@@ -133,7 +134,13 @@ def _flat_rules(raw: Any) -> Dict[str, str]:
             if isinstance(category, Mapping):
                 flattened.update(category)
         raw = flattened
-    return {str(key): _substitute_env(str(value)) for key, value in raw.items() if str(key) in PATTERN_KEYS}
+    result = {str(key): _substitute_env(str(value)) for key, value in raw.items() if str(key) in PATTERN_KEYS}
+    # Seed split ESXi patterns when loading legacy files.
+    result.setdefault("esxi_portgroup_name", DEFAULT_RULES["esxi_portgroup_name"])
+    result.setdefault("esxi_portgroup_desc", result.get("esxi_portgroup", DEFAULT_RULES["esxi_portgroup_desc"]))
+    result.setdefault("esxi_vmkernel_name", DEFAULT_RULES["esxi_vmkernel_name"])
+    result.setdefault("esxi_vmkernel_desc", result.get("esxi_vmkernel", DEFAULT_RULES["esxi_vmkernel_desc"]))
+    return result
 
 
 def _structured_rules(rules: Mapping[str, Any]) -> Dict[str, Any]:
