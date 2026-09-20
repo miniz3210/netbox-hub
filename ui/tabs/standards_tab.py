@@ -11,13 +11,18 @@ def _persist_variables(rules: dict, variables: dict) -> None:
     rules["pattern_variables"] = variables
     save_naming_rules(rules, source="Variable Manager")
     st.session_state["naming_rules"] = rules.copy()
-    st.success("✅ Variables updated.")
+    st.session_state["variables_saved"] = True
     st.rerun()
 
 def render_standards_tab(active_model):
     st.subheader("📖 Infrastructure Naming Standards Configuration")
     st.caption("Define and manage your organization's naming conventions. All patterns configured here are automatically applied in the Naming tab.")
     
+    # Check for variable manager save success message
+    if "variables_saved" in st.session_state and st.session_state["variables_saved"]:
+        st.success("✅ Variables saved successfully!")
+        st.session_state["variables_saved"] = False
+
     # Check for save success message
     if "standards_saved" in st.session_state and st.session_state["standards_saved"]:
         st.success("✅ Naming standards saved successfully!")
@@ -275,6 +280,8 @@ def render_standards_tab(active_model):
                     }
                     if var_opt:
                         entry["optional"] = True
+                    else:
+                        entry["optional"] = False
                     edited_vars[var_key] = entry
 
                 if st.button("💾 Apply Variable Changes", key="var_apply"):
@@ -304,11 +311,11 @@ def render_standards_tab(active_model):
                     }
                     if new_optional:
                         entry["optional"] = True
+                    else:
+                        entry["optional"] = False
                     final_vars = dict(variables_now)
                     final_vars[new_name] = entry
                     _persist_variables(current_rules, final_vars)
-                    st.success(f"✅ Added variable `<{new_name}>`. Use it in your patterns.")
-                    st.rerun()
                 else:
                     st.warning("⚠️ Please enter a variable name.")
 
