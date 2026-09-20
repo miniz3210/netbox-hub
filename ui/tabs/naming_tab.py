@@ -322,6 +322,11 @@ def _interface_ref(opt):
     }.get(opt, ("Interface", ""))
 
 
+def _is_var_optional(variables, token: str) -> bool:
+    meta = variables.get(token, {})
+    return isinstance(meta, dict) and bool(meta.get("optional"))
+
+
 def _ref_info(dev_type):
     if "SW" in dev_type or "Switch" in dev_type:
         return "Switch", "SW", "SWUSNYC01-0       (Switch Stack, Member 0)\nSWUSLON01         (London Switch 01)"
@@ -528,8 +533,9 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables):
         vals["pg_network"] = pg_net
         clean = {k: v for k, v in vals.items() if v}
         gen_desc = interpolate_pattern(pat, clean) if clean else interpolate_pattern(pat, {k: f"<{k}>" for k in vals})
-        gen_desc = re.sub(r"\s*/\s*Standby$", "", gen_desc)
-        gen_desc = re.sub(r"\s*/\s*<Standby_vmnics>\s*Standby", "", gen_desc)
+        if _is_var_optional(variables, "Standby_vmnics"):
+            gen_desc = re.sub(r"\s*/\s*Standby$", "", gen_desc)
+            gen_desc = re.sub(r"\s*/\s*<Standby_vmnics>\s*Standby", "", gen_desc)
         st.caption("Generated Port Group Name:")
         st.code(gen_prefix, language="text")
         st.caption("Generated Port Group Description:")
@@ -549,10 +555,11 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables):
             vals["Purpose"] = f"{p} Network" if p.lower() in ("management", "vmotion", "storage", "iscsi") else p
         clean = {k: v for k, v in vals.items() if v}
         gen = interpolate_pattern(pat, clean) if clean else interpolate_pattern(pat, {k: f"<{k}>" for k in vals})
-        gen = re.sub(r"\(\s*([^)]*?)\s*/\s*Standby\s*\)$", r"(\1)", gen)
-        gen = re.sub(r"\(\s*/\s*<Standby_vmnics>\s*Standby\s*\)$", "()", gen)
-        gen = re.sub(r"\s*/\s*Standby$", "", gen)
-        gen = re.sub(r"\s*/\s*<Standby_vmnics>\s*Standby", "", gen)
+        if _is_var_optional(variables, "Standby_vmnics"):
+            gen = re.sub(r"\(\s*([^)]*?)\s*/\s*Standby\s*\)$", r"(\1)", gen)
+            gen = re.sub(r"\(\s*/\s*<Standby_vmnics>\s*Standby\s*\)$", "()", gen)
+            gen = re.sub(r"\s*/\s*Standby$", "", gen)
+            gen = re.sub(r"\s*/\s*<Standby_vmnics>\s*Standby", "", gen)
         st.caption("Generated vmk Name:")
         st.code(vmk_name or "<vmk>", language="text")
         st.caption("Generated VMkernel Description:")

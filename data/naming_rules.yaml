@@ -32,156 +32,193 @@
   "pattern_variables": {
     "Country": {
       "label": "Country Code (2-letter)",
-      "placeholder": "e.g. US, UK, AU, DE, JP"
+      "placeholder": "e.g. US, UK, AU, DE, JP",
+      "optional": false
     },
     "State": {
       "label": "State / Region (Optional)",
-      "placeholder": "e.g. NY, CA, TX, NSW"
+      "placeholder": "e.g. NY, CA, TX, NSW",
+      "optional": false
     },
     "Site": {
       "label": "Site Code",
-      "placeholder": "e.g. NYC, LON, SYD, AGE"
+      "placeholder": "e.g. NYC, LON, SYD, AGE",
+      "optional": false
     },
     "Zone": {
       "label": "Zone / Role / Vendor (Optional)",
-      "placeholder": "e.g. CORE, DIST, EDGE, PA"
+      "placeholder": "e.g. CORE, DIST, EDGE, PA",
+      "optional": false
     },
     "Vendor": {
       "label": "Vendor (Optional)",
-      "placeholder": "e.g. PA, CISCO, HUAWEI"
+      "placeholder": "e.g. PA, CISCO, HUAWEI",
+      "optional": false
     },
     "Seq": {
       "label": "Sequence Number",
-      "placeholder": "e.g. 01, 02"
+      "placeholder": "e.g. 01, 02",
+      "optional": false
     },
     "StackID": {
       "label": "Stack / Member ID (Optional)",
-      "placeholder": "e.g. 0, 1"
+      "placeholder": "e.g. 0, 1",
+      "optional": false
     },
     "Local_Device": {
       "label": "Local Device Hostname",
-      "placeholder": "e.g. SWUSNYC01-0"
+      "placeholder": "e.g. SWUSNYC01-0",
+      "optional": false
     },
     "Local_Port": {
       "label": "Local Port",
-      "placeholder": "e.g. Gi1/0/48, Te1/0/1"
+      "placeholder": "e.g. Gi1/0/48, Te1/0/1",
+      "optional": false
     },
     "Local_Port_Short": {
       "label": "Local Port (Short)",
-      "placeholder": "e.g. Gi1/0/48, Te1/0/1"
+      "placeholder": "e.g. Gi1/0/48, Te1/0/1",
+      "optional": false
     },
     "Remote_Device": {
       "label": "Remote Device Hostname",
-      "placeholder": "e.g. SWUSNYC02-0"
+      "placeholder": "e.g. SWUSNYC02-0",
+      "optional": false
     },
     "Remote_Port": {
       "label": "Remote Port",
-      "placeholder": "e.g. Gi1/0/48, Te1/0/1"
+      "placeholder": "e.g. Gi1/0/48, Te1/0/1",
+      "optional": false
     },
     "Remote_Port_Short": {
       "label": "Remote Port (Short)",
-      "placeholder": "e.g. Gi1/0/48, Te1/0/1"
+      "placeholder": "e.g. Gi1/0/48, Te1/0/1",
+      "optional": false
     },
     "Local_Po_ID": {
       "label": "Local Port-Channel ID",
-      "placeholder": "LAG1"
+      "placeholder": "LAG1",
+      "optional": false
     },
     "VLAN_Name": {
       "label": "VLAN Name",
-      "placeholder": "e.g. DATA, VOIP"
+      "placeholder": "e.g. DATA, VOIP",
+      "optional": false
     },
     "VLAN_ID": {
       "label": "VLAN ID",
-      "placeholder": "e.g. 10, 20"
+      "placeholder": "e.g. 10, 20",
+      "optional": false
     },
     "Device": {
       "label": "Connected Device",
-      "placeholder": "e.g. WAP01"
+      "placeholder": "e.g. WAP01",
+      "optional": false
     },
     "Port": {
       "label": "Connected Port",
-      "placeholder": "e.g. Gi0/1"
+      "placeholder": "e.g. Gi0/1",
+      "optional": false
     },
     "Role_Zone": {
       "label": "Security Zone / Role",
-      "placeholder": "e.g. INSIDE, OUTSIDE"
+      "placeholder": "e.g. INSIDE, OUTSIDE",
+      "optional": false
     },
     "site": {
       "label": "Site Prefix",
-      "placeholder": "e.g. age, nyc, lon, syd"
+      "placeholder": "e.g. age, nyc, lon, syd",
+      "optional": false
     },
     "site_prefix": {
       "label": "Site Prefix",
-      "placeholder": "e.g. age, nyc, lon, syd"
+      "placeholder": "e.g. age, nyc, lon, syd",
+      "optional": false
     },
     "role": {
       "label": "Host Role (Optional)",
-      "placeholder": "e.g. esx, otinfhost, infhost"
+      "placeholder": "e.g. esx, otinfhost, infhost",
+      "optional": false
     },
     "role_esx": {
       "label": "Host Role (Optional)",
-      "placeholder": "e.g. esx, otinfhost, infhost"
+      "placeholder": "e.g. esx, otinfhost, infhost",
+      "optional": false
     },
     "seq": {
       "label": "Host Sequence Number",
-      "placeholder": "001"
+      "placeholder": "001",
+      "optional": false
     },
     "host_seq": {
       "label": "Host Sequence Number",
-      "placeholder": "001"
+      "placeholder": "001",
+      "optional": false
     },
     "Domain": {
       "label": "Domain Name (FQDN Suffix)",
-      "placeholder": "e.g. corp.example.com, internal.net"
+      "placeholder": "e.g. corp.example.com, internal.net",
+      "optional": false
     },
     "domain": {
       "label": "Domain Name (FQDN Suffix)",
-      "placeholder": "e.g. corp.example.com, internal.net"
+      "placeholder": "e.g. corp.example.com, internal.net",
+      "optional": false
     },
     "Role": {
       "label": "Role Code / Workload",
-      "placeholder": "e.g. app, web, db, fs, dc"
+      "placeholder": "e.g. app, web, db, fs, dc",
+      "optional": false
     },
     "vm_site": {
       "label": "Site Prefix / Country & Site",
-      "placeholder": "e.g. age, usnyc, uklon"
+      "placeholder": "e.g. age, usnyc, uklon",
+      "optional": false
     },
     "vmnic": {
       "label": "vmnic Name",
-      "placeholder": "vmnic"
+      "placeholder": "vmnic",
+      "optional": false
     },
     "vSwitch": {
       "label": "vSwitch Name",
-      "placeholder": "vSwitch"
+      "placeholder": "vSwitch",
+      "optional": false
     },
     "Purpose": {
       "label": "Purpose / Service",
-      "placeholder": "e.g. Management, vMotion, Storage"
+      "placeholder": "e.g. Management, vMotion, Storage",
+      "optional": false
     },
     "Status": {
       "label": "Status",
-      "placeholder": "Active Uplink / Standby Uplink"
+      "placeholder": "Active Uplink / Standby Uplink",
+      "optional": false
     },
     "pg_network": {
       "label": "Network",
-      "placeholder": "e.g. VM Network"
+      "placeholder": "e.g. VM Network",
+      "optional": false
     },
     "PortGroup": {
       "label": "Port Group / vSwitch",
-      "placeholder": "e.g. vSwitch0"
+      "placeholder": "e.g. vSwitch0",
+      "optional": false
     },
     "Active_vmnics": {
       "label": "Active vmnics",
-      "placeholder": "e.g. vmnic0, vmnic1"
+      "placeholder": "e.g. vmnic0, vmnic1",
+      "optional": false
     },
     "Standby_vmnics": {
       "label": "Standby vmnics (Optional)",
       "placeholder": "e.g. vmnic2",
-      "optional": true
+      "optional": false
     },
     "vmk": {
       "label": "vmk Name",
-      "placeholder": "vmk"
+      "placeholder": "vmk",
+      "optional": false
     }
   }
 }
