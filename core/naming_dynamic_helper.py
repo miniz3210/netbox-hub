@@ -142,7 +142,7 @@ def render_esxi_network_inputs(pattern: str, variables: Dict, prefix: str, auto_
         value = ""
         meta = variables.get(token, {})
         is_optional = isinstance(meta, dict) and meta.get("optional")
-        if token == "Standby_vmnics" or is_optional:
+        if is_optional:
             value = st.text_input(label, value="", placeholder=ph, key=wk,
                                help="Optional - Leave empty if no standby uplinks").strip()
         else:
