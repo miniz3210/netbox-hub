@@ -1,7 +1,8 @@
 import streamlit as st
 from config.naming_rules import (
     load_naming_rules, save_naming_rules, export_rules_as_prompt,
-    load_history, restore_from_history, clear_history
+    load_history, restore_from_history, clear_history,
+    get_pattern_variables, get_naming_patterns,
 )
 from core.naming_engine import parse_prompt_to_rules
 
@@ -159,6 +160,10 @@ def render_standards_tab(active_model):
                 reset = st.form_submit_button("🔄 Reset to Defaults", use_container_width=True)
             
             if submitted:
+                # Preserve any user-defined pattern_variables added via Edit Mode
+                rules_session = st.session_state.get("naming_rules", {})
+                session_variables = rules_session.get("pattern_variables", {}) if isinstance(rules_session, dict) else {}
+
                 new_rules = {
                     "branch_switch": branch_switch,
                     "branch_ap": branch_ap,
@@ -173,7 +178,8 @@ def render_standards_tab(active_model):
                     "esxi_uplink": esxi_uplink,
                     "esxi_portgroup": esxi_portgroup,
                     "esxi_vmkernel": esxi_vmkernel,
-                    "netbox_server_yaml": netbox_server_yaml
+                    "netbox_server_yaml": netbox_server_yaml,
+                    "pattern_variables": session_variables,
                 }
                 try:
                     # Save to file first
@@ -224,6 +230,23 @@ def render_standards_tab(active_model):
     # Tab 3: Pattern Variables Reference
     with tab3:
         st.markdown("##### 📘 Pattern Variables Reference Guide")
+        st.caption("All available pattern variables currently configured. These drive the dynamic input fields in the Naming tab.")
+        variables_now = get_pattern_variables(current_rules)
+        patterns_now = get_naming_patterns(current_rules)
+
+        with st.expander("✅ Active Variables (from Standards)", expanded=True):
+            if variables_now:
+                for name, meta in variables_now.items():
+                    label = meta.get("label", name) if isinstance(meta, dict) else name
+                    ph = meta.get("placeholder", "") if isinstance(meta, dict) else ""
+                    st.markdown(f"- **`<{name}>`** — {label}" + (f" — *{ph}*" if ph else ""))
+                    
+        with st.expander("🧩 Active Patterns", expanded=False):
+            if patterns_now:
+                for key, pat in patterns_now.items():
+                    st.markdown(f"**{key}:** `{pat}`")
+
+        st.markdown("---")
         st.caption("Use these variables in your naming patterns. The Naming tab will automatically replace them with actual values.")
         
         st.markdown("#### Network & Security Device Hostnames")

@@ -23,6 +23,14 @@ from core.db_manager import (
 from core.session_manager import SessionStateManager as SSM
 from core.shared_backup_state import SharedBackupState
 from ui.components import render_ai_chat, render_backup_uploader
+from core.naming_dynamic_helper import (
+    interpolate_pattern,
+    render_token_widgets,
+    render_esxi_network_inputs,
+    render_edit_mode_ui,
+    extract_tokens,
+    pick_sub_pattern,
+)
 
 def build_naming_system_prompt(prompt: str) -> str:
     """Build the grounded naming/inventory system prompt for the AI Assistant."""
@@ -252,682 +260,292 @@ def render_compact_toolbar(active_model):
 
     return case_mode
 
+
+import re
+
+from config.naming_rules import get_naming_patterns, get_pattern_variables, load_naming_rules
+from utils.formatters import normalize_network_name
+
+
+DEVICE_TYPE_OPTIONS = [
+    "SW (Switch)", "VS (Virtual Chassis / Stack)", "OTSW (OT Switch)",
+    "WAP (Wireless Access Point)", "FW (Firewall / Security Appliance)",
+    "ION (Prisma SD-WAN)", "VA (Virtual Appliance)", "RTR (Router)", "Custom Prefix...",
+]
+INTERFACE_OPTIONS = [
+    "Switch Uplink (Inter-Switch)",
+    "Switch LAG Member (LACP)",
+    "Switch Port-Channel (Logical)",
+    "Switch Access Port (Endpoint)",
+    "Firewall Security Zone Interface",
+]
+
+
+def _edit_toggle(pattern_key):
+    return st.toggle(
+        "Edit Mode",
+        value=st.session_state.get(f"edit_mode_{pattern_key}", False),
+        key=f"edit_mode_{pattern_key}",
+        help="Turn ON to edit the raw pattern template and add new variables.",
+    )
+
+
+def _sel_pattern_key(dev_type_preset):
+    if "WAP" in dev_type_preset:
+        return "branch_ap"
+    elif "ION" in dev_type_preset or "FW" in dev_type_preset:
+        return "branch_security"
+    return "branch_switch"
+
+
+def _interface_key(opt):
+    return {
+        INTERFACE_OPTIONS[0]: "switch_uplink_desc",
+        INTERFACE_OPTIONS[1]: "switch_lag_member",
+        INTERFACE_OPTIONS[2]: "switch_port_channel",
+        INTERFACE_OPTIONS[3]: "switch_access_desc",
+        INTERFACE_OPTIONS[4]: "firewall_interface",
+    }.get(opt, "switch_uplink_desc")
+
+
+def _interface_ref(opt):
+    return {
+        INTERFACE_OPTIONS[0]: ("Switch Uplink Interface", "Uplink_to_SWUSNYC02-0_Gi1/0/48\nUplink_to_FWUSNYC01_Te1/0/1\nUplink_to_Huawei-Core_XGE0/0/31"),
+        INTERFACE_OPTIONS[1]: ("LAG Member Port", "LACP_to_SWUSNYC02-0_Gi1/0/1\nLACP_to_FWUSNYC01_Po1\nLACP_to_SWUSLONCORE01_Te1/0/1"),
+        INTERFACE_OPTIONS[2]: ("Port-Channel Interface", "LAG1_to_SWUSNYC02-0\nLAG2_to_FWUSNYC01\nLAG5_to_CV-CPD"),
+        INTERFACE_OPTIONS[3]: ("Access Port Interface", "Data - PC-001_eth0\nVoice - IP-Phone-101_PoE\nGuest - Printer-Lab_NIC1"),
+        INTERFACE_OPTIONS[4]: ("Firewall Interface", "TRUST_10\nUNTRUST_100\nDMZ_50"),
+    }.get(opt, ("Interface", ""))
+
+
+def _ref_info(dev_type):
+    if "SW" in dev_type or "Switch" in dev_type:
+        return "Switch", "SW", "SWUSNYC01-0       (Switch Stack, Member 0)\nSWUSLON01         (London Switch 01)"
+    if "WAP" in dev_type or "Wireless" in dev_type:
+        return "Wireless AP", "WAP", "WAPUSNYC01        (Access Point NYC 01)\nWAPUSLON01        (Access Point London 01)"
+    if "FW" in dev_type or "Firewall" in dev_type:
+        return "Firewall", "FW", "FWUSNYC01         (NYC Firewall 01)\nFWUSNYCPA01       (NYC Palo Alto FW 01)"
+    if "RTR" in dev_type or "Router" in dev_type:
+        return "Router", "RTR", "RTRUSNYC01        (NYC Router 01)\nRTRUSLON01"
+    if "ION" in dev_type:
+        return "SD-WAN ION", "ION", "IONUSNYC01        (NYC SD-WAN 01)\nIONUSLON01"
+    return "Device", "", "SWUSNYC01-0       (Switch Stack)\nWAPUSNYC01        (Access Point 01)\nFWUSNYCPA01       (Firewall 01)"
+
+
 def render_naming_tab(active_model):
-    st.subheader("🏷️ Standardized Infrastructure Naming Generator")
+    st.subheader("Standardized Infrastructure Naming Generator")
     st.caption("Generate and validate standardized hostnames for network devices, servers, VMs, and ESXi configurations using AI-powered naming conventions aligned with your NetBox inventory data.")
-    
-    # Always reload naming rules from file to ensure latest updates from Standards tab are applied
-    from config.naming_rules import load_naming_rules
+
     naming_rules = load_naming_rules()
     st.session_state["naming_rules"] = naming_rules
-    
-    # Call toolbar which includes Ingest and AI Assistant
+    naming_patterns = get_naming_patterns(naming_rules)
+    variables = get_pattern_variables(naming_rules)
     case_mode = render_compact_toolbar(active_model)
-    
+
     naming_cat = st.radio(
         "Select Asset Class",
         [
             "1. Network & Security Devices (Switches, APs, Firewalls, Routers)",
             "2. Hosts & Virtual Machines (ESXi & VMs)",
-            "3. ESXi Network Descriptions (vmnic, PortGroup, VMkernel)"
+            "3. ESXi Network Descriptions (vmnic, PortGroup, VMkernel)",
         ],
-        horizontal=True
+        horizontal=True,
     )
-
     st.markdown("---")
 
-    # Network & Security Devices
     if "1. Network" in naming_cat:
-        st.markdown("##### 📍 Location & Site Code Assistant")
-        loc_col1, loc_col2 = st.columns([2, 1])
-        with loc_col1:
-            input_location = st.text_input("Location / City Name", value="", placeholder="e.g. Sydney, London, Dallas, New York", key="loc_input_help")
-        with loc_col2:
-            auto_code = compute_suggested_site_code(input_location) if input_location else ""
-            st.info(f"Suggested Site Code: **`{auto_code or '----'}`**")
-
-        st.markdown("---")
-        col_a, col_b = st.columns([1, 1])
-        
-        with col_a:
-            st.markdown("#### 🛠️ Universal Device Hostname Generator")
-            dev_type_preset = st.selectbox(
-                "Device Type / Prefix",
-                [
-                    "SW (Switch)", "VS (Virtual Chassis / Stack)", "OTSW (OT Switch)",
-                    "WAP (Wireless Access Point)", "FW (Firewall / Security Appliance)",
-                    "ION (Prisma SD-WAN)", "VA (Virtual Appliance)", "RTR (Router)", "✏️ Custom Prefix..."
-                ],
-                index=0, key="dev_prefix_sel"
-            )
-
-            if "Custom Prefix" in dev_type_preset:
-                dev_prefix = st.text_input("Enter Custom Prefix", value="", placeholder="e.g. SVR, GW, AGG", key="dev_custom_pre").strip()
-            else:
-                dev_prefix = dev_type_preset.split()[0].strip()
-
-            c_ctry = st.text_input("Country Code (2-letter)", value="", placeholder="e.g. US, UK, AU, DE, JP", key="u_ctry").strip()
-            c_state = st.text_input("State / Region (Optional)", value="", placeholder="e.g. NY, CA, TX, NSW", key="u_state").strip()
-            c_site = st.text_input("Site Code", value=auto_code, placeholder="e.g. NYC, LON, SYD, AGE", key="u_site").strip()
-            c_zone = st.text_input("Zone / Role / Vendor (Optional)", value="", placeholder="e.g. CORE, DIST, EDGE, PA", key="u_zone").strip()
-            c_seq = st.text_input("Sequence Number", value="01", placeholder="e.g. 01, 02", key="u_seq").strip()
-            c_stack = st.text_input("Stack / Member ID (Optional)", value="", placeholder="e.g. 0, 1", key="u_stk").strip()
-
-            # Determine which naming pattern to use based on device type
-            pattern_key = None
-            if "SW" in dev_prefix or "Switch" in dev_type_preset or "VS" in dev_prefix or "Virtual Chassis" in dev_type_preset:
-                pattern_key = "branch_switch"
-            elif "WAP" in dev_prefix or "Wireless" in dev_type_preset:
-                pattern_key = "branch_ap"
-            elif "FW" in dev_prefix or "Firewall" in dev_type_preset or "ION" in dev_prefix or "SD-WAN" in dev_type_preset:
-                pattern_key = "branch_security"
-            
-            # Generate device name using pattern or fallback to manual construction
-            if pattern_key and pattern_key in naming_rules:
-                pattern = naming_rules[pattern_key]
-                # Extract the first pattern if multiple patterns are separated by " / "
-                if " / " in pattern:
-                    patterns = pattern.split(" / ")
-                    # Choose appropriate pattern based on prefix
-                    if "VS" in dev_prefix and len(patterns) > 1:
-                        pattern = patterns[1] if "VS" in patterns[1] else patterns[0]
-                    elif "ION" in dev_prefix and len(patterns) > 1:
-                        pattern = patterns[1] if "ION" in patterns[1] else patterns[0]
-                    else:
-                        pattern = patterns[0]
-                
-                # Apply pattern with variables
-                device_name_raw = apply_pattern(pattern, {
-                    "Country": c_ctry,
-                    "State": c_state,
-                    "Site": c_site,
-                    "Zone": c_zone,
-                    "Vendor": c_zone,  # Zone/Vendor are used interchangeably
-                    "Seq": c_seq,
-                    "StackID": c_stack
-                })
-                
-                # Remove angle brackets for any unfilled variables and clean up
-                import re
-                device_name_raw = re.sub(r'<[^>]+>', '', device_name_raw)
-                # Clean up any double hyphens or trailing hyphens
-                device_name_raw = re.sub(r'-+', '-', device_name_raw).strip('-')
-                
-                final_device_name = apply_case(device_name_raw, case_mode)
-            else:
-                # Fallback to manual construction if no pattern found
-                raw_base = f"{dev_prefix}{c_ctry}{c_state}{c_site}{c_zone}{c_seq}"
-                final_device_name = apply_case(f"{raw_base}-{c_stack}" if c_stack else raw_base, case_mode)
-
-            st.caption("Generated Device Hostname:")
-            st.code(final_device_name, language="text")
-
-            if st.button("🤖 AI Verify / Suggest Device Hostname", key="ai_chk_dev"):
-                with st.spinner("Auditing against NetBox Data & standards..."):
-                    st.info(verify_and_suggest_with_ai(
-                        final_device_name, 
-                        active_model, 
-                        asset_type=f"Network/Security Device ({dev_type_preset})", 
-                        category_key="device",
-                        site_filter=c_site
-                    ))
-
-            # Dynamic reference box based on device type and site
-            ref_label = "Device"
-            name_prefix_filter = ""
-            default_examples = "SWUSNYC01-0       (Switch Stack, Member 0)\nWAPUSNYC01        (Access Point 01)\nFWUSNYCPA01       (Firewall 01)"
-            
-            if "SW" in dev_prefix or "Switch" in dev_type_preset:
-                ref_label = "Switch"
-                name_prefix_filter = "SW"
-                default_examples = "SWUSNYC01-0       (Switch Stack, Member 0)\nSWUSLON01         (London Switch 01)\nSWAUSYD02         (Sydney Switch 02)"
-            elif "WAP" in dev_prefix or "Wireless" in dev_type_preset:
-                ref_label = "Wireless AP"
-                name_prefix_filter = "WAP"
-                default_examples = "WAPUSNYC01        (Access Point NYC 01)\nWAPUSLON01        (Access Point London 01)\nWAPAUSYD01        (Access Point Sydney 01)"
-            elif "FW" in dev_prefix or "Firewall" in dev_type_preset:
-                ref_label = "Firewall"
-                name_prefix_filter = "FW"
-                default_examples = "FWUSNYC01         (NYC Firewall 01)\nFWUSNYCPA01       (NYC Palo Alto FW 01)\nFWUSLONCISCO01    (London Cisco FW 01)"
-            elif "RTR" in dev_prefix or "Router" in dev_type_preset:
-                ref_label = "Router"
-                name_prefix_filter = "RTR"
-                default_examples = "RTRUSNYC01        (NYC Router 01)\nRTRUSLON01        (London Router 01)\nRTRAUSYD01        (Sydney Router 01)"
-            elif "ION" in dev_prefix:
-                ref_label = "SD-WAN ION"
-                name_prefix_filter = "ION"
-                default_examples = "IONUSNYC01        (NYC SD-WAN 01)\nIONUSLON01        (London SD-WAN 01)\nIONAUSYD01        (Sydney SD-WAN 01)"
-            elif "VS" in dev_prefix:
-                ref_label = "Virtual Chassis"
-                name_prefix_filter = "VS"
-                default_examples = "VSUSNYC01-0       (Virtual Stack Member 0)\nVSUSLON01-1       (Virtual Stack Member 1)"
-            
-            display_reference_box(
-                category_key="device",
-                default_lines=default_examples,
-                label=ref_label,
-                site_filter=c_site,
-                name_filter=name_prefix_filter
-            )
-
-        with col_b:
-            st.markdown("#### 🔌 Switch & Firewall Interface Formatter")
-            p_cat = st.radio("Interface Type", [
-                "Switch Uplink (Inter-Switch)", "Switch Port-Channel (Logical)", 
-                "Switch LAG Member Port (LACP)", "Switch Access Port (Endpoint)", "Firewall Security Zone Interface"
-            ], key="p_cat_sel")
-            
-            if p_cat == "Switch Uplink (Inter-Switch)":
-                l_dev = st.text_input("Local Device Hostname", value="", placeholder="e.g. SWUSNYC01-0", key="up_ld").strip()
-                l_port_raw = st.text_input("Local Port", value="", placeholder="e.g. Gi1/0/48, Te1/0/1", key="up_lp")
-                r_dev = st.text_input("Remote Device Hostname", value="", placeholder="e.g. SWUSNYC02-0", key="up_rd").strip()
-                r_port_raw = st.text_input("Remote Port", value="", placeholder="e.g. Gi1/0/48, Te1/0/1", key="up_rp")
-
-                l_port_short = normalize_port_shortname(l_port_raw)
-                r_port_short = normalize_port_shortname(r_port_raw)
-
-                # Use pattern from naming rules
-                pattern = naming_rules.get("switch_uplink_desc", "Uplink_to_<Remote_Device>_<Remote_Port_Short>")
-                
-                if r_dev and r_port_raw:
-                    uplink_desc_local = apply_pattern(pattern, {
-                        "Local_Device": l_dev,
-                        "Local_Port": l_port_raw,
-                        "Local_Port_Short": l_port_short,
-                        "Remote_Device": r_dev,
-                        "Remote_Port": r_port_raw,
-                        "Remote_Port_Short": r_port_short
-                    })
-                else:
-                    uplink_desc_local = apply_pattern(pattern, {
-                        "Local_Device": "<Local_Device>",
-                        "Local_Port": "<Local_Port>",
-                        "Local_Port_Short": "<Local_Port_Short>",
-                        "Remote_Device": "<Remote_Device>",
-                        "Remote_Port": "<Remote_Port>",
-                        "Remote_Port_Short": "<Remote_Port_Short>"
-                    })
-                
-                if l_dev and l_port_raw:
-                    uplink_desc_remote = apply_pattern(pattern, {
-                        "Local_Device": r_dev,
-                        "Local_Port": r_port_raw,
-                        "Local_Port_Short": r_port_short,
-                        "Remote_Device": l_dev,
-                        "Remote_Port": l_port_raw,
-                        "Remote_Port_Short": l_port_short
-                    })
-                else:
-                    uplink_desc_remote = apply_pattern(pattern, {
-                        "Local_Device": "<Remote_Device>",
-                        "Local_Port": "<Remote_Port>",
-                        "Local_Port_Short": "<Remote_Port_Short>",
-                        "Remote_Device": "<Local_Device>",
-                        "Remote_Port": "<Local_Port>",
-                        "Remote_Port_Short": "<Local_Port_Short>"
-                    })
-
-                st.caption(f"On Local Device (`{l_dev or 'LOCAL'}`):")
-                st.code(uplink_desc_local, language="text")
-                st.caption(f"On Remote Device (`{r_dev or 'REMOTE'}`):")
-                st.code(uplink_desc_remote, language="text")
-                
-                if st.button("🤖 AI Verify Uplink Description", key="ai_chk_uplink"):
-                    with st.spinner("Auditing against Standards..."):
-                        st.info(verify_and_suggest_with_ai(
-                            uplink_desc_local, 
-                            active_model, 
-                            asset_type="Switch Uplink Description", 
-                            category_key="device",
-                            site_filter=c_site
-                        ))
-                
-                display_reference_box(
-                    category_key="device",
-                    default_lines="Uplink_to_SWUSNYC02-0_Gi1/0/48\nUplink_to_FWUSNYC01_Te1/0/1\nUplink_to_Huawei-Core_XGE0/0/31",
-                    label="Switch Uplink Interface",
-                    site_filter=c_site
-                )
-            
-            elif p_cat == "Switch LAG Member Port (LACP)":
-                r_dev_lag = st.text_input("Remote Device Hostname", value="", placeholder="e.g. SWUSNYC02-0", key="lag_rd").strip()
-                r_port_lag_raw = st.text_input("Remote Port", value="", placeholder="e.g. Gi1/0/1, Te1/0/1, Po1", key="lag_rp")
-
-                r_port_lag_short = normalize_port_shortname(r_port_lag_raw)
-                
-                # Use pattern from naming rules
-                pattern = naming_rules.get("switch_lag_member", "LACP_to_<Remote_Device>_<Remote_Port_Short>")
-                lag_desc = apply_pattern(pattern, {
-                    "Remote_Device": r_dev_lag if r_dev_lag else "<Remote_Device>",
-                    "Remote_Port": r_port_lag_raw if r_port_lag_raw else "<Remote_Port>",
-                    "Remote_Port_Short": r_port_lag_short if r_port_lag_raw else "<Remote_Port_Short>"
-                })
-
-                st.caption(f"Generated LAG Member Port Description:")
-                st.code(lag_desc, language="text")
-                
-                if st.button("🤖 AI Verify LAG Member Description", key="ai_chk_lag"):
-                    with st.spinner("Auditing against Standards..."):
-                        st.info(verify_and_suggest_with_ai(
-                            lag_desc, 
-                            active_model, 
-                            asset_type="Switch LAG Member Port Description", 
-                            category_key="device",
-                            site_filter=c_site
-                        ))
-                
-                display_reference_box(
-                    category_key="device",
-                    default_lines="LACP_to_SWUSNYC02-0_Gi1/0/1\nLACP_to_FWUSNYC01_Po1\nLACP_to_SWUSLONCORE01_Te1/0/1",
-                    label="LAG Member Port",
-                    site_filter=c_site
-                )
-            
-            elif p_cat == "Switch Port-Channel (Logical)":
-                local_po_id = st.text_input("Local Port-Channel ID", value="LAG1", placeholder="e.g. LAG1, LAG2, Po1", key="pc_local_id").strip()
-                r_dev_po = st.text_input("Remote Device Hostname", value="", placeholder="e.g. SWUSNYC02-0, CV-CPD", key="pc_rd").strip()
-
-                # Use pattern from naming rules
-                pattern = naming_rules.get("switch_port_channel", "<Local_Po_ID>_to_<Remote_Device>")
-                po_desc = apply_pattern(pattern, {
-                    "Local_Po_ID": local_po_id if local_po_id else "<Local_Po_ID>",
-                    "Remote_Device": r_dev_po if r_dev_po else "<Remote_Device>"
-                })
-
-                st.caption(f"Generated Port-Channel Description:")
-                st.code(po_desc, language="text")
-                
-                if st.button("🤖 AI Verify Port-Channel Description", key="ai_chk_po"):
-                    with st.spinner("Auditing against Standards..."):
-                        st.info(verify_and_suggest_with_ai(
-                            po_desc, 
-                            active_model, 
-                            asset_type="Switch Port-Channel Description", 
-                            category_key="device",
-                            site_filter=c_site
-                        ))
-                
-                display_reference_box(
-                    category_key="device",
-                    default_lines="LAG1_to_SWUSNYC02-0\nLAG2_to_FWUSNYC01\nLAG5_to_CV-CPD",
-                    label="Port-Channel Interface",
-                    site_filter=c_site
-                )
-            
-            elif p_cat == "Switch Access Port (Endpoint)":
-                access_vlan_id = st.text_input("Access VLAN ID (Optional)", value="", placeholder="e.g. 10, 100", key="ac_vlan").strip()
-                access_vlan_name = st.text_input("VLAN Name (Optional)", value="", placeholder="e.g. Data, Voice, Guest", key="ac_vlan_name").strip()
-                endpoint_device = st.text_input("Connected Device/Host", value="", placeholder="e.g. PC-001, Printer-Lab", key="ac_device").strip()
-                endpoint_port = st.text_input("Endpoint Port (Optional)", value="", placeholder="e.g. eth0, NIC1", key="ac_port").strip()
-
-                # Use pattern from naming rules
-                pattern = naming_rules.get("switch_access_desc", "<VLAN_Name> - <Device>_<Port>")
-                
-                # Build device and port parts
-                device_val = endpoint_device if endpoint_device else "<Device>"
-                port_val = endpoint_port if endpoint_port else "<Port>"
-                device_port = f"{device_val}_{port_val}" if endpoint_port else device_val
-                
-                # Determine VLAN display
-                vlan_display = ""
-                if access_vlan_name:
-                    vlan_display = access_vlan_name
-                elif access_vlan_id:
-                    vlan_display = f"VLAN{access_vlan_id}"
-                
-                # Apply pattern with VLAN or without
-                if vlan_display:
-                    access_desc = apply_pattern(pattern, {
-                        "VLAN_ID": access_vlan_id if access_vlan_id else "<VLAN_ID>",
-                        "VLAN_Name": vlan_display,
-                        "Device": device_val,
-                        "Port": port_val
-                    })
-                    # If pattern doesn't contain VLAN placeholders, use simple format
-                    if "<VLAN" not in pattern:
-                        access_desc = f"{vlan_display} - {device_port}"
-                else:
-                    # No VLAN, just device_port
-                    access_desc = device_port
-
-                st.caption(f"Generated Access Port Description:")
-                st.code(access_desc, language="text")
-                
-                if st.button("🤖 AI Verify Access Port Description", key="ai_chk_access"):
-                    with st.spinner("Auditing against Standards..."):
-                        st.info(verify_and_suggest_with_ai(
-                            access_desc, 
-                            active_model, 
-                            asset_type="Switch Access Port Description", 
-                            category_key="device",
-                            site_filter=c_site
-                        ))
-                
-                display_reference_box(
-                    category_key="device",
-                    default_lines="Data - PC-001_eth0\nVoice - IP-Phone-101_PoE\nGuest - Printer-Lab_NIC1",
-                    label="Access Port Interface",
-                    site_filter=c_site
-                )
-            
-            elif p_cat == "Firewall Security Zone Interface":
-                fw_role = st.text_input("Role / Zone", value="", placeholder="e.g. TRUST, UNTRUST, DMZ", key="fw_role").strip()
-                fw_vlan_id = st.text_input("VLAN ID", value="", placeholder="e.g. 10, 100", key="fw_vlan").strip()
-
-                # Use pattern from naming rules
-                pattern = naming_rules.get("firewall_interface", "<Role_Zone>_<VLAN_ID>")
-                fw_desc = apply_pattern(pattern, {
-                    "Role_Zone": fw_role if fw_role else "<Role_Zone>",
-                    "VLAN_ID": fw_vlan_id if fw_vlan_id else "<VLAN_ID>"
-                })
-
-                st.caption(f"Generated Firewall Interface Description:")
-                st.code(fw_desc, language="text")
-                
-                if st.button("🤖 AI Verify Firewall Interface Description", key="ai_chk_fw"):
-                    with st.spinner("Auditing against Standards..."):
-                        st.info(verify_and_suggest_with_ai(
-                            fw_desc, 
-                            active_model, 
-                            asset_type="Firewall Interface Description", 
-                            category_key="device",
-                            site_filter=c_site
-                        ))
-                
-                display_reference_box(
-                    category_key="device",
-                    default_lines="TRUST_10\nUNTRUST_100\nDMZ_50",
-                    label="Firewall Interface",
-                    site_filter=c_site
-                )
-
-    # Hosts & VMs
+        _asset_class_1(case_mode, active_model, naming_patterns, variables)
     elif "2. Hosts" in naming_cat:
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.markdown("#### 🖥️ ESXi Hypervisor Hostname")
-            h_site = st.text_input("Site Prefix", value="", placeholder="e.g. age, nyc, lon, syd", key="esx_site").strip()
-            h_role = st.text_input("Host Role (Optional)", value="", placeholder="e.g. esx, otinfhost, infhost", key="esx_role").strip()
-            h_num = st.text_input("Host Sequence Number", value="001", placeholder="e.g. 001, 01, 1", key="esx_num").strip()
-            h_dom = st.text_input("Domain Name (FQDN Suffix)", value="", placeholder="e.g. corp.example.com, internal.net, corp.local", key="esx_dom").strip()
-
-            # Use pattern from naming rules if available
-            if "esxi_host" in naming_rules and naming_rules["esxi_host"]:
-                pattern = naming_rules["esxi_host"]
-                # Remove any comments in parentheses from the pattern
-                import re
-                pattern = re.sub(r'\s*\([^)]*\)', '', pattern).strip()
-                
-                # Apply pattern with variables
-                gen_esx_raw = apply_pattern(pattern, {
-                    "Site": h_site,
-                    "site": h_site.lower(),
-                    "Role": h_role if h_role else "esx",
-                    "role": (h_role if h_role else "esx").lower(),
-                    "Seq": h_num,
-                    "seq": h_num,
-                    "Domain": h_dom,
-                    "domain": h_dom.lower()
-                })
-                
-                # Remove any unfilled variables
-                gen_esx_raw = re.sub(r'<[^>]+>', '', gen_esx_raw)
-                # Clean up dots and extra characters
-                gen_esx_raw = re.sub(r'\.+', '.', gen_esx_raw).strip('.')
-                
-                # Apply casing to the hostname part (before domain)
-                if '.' in gen_esx_raw and h_dom:
-                    parts = gen_esx_raw.split('.', 1)
-                    gen_esx = f"{apply_case(parts[0], case_mode)}.{parts[1].lower()}"
-                else:
-                    gen_esx = apply_case(gen_esx_raw, case_mode)
-            else:
-                # Fallback to manual construction
-                raw_host = f"{h_site}{h_role or 'esx'}{h_num}"
-                host_formatted = apply_case(raw_host, case_mode)
-                gen_esx = f"{host_formatted}.{h_dom.lower()}" if h_dom else host_formatted
-
-            st.caption("Generated ESXi Hostname:")
-            st.code(gen_esx, language="text")
-
-            if st.button("🤖 AI Verify ESXi Host", key="ai_chk_esx"):
-                with st.spinner("Auditing against NetBox Data & standards..."):
-                    st.info(verify_and_suggest_with_ai(
-                        gen_esx, 
-                        active_model, 
-                        asset_type="ESXi Hypervisor Hostname", 
-                        category_key="hypervisor",
-                        site_filter=h_site
-                    ))
-
-            display_reference_box(
-                category_key="hypervisor",
-                default_lines="NYCESX001.corp.internal  (Enterprise ESXi Node 001)\nLONESX001.corp.internal  (Enterprise ESXi Node 001)\nSYDESX01.corp.local      (Branch Hypervisor Standalone)",
-                label="Hypervisor",
-                site_filter=h_site
-            )
-
-        with col_b:
-            st.markdown("#### 🖲️ Virtual Machine (VM) Hostname")
-            v_site = st.text_input("Site Prefix / Country & Site", value="", placeholder="e.g. age, usnyc, uklon", key="vm_site").strip()
-            v_role = st.text_input("Role Code / Workload", value="", placeholder="e.g. app, web, db, fs, dc", key="vm_role").strip()
-            v_seq = st.text_input("Sequence Number", value="01", placeholder="e.g. 01, 02", key="vm_seq").strip()
-
-            # Use pattern from naming rules if available
-            if "vm_host" in naming_rules and naming_rules["vm_host"]:
-                pattern = naming_rules["vm_host"]
-                # Remove any comments in parentheses from the pattern
-                import re
-                pattern = re.sub(r'\s*\([^)]*\)', '', pattern).strip()
-                # If multiple patterns separated by "or", use the first one
-                if " or " in pattern:
-                    pattern = pattern.split(" or ")[0].strip()
-                
-                # Apply pattern with variables
-                gen_vm_raw = apply_pattern(pattern, {
-                    "Site": v_site,
-                    "site": v_site.lower(),
-                    "Country": v_site[:2] if len(v_site) > 2 else v_site,  # First 2 chars as country
-                    "Role": v_role,
-                    "role": v_role.lower(),
-                    "Seq": v_seq,
-                    "seq": v_seq
-                })
-                
-                # Remove any unfilled variables
-                gen_vm_raw = re.sub(r'<[^>]+>', '', gen_vm_raw)
-                
-                gen_vm = apply_case(gen_vm_raw, case_mode)
-            else:
-                # Fallback to manual construction
-                raw_vm = f"{v_site}{v_role}{v_seq}"
-                gen_vm = apply_case(raw_vm, case_mode)
-
-            st.caption("Generated VM Hostname:")
-            st.code(gen_vm, language="text")
-
-            if st.button("🤖 AI Verify VM Hostname", key="ai_chk_vm"):
-                with st.spinner("Auditing against NetBox Data & standards..."):
-                    st.info(verify_and_suggest_with_ai(
-                        gen_vm, 
-                        active_model, 
-                        asset_type="Virtual Machine (VM) Hostname", 
-                        category_key="vm",
-                        site_filter=v_site
-                    ))
-
-            display_reference_box(
-                category_key="vm",
-                default_lines="USNYCAPP01     (NYC Application Server 01)\nUKLONDB01      (London Database Server 01)\nAUSYDFS01      (Sydney File Server 01)",
-                label="Virtual Machine",
-                site_filter=v_site
-            )
-
-    # ESXi Network Descriptions
+        _asset_class_2(case_mode, active_model, naming_patterns, variables)
     else:
-        auto_correct = st.checkbox(
-            "⚡ Auto-Correct VMware Syntax (e.g. vswitch1 -> vSwitch1, nic0 -> vmnic0)",
-            value=True,
-            help="When checked, automatically normalizes vSwitch and vmnic naming."
-        )
+        _asset_class_3(case_mode, active_model, naming_patterns, variables)
 
-        col_a, col_b, col_c = st.columns(3)
-        with col_a:
-            st.markdown("#### 1. Physical Uplink :green[(PCIeX/PortX)]")
-            vmnic_raw = st.text_input("vmnic Name", value="vmnic", placeholder="e.g. vmnic0", key="vmnic_in")
-            vsw1_raw = st.text_input("vSwitch Name", value="vSwitch", placeholder="e.g. vSwitch0", key="vsw1")
-            vmnic_purpose = st.text_input("Purpose / Service", value="", placeholder="e.g. Management, vMotion, Storage", key="vmnic_purpose")
-            status = st.radio("Status", ["Active Uplink", "Standby Uplink"], horizontal=True, key="vmnic_status")
-            
-            # Apply normalization - always normalize vSwitch regardless of auto_correct
-            if vmnic_raw:
-                clean_vmnic = normalize_vmnic(vmnic_raw) if auto_correct else vmnic_raw.strip()
-            else:
-                clean_vmnic = ""
-                
-            if vsw1_raw:
-                # Always normalize vSwitch to fix common typos like "vswtich"
-                clean_vsw1 = normalize_vswitch(vsw1_raw)
-            else:
-                clean_vsw1 = ""
-            
-            # Normalize purpose name for proper capitalization
-            if vmnic_purpose:
-                clean_purpose = normalize_network_name(vmnic_purpose.strip())
-            else:
-                clean_purpose = ""
-            
-            # Only generate if we have actual values
-            if clean_vmnic and clean_vsw1:
-                # Build with purpose if provided
-                if clean_purpose:
-                    gen_vmnic = f"{clean_vmnic} - {clean_vsw1} {clean_purpose} {status}"
-                else:
-                    gen_vmnic = f"{clean_vmnic} - {clean_vsw1} {status}"
-            else:
-                # Show placeholder pattern
-                if clean_purpose:
-                    gen_vmnic = f"{clean_vmnic or '<vmnic>'} - {clean_vsw1 or '<vSwitch>'} {clean_purpose} {status}"
-                else:
-                    gen_vmnic = f"{clean_vmnic or '<vmnic>'} - {clean_vsw1 or '<vSwitch>'} {status}"
-            
-            st.caption("Generated Physical Uplink Description:")
-            st.code(gen_vmnic, language="text")
 
-        with col_b:
-            st.markdown("#### 2. Port Group Teaming :green[(Network)]")
-            pg_network_raw = st.text_input("Network", value="", placeholder="e.g. VM Network", key="pg_network_in", label_visibility="visible")
-            vsw_pg_raw = st.text_input("vSwitch Name", value="vSwitch", placeholder="e.g. vSwitch0", help="Port Group name (defaults to PG- prefix).", key="vsw2")
-            act_nics_raw = st.text_input("Active vmnics", value="", placeholder="e.g. vmnic0, vmnic1", key="act_nics_in")
-            stb_nics_raw = st.text_input("Standby vmnics (Optional)", value="", placeholder="e.g. vmnic2", key="stb_nics_in")
-            
-            # Apply normalization - always normalize network name and vSwitch
-            clean_pg_network = normalize_network_name(pg_network_raw) if pg_network_raw.strip() else ""
-            # Always normalize vSwitch to fix common typos like "vswtich"
-            clean_vsw_pg = normalize_vswitch(vsw_pg_raw) if vsw_pg_raw.strip() else ""
-            
-            if act_nics_raw:
-                clean_act = normalize_vmnic_list(act_nics_raw) if auto_correct else act_nics_raw.strip()
-            else:
-                clean_act = ""
-                
-            if stb_nics_raw:
-                clean_stb = normalize_vmnic_list(stb_nics_raw) if auto_correct else stb_nics_raw.strip()
-            else:
-                clean_stb = ""
+def _asset_class_1(case_mode, active_model, naming_patterns, variables):
+    st.markdown("##### Location & Site Code Assistant")
+    loc_c1, loc_c2 = st.columns([2, 1])
+    with loc_c1:
+        loc = st.text_input("Location / City Name", value="", placeholder="e.g. Sydney, London", key="loc_input_help")
+    with loc_c2:
+        auto_code = compute_suggested_site_code(loc) if loc else ""
+        st.info(f"Suggested Site Code: **{auto_code or '----'}**")
+    st.markdown("---")
 
-            # Generate PG- prefix name
-            gen_pg_prefix = f"PG-{clean_pg_network}" if clean_pg_network else "PG-<pg_network>"
-            
-            # Build the teaming description
-            if clean_vsw_pg and clean_act:
-                # Build the active/standby string
-                if clean_stb:
-                    # Both active and standby
-                    gen_pg = f"{clean_vsw_pg} ({clean_act} Active / {clean_stb} Standby)"
-                else:
-                    # Only active
-                    gen_pg = f"{clean_vsw_pg} ({clean_act} Active)"
-            else:
-                # Show placeholder pattern
-                if clean_act:
-                    gen_pg = f"<vSwitch> ({clean_act} Active)"
-                else:
-                    gen_pg = "<vSwitch> (<Active_vmnics> Active)"
-            
-            st.caption("Generated Port Group Name:")
-            st.code(gen_pg_prefix, language="text")
-            st.caption("Generated Port Group Description:")
-            st.code(gen_pg, language="text")
+    col_a, col_b = st.columns([1, 1])
+    with col_a:
+        st.markdown("#### Universal Device Hostname Generator")
+        dev_type = st.selectbox("Device Type / Prefix", DEVICE_TYPE_OPTIONS, index=0, key="dev_prefix_sel")
+        if "Custom" in dev_type:
+            dev_prefix = st.text_input("Enter Custom Prefix", value="", placeholder="e.g. SVR, GW", key="dev_custom_pre").strip()
+        else:
+            dev_prefix = dev_type.split()[0].strip()
 
-        with col_c:
-            st.markdown("#### 3. VMkernel Adapter (`vmk`)")
-            vmk_name_raw = st.text_input("vmk Name", value="vmk", placeholder="e.g. vmk0, vmk1", key="vmk_name_in")
-            vmk_purp = st.text_input("Purpose / Service", value="", placeholder="e.g. Management, vMotion, Storage", key="vmk_p_in").strip()
-            vsw_vmk_raw = st.text_input("vSwitch Name", value="vSwitch", placeholder="e.g. vSwitch0", key="vsw3")
-            vmk_act_nics_raw = st.text_input("Active vmnics (Optional)", value="", placeholder="e.g. vmnic0, vmnic1", key="vmk_act_nics_in")
-            vmk_stb_nics_raw = st.text_input("Standby vmnics (Optional)", value="", placeholder="e.g. vmnic2", key="vmk_stb_nics_in")
-            
-            # Apply normalization - always normalize vSwitch and purpose
-            if vsw_vmk_raw:
-                # Always normalize vSwitch to fix common typos like "vswtich"
-                clean_vsw_vmk = normalize_vswitch(vsw_vmk_raw)
-            else:
-                clean_vsw_vmk = ""
-            
-            # Normalize purpose name for proper capitalization (e.g., "vmontion" -> "vMotion")
-            if vmk_purp:
-                clean_vmk_purp = normalize_network_name(vmk_purp)
-            else:
-                clean_vmk_purp = ""
-            
-            # Clean vmk name
-            clean_vmk_name = vmk_name_raw.strip() if vmk_name_raw else ""
-            
-            # Normalize vmnic lists
-            if vmk_act_nics_raw:
-                clean_vmk_act = normalize_vmnic_list(vmk_act_nics_raw) if auto_correct else vmk_act_nics_raw.strip()
-            else:
-                clean_vmk_act = ""
-                
-            if vmk_stb_nics_raw:
-                clean_vmk_stb = normalize_vmnic_list(vmk_stb_nics_raw) if auto_correct else vmk_stb_nics_raw.strip()
-            else:
-                clean_vmk_stb = ""
-            
-            # Build the VMkernel description
-            # Format: "Management Network - vSwitch0 (vmnic0 Active / vmnic1 Standby)"
-            if clean_vmk_purp:
-                # Start with purpose
-                if clean_vmk_purp.lower() in ['management', 'vmotion', 'storage', 'iscsi']:
-                    purpose_display = f"{clean_vmk_purp} Network"
-                else:
-                    purpose_display = clean_vmk_purp
-            else:
-                purpose_display = "<Purpose>"
-            
-            # Build teaming part
-            if clean_vsw_vmk and (clean_vmk_act or clean_vmk_stb):
-                # Has vSwitch and at least one vmnic
-                if clean_vmk_act and clean_vmk_stb:
-                    # Both active and standby
-                    teaming_part = f"{clean_vsw_vmk} ({clean_vmk_act} Active / {clean_vmk_stb} Standby)"
-                elif clean_vmk_act:
-                    # Only active
-                    teaming_part = f"{clean_vsw_vmk} ({clean_vmk_act} Active)"
-                else:
-                    # Only standby (unusual but handle it)
-                    teaming_part = f"{clean_vsw_vmk} ({clean_vmk_stb} Standby)"
-                
-                fallback_disp = f"{purpose_display} - {teaming_part}"
-            elif clean_vsw_vmk:
-                # Has vSwitch but no vmnics
-                fallback_disp = f"{purpose_display} ({clean_vsw_vmk})"
-            else:
-                # No vSwitch
-                fallback_disp = f"{purpose_display} (<vSwitch>)"
+        pk = _sel_pattern_key(dev_type)
+        edit_on = _edit_toggle(pk)
+        pat = naming_patterns.get(pk, "")
+        if edit_on:
+            render_edit_mode_ui(pk, pat, variables)
+            st.stop()
+            return
 
-            st.caption("Generated vmk Name:")
-            st.code(clean_vmk_name if clean_vmk_name else "<vmk>", language="text")
-            st.caption("Generated VMkernel Description:")
-            st.code(fallback_disp, language="text")
+        pat = pick_sub_pattern(pat, dev_type)
+        defaults = {"Seq": "01"}
+        if auto_code:
+            defaults["Site"] = auto_code
+        values = render_token_widgets(pat, variables, "dev", defaults)
+        interpolated = interpolate_pattern(pat, {k: v for k, v in values.items() if v})
+        if not any(values.values()):
+            interpolated = interpolate_pattern(pat, {k: f"<{k}>" for k in values})
+        final = apply_case(interpolated, case_mode)
+        st.caption("Generated Device Hostname:")
+        st.code(final, language="text")
+
+        if st.button("AI Verify / Suggest Device Hostname", key="ai_chk_dev"):
+            with st.spinner("Auditing..."):
+                st.info(verify_and_suggest_with_ai(final, active_model, asset_type=f"Network/Security Device ({dev_type})", category_key="device", site_filter=values.get("Site", "")))
+
+        ref_lbl, ref_flt, ref_ex = _ref_info(dev_type)
+        display_reference_box("device", ref_ex, ref_lbl, values.get("Site", ""), ref_flt)
+
+    with col_b:
+        st.markdown("#### Switch & Firewall Interface Formatter")
+        intf_type = st.radio("Interface Type", INTERFACE_OPTIONS, key="p_cat_sel")
+        ipk = _interface_key(intf_type)
+        edit_on = _edit_toggle(ipk)
+        pat = naming_patterns.get(ipk, "")
+        if edit_on:
+            render_edit_mode_ui(ipk, pat, variables)
+            st.stop()
+            return
+
+        if ipk == "switch_access_desc":
+            vlan_id = st.text_input("Access VLAN ID (Optional)", value="", placeholder="e.g. 10, 100", key="ac_vlan").strip()
+            vlan_name = st.text_input("VLAN Name (Optional)", value="", placeholder="e.g. Data, Voice", key="ac_vlan_name").strip()
+            dev_end = st.text_input("Connected Device/Host", value="", placeholder="e.g. PC-001", key="ac_device").strip()
+            port_end = st.text_input("Endpoint Port (Optional)", value="", placeholder="e.g. eth0", key="ac_port").strip()
+            vlan_disp = vlan_name or (f"VLAN{vlan_id}" if vlan_id else "")
+            vals = {"VLAN_ID": vlan_id or "<VLAN_ID>", "VLAN_Name": vlan_disp, "Device": dev_end or "<Device>", "Port": port_end or "<Port>"}
+            gen = interpolate_pattern(pat, {k: v for k, v in vals.items() if v})
+        else:
+            vals = render_token_widgets(pat, variables, f"intf_{ipk}")
+            gen = interpolate_pattern(pat, {k: (v if v else f"<{k}>") for k, v in vals.items()})
+
+        st.caption("Generated Interface Description:")
+        st.code(gen, language="text")
+        ref_lbl, ref_ex = _interface_ref(intf_type)
+        if st.button("AI Verify Interface Description", key="ai_chk_intf"):
+            with st.spinner("Auditing..."):
+                st.info(verify_and_suggest_with_ai(gen, active_model, asset_type=ref_lbl, category_key="device", site_filter=""))
+        display_reference_box("device", ref_ex, ref_lbl, "")
+
+
+def _asset_class_2(case_mode, active_model, naming_patterns, variables):
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.markdown("#### ESXi Hypervisor Hostname")
+        pk = "esxi_host"
+        pat = naming_patterns.get(pk, "")
+        if _edit_toggle(pk):
+            render_edit_mode_ui(pk, pat, variables)
+            st.stop()
+            return
+        values = render_token_widgets(pat, variables, "esx", defaults={"seq": "001"})
+        gen_raw = interpolate_pattern(pat, {k: v for k, v in values.items() if v})
+        gen_raw = re.sub(r"\s*\([^)]*\)", "", gen_raw).strip()
+        gen_raw = re.sub(r"<[^>]+>", "", gen_raw)
+        gen_raw = re.sub(r"\.+", ".", gen_raw).strip(".")
+        if "." in gen_raw:
+            parts = gen_raw.split(".", 1)
+            gen = f"{apply_case(parts[0], case_mode)}.{parts[1].lower()}"
+        else:
+            gen = apply_case(gen_raw, case_mode)
+        st.caption("Generated ESXi Hostname:")
+        st.code(gen, language="text")
+        if st.button("AI Verify ESXi Host", key="ai_chk_esx"):
+            with st.spinner("Auditing..."):
+                st.info(verify_and_suggest_with_ai(gen, active_model, asset_type="ESXi Hypervisor Hostname", category_key="hypervisor", site_filter=values.get("site", "")))
+        display_reference_box("hypervisor", "NYCESX001.corp.internal\nLONESX001.corp.internal\nSYDESX01.corp.local", "Hypervisor", site_filter=values.get("site", ""))
+
+    with col_b:
+        st.markdown("#### Virtual Machine (VM) Hostname")
+        pk = "vm_host"
+        pat = naming_patterns.get(pk, "")
+        if _edit_toggle(pk):
+            render_edit_mode_ui(pk, pat, variables)
+            st.stop()
+            return
+        values = render_token_widgets(pat, variables, "vm", defaults={"Seq": "01"})
+        gen_raw = interpolate_pattern(pat, {k: v for k, v in values.items() if v})
+        gen_raw = re.sub(r"\s*\([^)]*\)", "", gen_raw).strip()
+        gen_raw = re.sub(r"\s+or\s+.*", "", gen_raw).strip()
+        gen_raw = re.sub(r"<[^>]+>", "", gen_raw)
+        gen = apply_case(gen_raw, case_mode)
+        st.caption("Generated VM Hostname:")
+        st.code(gen, language="text")
+        if st.button("AI Verify VM Hostname", key="ai_chk_vm"):
+            with st.spinner("Auditing..."):
+                st.info(verify_and_suggest_with_ai(gen, active_model, asset_type="Virtual Machine (VM) Hostname", category_key="vm", site_filter=values.get("site", "")))
+        display_reference_box("vm", "USNYCAPP01     (NYC Application Server 01)\nUKLONDB01\nAUSYDFS01", "Virtual Machine", site_filter=values.get("site", ""))
+
+
+def _asset_class_3(case_mode, active_model, naming_patterns, variables):
+    auto_correct = st.checkbox(
+        "Auto-Correct VMware Syntax (vswitch1 -> vSwitch1, nic0 -> vmnic0)",
+        value=True, key="esxi_auto_corr",
+        help="When checked, automatically normalizes vSwitch and vmnic naming.",
+    )
+    col_a, col_b, col_c = st.columns(3)
+    with col_a:
+        st.markdown("#### 1. Physical Uplink (PCIeX/PortX)")
+        pk = "esxi_uplink"
+        pat = naming_patterns.get(pk, "")
+        if _edit_toggle(pk):
+            render_edit_mode_ui(pk, pat, variables)
+            st.stop()
+            return
+        vals = render_esxi_network_inputs(pat, variables, "uplink", auto_correct)
+        gen = interpolate_pattern(pat, {k: v for k, v in vals.items() if v})
+        if not any(vals.values()):
+            gen = interpolate_pattern(pat, {k: f"<{k}>" for k in vals})
+        st.caption("Generated Physical Uplink Description:")
+        st.code(gen, language="text")
+    with col_b:
+        st.markdown("#### 2. Port Group Teaming (Network)")
+        pk = "esxi_portgroup"
+        pat = naming_patterns.get(pk, "")
+        if _edit_toggle(pk):
+            render_edit_mode_ui(pk, pat, variables)
+            st.stop()
+            return
+        pg_net = st.text_input("Network", value="", placeholder="e.g. VM Network", key="pg_network_in", label_visibility="visible").strip()
+        pg_net = normalize_network_name(pg_net) if pg_net else ""
+        gen_prefix = f"PG-{pg_net}" if pg_net else "PG-<pg_network>"
+        vsw = st.text_input("vSwitch Name", value="vSwitch", placeholder="e.g. vSwitch0", help="Port Group name (defaults to PG- prefix).", key="pg_vsw").strip()
+        vals = render_esxi_network_inputs(pat, variables, "portgroup", auto_correct)
+        vals["pg_network"] = pg_net
+        vals["PortGroup"] = vsw or "<PortGroup>"
+        clean = {k: v for k, v in vals.items() if v}
+        gen_desc = interpolate_pattern(pat, clean) if clean else interpolate_pattern(pat, {k: f"<{k}>" for k in vals})
+        st.caption("Generated Port Group Name:")
+        st.code(gen_prefix, language="text")
+        st.caption("Generated Port Group Description:")
+        st.code(gen_desc, language="text")
+    with col_c:
+        st.markdown("#### 3. VMkernel Adapter (vmk)")
+        pk = "esxi_vmkernel"
+        pat = naming_patterns.get(pk, "")
+        if _edit_toggle(pk):
+            render_edit_mode_ui(pk, pat, variables)
+            st.stop()
+            return
+        vmk_name = st.text_input("vmk Name", value="vmk", placeholder="e.g. vmk0, vmk1", key="vmk_name_in").strip()
+        vals = render_esxi_network_inputs(pat, variables, "vmk", auto_correct)
+        if vals.get("Purpose"):
+            p = vals["Purpose"]
+            vals["Purpose"] = f"{p} Network" if p.lower() in ("management", "vmotion", "storage", "iscsi") else p
+        clean = {k: v for k, v in vals.items() if v}
+        gen = interpolate_pattern(pat, clean) if clean else interpolate_pattern(pat, {k: f"<{k}>" for k in vals})
+        st.caption("Generated vmk Name:")
+        st.code(vmk_name or "<vmk>", language="text")
+        st.caption("Generated VMkernel Description:")
+        st.code(gen, language="text")
