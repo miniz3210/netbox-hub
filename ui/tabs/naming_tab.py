@@ -524,12 +524,12 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables):
         pg_net = st.text_input("Network", value="", placeholder="e.g. VM Network", key="pg_network_in", label_visibility="visible").strip()
         pg_net = normalize_network_name(pg_net) if pg_net else ""
         gen_prefix = f"PG-{pg_net}" if pg_net else "PG-<pg_network>"
-        vsw = st.text_input("vSwitch Name", value="vSwitch", placeholder="e.g. vSwitch0", help="Port Group name (defaults to PG- prefix).", key="pg_vsw").strip()
         vals = render_esxi_network_inputs(pat, variables, "portgroup", auto_correct)
         vals["pg_network"] = pg_net
-        vals["PortGroup"] = vsw or "<PortGroup>"
         clean = {k: v for k, v in vals.items() if v}
         gen_desc = interpolate_pattern(pat, clean) if clean else interpolate_pattern(pat, {k: f"<{k}>" for k in vals})
+        gen_desc = re.sub(r"\s*/\s*Standby$", "", gen_desc)
+        gen_desc = re.sub(r"\s*/\s*<Standby_vmnics>\s*Standby", "", gen_desc)
         st.caption("Generated Port Group Name:")
         st.code(gen_prefix, language="text")
         st.caption("Generated Port Group Description:")
@@ -549,6 +549,10 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables):
             vals["Purpose"] = f"{p} Network" if p.lower() in ("management", "vmotion", "storage", "iscsi") else p
         clean = {k: v for k, v in vals.items() if v}
         gen = interpolate_pattern(pat, clean) if clean else interpolate_pattern(pat, {k: f"<{k}>" for k in vals})
+        gen = re.sub(r"\(\s*([^)]*?)\s*/\s*Standby\s*\)$", r"(\1)", gen)
+        gen = re.sub(r"\(\s*/\s*<Standby_vmnics>\s*Standby\s*\)$", "()", gen)
+        gen = re.sub(r"\s*/\s*Standby$", "", gen)
+        gen = re.sub(r"\s*/\s*<Standby_vmnics>\s*Standby", "", gen)
         st.caption("Generated vmk Name:")
         st.code(vmk_name or "<vmk>", language="text")
         st.caption("Generated VMkernel Description:")
