@@ -84,7 +84,7 @@ PATTERN_VARIABLES = {
     "pg_network": {"label": "Network", "placeholder": "e.g. VM Network"},
     "PortGroup": {"label": "Port Group / vSwitch", "placeholder": "e.g. vSwitch0"},
     "Active_vmnics": {"label": "Active vmnics", "placeholder": "e.g. vmnic0, vmnic1"},
-    "Standby_vmnics": {"label": "Standby vmnics (Optional)", "placeholder": "e.g. vmnic2"},
+    "Standby_vmnics": {"label": "Standby vmnics (Optional)", "placeholder": "e.g. vmnic2", "optional": True},
     "vmk": {"label": "vmk Name", "placeholder": "vmk"},
 }
 
