@@ -322,43 +322,48 @@ def _interface_ref(opt):
     }.get(opt, ("Interface", ""))
 
 
-def _clean_vmkernel_teaming(gen: str, vals: dict) -> str:
+def _clean_vmkernel_teaming(gen: str, vals: dict, variables: dict) -> str:
     """Rebuild the parenthetical teaming block in the VMkernel description.
 
-    Keeps only the Active / Standby segments that have values, and drops the
-    whole '( )' block when neither has content.
+    Drops a teaming segment only when the corresponding variable is marked
+    ``optional`` in *variables* and its value is empty in *vals*.
     """
     act = vals.get("Active_vmnics", "")
     sb = vals.get("Standby_vmnics", "")
-    if not act and not sb:
-        gen = re.sub(r"\s*\([^)]*Active[^)]*\)\s*$", "", gen)
-        gen = re.sub(r"\s*\([^)]*Standby[^)]*\)\s*$", "", gen)
+    act_opt = _is_optional(variables, "Active_vmnics")
+    sb_opt = _is_optional(variables, "Standby_vmnics")
+
+    if act_opt and not act and sb_opt and not sb:
         gen = re.sub(r"\s*\([^)]*\)\s*$", "", gen)
         return gen.strip()
-    if not sb:
+    if sb_opt and not sb:
         gen = re.sub(r"\s*/\s*([^)]*)Standby[^)]*\)\s*$", r")", gen)
-    if not act:
+    if act_opt and not act:
         gen = re.sub(r"\s*([^)]*?)Active\s*/\s*", r" (", gen)
     return gen.strip()
 
 
-def _clean_portgroup_teaming(gen: str, vals: dict) -> str:
-    """Rebuild the bracket teaming block in the Port Group description.
-
-    The portgroup pattern is '<PortGroup> [<Active_vmnics> Active / <Standby_vmnics> Standby]'.
-    Drops empty optional segments so only provided vmnics show.
-    """
+def _clean_portgroup_teaming(gen: str, vals: dict, variables: dict) -> str:
+    """Rebuild the bracket teaming block in the Port Group description."""
     act = vals.get("Active_vmnics", "")
     sb = vals.get("Standby_vmnics", "")
-    if not act and not sb:
+    act_opt = _is_optional(variables, "Active_vmnics")
+    sb_opt = _is_optional(variables, "Standby_vmnics")
+
+    if act_opt and not act and sb_opt and not sb:
         gen = re.sub(r"\s*\[[^\]]*\]\s*$", "", gen)
         return gen.strip()
-    if not sb:
+    if sb_opt and not sb:
         gen = re.sub(r"\s*/\s*([^\]\[]*)Standby[^\]\[]*\]\s*$", r"]", gen)
-    if not act:
+    if act_opt and not act:
         gen = re.sub(r"\s*\[?\s*[^\]\[]*Active\s*/\s*", r" [", gen)
         gen = re.sub(r"\s*]\s*$", "]", gen)
     return gen.strip()
+
+
+def _is_optional(variables: dict, token: str) -> bool:
+    meta = variables.get(token, {})
+    return isinstance(meta, dict) and bool(meta.get("optional"))
 
 
 def _ref_info(dev_type):
@@ -567,7 +572,7 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables):
         vals["pg_network"] = pg_net
         clean = {k: v for k, v in vals.items() if v}
         gen_desc = interpolate_pattern(pat, clean) if clean else interpolate_pattern(pat, {k: f"<{k}>" for k in vals})
-        gen_desc = _clean_portgroup_teaming(gen_desc, vals)
+        gen_desc = _clean_portgroup_teaming(gen_desc, vals, variables)
         st.caption("Generated Port Group Name:")
         st.code(gen_prefix, language="text")
         st.caption("Generated Port Group Description:")
@@ -587,7 +592,7 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables):
             vals["Purpose"] = f"{p} Network" if p.lower() in ("management", "vmotion", "storage", "iscsi") else p
         clean = {k: v for k, v in vals.items() if v}
         gen = interpolate_pattern(pat, clean) if clean else interpolate_pattern(pat, {k: f"<{k}>" for k in vals})
-        gen = _clean_vmkernel_teaming(gen, vals)
+        gen = _clean_vmkernel_teaming(gen, vals, variables)
         st.caption("Generated vmk Name:")
         st.code(vmk_name or "<vmk>", language="text")
         st.caption("Generated VMkernel Description:")
