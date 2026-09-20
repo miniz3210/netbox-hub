@@ -6,6 +6,14 @@ from config.naming_rules import (
 )
 from core.naming_engine import parse_prompt_to_rules
 
+def _persist_variables(rules: dict, variables: dict) -> None:
+    """Save updated ``pattern_variables`` to file and session state."""
+    rules["pattern_variables"] = variables
+    save_naming_rules(rules, source="Variable Manager")
+    st.session_state["naming_rules"] = rules.copy()
+    st.success("✅ Variables updated.")
+    st.rerun()
+
 def render_standards_tab(active_model):
     st.subheader("📖 Infrastructure Naming Standards Configuration")
     st.caption("Define and manage your organization's naming conventions. All patterns configured here are automatically applied in the Naming tab.")
@@ -234,219 +242,83 @@ def render_standards_tab(active_model):
         variables_now = get_pattern_variables(current_rules)
         patterns_now = get_naming_patterns(current_rules)
 
-        with st.expander("✅ Active Variables (from Standards)", expanded=True):
+        # Editable variable manager
+        st.markdown("#### ✏️ Manage Pattern Variables")
+        st.caption("Add, edit, or remove variables. New variables default to **optional** (shown empty; omitted from output unless filled). Use `<Name>` in your naming patterns.")
+
+        # In-place editable variable rows
+        with st.expander("🔧 Edit Existing Variables", expanded=True):
             if variables_now:
-                for name, meta in variables_now.items():
-                    label = meta.get("label", name) if isinstance(meta, dict) else name
-                    ph = meta.get("placeholder", "") if isinstance(meta, dict) else ""
-                    st.markdown(f"- **`<{name}>`** — {label}" + (f" — *{ph}*" if ph else ""))
-                    
+                edited_vars = {}
+                for name, meta in list(variables_now.items()):
+                    meta = meta if isinstance(meta, dict) else {}
+                    c1, c2, c3, c4, c5 = st.columns([1, 2, 2, 1, 1])
+                    with c1:
+                        var_key = st.text_input("Name", value=name, key=f"var_key_{name}").strip()
+                    with c2:
+                        var_lbl = st.text_input("Label", value=meta.get("label", name), key=f"var_lbl_{name}").strip()
+                    with c3:
+                        var_ph = st.text_input("Placeholder Example", value=meta.get("placeholder", ""), key=f"var_ph_{name}").strip()
+                    with c4:
+                        var_opt = st.checkbox("Optional", value=bool(meta.get("optional")), key=f"var_opt_{name}",
+                                              help="Optional variables start empty and are omitted when not filled.")
+                        st.caption("default empty")
+                    with c5:
+                        remove = st.button("🗑️", key=f"var_del_{name}", help=f"Remove <{name}>")
+                    if remove:
+                        edited_vars[name] = None  # marker for deletion
+                        continue
+                    var_key = var_key or name
+                    entry = {
+                        "label": var_lbl or var_key,
+                        "placeholder": var_ph or f"e.g. {var_key}",
+                    }
+                    if var_opt:
+                        entry["optional"] = True
+                    edited_vars[var_key] = entry
+
+                if st.button("💾 Apply Variable Changes", key="var_apply"):
+                    final_vars = {k: v for k, v in edited_vars.items() if v is not None}
+                    _persist_variables(current_rules, final_vars)
+            else:
+                st.info("No variables defined yet. Add one below.")
+                if st.button("💾 Apply Variable Changes", key="var_apply_empty"):
+                    st.warning("Nothing to apply.")
+
+        st.markdown("---")
+        st.markdown("#### ➕ Add New Variable")
+        with st.expander("➕ Add a New Variable", expanded=True):
+            new_name = st.text_input("Variable Name (e.g. Speed, Standby_vmnics)", value="", key="var_new_name").strip()
+            new_label = st.text_input("Display Label", value="", placeholder="e.g. Interface Speed", key="var_new_label").strip()
+            new_ph = st.text_input("Placeholder Example", value="", placeholder="e.g. 10G, 25G", key="var_new_ph").strip()
+            new_optional = st.checkbox(
+                "Optional (default empty unless user inputs)", value=True,
+                key="var_new_optional",
+                help="Optional variables start blank and are omitted from output when not filled.",
+            )
+            if st.button("➕ Add Variable", key="var_new_add", type="primary"):
+                if new_name:
+                    entry = {
+                        "label": new_label or new_name,
+                        "placeholder": new_ph or f"e.g. {new_name}",
+                    }
+                    if new_optional:
+                        entry["optional"] = True
+                    final_vars = dict(variables_now)
+                    final_vars[new_name] = entry
+                    _persist_variables(current_rules, final_vars)
+                    st.success(f"✅ Added variable `<{new_name}>`. Use it in your patterns.")
+                    st.rerun()
+                else:
+                    st.warning("⚠️ Please enter a variable name.")
+
         with st.expander("🧩 Active Patterns", expanded=False):
             if patterns_now:
                 for key, pat in patterns_now.items():
                     st.markdown(f"**{key}:** `{pat}`")
 
         st.markdown("---")
-        st.caption("Use these variables in your naming patterns. The Naming tab will automatically replace them with actual values.")
-        
-        st.markdown("#### Network & Security Device Hostnames")
-        
-        with st.expander("🖥️ Device Hostname Variables", expanded=True):
-            st.markdown("""
-**Available Variables:**
-- `<Country>` - 2-letter country code (e.g., US, UK, AU)
-- `<State>` - State or region code (e.g., NY, CA, NSW)
-- `<Site>` - Site code (e.g., NYC, LON, SYD, AGE)
-- `<Zone>` - Zone, role, or vendor identifier (e.g., CORE, DIST, EDGE, PA)
-- `<Vendor>` - Vendor identifier (same as Zone, interchangeable)
-- `<Seq>` - Sequence number (e.g., 01, 02)
-- `<StackID>` - Stack or member ID (e.g., 0, 1)
-
-**Example Patterns:**
-- `SW<Country><Site><Seq>-<StackID>` → `SWUSNYC01-0`
-- `WAP<Country><Site><Seq>` → `WAPUSNYC01`
-- `FW<Country><Site><Vendor><Seq>` → `FWUSNYCPA01`
-- `ION<Country><Site><Seq>` → `IONUSNYC01`
-            """)
-        
-        st.markdown("#### Switch & Firewall Interface Descriptions")
-        
-        with st.expander("🔗 Switch Uplink Description Variables"):
-            st.markdown("""
-**Available Variables:**
-- `<Local_Device>` - The hostname of the local switch (e.g., CV-BARRICAS)
-- `<Local_Port>` - The raw port name as entered (e.g., XGigabitEthernet0/0/31)
-- `<Local_Port_Short>` - **Auto-shortened** port name (e.g., XGE0/0/31) ⭐
-- `<Remote_Device>` - The hostname of the remote switch (e.g., CV-BARRICAS_PASILLO)
-- `<Remote_Port>` - The raw port name as entered (e.g., Port24)
-- `<Remote_Port_Short>` - **Auto-shortened** port name (e.g., Po24) ⭐
-
-**Auto-Shortening Examples:**
-- `XGigabitEthernet0/0/31` → `XGE0/0/31`
-- `TenGigabitEthernet1/0/1` → `Te1/0/1`
-- `GigabitEthernet1/0/24` → `Gi1/0/24`
-- `Port-channel10` → `Po10`
-
-**Example Patterns:**
-- `Uplink_to_<Remote_Device>_<Remote_Port_Short>` → `Uplink_to_CV-BARRICAS_PASILLO_Po24`
-- `Uplink_from_<Local_Device>_to_<Remote_Device>_<Remote_Port_Short>` → `Uplink_from_CV-BARRICAS_to_CV-BARRICAS_PASILLO_XGE0/0/31`
-- `<Local_Device>_<Local_Port_Short>_to_<Remote_Device>_<Remote_Port_Short>` → `CV-BARRICAS_Gi1/0/1_to_CV-CPD_Gi1/0/1`
-            """)
-        
-        with st.expander("🔗 LAG Member Port (LACP) Variables"):
-            st.markdown("""
-**Available Variables:**
-- `<Remote_Device>` - The hostname of the remote device
-- `<Remote_Port>` - The raw port name as entered
-- `<Remote_Port_Short>` - **Auto-shortened** port name ⭐
-
-**Example Patterns:**
-- `LACP_to_<Remote_Device>_<Remote_Port_Short>` → `LACP_to_SWUSNYC02-0_Gi1/0/1`
-- `LAG_member_to_<Remote_Device>_<Remote_Port_Short>` → `LAG_member_to_SWUSNYC02-0_Po1`
-            """)
-        
-        with st.expander("🔗 Port-Channel (Logical) Variables"):
-            st.markdown("""
-**Available Variables:**
-- `<Local_Po_ID>` - The Port-Channel ID (e.g., LAG1, Po1)
-- `<Remote_Device>` - The hostname of the remote device
-
-**Example Patterns:**
-- `<Local_Po_ID>_to_<Remote_Device>` → `LAG1_to_SWUSNYC02-0`
-- `PortChannel_<Local_Po_ID>_<Remote_Device>` → `PortChannel_LAG1_SWUSNYC02-0`
-            """)
-        
-        with st.expander("🔗 Access Port (Endpoint) Variables"):
-            st.markdown("""
-**Available Variables:**
-- `<VLAN_ID>` - The VLAN number (e.g., 10, 100)
-- `<VLAN_Name>` - The VLAN name (e.g., Data, Voice, Guest)
-- `<Device>` - The connected device/host name
-- `<Port>` - The endpoint port identifier
-
-**Example Patterns:**
-- `<VLAN_Name> - <Device>_<Port>` → `Data - PC-001_eth0`
-- `VLAN<VLAN_ID> - <Device>_<Port>` → `VLAN10 - PC-001_eth0`
-- `<Device>_<Port>` → `pwsesx001_iLO` (VLAN optional)
-
-**Note:** If VLAN fields are empty, only `<Device>_<Port>` is used.
-            """)
-        
-        with st.expander("🔗 Firewall Interface Variables"):
-            st.markdown("""
-**Available Variables:**
-- `<Role_Zone>` - The security zone or role (e.g., TRUST, UNTRUST, DMZ)
-- `<VLAN_ID>` - The VLAN number
-
-**Example Patterns:**
-- `<Role_Zone>_<VLAN_ID>` → `TRUST_10`
-- `<Role_Zone>_VLAN<VLAN_ID>` → `TRUST_VLAN10`
-            """)
-        
-        st.markdown("#### Hypervisors & Virtual Machines")
-        
-        with st.expander("🖥️ ESXi Hypervisor Variables"):
-            st.markdown("""
-**Available Variables:**
-- `<Site>` or `<site>` - Site code (uppercase or lowercase)
-- `<Role>` or `<role>` - Host role (uppercase or lowercase, e.g., esx, otinfhost, infhost)
-- `<Seq>` or `<seq>` - Sequence number
-- `<Domain>` or `<domain>` - Domain name (uppercase or lowercase)
-
-**Example Patterns:**
-- `<site><role><seq>.<domain>` → `ageesx001.example.corp`
-- `<Site><Role><Seq>.<Domain>` → `AGEESX001.EXAMPLE.CORP`
-- `<site>-<role>-<seq>.<domain>` → `age-esx-001.corp.internal`
-            """)
-        
-        with st.expander("🖲️ Virtual Machine Variables"):
-            st.markdown("""
-**Available Variables:**
-- `<Site>` or `<site>` - Site code (uppercase or lowercase)
-- `<Country>` - First 2 characters of site code (e.g., US from USNYC)
-- `<Role>` or `<role>` - Workload role (uppercase or lowercase, e.g., app, web, db, fs, dc)
-- `<Seq>` or `<seq>` - Sequence number
-
-**Example Patterns:**
-- `<site><role><seq>` → `ageapp01`
-- `<Country><Site><Role><Seq>` → `USNYCAPP01`
-- `<Site>-<Role>-<Seq>` → `AGE-APP-01`
-            """)
-        
-        st.markdown("#### ESXi Network Descriptions")
-        
-        with st.expander("🔗 ESXi Physical Uplink Variables (PCIeX/PortX)"):
-            st.markdown("""
-**Available Variables:**
-- `<vmnic>` - The vmnic identifier (e.g., vmnic0, vmnic1)
-- `<vSwitch>` - The vSwitch name (e.g., vSwitch0, vSwitch1)
-- `<Purpose>` - The service purpose (e.g., Management, vMotion, Storage)
-- `<Status>` - The uplink status (Active Uplink or Standby Uplink)
-
-**Auto-Normalization:**
-- Input "nic0" or "vmnic0" → Output: `vmnic0`
-- Input "vswitch0" or "vswtich0" → Output: `vSwitch0` ⭐
-- Input "vmotion" → Output: `vMotion` ⭐
-- Input "management" → Output: `Management` ⭐
-
-**Example Patterns:**
-- `<vmnic> - <vSwitch> <Purpose> <Status>` → `vmnic1 - vSwitch0 Management Active Uplink`
-- `<vmnic> - <vSwitch> <Status>` → `vmnic0 - vSwitch0 Active Uplink`
-- `<vmnic>_<vSwitch>_<Purpose>_<Status>` → `vmnic1_vSwitch0_Management_Active_Uplink`
-
-**Note:** vSwitch and Purpose normalization is always applied to fix common typos and ensure proper capitalization.
-            """)
-        
-        with st.expander("🔗 ESXi Port Group Variables"):
-            st.markdown("""
-**Available Variables:**
-- `<pg_network>` - The network name (e.g., VM Network, vMotion)
-- `<PortGroup>` - The vSwitch name (e.g., vSwitch0)
-- `<Active_vmnics>` - Active vmnic list (e.g., vmnic0, vmnic1)
-- `<Standby_vmnics>` - Standby vmnic list (optional)
-
-**Auto-Normalization:**
-- Input "vm network" → Output: `VM Network` ⭐
-- Input "vmotion" → Output: `vMotion` ⭐
-- Input "vswitch0" → Output: `vSwitch0` ⭐
-
-**Output Format:**
-- **Port Group Name:** `PG-<pg_network>` → `PG-VM Network`
-- **Port Group Description:** `<PortGroup> (<Active_vmnics> Active)` → `vSwitch0 (vmnic0 Active)`
-- **With Standby:** `<PortGroup> (<Active_vmnics> Active / <Standby_vmnics> Standby)` → `vSwitch0 (vmnic0 Active / vmnic1 Standby)`
-
-**Note:** Network names and vSwitch are always normalized for proper capitalization.
-            """)
-        
-        with st.expander("🔗 ESXi VMkernel Adapter Variables"):
-            st.markdown("""
-**Available Variables:**
-- `<Purpose>` - The service purpose (e.g., Management, vMotion, Storage)
-- `<vSwitch>` - The vSwitch name
-- `<Active_vmnics>` - Active vmnic list (e.g., vmnic0, vmnic1)
-- `<Standby_vmnics>` - Standby vmnic list (optional)
-
-**Auto-Normalization:**
-- Input "vmotion" → Output: `vMotion` ⭐
-- Input "management" → Output: `Management` ⭐
-- Input "iscsi" → Output: `iSCSI` ⭐
-- Input "vswitch0" → Output: `vSwitch0` ⭐
-
-**Output Format:**
-- **With Teaming:** `<Purpose> Network - <vSwitch> (<Active_vmnics> Active / <Standby_vmnics> Standby)`
-- **Active Only:** `<Purpose> Network - <vSwitch> (<Active_vmnics> Active)`
-- **Without Teaming:** `<Purpose> (<vSwitch>)`
-
-**Example Patterns:**
-- `Management Network - vSwitch0 (vmnic0 Active / vmnic1 Standby)`
-- `vMotion Network - vSwitch1 (vmnic2 Active)`
-- `Storage Network - vSwitch2 (vmnic4 Active / vmnic5 Standby)`
-- `Management (vSwitch0)` (without teaming details)
-
-**Note:** Purpose and vSwitch are always normalized for proper capitalization. Common purposes like Management, vMotion, Storage, and iSCSI automatically append "Network" suffix.
-            """)
-        
-        st.info("💡 **Tip:** Copy any example pattern and modify it in the Edit Standards tab. All changes take effect immediately in the Naming tab.")
+        st.caption("Use these variables in your naming patterns. The Naming tab will automatically replace them with actual values; optional ones only appear when filled.")
     
     # Tab 4: AI-Powered Import
     with tab4:
