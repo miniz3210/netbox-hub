@@ -10,7 +10,7 @@
   "esxi_host": "<site><role/esx><seq>.<domain> (Valid domains: .example.corp for IT/Corp, .example.ot or .example.ot for OT/Industrial, .corp.local for Branch/Local, or shortname without domain)",
   "vm_host": "<Country><Site><Role><Seq> (e.g. AURFLWOTAPP01, AUGLOSFS01) or <Site><Role><Seq> (e.g. PWSAFS001, ESCPDC01, NYCCVI01)",
   "esxi_uplink": "<vmnic> - <vSwitch> <Purpose> <Status>",
-  "esxi_portgroup": "<PortGroup> [<Active_vmnics> Active / <Standby_vmnics> Standby]",
+  "esxi_portgroup": "<PortGroup> (<Active_vmnics> Active / <Standby_vmnics> Standby)",
   "esxi_vmkernel": "<Purpose> Network - <vSwitch> (<Active_vmnics> Active / <Standby_vmnics> Standby)",
   "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
   "naming_patterns": {
@@ -25,7 +25,7 @@
     "esxi_host": "<site><role/esx><seq>.<domain> (Valid domains: .example.corp for IT/Corp, .example.ot or .example.ot for OT/Industrial, .corp.local for Branch/Local, or shortname without domain)",
     "vm_host": "<Country><Site><Role><Seq> (e.g. AURFLWOTAPP01, AUGLOSFS01) or <Site><Role><Seq> (e.g. PWSAFS001, ESCPDC01, NYCCVI01)",
     "esxi_uplink": "<vmnic> - <vSwitch> <Purpose> <Status>",
-    "esxi_portgroup": "<PortGroup> [<Active_vmnics> Active / <Standby_vmnics> Standby]",
+    "esxi_portgroup": "<PortGroup> (<Active_vmnics> Active / <Standby_vmnics> Standby)",
     "esxi_vmkernel": "<Purpose> Network - <vSwitch> (<Active_vmnics> Active / <Standby_vmnics> Standby)",
     "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)"
   },
@@ -206,14 +206,14 @@
       "optional": false
     },
     "Active_vmnics": {
-      "label": "Active vmnics",
+      "label": "Active vmnics (Optinal)",
       "placeholder": "e.g. vmnic0, vmnic1",
-      "optional": false
+      "optional": true
     },
     "Standby_vmnics": {
       "label": "Standby vmnics (Optional)",
       "placeholder": "e.g. vmnic2",
-      "optional": false
+      "optional": true
     },
     "vmk": {
       "label": "vmk Name",
