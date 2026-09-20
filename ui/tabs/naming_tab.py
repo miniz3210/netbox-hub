@@ -282,12 +282,16 @@ INTERFACE_OPTIONS = [
 
 
 def _edit_toggle(pattern_key):
-    return st.toggle(
+    flag_key = f"edit_mode_{pattern_key}"
+    widget_key = f"edit_toggle_widget_{pattern_key}"
+    toggled = st.toggle(
         "Edit Mode",
-        value=st.session_state.get(f"edit_mode_{pattern_key}", False),
-        key=f"edit_mode_{pattern_key}",
+        value=st.session_state.get(flag_key, False),
+        key=widget_key,
         help="Turn ON to edit the raw pattern template and add new variables.",
     )
+    st.session_state[flag_key] = bool(toggled)
+    return bool(toggled)
 
 
 def _sel_pattern_key(dev_type_preset):

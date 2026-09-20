@@ -206,6 +206,7 @@ def render_edit_mode_ui(pattern_key: str, pattern_value: str, variables: Dict):
         st.session_state["naming_rules"] = rules
         save_naming_rules(rules, source=f"Edit Mode: {pattern_key}")
         st.session_state[edit_key] = False
+        st.session_state.pop(f"edit_toggle_widget_{pattern_key}", None)
         st.success(f"✅ Pattern '{pattern_key}' saved. Re-rendering form...")
         st.rerun()
 
