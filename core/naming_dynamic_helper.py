@@ -95,7 +95,12 @@ def render_token_widgets(
         label = token_label(variables, token)
         ph = token_placeholder(variables, token)
         wk = f"{prefix}__{token}"
-        values[token] = st.text_input(label, value=defaults.get(token, ""), placeholder=ph, key=wk).strip()
+        meta = variables.get(token, {})
+        is_optional = isinstance(meta, dict) and meta.get("optional")
+        initial = defaults.get(token, "")
+        if is_optional:
+            initial = ""
+        values[token] = st.text_input(label, value=initial, placeholder=ph, key=wk).strip()
 
     for token, (label, ph, default) in (extra_inputs or {}).items():
         if token not in values:
@@ -135,9 +140,11 @@ def render_esxi_network_inputs(pattern: str, variables: Dict, prefix: str, auto_
             continue
 
         value = ""
-        if token == "Standby_vmnics":
+        meta = variables.get(token, {})
+        is_optional = isinstance(meta, dict) and meta.get("optional")
+        if token == "Standby_vmnics" or is_optional:
             value = st.text_input(label, value="", placeholder=ph, key=wk,
-                                  help="Optional - Leave empty if no standby uplinks").strip()
+                               help="Optional - Leave empty if no standby uplinks").strip()
         else:
             value = st.text_input(label, value="", placeholder=ph, key=wk).strip()
 
@@ -192,12 +199,19 @@ def render_edit_mode_ui(pattern_key: str, pattern_value: str, variables: Dict):
             "Placeholder Example", value="", placeholder="e.g. 10G, 25G",
             key=f"nw_var_ph_{pattern_key}",
         ).strip()
+        var_optional = st.checkbox(
+            "Optional (default empty unless user inputs)", value=False,
+            key=f"nw_var_opt_{pattern_key}",
+            help="When checked, this field starts blank and is omitted from the final output if not filled."
+        )
         if st.button("➕ Add Field", key=f"nw_add_{pattern_key}"):
             if var_name:
                 variables[var_name] = {
                     "label": var_label or var_name,
                     "placeholder": var_ph or f"e.g. {var_name}",
                 }
+                if var_optional:
+                    variables[var_name]["optional"] = True
                 token = f"<{var_name}>"
                 if token not in edited:
                     st.session_state[pending_key] = edited + token
@@ -209,6 +223,8 @@ def render_edit_mode_ui(pattern_key: str, pattern_value: str, variables: Dict):
                 "label": var_label or var_name,
                 "placeholder": var_ph or f"e.g. {var_name}",
             }
+            if var_optional:
+                variables[var_name]["optional"] = True
             token = f"<{var_name}>"
             if token not in edited:
                 edited = edited + token
