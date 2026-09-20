@@ -162,10 +162,12 @@ def render_edit_mode_ui(pattern_key: str, pattern_value: str, variables: Dict):
     file, then triggers a rerun.
     """
     edit_key = f"edit_mode_{pattern_key}"
+    pending_key = f"_edit_pending_{pattern_key}"
+    initial = st.session_state.pop(pending_key, pattern_value or "")
 
     edited = st.text_area(
         "Pattern Template",
-        value=pattern_value or "",
+        value=initial,
         height=120,
         key=f"edit_text_{pattern_key}",
         help="Edit the pattern using <Token> placeholders.",
@@ -191,8 +193,8 @@ def render_edit_mode_ui(pattern_key: str, pattern_value: str, variables: Dict):
                 }
                 token = f"<{var_name}>"
                 if token not in edited:
-                    st.session_state[f"edit_text_{pattern_key}"] = edited + token
-                st.success(f"Added <{var_name}>. Click 'Save to Standards' below to persist.")
+                    st.session_state[pending_key] = edited + token
+                st.rerun()
 
     if st.button("💾 Save to Standards", key=f"nw_save_{pattern_key}", type="primary"):
         rules = st.session_state.get("naming_rules")
