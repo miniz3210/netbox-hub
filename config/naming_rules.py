@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from typing import Dict, List
 from datetime import datetime
 from config.constants import RULES_FILE, RULES_HISTORY_FILE, MAX_HISTORY_ENTRIES
@@ -8,12 +9,8 @@ try:
     from dotenv import load_dotenv
     load_dotenv()
 except Exception:
-    # python-dotenv is optional; environment variables may already be injected by the
-    # container runtime (e.g. docker-compose env_file) or shell.
     pass
 
-# Default domain variables. These are intentionally generic placeholders; real values are
-# injected at runtime from environment variables (see DEFAULT_RULES and load_naming_rules).
 DOMAIN_DEFAULTS = {
     "CORP_DOMAIN_IT": ".example.corp",
     "CORP_DOMAIN_OT_PRIMARY": ".example.ot",
@@ -21,11 +18,10 @@ DOMAIN_DEFAULTS = {
     "CORP_DOMAIN_LOCAL": ".corp.local",
 }
 
-# Read a domain from the environment, falling back to the generic placeholder.
 def _env_domain(key: str) -> str:
     return os.getenv(key, DOMAIN_DEFAULTS.get(key, "")).strip()
 
-DEFAULT_RULES = {
+DEFAULT_NAMING_PATTERNS = {
     "branch_switch": "SW<Country><State><Site><Zone><Seq>-<StackID> / VS<Country><State><Site><Seq>-<StackID>",
     "branch_ap": "WAP<Country><State><Site><Seq>",
     "branch_security": "FW<Country><State><Site><Vendor><Seq> / ION<Country><State><Site><Seq>",
@@ -48,16 +44,61 @@ DEFAULT_RULES = {
         "console-ports: Serial (de-9); "
         "module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; "
         "interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)"
-    )
+    ),
 }
 
-# Environment variable names accepted in name rule templates.
+PATTERN_VARIABLES = {
+    "Country": {"label": "Country Code (2-letter)", "placeholder": "e.g. US, UK, AU, DE, JP"},
+    "State": {"label": "State / Region (Optional)", "placeholder": "e.g. NY, CA, TX, NSW"},
+    "Site": {"label": "Site Code", "placeholder": "e.g. NYC, LON, SYD, AGE"},
+    "Zone": {"label": "Zone / Role / Vendor (Optional)", "placeholder": "e.g. CORE, DIST, EDGE, PA"},
+    "Vendor": {"label": "Vendor (Optional)", "placeholder": "e.g. PA, CISCO, HUAWEI"},
+    "Seq": {"label": "Sequence Number", "placeholder": "e.g. 01, 02"},
+    "StackID": {"label": "Stack / Member ID (Optional)", "placeholder": "e.g. 0, 1"},
+    "Local_Device": {"label": "Local Device Hostname", "placeholder": "e.g. SWUSNYC01-0"},
+    "Local_Port": {"label": "Local Port", "placeholder": "e.g. Gi1/0/48, Te1/0/1"},
+    "Local_Port_Short": {"label": "Local Port (Short)", "placeholder": "e.g. Gi1/0/48, Te1/0/1"},
+    "Remote_Device": {"label": "Remote Device Hostname", "placeholder": "e.g. SWUSNYC02-0"},
+    "Remote_Port": {"label": "Remote Port", "placeholder": "e.g. Gi1/0/48, Te1/0/1"},
+    "Remote_Port_Short": {"label": "Remote Port (Short)", "placeholder": "e.g. Gi1/0/48, Te1/0/1"},
+    "Local_Po_ID": {"label": "Local Port-Channel ID", "placeholder": "LAG1"},
+    "VLAN_Name": {"label": "VLAN Name", "placeholder": "e.g. DATA, VOIP"},
+    "VLAN_ID": {"label": "VLAN ID", "placeholder": "e.g. 10, 20"},
+    "Device": {"label": "Connected Device", "placeholder": "e.g. WAP01"},
+    "Port": {"label": "Connected Port", "placeholder": "e.g. Gi0/1"},
+    "Role_Zone": {"label": "Security Zone / Role", "placeholder": "e.g. INSIDE, OUTSIDE"},
+    "site": {"label": "Site Prefix", "placeholder": "e.g. age, nyc, lon, syd"},
+    "site_prefix": {"label": "Site Prefix", "placeholder": "e.g. age, nyc, lon, syd"},
+    "role": {"label": "Host Role (Optional)", "placeholder": "e.g. esx, otinfhost, infhost"},
+    "role_esx": {"label": "Host Role (Optional)", "placeholder": "e.g. esx, otinfhost, infhost"},
+    "seq": {"label": "Host Sequence Number", "placeholder": "001"},
+    "host_seq": {"label": "Host Sequence Number", "placeholder": "001"},
+    "Domain": {"label": "Domain Name (FQDN Suffix)", "placeholder": "e.g. corp.example.com, internal.net"},
+    "domain": {"label": "Domain Name (FQDN Suffix)", "placeholder": "e.g. corp.example.com, internal.net"},
+    "Role": {"label": "Role Code / Workload", "placeholder": "e.g. app, web, db, fs, dc"},
+    "vm_site": {"label": "Site Prefix / Country & Site", "placeholder": "e.g. age, usnyc, uklon"},
+    "vmnic": {"label": "vmnic Name", "placeholder": "vmnic"},
+    "vSwitch": {"label": "vSwitch Name", "placeholder": "vSwitch"},
+    "Purpose": {"label": "Purpose / Service", "placeholder": "e.g. Management, vMotion, Storage"},
+    "Status": {"label": "Status", "placeholder": "Active Uplink / Standby Uplink"},
+    "pg_network": {"label": "Network", "placeholder": "e.g. VM Network"},
+    "PortGroup": {"label": "Port Group / vSwitch", "placeholder": "e.g. vSwitch0"},
+    "Active_vmnics": {"label": "Active vmnics", "placeholder": "e.g. vmnic0, vmnic1"},
+    "Standby_vmnics": {"label": "Standby vmnics (Optional)", "placeholder": "e.g. vmnic2"},
+    "vmk": {"label": "vmk Name", "placeholder": "vmk"},
+}
+
+LEGACY_PATTERN_KEYS = list(DEFAULT_NAMING_PATTERNS.keys())
+
 DOMAIN_ENV_KEYS = (
     "CORP_DOMAIN_IT",
     "CORP_DOMAIN_OT_PRIMARY",
     "CORP_DOMAIN_OT_SECONDARY",
     "CORP_DOMAIN_LOCAL",
 )
+
+def _is_str(value) -> bool:
+    return isinstance(value, str)
 
 def _substitute_env(value: str) -> str:
     """Expand ${VAR} placeholders in a rule value using os.path.expandvars.
@@ -73,7 +114,7 @@ def _substitute_env(value: str) -> str:
             result = result.replace(f"${{{key}}}", DOMAIN_DEFAULTS.get(key, ""))
     return result
 
-def _load_rules_dict_from_file() -> Dict[str, str]:
+def _load_rules_dict_from_file() -> dict:
     """Read the rules file as JSON and apply environment variable substitution."""
     if not os.path.exists(RULES_FILE):
         return {}
@@ -84,21 +125,101 @@ def _load_rules_dict_from_file() -> Dict[str, str]:
         return {}
     if not isinstance(raw, dict):
         return {}
-    return {str(k): _substitute_env(str(v)) for k, v in raw.items()}
+    normalized = {}
+    for k, v in raw.items():
+        if isinstance(v, dict):
+            normalized[str(k)] = {
+                str(ik): (_substitute_env(str(iv)) if _is_str(iv) else iv)
+                for ik, iv in v.items()
+            }
+        elif _is_str(v):
+            normalized[str(k)] = _substitute_env(v)
+        else:
+            normalized[str(k)] = v
+    return normalized
+
+
+def extract_tokens(pattern: str) -> List[str]:
+    """Extract unique token names from a pattern string.
+
+    Combined/annotated tokens such as ``<role/esx>`` are reduced to their first
+    segment (``role``) so they still drive an input widget. This matches the legacy
+    behaviour where ``<role>`` and ``<role/esx>`` map to the same variable.
+    """
+    tokens: List[str] = []
+    if not pattern:
+        return tokens
+    for raw_token in re.findall(r"<([^>]+)>", pattern):
+        token = raw_token.split("/")[0].strip()
+        if token and token not in tokens:
+            tokens.append(token)
+    return tokens
+
+
+def _normalize_rules(raw: dict) -> dict:
+    """Upgrade any rule dict to the merged schema used by the app.
+
+    The merged schema keeps every pattern key flat at the top level (for backward
+    compatibility) and additionally exposes ``naming_patterns`` and ``pattern_variables``
+    sub-dictionaries consumed by the dynamic UI.
+    """
+    raw_patterns = raw.get("naming_patterns")
+    if not isinstance(raw_patterns, dict):
+        raw_patterns = {
+            k: v for k, v in raw.items()
+            if _is_str(v) and k not in ("pattern_variables", "naming_patterns")
+        }
+    patterns = {k: str(v) for k, v in raw_patterns.items()}
+    for key in LEGACY_PATTERN_KEYS:
+        if key not in patterns:
+            patterns[key] = DEFAULT_NAMING_PATTERNS.get(key, "")
+
+    variables = raw.get("pattern_variables")
+    if not isinstance(variables, dict):
+        variables = PATTERN_VARIABLES.copy()
+    else:
+        merged_vars = PATTERN_VARIABLES.copy()
+        for k, v in variables.items():
+            if isinstance(v, dict) and v:
+                existing = merged_vars.get(k, {})
+                merged_vars[str(k)] = {**existing, **v}
+            elif _is_str(v):
+                merged_vars[str(k)] = {"label": v, "placeholder": f"e.g. {k}"}
+        variables = merged_vars
+
+    merged = dict(patterns)
+    merged["naming_patterns"] = dict(patterns)
+    merged["pattern_variables"] = variables
+    return merged
+
 
 def load_naming_rules() -> Dict[str, str]:
     rules = _load_rules_dict_from_file()
     if not rules:
-        # Fall back to defaults (which already include resolved domains).
-        return DEFAULT_RULES.copy()
-    return rules
+        return _normalize_rules(DEFAULT_NAMING_PATTERNS.copy())
+    return _normalize_rules(rules)
+
+
+def get_pattern_variables(rules: dict) -> dict:
+    """Return the variable metadata dict from a rules structure (defaults if missing)."""
+    variables = rules.get("pattern_variables")
+    if isinstance(variables, dict) and variables:
+        return variables
+    return PATTERN_VARIABLES.copy()
+
+
+def get_naming_patterns(rules: dict) -> dict:
+    """Return the naming patterns dict from a rules structure (defaults if missing)."""
+    patterns = rules.get("naming_patterns")
+    if isinstance(patterns, dict) and patterns:
+        return patterns
+    return {k: v for k, v in rules.items() if _is_str(v)}
+
 
 def save_naming_rules(rules: Dict[str, str], source: str = "Manual Edit"):
     """Save naming rules and add to history."""
-    # Ensure data directory exists
     os.makedirs(os.path.dirname(RULES_FILE), exist_ok=True)
 
-    # Save current rules to history before overwriting
     if os.path.exists(RULES_FILE):
         try:
             with open(RULES_FILE, "r", encoding="utf-8") as f:
@@ -107,12 +228,13 @@ def save_naming_rules(rules: Dict[str, str], source: str = "Manual Edit"):
         except Exception:
             pass
 
-    # Persist the rules verbatim (with placeholders preserved) so environment
-    # substitution still applies when the file is loaded again.
+    stored = _normalize_rules(dict(rules))
     with open(RULES_FILE, "w", encoding="utf-8") as f:
-        json.dump(rules, f, indent=2, ensure_ascii=False)
+        json.dump(stored, f, indent=2, ensure_ascii=False)
         f.flush()
         os.fsync(f.fileno())
+
+DEFAULT_RULES = _normalize_rules(DEFAULT_NAMING_PATTERNS.copy())
 
 def add_to_history(rules: Dict[str, str], source: str = "Manual Edit"):
     """Add rules to history with timestamp."""
@@ -150,9 +272,8 @@ def restore_from_history(index: int) -> Dict[str, str]:
     history = load_history()
     if 0 <= index < len(history):
         raw_rules = history[index]["rules"]
-        # Apply environment substitution to restored templates too.
         if isinstance(raw_rules, dict):
-            return {str(k): _substitute_env(str(v)) for k, v in raw_rules.items()}
+            return _normalize_rules(raw_rules)
         return raw_rules
     return DEFAULT_RULES.copy()
 
@@ -162,32 +283,41 @@ def clear_history():
         os.remove(RULES_HISTORY_FILE)
 
 def export_rules_as_prompt(rules: Dict[str, str]) -> str:
+    p = get_naming_patterns(rules)
+    variables = get_pattern_variables(rules)
+    var_lines = "\n".join(
+        f"- <{name}>: {meta.get('label', name)}"
+        for name, meta in variables.items()
+    )
     return f"""# INFRASTRUCTURE & NAMING CONVENTIONS STANDARD (AUTOMATION GRADE)
 
 1. Network & Security Devices:
-- Switch Hostname: {rules.get('branch_switch', '')}
-- Wireless AP Hostname: {rules.get('branch_ap', '')}
-- Firewall / Security Hostname: {rules.get('branch_security', '')}
+- Switch Hostname: {p.get('branch_switch', '')}
+- Wireless AP Hostname: {p.get('branch_ap', '')}
+- Firewall / Security Hostname: {p.get('branch_security', '')}
 
 2. Switch & Firewall Interface Descriptions:
-- Switch Uplink Description: {rules.get('switch_uplink_desc', '')}
-- Switch LAG Member Description: {rules.get('switch_lag_member', '')}
-- Switch Port Channel Description: {rules.get('switch_port_channel', '')}
-- Switch Access Port Description: {rules.get('switch_access_desc', '')}
-- Firewall Interface Description: {rules.get('firewall_interface', '')}
+- Switch Uplink Description: {p.get('switch_uplink_desc', '')}
+- Switch LAG Member Description: {p.get('switch_lag_member', '')}
+- Switch Port Channel Description: {p.get('switch_port_channel', '')}
+- Switch Access Port Description: {p.get('switch_access_desc', '')}
+- Firewall Interface Description: {p.get('firewall_interface', '')}
 
 3. Hypervisors & Virtual Machines:
-- ESXi Hypervisor Hostname: {rules.get('esxi_host', '')}
+- ESXi Hypervisor Hostname: {p.get('esxi_host', '')}
   * IT / Corporate ESXi Domain: {_env_domain('CORP_DOMAIN_IT')} (e.g. host001{_env_domain('CORP_DOMAIN_IT')})
   * OT / Industrial Cluster Domain: {_env_domain('CORP_DOMAIN_OT_PRIMARY')} / {_env_domain('CORP_DOMAIN_OT_SECONDARY')} (e.g. host001{_env_domain('CORP_DOMAIN_OT_PRIMARY')})
   * Branch / Standalone: {_env_domain('CORP_DOMAIN_LOCAL')} or shortname (no FQDN)
-- Virtual Machine (VM) Hostname: {rules.get('vm_host', '')}
+- Virtual Machine (VM) Hostname: {p.get('vm_host', '')}
 
 4. ESXi Network Descriptions:
-- ESXi Physical Uplink Description: {rules.get('esxi_uplink', '')}
-- ESXi Port Group Teaming Description: {rules.get('esxi_portgroup', '')}
-- ESXi VMkernel Description: {rules.get('esxi_vmkernel', '')}
+- ESXi Physical Uplink Description: {p.get('esxi_uplink', '')}
+- ESXi Port Group Teaming Description: {p.get('esxi_portgroup', '')}
+- ESXi VMkernel Description: {p.get('esxi_vmkernel', '')}
 
-5. NetBox Hardware YAML Schema:
-- {rules.get('netbox_server_yaml', '')}
+5. Available Pattern Variables:
+{var_lines}
+
+6. NetBox Hardware YAML Schema:
+- {p.get('netbox_server_yaml', '')}
 """
