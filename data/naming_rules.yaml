@@ -176,7 +176,8 @@
     },
     "Standby_vmnics": {
       "label": "Standby vmnics (Optional)",
-      "placeholder": "e.g. vmnic2"
+      "placeholder": "e.g. vmnic2",
+      "optional": true
     },
     "vmk": {
       "label": "vmk Name",
