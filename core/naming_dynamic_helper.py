@@ -173,6 +173,7 @@ def render_edit_mode_ui(pattern_key: str, pattern_value: str, variables: Dict):
         help="Edit the pattern using <Token> placeholders.",
     )
 
+    var_name = ""
     with st.expander("➕ Add New Field / Variable", expanded=False):
         var_name = st.text_input(
             "Variable Key (e.g. Speed)", value="", key=f"nw_var_name_{pattern_key}"
@@ -197,6 +198,14 @@ def render_edit_mode_ui(pattern_key: str, pattern_value: str, variables: Dict):
                 st.rerun()
 
     if st.button("💾 Save to Standards", key=f"nw_save_{pattern_key}", type="primary"):
+        if var_name:
+            variables[var_name] = {
+                "label": var_label or var_name,
+                "placeholder": var_ph or f"e.g. {var_name}",
+            }
+            token = f"<{var_name}>"
+            if token not in edited:
+                edited = edited + token
         rules = st.session_state.get("naming_rules")
         patterns = rules.get("naming_patterns")
         if patterns is not None:
