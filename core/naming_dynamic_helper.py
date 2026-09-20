@@ -134,18 +134,24 @@ def render_esxi_network_inputs(pattern: str, variables: Dict, prefix: str, auto_
             )
             continue
 
-        raw = st.text_input(label, value="", placeholder=ph, key=wk).strip()
-        if raw:
+        value = ""
+        if token == "Standby_vmnics":
+            value = st.text_input(label, value="", placeholder=ph, key=wk,
+                                  help="Optional - Leave empty if no standby uplinks").strip()
+        else:
+            value = st.text_input(label, value="", placeholder=ph, key=wk).strip()
+
+        if value:
             if token == "vSwitch":
-                values[token] = normalize_vswitch(raw)
+                values[token] = normalize_vswitch(value)
             elif token == "vmnic":
-                values[token] = normalize_vmnic(raw) if auto_correct else raw
+                values[token] = normalize_vmnic(value) if auto_correct else value
             elif token in ("Active_vmnics", "Standby_vmnics"):
-                values[token] = normalize_vmnic_list(raw) if auto_correct else raw
+                values[token] = normalize_vmnic_list(value) if auto_correct else value
             elif token == "Purpose":
-                values[token] = normalize_network_name(raw)
+                values[token] = normalize_network_name(value)
             else:
-                values[token] = raw
+                values[token] = value
         else:
             values[token] = ""
 
@@ -211,7 +217,10 @@ def render_edit_mode_ui(pattern_key: str, pattern_value: str, variables: Dict):
         if patterns is not None:
             patterns[pattern_key] = edited
             rules[pattern_key] = edited
-        rules["pattern_variables"] = variables
+        all_used = set()
+        for p in (patterns or {}).values():
+            all_used.update(extract_tokens(p))
+        rules["pattern_variables"] = {k: v for k, v in variables.items() if k in all_used}
         st.session_state["naming_rules"] = rules
         save_naming_rules(rules, source=f"Edit Mode: {pattern_key}")
         st.session_state[edit_key] = False
