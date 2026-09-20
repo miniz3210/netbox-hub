@@ -183,51 +183,10 @@ def render_edit_mode_ui(pattern_key: str, pattern_value: str, variables: Dict):
         value=initial,
         height=120,
         key=f"edit_text_{pattern_key}",
-        help="Edit the pattern using <Token> placeholders.",
+        help="Edit the pattern using <Token> placeholders. Manage variables in the Standards tab > Pattern Variables Reference.",
     )
 
-    var_name = ""
-    with st.expander("➕ Add New Field / Variable", expanded=False):
-        var_name = st.text_input(
-            "Variable Key (e.g. Speed)", value="", key=f"nw_var_name_{pattern_key}"
-        ).strip()
-        var_label = st.text_input(
-            "Display Label", value="", placeholder="e.g. Interface Speed",
-            key=f"nw_var_label_{pattern_key}",
-        ).strip()
-        var_ph = st.text_input(
-            "Placeholder Example", value="", placeholder="e.g. 10G, 25G",
-            key=f"nw_var_ph_{pattern_key}",
-        ).strip()
-        var_optional = st.checkbox(
-            "Optional (default empty unless user inputs)", value=False,
-            key=f"nw_var_opt_{pattern_key}",
-            help="When checked, this field starts blank and is omitted from the final output if not filled."
-        )
-        if st.button("➕ Add Field", key=f"nw_add_{pattern_key}"):
-            if var_name:
-                variables[var_name] = {
-                    "label": var_label or var_name,
-                    "placeholder": var_ph or f"e.g. {var_name}",
-                }
-                if var_optional:
-                    variables[var_name]["optional"] = True
-                token = f"<{var_name}>"
-                if token not in edited:
-                    st.session_state[pending_key] = edited + token
-                st.rerun()
-
     if st.button("💾 Save to Standards", key=f"nw_save_{pattern_key}", type="primary"):
-        if var_name:
-            variables[var_name] = {
-                "label": var_label or var_name,
-                "placeholder": var_ph or f"e.g. {var_name}",
-            }
-            if var_optional:
-                variables[var_name]["optional"] = True
-            token = f"<{var_name}>"
-            if token not in edited:
-                edited = edited + token
         rules = st.session_state.get("naming_rules")
         patterns = rules.get("naming_patterns")
         if patterns is not None:
