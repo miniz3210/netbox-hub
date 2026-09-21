@@ -24,6 +24,7 @@ from core.naming_dynamic_helper import (
     render_token_widgets,
     render_esxi_network_inputs,
     render_edit_mode_ui,
+    render_multi_edit_mode_ui,
     extract_tokens,
     pick_sub_pattern,
     remove_empty_optional_tokens,
@@ -528,10 +529,14 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables):
         name_pk = "esxi_portgroup_name"
         name_pat = naming_patterns.get(name_pk, "")
         if _edit_toggle(pk):
-            render_edit_mode_ui(pk, pat, variables)
+            render_multi_edit_mode_ui([(name_pk, name_pat), (pk, pat)], variables)
             st.stop()
             return
-        vals = render_esxi_network_inputs(pat, variables, "portgroup", auto_correct, extra_pattern=name_pat)
+        vals = render_esxi_network_inputs(
+            pat, variables, "portgroup", auto_correct,
+            extra_pattern=name_pat,
+            token_order=["pg_network", "PortGroup", "Active_vmnics", "Standby_vmnics"],
+        )
         gen_desc = _render_esxi_pattern(pat, vals, variables)
         gen_prefix = interpolate_pattern(name_pat, {k: (v if v else f"<{k}>") for k, v in vals.items()})
         st.caption("Generated Port Group Name:")
@@ -545,10 +550,14 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables):
         name_pk = "esxi_vmkernel_name"
         name_pat = naming_patterns.get(name_pk, "")
         if _edit_toggle(pk):
-            render_edit_mode_ui(pk, pat, variables)
+            render_multi_edit_mode_ui([(name_pk, name_pat), (pk, pat)], variables)
             st.stop()
             return
-        vals = render_esxi_network_inputs(pat, variables, "vmk", auto_correct, extra_pattern=name_pat)
+        vals = render_esxi_network_inputs(
+            pat, variables, "vmk", auto_correct,
+            extra_pattern=name_pat,
+            token_order=["vmk", "Purpose", "vSwitch", "Active_vmnics", "Standby_vmnics"],
+        )
         gen = _render_esxi_pattern(pat, vals, variables)
         vmk_name = interpolate_pattern(name_pat, {k: (v if v else f"<{k}>") for k, v in vals.items()})
         st.caption("Generated vmk Name:")

@@ -120,18 +120,39 @@ def preview_box(label: str, content: str):
 
 
 def render_esxi_network_inputs(pattern: str, variables: Dict, prefix: str, auto_correct: bool,
-                            extra_pattern: str = ""):
+                            extra_pattern: str = "",
+                            token_order: list = None):
     """Renders ESXi-specific inputs with normalization for ``vmnic``, ``vSwitch``,
     ``Purpose``, ``Status``, and vmnic lists.
 
     ``extra_pattern`` is an optional second pattern (e.g. the *_name pattern) whose
     tokens should also receive widgets.
 
+    ``token_order`` is an optional list of token names in the desired render order.
+    When omitted, tokens are rendered in the order they appear in the combined patterns.
+
     Returns a dict that can be fed directly into ``interpolate_pattern``.
     """
     values: Dict[str, str] = {}
     tokens = extract_tokens(pattern) + extract_tokens(extra_pattern)
-    for token in tokens:
+    # Deduplicate while preserving order.
+    seen = set()
+    ordered = []
+    for t in tokens:
+        if t not in seen:
+            seen.add(t)
+            ordered.append(t)
+    if token_order:
+        # Use token_order for rendering, but still populate from the full set.
+        render_list = [t for t in token_order if t in seen]
+        # Append any tokens not in token_order at the end.
+        for t in ordered:
+            if t not in token_order:
+                render_list.append(t)
+    else:
+        render_list = ordered
+
+    for token in render_list:
         label = token_label(variables, token)
         ph = token_placeholder(variables, token)
         wk = f"{prefix}__{token}"
@@ -163,6 +184,10 @@ def render_esxi_network_inputs(pattern: str, variables: Dict, prefix: str, auto_
                 values[token] = normalize_vmnic_list(value) if auto_correct else value
             elif token == "Purpose":
                 values[token] = normalize_network_name(value)
+            elif token in ("pg_network",):
+                values[token] = normalize_network_name(value) if auto_correct else value.strip()
+            elif token in ("vmk",):
+                values[token] = normalize_vmnic(value) if auto_correct else value
             else:
                 values[token] = value
         else:
@@ -207,6 +232,60 @@ def render_edit_mode_ui(pattern_key: str, pattern_value: str, variables: Dict):
         st.session_state[edit_key] = False
         st.session_state.pop(f"edit_toggle_widget_{pattern_key}", None)
         st.success(f"✅ Pattern '{pattern_key}' saved. Re-rendering form...")
+        st.rerun()
+
+
+def render_multi_edit_mode_ui(pattern_pairs: List[Tuple[str, str]], variables: Dict):
+    """In-place Edit Mode for a set of related pattern templates.
+
+    ``pattern_pairs`` is a list of ``(pattern_key, current_value)`` where each entry
+    is rendered as an editable textarea. On save, all keys are persisted to
+    ``st.session_state["naming_rules"]`` and to the JSON file, then reruns.
+
+    Labels and fallback defaults mirror the canonical Asset Class 3 patterns so the UI
+    stays useful even when a *_name pattern is missing from the loaded rules.
+    """
+    joiner = "__".join(k for k, _ in pattern_pairs)
+    edit_key = f"edit_mode_{joiner}"
+    defaults = {
+        "esxi_portgroup_name": "PG-<pg_network>",
+        "esxi_vmkernel_name": "<vmk>",
+    }
+    labels = {
+        "esxi_portgroup_name": "Port Group Name Pattern Template",
+        "esxi_portgroup": "Port Group Description Pattern Template",
+        "esxi_vmkernel_name": "VMkernel Name Pattern Template",
+        "esxi_vmkernel": "VMkernel Description Pattern Template",
+    }
+    edited_vals = {}
+    for key, current in pattern_pairs:
+        edited_vals[key] = st.text_area(
+            labels.get(key, f"{key} Pattern Template"),
+            value=current or defaults.get(key, ""),
+            height=90,
+            key=f"edit_text_{key}",
+            help="Edit the pattern using <Token> placeholders. Manage variables in the Standards tab > Pattern Variables Reference.",
+        )
+
+    if st.button("💾 Save to Standards", key=f"nw_save_{joiner}", type="primary"):
+        rules = st.session_state.get("naming_rules")
+        patterns = rules.get("naming_patterns")
+        if patterns is None:
+            patterns = {}
+            rules["naming_patterns"] = patterns
+        for key, val in edited_vals.items():
+            patterns[key] = val
+            rules[key] = val
+        all_used = set()
+        for p in (patterns or {}).values():
+            all_used.update(extract_tokens(p))
+        rules["pattern_variables"] = {k: v for k, v in variables.items() if k in all_used}
+        st.session_state["naming_rules"] = rules
+        save_naming_rules(rules, source=f"Edit Mode: {joiner}")
+        for key, _ in pattern_pairs:
+            st.session_state.pop(f"edit_mode_{key}", None)
+            st.session_state.pop(f"edit_toggle_widget_{key}", None)
+        st.success("✅ Patterns saved. Re-rendering form...")
         st.rerun()
 
 
