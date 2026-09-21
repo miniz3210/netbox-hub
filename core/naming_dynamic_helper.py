@@ -229,9 +229,12 @@ def render_edit_mode_ui(pattern_key: str, pattern_value: str, variables: Dict):
         rules["pattern_variables"] = {k: v for k, v in variables.items() if k in all_used}
         st.session_state["naming_rules"] = rules
         save_naming_rules(rules, source=f"Edit Mode: {pattern_key}")
+        # Explicitly disable the Edit Mode toggle and clear its widget state so the
+        # rerun exits Edit Mode and shows the generated view.
         st.session_state[edit_key] = False
-        st.session_state.pop(f"edit_toggle_widget_{pattern_key}", None)
-        st.success(f"✅ Pattern '{pattern_key}' saved. Re-rendering form...")
+        toggle_key = f"edit_toggle_widget_{pattern_key}"
+        st.session_state.pop(toggle_key, None)
+        st.session_state.pop(pending_key, None)
         st.rerun()
 
 
@@ -282,10 +285,11 @@ def render_multi_edit_mode_ui(pattern_pairs: List[Tuple[str, str]], variables: D
         rules["pattern_variables"] = {k: v for k, v in variables.items() if k in all_used}
         st.session_state["naming_rules"] = rules
         save_naming_rules(rules, source=f"Edit Mode: {joiner}")
+        # Explicitly disable each Edit Mode toggle and clear its widget state so the
+        # rerun exits Edit Mode and shows the generated view.
         for key, _ in pattern_pairs:
-            st.session_state.pop(f"edit_mode_{key}", None)
+            st.session_state[f"edit_mode_{key}"] = False
             st.session_state.pop(f"edit_toggle_widget_{key}", None)
-        st.success("✅ Patterns saved. Re-rendering form...")
         st.rerun()
 
 
