@@ -403,7 +403,7 @@ def _asset_class_1(case_mode, active_model, naming_patterns, variables):
             return
 
         pat = pick_sub_pattern(pat, dev_type)
-        defaults = {"Seq": "01"}
+        defaults = {}
         if auto_code:
             defaults["Site"] = auto_code
         values = render_token_widgets(pat, variables, "dev", defaults)
@@ -472,7 +472,7 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables):
             render_edit_mode_ui(pk, pat, variables)
             st.stop()
             return
-        values = render_token_widgets(pat, variables, "esx", defaults={"seq": "001"})
+        values = render_token_widgets(pat, variables, "esx")
         gen_raw = interpolate_pattern(pat, {k: v for k, v in values.items() if v})
         gen_raw = re.sub(r"\s*\([^)]*\)", "", gen_raw).strip()
         gen_raw = re.sub(r"<[^>]+>", "", gen_raw)
@@ -486,8 +486,8 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables):
         st.code(gen, language="text")
         if st.button("AI Verify ESXi Host", key="ai_chk_esx"):
             with st.spinner("Auditing..."):
-                st.info(verify_and_suggest_with_ai(gen, active_model, asset_type="ESXi Hypervisor Hostname", category_key="hypervisor", site_filter=values.get("site", "")))
-        display_reference_box("hypervisor", "NYCESX001.corp.internal\nLONESX001.corp.internal\nSYDESX01.corp.local", "Hypervisor", site_filter=values.get("site", ""))
+                st.info(verify_and_suggest_with_ai(gen, active_model, asset_type="ESXi Hypervisor Hostname", category_key="hypervisor", site_filter=values.get("site_prefix", "")))
+        display_reference_box("hypervisor", "NYCESX001.corp.internal\nLONESX001.corp.internal\nSYDESX01.corp.local", "Hypervisor", site_filter=values.get("site_prefix", ""))
 
     with col_b:
         st.markdown("#### Virtual Machine (VM) Hostname")
@@ -497,7 +497,7 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables):
             render_edit_mode_ui(pk, pat, variables)
             st.stop()
             return
-        values = render_token_widgets(pat, variables, "vm", defaults={"Seq": "01"})
+        values = render_token_widgets(pat, variables, "vm")
         gen_raw = interpolate_pattern(pat, {k: v for k, v in values.items() if v})
         gen_raw = re.sub(r"\s*\([^)]*\)", "", gen_raw).strip()
         gen_raw = re.sub(r"\s+or\s+.*", "", gen_raw).strip()
@@ -507,8 +507,8 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables):
         st.code(gen, language="text")
         if st.button("AI Verify VM Hostname", key="ai_chk_vm"):
             with st.spinner("Auditing..."):
-                st.info(verify_and_suggest_with_ai(gen, active_model, asset_type="Virtual Machine (VM) Hostname", category_key="vm", site_filter=values.get("site", "")))
-        display_reference_box("vm", "USNYCAPP01     (NYC Application Server 01)\nUKLONDB01\nAUSYDFS01", "Virtual Machine", site_filter=values.get("site", ""))
+                st.info(verify_and_suggest_with_ai(gen, active_model, asset_type="Virtual Machine (VM) Hostname", category_key="vm", site_filter=values.get("Site", "")))
+        display_reference_box("vm", "USNYCAPP01     (NYC Application Server 01)\nUKLONDB01\nAUSYDFS01", "Virtual Machine", site_filter=values.get("Site", ""))
 
 
 def _asset_class_3(case_mode, active_model, naming_patterns, variables, token_order_map=None):
