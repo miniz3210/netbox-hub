@@ -119,24 +119,30 @@ def preview_box(label: str, content: str):
 # ── Special input behaviour per token ────────────────────────────────────
 
 
-def render_esxi_network_inputs(pattern: str, variables: Dict, prefix: str, auto_correct: bool):
+def render_esxi_network_inputs(pattern: str, variables: Dict, prefix: str, auto_correct: bool,
+                            extra_pattern: str = ""):
     """Renders ESXi-specific inputs with normalization for ``vmnic``, ``vSwitch``,
     ``Purpose``, ``Status``, and vmnic lists.
+
+    ``extra_pattern`` is an optional second pattern (e.g. the *_name pattern) whose
+    tokens should also receive widgets.
 
     Returns a dict that can be fed directly into ``interpolate_pattern``.
     """
     values: Dict[str, str] = {}
-    tokens = extract_tokens(pattern)
+    tokens = extract_tokens(pattern) + extract_tokens(extra_pattern)
     for token in tokens:
         label = token_label(variables, token)
         ph = token_placeholder(variables, token)
         wk = f"{prefix}__{token}"
 
         if token == "Status":
-            values[token] = st.radio(
-                label, ["Active Uplink", "Standby Uplink"],
-                horizontal=True, key=wk,
-            )
+            meta = variables.get("Status", {})
+            ph = meta.get("placeholder", "Active Uplink / Standby Uplink")
+            label = token_label(variables, token)
+            wk = f"{prefix}__Status"
+            values[token] = st.text_input(label, value="", placeholder=ph, key=wk,
+                                        help="Enter the uplink status").strip()
             continue
 
         value = ""
@@ -241,3 +247,77 @@ def ai_verify_button(
                     site_filter=site_filter,
                 )
             )
+
+
+# ── Optional-clause removal (fully token-driven, no hardcoded words) ──
+
+
+def _is_optional_token(variables: Dict, token: str) -> bool:
+    meta = variables.get(token, {})
+    return isinstance(meta, dict) and bool(meta.get("optional"))
+
+
+def remove_empty_optional_tokens(pattern: str, values: Dict, variables: Dict) -> str:
+    """Remove optional tokens (and their attached fixed text) that have no value.
+
+    Operates on the raw pattern BEFORE value substitution. Every token marked
+    ``optional`` whose value is empty in ``values`` has its clause member removed,
+    along with the fixed words and separators that belong to it. Delimiters like
+    `` / ...``, ``[...]`` and ``(...)`` are cleaned up so remaining text renders
+    cleanly.
+
+    The algorithm:
+    1. Locate each ``[...]`` or ``(...)`` bracket clause in the pattern.
+    2. For each member separated by `` / ``, evaluate the member's optional token.
+       If empty (and optional), drop the member entirely.
+    3. If a bracket clause becomes empty, drop the whole block.
+    4. Fixed words (``Active``, ``Standby``, ``Network``) are *not* hardcoded -
+       they live entirely in the editable template.
+    """
+    if not pattern or not values:
+        return pattern or ""
+
+    empty_opt = {t for t in extract_tokens(pattern)
+                 if _is_optional_token(variables, t) and not str(values.get(t, ""))}
+    if not empty_opt:
+        return pattern
+
+    # Process bracket clauses first (the most complex case).
+    result = _process_bracket_clauses(pattern, empty_opt)
+    # Drop empty brackets produced above.
+    result = _drop_empty_brackets(result)
+    result = re.sub(r"\s+", " ", result).strip()
+    return result
+
+
+BRACKET_RE = re.compile(r"\(([^()]+)\)|\[([^\[\]]+)\]")
+
+
+def _process_bracket_clauses(pattern: str, empty_opt: set) -> str:
+    """Inside each ``(...)`` or ``[...]``, split on `` / ``, drop any clause
+    member whose token is in *empty_opt*, and reassemble."""
+    result = []
+    pos = 0
+    for m in BRACKET_RE.finditer(pattern):
+        result.append(pattern[pos:m.start()])
+        inner = m.group(1) or m.group(2)
+        opener = m.group(0)[0]     # ( or [
+        closer = ")" if opener == "(" else "]"
+        members = re.split(r"\s+/\s+", inner)
+        kept = []
+        for member in members:
+            tokens = extract_tokens(member)
+            # Drop this member if any of its tokens is an empty optional.
+            if any(t in empty_opt for t in tokens):
+                continue
+            kept.append(member)
+        if kept:
+            result.append(f"{opener}{' / '.join(kept)}{closer}")
+        # else: empty clause - skip it entirely
+        pos = m.end()
+    result.append(pattern[pos:])
+    return "".join(result)
+
+
+def _drop_empty_brackets(pattern: str) -> str:
+    return re.sub(r"\(\s*\)", "", re.sub(r"\[\s*\]", "", pattern))

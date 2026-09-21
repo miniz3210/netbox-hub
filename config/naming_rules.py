@@ -38,7 +38,9 @@ DEFAULT_NAMING_PATTERNS = {
     ),
     "vm_host": "<Country><Site><Role><Seq> (e.g. AURFLWOTAPP01, AUGLOSFS01) or <Site><Role><Seq> (e.g. PWSAFS001, ESCPDC01, NYCCVI01)",
     "esxi_uplink": "<vmnic> - <vSwitch> <Purpose> <Status>",
+    "esxi_portgroup_name": "PG-<pg_network>",
     "esxi_portgroup": "<PortGroup> [<Active_vmnics> Active / <Standby_vmnics> Standby]",
+    "esxi_vmkernel_name": "<vmk>",
     "esxi_vmkernel": "<Purpose> Network - <vSwitch> (<Active_vmnics> Active / <Standby_vmnics> Standby)",
     "netbox_server_yaml": (
         "console-ports: Serial (de-9); "

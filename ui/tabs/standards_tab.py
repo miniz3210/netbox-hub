@@ -142,11 +142,25 @@ def render_standards_tab(active_model):
                     key="form_esxi_uplink",
                     autocomplete="off"
                 )
+                esxi_portgroup_name = st.text_input(
+                    "ESXi Port Group Name",
+                    value=current_rules.get("esxi_portgroup_name", ""),
+                    help="Available: <pg_network> (e.g. PG-<pg_network>)",
+                    key="form_esxi_pg_name",
+                    autocomplete="off"
+                )
                 esxi_portgroup = st.text_input(
                     "ESXi Port Group Description",
                     value=current_rules.get("esxi_portgroup", ""),
                     help="Available: <PortGroup>, <Active_vmnics>, <Standby_vmnics>",
                     key="form_esxi_pg",
+                    autocomplete="off"
+                )
+                esxi_vmkernel_name = st.text_input(
+                    "ESXi VMkernel Name",
+                    value=current_rules.get("esxi_vmkernel_name", ""),
+                    help="Available: <vmk> (e.g. <vmk>)",
+                    key="form_esxi_vmk_name",
                     autocomplete="off"
                 )
                 esxi_vmkernel = st.text_input(
@@ -189,7 +203,9 @@ def render_standards_tab(active_model):
                     "esxi_host": esxi_host,
                     "vm_host": vm_host,
                     "esxi_uplink": esxi_uplink,
+                    "esxi_portgroup_name": esxi_portgroup_name,
                     "esxi_portgroup": esxi_portgroup,
+                    "esxi_vmkernel_name": esxi_vmkernel_name,
                     "esxi_vmkernel": esxi_vmkernel,
                     "netbox_server_yaml": netbox_server_yaml,
                     "pattern_variables": session_variables,
