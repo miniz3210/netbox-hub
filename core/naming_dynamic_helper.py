@@ -70,7 +70,8 @@ def render_dynamic_pattern(pattern: str, values: Dict[str, str], variables: Dict
     if not pattern:
         return ""
     cleaned = remove_empty_optional_tokens(pattern, values, variables)
-    return _substitute_values(cleaned, values)
+    rendered = _substitute_values(cleaned, values)
+    return _normalize_delimiters(rendered)
 
 
 def _substitute_values(pattern: str, values: Dict[str, str]) -> str:
@@ -492,30 +493,44 @@ def _process_bracket_clauses(pattern: str, empty_opt: set) -> str:
 
 
 def _drop_empty_brackets(pattern: str) -> str:
-    return re.sub(r"\(\s*\)", "", re.sub(r"\[\s*\]", "", pattern))
+    pattern = re.sub(r"\s*\(\s*\)", "", pattern)
+    return re.sub(r"\s*\[\s*\]", "", pattern)
 
 
 def _strip_standalone_token(pattern: str, token: str) -> str:
     """Remove an empty optional ``token`` that sits outside any bracket clause.
 
-    The token (with surrounding whitespace) is dropped; duplicate separators left
-    behind (``A-<Opt>-B`` -> ``A--B``) are collapsed by
+    The token (with surrounding whitespace) is dropped entirely. Duplicate
+    separators left behind (``A-<Opt>-B`` -> ``A--B``) are collapsed by
     ``_normalize_delimiters`` afterwards.
     """
-    return re.sub(rf"\s*<{re.escape(token)}(?:/[^>]*)?>\s*", " ", pattern)
+    return re.sub(rf"\s*<{re.escape(token)}(?:/[^>]*)?>\s*", "", pattern)
 
 
-_SEP_CHAR = r"\-_/"
+_SEP_CHAR = r"\-_/\.@"
 
 def _normalize_delimiters(text: str) -> str:
-    """Collapse duplicate separators and stray edge punctuation left by token removal."""
+    """Template-faithful whitespace & delimiter collapse sweep (post-substitution).
+
+    Step A: Remove empty bracket pairs ``()`` ``[]`` (with preceding whitespace).
+    Step B: Collapse runs of spaces into a single space.
+    Step C: Remove whitespace before delimiters that bind tightly (``_``, ``.``, ``/``).
+    Step D: Strip dangling leading/trailing delimiters and outer whitespace.
+    Space-separated hyphens such as `` - `` in templates are intentionally preserved.
+    """
     if not text:
         return text
-    text = re.sub(r"[ \t]{2,}", " ", text)
+    # Step A: remove empty bracket pairs (consume preceding whitespace).
+    text = re.sub(r"\s*\(\s*\)", "", text)
+    text = re.sub(r"\s*\[\s*\]", "", text)
+    # Step B: collapse multiple spaces.
+    text = re.sub(r" {2,}", " ", text)
+    # Step C: no whitespace before tight-binding delimiters (underscore, dot, slash).
+    text = re.sub(r"[ \t]+([_/.])", r"\1", text)
     # Collapse a repeated separator (with optional whitespace between them) to one.
     text = re.sub(rf"([{_SEP_CHAR}])[ \t]*\1", r"\1", text)
-    # Trim separators / whitespace at the start and end.
+    # Step D: trim separators / whitespace at the start and end.
     text = re.sub(rf"^[\s{_SEP_CHAR}]+", "", text)
     text = re.sub(rf"[\s{_SEP_CHAR}]+$", "", text)
-    text = re.sub(r"[ \t]{2,}", " ", text)
+    text = re.sub(r" {2,}", " ", text)
     return text
