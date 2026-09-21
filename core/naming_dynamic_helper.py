@@ -264,12 +264,13 @@ def render_edit_mode_ui(pattern_key: str, pattern_value: str, variables: Dict):
         rules["pattern_variables"] = {k: v for k, v in variables.items() if k in all_used}
         st.session_state["naming_rules"] = rules
         save_naming_rules(rules, source=f"Edit Mode: {pattern_key}")
-        # Explicitly flip BOTH the flag and the actual widget key to False so the
-        # toggle widget redraws as OFF on rerun. Popping the widget key can let the
-        # browser's incoming value re-initialize it to True.
+        # Reset Edit Mode by flipping the semantic flag and bumping the version counter.
+        # The widget key is versioned in _edit_toggle, so a fresh key is used on rerun
+        # and the toggle redraws as OFF without mutating an already-instantiated key.
         st.session_state[edit_key] = False
-        toggle_key = f"edit_toggle_widget_{pattern_key}"
-        st.session_state[toggle_key] = False
+        st.session_state[f"edit_toggle_ver_{pattern_key}"] = (
+            st.session_state.get(f"edit_toggle_ver_{pattern_key}", 0) + 1
+        )
         st.session_state.pop(pending_key, None)
         st.rerun()
 
@@ -365,11 +366,14 @@ def render_multi_edit_mode_ui(pattern_pairs: List[Tuple[str, str]], variables: D
         st.session_state["naming_rules"] = rules
         st.session_state.pop(order_key, None)
         save_naming_rules(rules, source=f"Edit Mode: {joiner}")
-        # Explicitly flip each Edit Mode toggle (both flag and widget key) to False so
-        # they redraw as OFF on rerun, without relying on popping widget state.
+        # Reset each Edit Mode flag and bump its version counter so the toggle renders a
+        # fresh widget key (and therefore OFF) on rerun. Never mutate the widget key
+        # itself after it has been instantiated.
         for key, _ in pattern_pairs:
             st.session_state[f"edit_mode_{key}"] = False
-            st.session_state[f"edit_toggle_widget_{key}"] = False
+            st.session_state[f"edit_toggle_ver_{key}"] = (
+                st.session_state.get(f"edit_toggle_ver_{key}", 0) + 1
+            )
         st.rerun()
 
 

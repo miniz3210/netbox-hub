@@ -280,12 +280,13 @@ INTERFACE_OPTIONS = [
 
 def _edit_toggle(pattern_key):
     flag_key = f"edit_mode_{pattern_key}"
-    widget_key = f"edit_toggle_widget_{pattern_key}"
-    # Ensure default reflects flag_key if present.
-    if widget_key not in st.session_state and flag_key in st.session_state:
-        st.session_state[widget_key] = st.session_state[flag_key]
+    ver = st.session_state.get(f"edit_toggle_ver_{pattern_key}", 0)
+    widget_key = f"edit_toggle_widget_{pattern_key}_{ver}"
+    # Initial state follows flag_key (fresh widget key on each version bump).
+    default_val = st.session_state.get(flag_key, False)
     toggled = st.toggle(
         "Edit Mode",
+        value=default_val,
         key=widget_key,
         help="Turn ON to edit the raw pattern template and add new variables.",
     )
