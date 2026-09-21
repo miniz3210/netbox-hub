@@ -264,11 +264,12 @@ def render_edit_mode_ui(pattern_key: str, pattern_value: str, variables: Dict):
         rules["pattern_variables"] = {k: v for k, v in variables.items() if k in all_used}
         st.session_state["naming_rules"] = rules
         save_naming_rules(rules, source=f"Edit Mode: {pattern_key}")
-        # Explicitly disable the Edit Mode toggle and clear its widget state so the
-        # rerun exits Edit Mode and shows the generated view.
+        # Explicitly flip BOTH the flag and the actual widget key to False so the
+        # toggle widget redraws as OFF on rerun. Popping the widget key can let the
+        # browser's incoming value re-initialize it to True.
         st.session_state[edit_key] = False
         toggle_key = f"edit_toggle_widget_{pattern_key}"
-        st.session_state.pop(toggle_key, None)
+        st.session_state[toggle_key] = False
         st.session_state.pop(pending_key, None)
         st.rerun()
 
@@ -364,11 +365,11 @@ def render_multi_edit_mode_ui(pattern_pairs: List[Tuple[str, str]], variables: D
         st.session_state["naming_rules"] = rules
         st.session_state.pop(order_key, None)
         save_naming_rules(rules, source=f"Edit Mode: {joiner}")
-        # Explicitly disable each Edit Mode toggle and clear its widget state so the
-        # rerun exits Edit Mode and shows the generated view.
+        # Explicitly flip each Edit Mode toggle (both flag and widget key) to False so
+        # they redraw as OFF on rerun, without relying on popping widget state.
         for key, _ in pattern_pairs:
             st.session_state[f"edit_mode_{key}"] = False
-            st.session_state.pop(f"edit_toggle_widget_{key}", None)
+            st.session_state[f"edit_toggle_widget_{key}"] = False
         st.rerun()
 
 
