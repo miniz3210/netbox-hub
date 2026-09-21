@@ -432,10 +432,19 @@ def _asset_class_1(case_mode, active_model, naming_patterns, variables):
             return
 
         if ipk == "switch_access_desc":
-            vlan_id = st.text_input("Access VLAN ID (Optional)", value="", placeholder="e.g. 10, 100", key="ac_vlan").strip()
-            vlan_name = st.text_input("VLAN Name (Optional)", value="", placeholder="e.g. Data, Voice", key="ac_vlan_name").strip()
-            dev_end = st.text_input("Connected Device/Host", value="", placeholder="e.g. PC-001", key="ac_device").strip()
-            port_end = st.text_input("Endpoint Port (Optional)", value="", placeholder="e.g. eth0", key="ac_port").strip()
+            tokens = extract_tokens(pat)
+            vlan_id = ""
+            vlan_name = ""
+            dev_end = ""
+            port_end = ""
+            if "VLAN_ID" in tokens:
+                vlan_id = st.text_input("Access VLAN ID (Optional)", value="", placeholder="e.g. 10, 100", key="ac_vlan").strip()
+            if "VLAN_Name" in tokens:
+                vlan_name = st.text_input("VLAN Name (Optional)", value="", placeholder="e.g. Data, Voice", key="ac_vlan_name").strip()
+            if "Device" in tokens:
+                dev_end = st.text_input("Connected Device/Host", value="", placeholder="e.g. PC-001", key="ac_device").strip()
+            if "Port" in tokens:
+                port_end = st.text_input("Endpoint Port (Optional)", value="", placeholder="e.g. eth0", key="ac_port").strip()
             vlan_disp = vlan_name or (f"VLAN{vlan_id}" if vlan_id else "")
             vals = {"VLAN_ID": vlan_id or "<VLAN_ID>", "VLAN_Name": vlan_disp, "Device": dev_end or "<Device>", "Port": port_end or "<Port>"}
             gen = interpolate_pattern(pat, {k: v for k, v in vals.items() if v})
