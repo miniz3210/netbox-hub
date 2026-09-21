@@ -1,24 +1,20 @@
 import streamlit as st
 from utils.formatters import (
-    compute_suggested_site_code, 
+    compute_suggested_site_code,
     normalize_port_shortname,
-    normalize_vswitch,
-    normalize_vmnic,
-    normalize_vmnic_list,
-    normalize_network_name
 )
 from utils.pattern_formatter import apply_pattern
 from core.naming_engine import verify_and_suggest_with_ai
 from datetime import datetime
 from core.db_manager import (
-    save_universal_csv, 
-    get_records_by_category, 
+    save_universal_csv,
+    get_records_by_category,
     clear_inventory_records,
     clear_device_records,
     clear_vm_records,
     get_total_record_count,
     get_sync_metadata,
-    get_file_sync_metadata
+    get_file_sync_metadata,
 )
 from core.session_manager import SessionStateManager as SSM
 from core.shared_backup_state import SharedBackupState
@@ -30,7 +26,9 @@ from core.naming_dynamic_helper import (
     render_edit_mode_ui,
     extract_tokens,
     pick_sub_pattern,
+    remove_empty_optional_tokens,
 )
+from config.naming_rules import load_naming_rules, get_naming_patterns, get_pattern_variables
 
 def build_naming_system_prompt(prompt: str) -> str:
     """Build the grounded naming/inventory system prompt for the AI Assistant."""
@@ -264,7 +262,6 @@ def render_compact_toolbar(active_model):
 import re
 
 from config.naming_rules import get_naming_patterns, get_pattern_variables, load_naming_rules
-from utils.formatters import normalize_network_name
 
 
 DEVICE_TYPE_OPTIONS = [
@@ -322,48 +319,15 @@ def _interface_ref(opt):
     }.get(opt, ("Interface", ""))
 
 
-def _clean_vmkernel_teaming(gen: str, vals: dict, variables: dict) -> str:
-    """Rebuild the parenthetical teaming block in the VMkernel description.
-
-    Drops a teaming segment only when the corresponding variable is marked
-    ``optional`` in *variables* and its value is empty in *vals*.
-    """
-    act = vals.get("Active_vmnics", "")
-    sb = vals.get("Standby_vmnics", "")
-    act_opt = _is_optional(variables, "Active_vmnics")
-    sb_opt = _is_optional(variables, "Standby_vmnics")
-
-    if act_opt and not act and sb_opt and not sb:
-        gen = re.sub(r"\s*\([^)]*\)\s*$", "", gen)
-        return gen.strip()
-    if sb_opt and not sb:
-        gen = re.sub(r"\s*/\s*([^)]*)Standby[^)]*\)\s*$", r")", gen)
-    if act_opt and not act:
-        gen = re.sub(r"\s*([^)]*?)Active\s*/\s*", r" (", gen)
-    return gen.strip()
-
-
-def _clean_portgroup_teaming(gen: str, vals: dict, variables: dict) -> str:
-    """Rebuild the bracket teaming block in the Port Group description."""
-    act = vals.get("Active_vmnics", "")
-    sb = vals.get("Standby_vmnics", "")
-    act_opt = _is_optional(variables, "Active_vmnics")
-    sb_opt = _is_optional(variables, "Standby_vmnics")
-
-    if act_opt and not act and sb_opt and not sb:
-        gen = re.sub(r"\s*\[[^\]]*\]\s*$", "", gen)
-        return gen.strip()
-    if sb_opt and not sb:
-        gen = re.sub(r"\s*/\s*([^\]\[]*)Standby[^\]\[]*\]\s*$", r"]", gen)
-    if act_opt and not act:
-        gen = re.sub(r"\s*\[?\s*[^\]\[]*Active\s*/\s*", r" [", gen)
-        gen = re.sub(r"\s*]\s*$", "]", gen)
-    return gen.strip()
-
-
-def _is_optional(variables: dict, token: str) -> bool:
-    meta = variables.get(token, {})
-    return isinstance(meta, dict) and bool(meta.get("optional"))
+def _render_esxi_pattern(pat: str, vals: dict, variables: dict) -> str:
+    """Interpolate an ESXi description pattern after removing empty optional
+    clauses. All fixed words (Active, Standby, Network, etc.) come from the
+    editable template - none are hardcoded here."""
+    cleaned_pattern = remove_empty_optional_tokens(pat, vals, variables)
+    clean = {k: v for k, v in vals.items() if v}
+    if clean:
+        return interpolate_pattern(cleaned_pattern, clean)
+    return interpolate_pattern(cleaned_pattern, {k: f"<{k}>" for k in vals})
 
 
 def _ref_info(dev_type):
@@ -561,18 +525,15 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables):
         st.markdown("#### 2. Port Group Teaming (Network)")
         pk = "esxi_portgroup"
         pat = naming_patterns.get(pk, "")
+        name_pk = "esxi_portgroup_name"
+        name_pat = naming_patterns.get(name_pk, "")
         if _edit_toggle(pk):
             render_edit_mode_ui(pk, pat, variables)
             st.stop()
             return
-        pg_net = st.text_input("Network", value="", placeholder="e.g. VM Network", key="pg_network_in", label_visibility="visible").strip()
-        pg_net = normalize_network_name(pg_net) if pg_net else ""
-        gen_prefix = f"PG-{pg_net}" if pg_net else "PG-<pg_network>"
-        vals = render_esxi_network_inputs(pat, variables, "portgroup", auto_correct)
-        vals["pg_network"] = pg_net
-        clean = {k: v for k, v in vals.items() if v}
-        gen_desc = interpolate_pattern(pat, clean) if clean else interpolate_pattern(pat, {k: f"<{k}>" for k in vals})
-        gen_desc = _clean_portgroup_teaming(gen_desc, vals, variables)
+        vals = render_esxi_network_inputs(pat, variables, "portgroup", auto_correct, extra_pattern=name_pat)
+        gen_desc = _render_esxi_pattern(pat, vals, variables)
+        gen_prefix = interpolate_pattern(name_pat, {k: (v if v else f"<{k}>") for k, v in vals.items()})
         st.caption("Generated Port Group Name:")
         st.code(gen_prefix, language="text")
         st.caption("Generated Port Group Description:")
@@ -581,19 +542,16 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables):
         st.markdown("#### 3. VMkernel Adapter (vmk)")
         pk = "esxi_vmkernel"
         pat = naming_patterns.get(pk, "")
+        name_pk = "esxi_vmkernel_name"
+        name_pat = naming_patterns.get(name_pk, "")
         if _edit_toggle(pk):
             render_edit_mode_ui(pk, pat, variables)
             st.stop()
             return
-        vmk_name = st.text_input("vmk Name", value="vmk", placeholder="e.g. vmk0, vmk1", key="vmk_name_in").strip()
-        vals = render_esxi_network_inputs(pat, variables, "vmk", auto_correct)
-        if vals.get("Purpose"):
-            p = vals["Purpose"]
-            vals["Purpose"] = f"{p} Network" if p.lower() in ("management", "vmotion", "storage", "iscsi") else p
-        clean = {k: v for k, v in vals.items() if v}
-        gen = interpolate_pattern(pat, clean) if clean else interpolate_pattern(pat, {k: f"<{k}>" for k in vals})
-        gen = _clean_vmkernel_teaming(gen, vals, variables)
+        vals = render_esxi_network_inputs(pat, variables, "vmk", auto_correct, extra_pattern=name_pat)
+        gen = _render_esxi_pattern(pat, vals, variables)
+        vmk_name = interpolate_pattern(name_pat, {k: (v if v else f"<{k}>") for k, v in vals.items()})
         st.caption("Generated vmk Name:")
-        st.code(vmk_name or "<vmk>", language="text")
+        st.code(vmk_name, language="text")
         st.caption("Generated VMkernel Description:")
         st.code(gen, language="text")
