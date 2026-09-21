@@ -96,10 +96,11 @@ def render_token_widgets(
         ph = token_placeholder(variables, token)
         wk = f"{prefix}__{token}"
         meta = variables.get(token, {})
-        is_optional = isinstance(meta, dict) and meta.get("optional")
-        initial = defaults.get(token, "")
+        meta = meta if isinstance(meta, dict) else {}
+        is_optional = meta.get("optional")
+        initial = defaults.get(token, meta.get("default", ""))
         if is_optional:
-            initial = ""
+            initial = "" if not meta.get("default") else meta.get("default", "")
         values[token] = st.text_input(label, value=initial, placeholder=ph, key=wk).strip()
 
     for token, (label, ph, default) in (extra_inputs or {}).items():
@@ -156,24 +157,25 @@ def render_esxi_network_inputs(pattern: str, variables: Dict, prefix: str, auto_
         label = token_label(variables, token)
         ph = token_placeholder(variables, token)
         wk = f"{prefix}__{token}"
+        _meta = variables.get(token, {})
+        _meta = _meta if isinstance(_meta, dict) else {}
+        default_val = _meta.get("default", "")
 
         if token == "Status":
-            meta = variables.get("Status", {})
-            ph = meta.get("placeholder", "Active Uplink / Standby Uplink")
+            ph = _meta.get("placeholder", "Active Uplink / Standby Uplink")
             label = token_label(variables, token)
             wk = f"{prefix}__Status"
-            values[token] = st.text_input(label, value="", placeholder=ph, key=wk,
+            values[token] = st.text_input(label, value=default_val or "", placeholder=ph, key=wk,
                                         help="Enter the uplink status").strip()
             continue
 
         value = ""
-        meta = variables.get(token, {})
-        is_optional = isinstance(meta, dict) and meta.get("optional")
+        is_optional = _meta.get("optional")
         if is_optional:
-            value = st.text_input(label, value="", placeholder=ph, key=wk,
+            value = st.text_input(label, value=default_val or "", placeholder=ph, key=wk,
                                help="Optional - Leave empty if no standby uplinks").strip()
         else:
-            value = st.text_input(label, value="", placeholder=ph, key=wk).strip()
+            value = st.text_input(label, value=default_val or "", placeholder=ph, key=wk).strip()
 
         if value:
             if token == "vSwitch":
@@ -270,6 +272,42 @@ def render_multi_edit_mode_ui(pattern_pairs: List[Tuple[str, str]], variables: D
             help="Edit the pattern using <Token> placeholders. Manage variables in the Standards tab > Pattern Variables Reference.",
         )
 
+    # ── Field Order Configuration ────────────────────────────────────────────
+    # Collect the natural token sequence from the templates, then allow re-ordering
+    # via Move Up / Down buttons. The chosen order is persisted on Save.
+    order_key = f"field_order_{joiner}"
+    tokens = []
+    for key, current in pattern_pairs:
+        for t in extract_tokens(current or defaults.get(key, "")):
+            if t not in tokens:
+                tokens.append(t)
+
+    custom_order = st.session_state.get(order_key)
+    if custom_order is None:
+        custom_order = list(tokens)
+    else:
+        # Keep in sync with any tokens added/removed by template edits.
+        for t in tokens:
+            if t not in custom_order:
+                custom_order.append(t)
+
+    with st.expander("🎛️ Field Order Configuration", expanded=False):
+        st.caption("Reorder the input fields. The saved order is used when rendering the generator.")
+        for i in range(len(custom_order)):
+            col_lbl, col_up, col_dn = st.columns([4, 1, 1])
+            with col_lbl:
+                st.markdown(f"`{i + 1}.` {token_label(variables, custom_order[i])}")
+            with col_up:
+                if i > 0 and st.button("⬆️", key=f"{order_key}_up_{i}", help="Move up"):
+                    custom_order[i - 1], custom_order[i] = custom_order[i], custom_order[i - 1]
+                    st.session_state[order_key] = list(custom_order)
+                    st.rerun()
+            with col_dn:
+                if i < len(custom_order) - 1 and st.button("⬇️", key=f"{order_key}_dn_{i}", help="Move down"):
+                    custom_order[i], custom_order[i + 1] = custom_order[i + 1], custom_order[i]
+                    st.session_state[order_key] = list(custom_order)
+                    st.rerun()
+
     if st.button("💾 Save to Standards", key=f"nw_save_{joiner}", type="primary"):
         rules = st.session_state.get("naming_rules")
         patterns = rules.get("naming_patterns")
@@ -283,7 +321,15 @@ def render_multi_edit_mode_ui(pattern_pairs: List[Tuple[str, str]], variables: D
         for p in (patterns or {}).values():
             all_used.update(extract_tokens(p))
         rules["pattern_variables"] = {k: v for k, v in variables.items() if k in all_used}
+        # Persist the chosen token order per pattern key.
+        token_order_map = rules.get("token_order")
+        if not isinstance(token_order_map, dict):
+            token_order_map = {}
+        for key, _ in pattern_pairs:
+            token_order_map[key] = list(custom_order)
+        rules["token_order"] = token_order_map
         st.session_state["naming_rules"] = rules
+        st.session_state.pop(order_key, None)
         save_naming_rules(rules, source=f"Edit Mode: {joiner}")
         # Explicitly disable each Edit Mode toggle and clear its widget state so the
         # rerun exits Edit Mode and shows the generated view.

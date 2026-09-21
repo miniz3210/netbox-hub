@@ -371,7 +371,8 @@ def render_naming_tab(active_model):
     elif "2. Hosts" in naming_cat:
         _asset_class_2(case_mode, active_model, naming_patterns, variables)
     else:
-        _asset_class_3(case_mode, active_model, naming_patterns, variables)
+        token_order_map = naming_rules.get("token_order", {})
+        _asset_class_3(case_mode, active_model, naming_patterns, variables, token_order_map)
 
 
 def _asset_class_1(case_mode, active_model, naming_patterns, variables):
@@ -510,7 +511,8 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables):
         display_reference_box("vm", "USNYCAPP01     (NYC Application Server 01)\nUKLONDB01\nAUSYDFS01", "Virtual Machine", site_filter=values.get("site", ""))
 
 
-def _asset_class_3(case_mode, active_model, naming_patterns, variables):
+def _asset_class_3(case_mode, active_model, naming_patterns, variables, token_order_map=None):
+    token_order_map = token_order_map or {}
     auto_correct = st.checkbox(
         "Auto-Correct VMware Syntax (vswitch1 -> vSwitch1, nic0 -> vmnic0)",
         value=True, key="esxi_auto_corr",
@@ -544,7 +546,7 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables):
         vals = render_esxi_network_inputs(
             pat, variables, "portgroup", auto_correct,
             extra_pattern=name_pat,
-            token_order=["pg_network", "PortGroup", "Active_vmnics", "Standby_vmnics"],
+            token_order=token_order_map.get(pk, ["pg_network", "PortGroup", "Active_vmnics", "Standby_vmnics"]),
         )
         gen_desc = _render_esxi_pattern(pat, vals, variables)
         gen_prefix = interpolate_pattern(name_pat, {k: (v if v else f"<{k}>") for k, v in vals.items()})
@@ -565,7 +567,7 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables):
         vals = render_esxi_network_inputs(
             pat, variables, "vmk", auto_correct,
             extra_pattern=name_pat,
-            token_order=["vmk", "Purpose", "vSwitch", "Active_vmnics", "Standby_vmnics"],
+            token_order=token_order_map.get(pk, ["vmk", "Purpose", "vSwitch", "Active_vmnics", "Standby_vmnics"]),
         )
         gen = _render_esxi_pattern(pat, vals, variables)
         vmk_name = interpolate_pattern(name_pat, {k: (v if v else f"<{k}>") for k, v in vals.items()})

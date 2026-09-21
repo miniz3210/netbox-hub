@@ -79,15 +79,15 @@ PATTERN_VARIABLES = {
     "domain": {"label": "Domain Name (FQDN Suffix)", "placeholder": "e.g. corp.example.com, internal.net"},
     "Role": {"label": "Role Code / Workload", "placeholder": "e.g. app, web, db, fs, dc"},
     "vm_site": {"label": "Site Prefix / Country & Site", "placeholder": "e.g. age, usnyc, uklon"},
-    "vmnic": {"label": "vmnic Name", "placeholder": "vmnic"},
-    "vSwitch": {"label": "vSwitch Name", "placeholder": "vSwitch"},
+    "vmnic": {"label": "vmnic Name", "placeholder": "vmnic", "default": "vmnic"},
+    "vSwitch": {"label": "vSwitch Name", "placeholder": "vSwitch", "default": "vSwitch"},
     "Purpose": {"label": "Purpose / Service", "placeholder": "e.g. Management, vMotion, Storage"},
     "Status": {"label": "Status", "placeholder": "Active Uplink / Standby Uplink"},
     "pg_network": {"label": "Network", "placeholder": "e.g. VM Network"},
-    "PortGroup": {"label": "Port Group / vSwitch", "placeholder": "e.g. vSwitch0"},
-    "Active_vmnics": {"label": "Active vmnics", "placeholder": "e.g. vmnic0, vmnic1"},
-    "Standby_vmnics": {"label": "Standby vmnics (Optional)", "placeholder": "e.g. vmnic2", "optional": True},
-    "vmk": {"label": "vmk Name", "placeholder": "vmk"},
+    "PortGroup": {"label": "Port Group / vSwitch", "placeholder": "e.g. vSwitch0", "default": "vSwitch"},
+    "Active_vmnics": {"label": "Active vmnics", "placeholder": "e.g. vmnic0, vmnic1", "default": "vmnic"},
+    "Standby_vmnics": {"label": "Standby vmnics (Optional)", "placeholder": "e.g. vmnic2"},
+    "vmk": {"label": "vmk Name", "placeholder": "vmk", "default": "vmk"},
 }
 
 LEGACY_PATTERN_KEYS = list(DEFAULT_NAMING_PATTERNS.keys())
@@ -192,6 +192,16 @@ def _normalize_rules(raw: dict) -> dict:
     merged = dict(patterns)
     merged["naming_patterns"] = dict(patterns)
     merged["pattern_variables"] = variables
+    token_order = raw.get("token_order")
+    if isinstance(token_order, dict):
+        normalized_to = {}
+        for k, v in token_order.items():
+            if isinstance(v, (list, tuple)):
+                normalized_to[str(k)] = [str(x) for x in v]
+            elif _is_str(v):
+                normalized_to[str(k)] = [x for x in v.split(",") if x]
+        if normalized_to:
+            merged["token_order"] = normalized_to
     return merged
 
 
