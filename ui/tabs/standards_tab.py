@@ -269,35 +269,52 @@ def render_standards_tab(active_model):
 
         # In-place editable variable rows
         with st.expander("🔧 Edit Existing Variables", expanded=True):
+            var_names = list(variables_now.keys())
+
             if variables_now:
                 edited_vars = {}
-                for name, meta in list(variables_now.items()):
-                    meta = meta if isinstance(meta, dict) else {}
-                    c1, c2, c3, c4, c5 = st.columns([1, 2, 2, 1, 1])
-                    with c1:
+                for idx, name in enumerate(var_names):
+                    meta = variables_now.get(name) if isinstance(variables_now.get(name), dict) else {}
+                    # Each row: Name(2) + Label(2) + Placeholder(2) + Fill(1) + Opt(1) + Up/Dn/Del(2)
+                    c_nm, c_lb, c_ph, c_df, c_opt, c_act = st.columns([2, 2, 2, 1, 1, 2])
+                    with c_nm:
                         var_key = st.text_input("Name", value=name, key=f"var_key_{name}").strip()
-                    with c2:
+                    with c_lb:
                         var_lbl = st.text_input("Label", value=meta.get("label", name), key=f"var_lbl_{name}").strip()
-                    with c3:
-                        var_ph = st.text_input("Placeholder Example", value=meta.get("placeholder", ""), key=f"var_ph_{name}").strip()
-                    with c4:
+                    with c_ph:
+                        var_ph = st.text_input("Placeholder", value=meta.get("placeholder", ""), key=f"var_ph_{name}").strip()
+                    with c_df:
+                        var_def = st.text_input("Auto-Fill", value=meta.get("default", ""), key=f"var_def_{name}",
+                                               help="Default value the Naming tab input starts with.")
+                    with c_opt:
                         var_opt = st.checkbox("Optional", value=bool(meta.get("optional")), key=f"var_opt_{name}",
                                               help="Optional variables start empty and are omitted when not filled.")
-                        st.caption("default empty")
-                    with c5:
-                        remove = st.button("🗑️", key=f"var_del_{name}", help=f"Remove <{name}>")
-                    if remove:
-                        edited_vars[name] = None  # marker for deletion
+                    with c_act:
+                        _sub_c_up, _sub_c_dn, _sub_c_del = st.columns([1, 1, 1])
+                        with _sub_c_up:
+                            if idx > 0 and st.button("⬆️", key=f"var_up_{idx}", help=f"Move <{name}> up"):
+                                var_names[idx - 1], var_names[idx] = var_names[idx], var_names[idx - 1]
+                                reordered = {k: variables_now[k] for k in var_names}
+                                _persist_variables(current_rules, reordered)
+                        with _sub_c_dn:
+                            if idx < len(var_names) - 1 and st.button("⬇️", key=f"var_dn_{idx}", help=f"Move <{name}> down"):
+                                var_names[idx], var_names[idx + 1] = var_names[idx + 1], var_names[idx]
+                                reordered = {k: variables_now[k] for k in var_names}
+                                _persist_variables(current_rules, reordered)
+                        with _sub_c_del:
+                            st.button("🗑️", key=f"var_del_{name}", help=f"Remove <{name}>")
+
+                    if st.session_state.get(f"var_del_{name}"):
+                        edited_vars[name] = None
                         continue
                     var_key = var_key or name
                     entry = {
                         "label": var_lbl or var_key,
                         "placeholder": var_ph or f"e.g. {var_key}",
                     }
-                    if var_opt:
-                        entry["optional"] = True
-                    else:
-                        entry["optional"] = False
+                    if var_def:
+                        entry["default"] = var_def
+                    entry["optional"] = bool(var_opt)
                     edited_vars[var_key] = entry
 
                 if st.button("💾 Apply Variable Changes", key="var_apply"):
@@ -314,6 +331,8 @@ def render_standards_tab(active_model):
             new_name = st.text_input("Variable Name (e.g. Speed, Standby_vmnics)", value="", key="var_new_name").strip()
             new_label = st.text_input("Display Label", value="", placeholder="e.g. Interface Speed", key="var_new_label").strip()
             new_ph = st.text_input("Placeholder Example", value="", placeholder="e.g. 10G, 25G", key="var_new_ph").strip()
+            new_def = st.text_input("Default Auto-Fill (Optional)", value="", placeholder="e.g. vmnic0", key="var_new_def",
+                                   help="Default value the Naming tab input starts with.")
             new_optional = st.checkbox(
                 "Optional (default empty unless user inputs)", value=True,
                 key="var_new_optional",
@@ -325,6 +344,8 @@ def render_standards_tab(active_model):
                         "label": new_label or new_name,
                         "placeholder": new_ph or f"e.g. {new_name}",
                     }
+                    if new_def:
+                        entry["default"] = new_def
                     if new_optional:
                         entry["optional"] = True
                     else:
