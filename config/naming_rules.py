@@ -30,13 +30,8 @@ DEFAULT_NAMING_PATTERNS = {
     "switch_port_channel": "<Local_Po_ID>_to_<Remote_Device>",
     "switch_access_desc": "<VLAN_Name> - <Device>_<Port>",
     "firewall_interface": "<Role_Zone>_<VLAN_ID>",
-    "esxi_host": (
-        "<site><role/esx><seq>.<domain> "
-        f"(Valid domains: {_env_domain('CORP_DOMAIN_IT')} for IT/Corp, "
-        f"{_env_domain('CORP_DOMAIN_OT_PRIMARY')} or {_env_domain('CORP_DOMAIN_OT_SECONDARY')} for "
-        f"OT/Industrial, {_env_domain('CORP_DOMAIN_LOCAL')} for Branch/Local, or shortname without domain)"
-    ),
-    "vm_host": "<Country><Site><Role><Seq> (e.g. AURFLWOTAPP01, AUGLOSFS01) or <Site><Role><Seq> (e.g. PWSAFS001, ESCPDC01, NYCCVI01)",
+    "esxi_host": "<site_prefix><role_esx><host_seq>.<domain>",
+    "vm_host": "<Country><Site><Role><Seq>",
     "esxi_uplink": "<vmnic> - <vSwitch> <Purpose> <Status>",
     "esxi_portgroup_name": "PG-<pg_network>",
     "esxi_portgroup": "<PortGroup> [<Active_vmnics> Active / <Standby_vmnics> Standby]",
