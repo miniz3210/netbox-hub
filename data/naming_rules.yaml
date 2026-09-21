@@ -9,7 +9,7 @@
   "firewall_interface": "<Role_Zone>_<VLAN_ID>",
   "esxi_host": "<site_prefix><role_esx><host_seq>.<domain>",
   "vm_host": "<Country><Site><Role><Seq>",
-  "esxi_uplink": "<vmnic> - <vSwitch> <Purpose> <Status> (<Standby_vmnics> Standby)",
+  "esxi_uplink": "<vmnic> - <vSwitch> <Purpose> <Status> ",
   "esxi_portgroup_name": "PG-<pg_network>",
   "esxi_portgroup": "<PortGroup> [<Active_vmnics> Active / <Standby_vmnics> Standby]",
   "esxi_vmkernel_name": "<vmk>",
@@ -26,7 +26,7 @@
     "firewall_interface": "<Role_Zone>_<VLAN_ID>",
     "esxi_host": "<site_prefix><role_esx><host_seq>.<domain>",
     "vm_host": "<Country><Site><Role><Seq>",
-    "esxi_uplink": "<vmnic> - <vSwitch> <Purpose> <Status> (<Standby_vmnics> Standby)",
+    "esxi_uplink": "<vmnic> - <vSwitch> <Purpose> <Status> ",
     "esxi_portgroup_name": "PG-<pg_network>",
     "esxi_portgroup": "<PortGroup> [<Active_vmnics> Active / <Standby_vmnics> Standby]",
     "esxi_vmkernel_name": "<vmk>",
@@ -141,12 +141,12 @@
     },
     "role": {
       "label": "Host Role (Optional)",
-      "placeholder": "e.g. esx, otinfhost, infhost",
+      "placeholder": "e.g. esx, host",
       "optional": false
     },
     "role_esx": {
       "label": "Host Role (Optional)",
-      "placeholder": "e.g. esx, otinfhost, infhost",
+      "placeholder": "e.g. esx, host",
       "optional": false
     },
     "seq": {
@@ -221,7 +221,7 @@
     "Standby_vmnics": {
       "label": "Standby vmnics (Optional)",
       "placeholder": "e.g. vmnic2",
-      "optional": true
+      "optional": false
     },
     "vmk": {
       "label": "vmk Name",
