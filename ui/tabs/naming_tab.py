@@ -20,14 +20,13 @@ from core.session_manager import SessionStateManager as SSM
 from core.shared_backup_state import SharedBackupState
 from ui.components import render_ai_chat, render_backup_uploader
 from core.naming_dynamic_helper import (
-    interpolate_pattern,
+    render_dynamic_pattern,
     render_token_widgets,
     render_esxi_network_inputs,
     render_edit_mode_ui,
     render_multi_edit_mode_ui,
     extract_tokens,
     pick_sub_pattern,
-    remove_empty_optional_tokens,
 )
 from config.naming_rules import load_naming_rules, get_naming_patterns, get_pattern_variables
 
@@ -321,14 +320,11 @@ def _interface_ref(opt):
 
 
 def _render_esxi_pattern(pat: str, vals: dict, variables: dict) -> str:
-    """Interpolate an ESXi description pattern after removing empty optional
-    clauses. All fixed words (Active, Standby, Network, etc.) come from the
-    editable template - none are hardcoded here."""
-    cleaned_pattern = remove_empty_optional_tokens(pat, vals, variables)
-    clean = {k: v for k, v in vals.items() if v}
-    if clean:
-        return interpolate_pattern(cleaned_pattern, clean)
-    return interpolate_pattern(cleaned_pattern, {k: f"<{k}>" for k in vals})
+    """Interpolate an ESXi description pattern through the unified rendering pipeline,
+    which strips empty optional clauses before substitution. All fixed words (Active,
+    Standby, Network, etc.) come from the editable template - none are hardcoded
+    here."""
+    return render_dynamic_pattern(pat, vals, variables)
 
 
 def _ref_info(dev_type):
@@ -407,9 +403,7 @@ def _asset_class_1(case_mode, active_model, naming_patterns, variables):
         if auto_code:
             defaults["Site"] = auto_code
         values = render_token_widgets(pat, variables, "dev", defaults)
-        interpolated = interpolate_pattern(pat, {k: v for k, v in values.items() if v})
-        if not any(values.values()):
-            interpolated = interpolate_pattern(pat, {k: f"<{k}>" for k in values})
+        interpolated = render_dynamic_pattern(pat, values, variables)
         final = apply_case(interpolated, case_mode)
         st.caption("Generated Device Hostname:")
         st.code(final, language="text")
@@ -448,10 +442,10 @@ def _asset_class_1(case_mode, active_model, naming_patterns, variables):
                 port_end = st.text_input("Endpoint Port (Optional)", value="", placeholder="e.g. eth0", key="ac_port").strip()
             vlan_disp = vlan_name or (f"VLAN{vlan_id}" if vlan_id else "")
             vals = {"VLAN_ID": vlan_id or "<VLAN_ID>", "VLAN_Name": vlan_disp, "Device": dev_end or "<Device>", "Port": port_end or "<Port>"}
-            gen = interpolate_pattern(pat, {k: v for k, v in vals.items() if v})
+            gen = render_dynamic_pattern(pat, vals, variables)
         else:
             vals = render_token_widgets(pat, variables, f"intf_{ipk}")
-            gen = interpolate_pattern(pat, {k: (v if v else f"<{k}>") for k, v in vals.items()})
+            gen = render_dynamic_pattern(pat, vals, variables)
 
         st.caption("Generated Interface Description:")
         st.code(gen, language="text")
@@ -473,7 +467,7 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables):
             st.stop()
             return
         values = render_token_widgets(pat, variables, "esx")
-        gen_raw = interpolate_pattern(pat, {k: v for k, v in values.items() if v})
+        gen_raw = render_dynamic_pattern(pat, values, variables)
         gen_raw = re.sub(r"\s*\([^)]*\)", "", gen_raw).strip()
         gen_raw = re.sub(r"<[^>]+>", "", gen_raw)
         gen_raw = re.sub(r"\.+", ".", gen_raw).strip(".")
@@ -498,7 +492,7 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables):
             st.stop()
             return
         values = render_token_widgets(pat, variables, "vm")
-        gen_raw = interpolate_pattern(pat, {k: v for k, v in values.items() if v})
+        gen_raw = render_dynamic_pattern(pat, values, variables)
         gen_raw = re.sub(r"\s*\([^)]*\)", "", gen_raw).strip()
         gen_raw = re.sub(r"\s+or\s+.*", "", gen_raw).strip()
         gen_raw = re.sub(r"<[^>]+>", "", gen_raw)
@@ -528,9 +522,7 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables, token_or
             st.stop()
             return
         vals = render_esxi_network_inputs(pat, variables, "uplink", auto_correct)
-        gen = interpolate_pattern(pat, {k: v for k, v in vals.items() if v})
-        if not any(vals.values()):
-            gen = interpolate_pattern(pat, {k: f"<{k}>" for k in vals})
+        gen = render_dynamic_pattern(pat, vals, variables)
         st.caption("Generated Physical Uplink Description:")
         st.code(gen, language="text")
     with col_b:
@@ -549,7 +541,7 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables, token_or
             token_order=token_order_map.get(pk, ["pg_network", "PortGroup", "Active_vmnics", "Standby_vmnics"]),
         )
         gen_desc = _render_esxi_pattern(pat, vals, variables)
-        gen_prefix = interpolate_pattern(name_pat, {k: (v if v else f"<{k}>") for k, v in vals.items()})
+        gen_prefix = render_dynamic_pattern(name_pat, vals, variables)
         st.caption("Generated Port Group Name:")
         st.code(gen_prefix, language="text")
         st.caption("Generated Port Group Description:")
@@ -570,7 +562,7 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables, token_or
             token_order=token_order_map.get(pk, ["vmk", "Purpose", "vSwitch", "Active_vmnics", "Standby_vmnics"]),
         )
         gen = _render_esxi_pattern(pat, vals, variables)
-        vmk_name = interpolate_pattern(name_pat, {k: (v if v else f"<{k}>") for k, v in vals.items()})
+        vmk_name = render_dynamic_pattern(name_pat, vals, variables)
         st.caption("Generated vmk Name:")
         st.code(vmk_name, language="text")
         st.caption("Generated VMkernel Description:")

@@ -52,6 +52,39 @@ def interpolate_pattern(pattern: str, values: Dict[str, str]) -> str:
     return result
 
 
+def render_dynamic_pattern(pattern: str, values: Dict[str, str], variables: Dict) -> str:
+    """Canonical render pipeline for a naming pattern.
+
+    Universally enforces optional-clause stripping before substitution:
+
+    1. Every token flagged ``optional`` in ``variables`` whose value is empty is
+       removed from the template together with its enclosing ``(...)`` / ``[...]``
+       clause and any adjacent delimiters (``/``, ``-``, ``_``, spaces).
+    2. Non-optional tokens are retained; blank ones render as ``<Token>``.
+    3. Non-empty values are substituted into the cleaned template.
+
+    All generator cards (Asset Classes 1-3) must go through this function rather
+    than calling ``interpolate_pattern`` directly, so the stripping logic is applied
+    uniformly across the entire application.
+    """
+    if not pattern:
+        return ""
+    cleaned = remove_empty_optional_tokens(pattern, values, variables)
+    return _substitute_values(cleaned, values)
+
+
+def _substitute_values(pattern: str, values: Dict[str, str]) -> str:
+    """Replace every known token with its value (``<Token>`` when blank/absent)."""
+    result = pattern
+    for token, value in values.items():
+        result = re.sub(
+            rf"<{re.escape(token)}(?:/[^>]*)?>",
+            str(value) if value else f"<{token}>",
+            result,
+        )
+    return result
+
+
 # ── Variable / pattern helpers used by edit mode ──────────────────────────
 
 
@@ -400,8 +433,10 @@ def remove_empty_optional_tokens(pattern: str, values: Dict, variables: Dict) ->
     2. For each member separated by `` / ``, evaluate the member's optional token.
        If empty (and optional), drop the member entirely.
     3. If a bracket clause becomes empty, drop the whole block.
-    4. Fixed words (``Active``, ``Standby``, ``Network``) are *not* hardcoded -
-       they live entirely in the editable template.
+    4. Strip any remaining / standalone empty optional tokens that were not
+       inside bracket clauses, together with adjacent delimiters.
+    5. Normalise duplicate separators (``--``, ``_ _``, `` / /``) left by
+       the removal.
     """
     if not pattern or not values:
         return pattern or ""
@@ -411,11 +446,14 @@ def remove_empty_optional_tokens(pattern: str, values: Dict, variables: Dict) ->
     if not empty_opt:
         return pattern
 
-    # Process bracket clauses first (the most complex case).
     result = _process_bracket_clauses(pattern, empty_opt)
-    # Drop empty brackets produced above.
     result = _drop_empty_brackets(result)
-    result = re.sub(r"\s+", " ", result).strip()
+
+    # Strip any empty optional tokens that remain outside brackets.
+    for token in empty_opt:
+        result = _strip_standalone_token(result, token)
+
+    result = _normalize_delimiters(result)
     return result
 
 
@@ -450,3 +488,29 @@ def _process_bracket_clauses(pattern: str, empty_opt: set) -> str:
 
 def _drop_empty_brackets(pattern: str) -> str:
     return re.sub(r"\(\s*\)", "", re.sub(r"\[\s*\]", "", pattern))
+
+
+def _strip_standalone_token(pattern: str, token: str) -> str:
+    """Remove an empty optional ``token`` that sits outside any bracket clause.
+
+    The token (with surrounding whitespace) is dropped; duplicate separators left
+    behind (``A-<Opt>-B`` -> ``A--B``) are collapsed by
+    ``_normalize_delimiters`` afterwards.
+    """
+    return re.sub(rf"\s*<{re.escape(token)}(?:/[^>]*)?>\s*", " ", pattern)
+
+
+_SEP_CHAR = r"\-_/"
+
+def _normalize_delimiters(text: str) -> str:
+    """Collapse duplicate separators and stray edge punctuation left by token removal."""
+    if not text:
+        return text
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    # Collapse a repeated separator (with optional whitespace between them) to one.
+    text = re.sub(rf"([{_SEP_CHAR}])[ \t]*\1", r"\1", text)
+    # Trim separators / whitespace at the start and end.
+    text = re.sub(rf"^[\s{_SEP_CHAR}]+", "", text)
+    text = re.sub(rf"[\s{_SEP_CHAR}]+$", "", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    return text
