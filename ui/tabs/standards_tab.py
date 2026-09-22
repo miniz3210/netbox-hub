@@ -53,24 +53,52 @@ def render_standards_tab(active_model):
             
             with col1:
                 branch_switch = st.text_input(
-                    "Switch Hostname Pattern",
+                    "Switch Hostname Pattern (SW / SWI)",
                     value=current_rules.get("branch_switch", ""),
                     help="Format: SW<Country><State><Site><Zone><Seq>-<StackID>",
                     key="form_switch",
                     autocomplete="off"
                 )
+                branch_stack = st.text_input(
+                    "Virtual Chassis / Stack Pattern (VS)",
+                    value=current_rules.get("branch_stack", ""),
+                    help="Format: VS<Country><State><Site><Seq>-<StackID>",
+                    key="form_stack",
+                    autocomplete="off"
+                )
                 branch_ap = st.text_input(
-                    "Wireless AP Pattern",
+                    "Wireless AP Pattern (WAP)",
                     value=current_rules.get("branch_ap", ""),
                     help="Format: WAP<Country><State><Site><Seq>",
                     key="form_ap",
                     autocomplete="off"
                 )
-                branch_security = st.text_input(
-                    "Firewall/Security Pattern",
-                    value=current_rules.get("branch_security", ""),
+                branch_firewall = st.text_input(
+                    "Firewall Pattern (FW)",
+                    value=current_rules.get("branch_firewall", current_rules.get("branch_security", "")),
                     help="Format: FW<Country><State><Site><Vendor><Seq>",
                     key="form_fw",
+                    autocomplete="off"
+                )
+                branch_ion = st.text_input(
+                    "SD-WAN / Prisma Pattern (ION)",
+                    value=current_rules.get("branch_ion", ""),
+                    help="Format: ION<Country><State><Site><Seq>",
+                    key="form_ion",
+                    autocomplete="off"
+                )
+                branch_router = st.text_input(
+                    "Router Pattern (RTR)",
+                    value=current_rules.get("branch_router", ""),
+                    help="Format: RTR<Country><State><Site><Zone><Seq>",
+                    key="form_rtr",
+                    autocomplete="off"
+                )
+                branch_va = st.text_input(
+                    "Virtual Appliance Pattern (VA)",
+                    value=current_rules.get("branch_va", ""),
+                    help="Format: VA<Country><State><Site><Zone><Seq>",
+                    key="form_va",
                     autocomplete="off"
                 )
             
@@ -193,8 +221,13 @@ def render_standards_tab(active_model):
 
                 new_rules = {
                     "branch_switch": branch_switch,
+                    "branch_stack": branch_stack,
                     "branch_ap": branch_ap,
-                    "branch_security": branch_security,
+                    "branch_firewall": branch_firewall,
+                    "branch_ion": branch_ion,
+                    "branch_router": branch_router,
+                    "branch_va": branch_va,
+                    "branch_security": branch_firewall,
                     "switch_uplink_desc": switch_uplink_desc,
                     "switch_lag_member": switch_lag_member,
                     "switch_port_channel": switch_port_channel,
@@ -448,9 +481,11 @@ ESXi Hosts:
                     col1, col2 = st.columns(2)
                     with col1:
                         st.markdown("##### Network Devices")
-                        st.code(f"Switch: {rules.get('branch_switch', 'N/A')[:60]}...", language="text")
-                        st.code(f"AP: {rules.get('branch_ap', 'N/A')[:60]}...", language="text")
-                        st.code(f"Firewall: {rules.get('branch_security', 'N/A')[:60]}...", language="text")
+                        st.code(f"Switch: {rules.get('branch_switch', 'N/A')[:60]}", language="text")
+                        st.code(f"Stack: {rules.get('branch_stack', 'N/A')[:60]}", language="text")
+                        st.code(f"AP: {rules.get('branch_ap', 'N/A')[:60]}", language="text")
+                        st.code(f"Firewall: {rules.get('branch_firewall', rules.get('branch_security', 'N/A'))[:60]}", language="text")
+                        st.code(f"ION: {rules.get('branch_ion', 'N/A')[:60]}", language="text")
                     
                     with col2:
                         st.markdown("##### Interface Descriptions")

@@ -26,7 +26,6 @@ from core.naming_dynamic_helper import (
     render_edit_mode_ui,
     render_multi_edit_mode_ui,
     extract_tokens,
-    pick_sub_pattern,
 )
 from config.naming_rules import load_naming_rules, get_naming_patterns, get_pattern_variables
 
@@ -265,10 +264,23 @@ from config.naming_rules import get_naming_patterns, get_pattern_variables, load
 
 
 DEVICE_TYPE_OPTIONS = [
-    "SW (Switch)", "VS (Virtual Chassis / Stack)", "OTSW (OT Switch)",
-    "WAP (Wireless Access Point)", "FW (Firewall / Security Appliance)",
-    "ION (Prisma SD-WAN)", "VA (Virtual Appliance)", "RTR (Router)", "Custom Prefix...",
+    "Switch (SW / SWI)",
+    "Virtual Chassis / Stack (VS)",
+    "Firewall / Security (FW)",
+    "SD-WAN / Prisma (ION)",
+    "Wireless AP (WAP)",
+    "Router (RTR)",
+    "Virtual Appliance (VA)",
 ]
+DEVICE_PATTERN_KEYS = {
+    "Switch (SW / SWI)": "branch_switch",
+    "Virtual Chassis / Stack (VS)": "branch_stack",
+    "Firewall / Security (FW)": "branch_firewall",
+    "SD-WAN / Prisma (ION)": "branch_ion",
+    "Wireless AP (WAP)": "branch_ap",
+    "Router (RTR)": "branch_router",
+    "Virtual Appliance (VA)": "branch_va",
+}
 INTERFACE_OPTIONS = [
     "Switch Uplink (Inter-Switch)",
     "Switch LAG Member (LACP)",
@@ -295,11 +307,7 @@ def _edit_toggle(pattern_key):
 
 
 def _sel_pattern_key(dev_type_preset):
-    if "WAP" in dev_type_preset:
-        return "branch_ap"
-    elif "ION" in dev_type_preset or "FW" in dev_type_preset:
-        return "branch_security"
-    return "branch_switch"
+    return DEVICE_PATTERN_KEYS.get(dev_type_preset, "branch_switch")
 
 
 def _interface_key(opt):
@@ -331,17 +339,16 @@ def _render_esxi_pattern(pat: str, vals: dict, variables: dict) -> str:
 
 
 def _ref_info(dev_type):
-    if "SW" in dev_type or "Switch" in dev_type:
-        return "Switch", "SW", "SWUSNYC01-0       (Switch Stack, Member 0)\nSWUSLON01         (London Switch 01)"
-    if "WAP" in dev_type or "Wireless" in dev_type:
-        return "Wireless AP", "WAP", "WAPUSNYC01        (Access Point NYC 01)\nWAPUSLON01        (Access Point London 01)"
-    if "FW" in dev_type or "Firewall" in dev_type:
-        return "Firewall", "FW", "FWUSNYC01         (NYC Firewall 01)\nFWUSNYCPA01       (NYC Palo Alto FW 01)"
-    if "RTR" in dev_type or "Router" in dev_type:
-        return "Router", "RTR", "RTRUSNYC01        (NYC Router 01)\nRTRUSLON01"
-    if "ION" in dev_type:
-        return "SD-WAN ION", "ION", "IONUSNYC01        (NYC SD-WAN 01)\nIONUSLON01"
-    return "Device", "", "SWUSNYC01-0       (Switch Stack)\nWAPUSNYC01        (Access Point 01)\nFWUSNYCPA01       (Firewall 01)"
+    refs = {
+        "Switch (SW / SWI)": ("Switch", "SW", "SWUSNYC01-0       (Switch Stack, Member 0)\nSWIUSLON01        (London Switch 01)"),
+        "Virtual Chassis / Stack (VS)": ("Virtual Chassis", "VS", "VSUSNYC01-0       (Virtual Chassis, Member 0)\nVSUSLON01-1"),
+        "Firewall / Security (FW)": ("Firewall", "FW", "FWUSNYC01         (NYC Firewall 01)\nFWUSNYCPA01       (NYC Palo Alto FW 01)"),
+        "SD-WAN / Prisma (ION)": ("SD-WAN ION", "ION", "IONUSNYC01        (NYC SD-WAN 01)\nIONUSLON01"),
+        "Wireless AP (WAP)": ("Wireless AP", "WAP", "WAPUSNYC01        (Access Point NYC 01)\nWAPUSLON01        (Access Point London 01)"),
+        "Router (RTR)": ("Router", "RTR", "RTRUSNYC01        (NYC Router 01)\nRTRUSLON01"),
+        "Virtual Appliance (VA)": ("Virtual Appliance", "VA", "VAUSNYC01         (NYC Virtual Appliance 01)\nVAUSLON01"),
+    }
+    return refs.get(dev_type, ("Device", "", "SWUSNYC01-0       (Switch Stack)\nWAPUSNYC01        (Access Point 01)\nFWUSNYCPA01       (Firewall 01)"))
 
 
 def render_naming_tab(active_model):
@@ -387,12 +394,7 @@ def _asset_class_1(case_mode, active_model, naming_patterns, variables):
     col_a, col_b = st.columns([1, 1])
     with col_a:
         st.markdown("#### Universal Device Hostname Generator")
-        dev_type = st.selectbox("Device Type / Prefix", DEVICE_TYPE_OPTIONS, index=0, key="dev_prefix_sel")
-        if "Custom" in dev_type:
-            dev_prefix = st.text_input("Enter Custom Prefix", value="", placeholder="e.g. SVR, GW", key="dev_custom_pre").strip()
-        else:
-            dev_prefix = dev_type.split()[0].strip()
-
+        dev_type = st.radio("Device Type", DEVICE_TYPE_OPTIONS, key="dev_prefix_sel")
         pk = _sel_pattern_key(dev_type)
         edit_on = _edit_toggle(pk)
         pat = naming_patterns.get(pk, "")
@@ -401,11 +403,10 @@ def _asset_class_1(case_mode, active_model, naming_patterns, variables):
             st.stop()
             return
 
-        pat = pick_sub_pattern(pat, dev_type)
         defaults = {}
         if auto_code:
             defaults["Site"] = auto_code
-        values = render_token_widgets(pat, variables, "dev", defaults)
+        values = render_token_widgets(pat, variables, f"dev_{pk}", defaults)
         interpolated = render_dynamic_pattern(pat, values, variables)
         final = apply_case(interpolated, case_mode)
         st.caption("Generated Device Hostname:")
