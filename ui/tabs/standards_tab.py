@@ -18,6 +18,42 @@ def _persist_variables(rules: dict, variables: dict) -> None:
     st.rerun()
 
 
+_FORM_WIDGET_KEY_MAP = {
+    "branch_switch": "form_switch",
+    "branch_stack": "form_stack",
+    "branch_ap": "form_ap",
+    "branch_firewall": "form_fw",
+    "branch_security": "form_fw",
+    "branch_ion": "form_ion",
+    "branch_router": "form_rtr",
+    "branch_va": "form_va",
+    "switch_uplink_desc": "form_uplink",
+    "switch_lag_member": "form_lag",
+    "switch_port_channel": "form_po",
+    "switch_access_desc": "form_access",
+    "firewall_interface": "form_fw_int",
+    "esxi_host": "form_esxi",
+    "vm_host": "form_vm",
+    "esxi_uplink": "form_esxi_uplink",
+    "esxi_portgroup_name": "form_esxi_pg_name",
+    "esxi_portgroup": "form_esxi_pg",
+    "esxi_vmkernel_name": "form_esxi_vmk_name",
+    "esxi_vmkernel": "form_esxi_vmk",
+    "netbox_server_yaml": "form_yaml",
+}
+
+
+def _load_parsed_into_form(rules: dict) -> None:
+    """Populate the Edit Standards form widget session keys from parsed rules.
+
+    Writes parsed pattern values straight into each ``form_*`` widget's session key
+    so the inputs below update immediately, letting the user review before saving.
+    """
+    for rule_key, widget_key in _FORM_WIDGET_KEY_MAP.items():
+        if rules.get(rule_key):
+            st.session_state[widget_key] = rules[rule_key]
+
+
 def _render_auto_correction_manager(active_model: str) -> None:
     """CRUD manager for the externalized VMware syntax auto-correction rules.
 
@@ -221,12 +257,57 @@ def render_standards_tab(active_model):
     st.session_state["naming_rules"] = current_rules
     
     # Create tabs for different editing modes
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📝 Edit Standards", "📄 View Full Prompt", "📘 Pattern Variables Reference", "🤖 AI Import", "📜 Change History"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📝 Edit Standards", "📄 View Full Prompt", "📘 Pattern Variables Reference", "📜 Change History"])
     
     # Tab 1: Editable Form Interface
     with tab1:
         st.markdown("##### Edit Naming Patterns")
         st.info("💡 Modify the naming patterns below. Changes are saved when you click 'Save Changes'. Use the **Pattern Variables Reference** tab to see all available variables.")
+        
+        # ── AI Assistant: Populate Naming Patterns from Natural Language ──
+        with st.expander("✨ AI Assistant: Populate Naming Patterns from Natural Language", expanded=False):
+            st.caption("Describe your naming standards in plain text and AI will parse them into the pattern fields below. Review the populated fields, then click **💾 Save Changes** to persist.")
+            imported_text = st.text_area(
+                "Paste Naming Guidelines",
+                placeholder="e.g., 'Switch naming should be SW followed by country code, site code, and sequence number...'\n\nDescribe your complete naming conventions in natural language.",
+                height=200,
+                key="import_prompt_text",
+            )
+            col_parse, col_example = st.columns([2, 1])
+            with col_parse:
+                if st.button("🤖 Parse & Apply with AI", type="primary", use_container_width=True):
+                    if imported_text.strip():
+                        with st.spinner(f"Parsing naming standards using {active_model}..."):
+                            try:
+                                extracted = parse_prompt_to_rules(imported_text, active_model)
+                                _load_parsed_into_form(extracted)
+                                st.session_state["naming_rules"] = {**current_rules, **extracted}
+                                st.success("✅ Standards parsed! Review the fields below, then click '💾 Save Changes'.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Failed to parse prompt: {str(e)}")
+                                st.info("💡 Try providing more detailed descriptions of your naming patterns.")
+                    else:
+                        st.warning("⚠️ Please paste your naming guidelines text first.")
+            with col_example:
+                if st.button("📋 Show Example", use_container_width=True):
+                    with st.expander("Example Guidelines", expanded=True):
+                        st.code("""Network Device Naming:
+- Switches: SW + 2-letter country + site code + sequence (e.g., SWUSNYC01)
+- Access Points: WAP + country + site + number
+- Firewalls: FW + country + site + vendor + sequence
+
+Interface Descriptions:
+- Uplinks should show: Uplink_to_<remote device>_<port>
+- LAG members: LACP_to_<remote device>_<port>
+- Access ports: VLAN name - device name_port (VLAN optional)
+
+ESXi Hosts:
+- Format: <site><esx><number>.<domain>
+- IT domain: .example.corp
+- OT domain: .example.ot
+""", language="text")
+                        st.info("💡 Copy this example and modify it with your own standards, then paste above and click 'Parse & Apply'.")
         
         with st.form("naming_standards_form"):
             st.markdown("#### 1. Network & Security Devices")
@@ -598,57 +679,8 @@ def render_standards_tab(active_model):
         st.markdown("---")
         st.caption("Use these variables in your naming patterns. The Naming tab will automatically replace them with actual values; optional ones only appear when filled.")
     
-    # Tab 4: AI-Powered Import
+    # Tab 4: Change History
     with tab4:
-        st.markdown("##### 📥 Import Standards from Natural Language")
-        st.caption("Paste a natural language description of your naming standards and AI will parse it into structured patterns.")
-        
-        imported_text = st.text_area(
-            "Paste Naming Guidelines", 
-            placeholder="e.g., 'Switch naming should be SW followed by country code, site code, and sequence number...'\n\nDescribe your complete naming conventions in natural language.",
-            height=300, 
-            key="import_prompt_text"
-        )
-        
-        col_parse, col_example = st.columns([2, 1])
-        with col_parse:
-            if st.button("🤖 Parse & Apply with AI", type="primary", use_container_width=True):
-                if imported_text.strip():
-                    with st.spinner(f"Parsing naming standards using {active_model}..."):
-                        try:
-                            extracted = parse_prompt_to_rules(imported_text, active_model)
-                            save_naming_rules(extracted, source="AI Import")
-                            st.session_state["naming_rules"] = extracted
-                            st.success("✅ Standards updated successfully from AI parsing!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ Failed to parse prompt: {str(e)}")
-                            st.info("💡 Try providing more detailed descriptions of your naming patterns.")
-                else:
-                    st.warning("⚠️ Please paste your naming guidelines text first.")
-        
-        with col_example:
-            if st.button("📋 Show Example", use_container_width=True):
-                example = """Network Device Naming:
-- Switches: SW + 2-letter country + site code + sequence (e.g., SWUSNYC01)
-- Access Points: WAP + country + site + number
-- Firewalls: FW + country + site + vendor + sequence
-
-Interface Descriptions:
-- Uplinks should show: Uplink_to_<remote device>_<port>
-- LAG members: LACP_to_<remote device>_<port>
-- Access ports: VLAN name - device name_port (VLAN optional)
-
-ESXi Hosts:
-- Format: <site><esx><number>.<domain>
-- IT domain: .example.corp
-- OT domain: .example.ot
-"""
-                st.code(example, language="text")
-                st.info("💡 Copy this example and modify it with your own standards, then paste above and click 'Parse & Apply'.")
-    
-    # Tab 5: Change History
-    with tab5:
         st.markdown("##### 📜 Naming Standards Change History")
         st.caption("View and restore previous versions of your naming standards. The last 10 changes are saved automatically.")
         
