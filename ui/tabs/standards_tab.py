@@ -4,7 +4,7 @@ from config.naming_rules import (
     load_history, restore_from_history, clear_history,
     get_pattern_variables, get_naming_patterns,
 )
-from core.naming_engine import parse_prompt_to_rules
+from core.naming_engine import parse_prompt_to_rules, generate_autocorrect_rule
 from utils.formatters import (
     load_auto_corrections, save_auto_corrections, reset_auto_corrections,
 )
@@ -18,7 +18,7 @@ def _persist_variables(rules: dict, variables: dict) -> None:
     st.rerun()
 
 
-def _render_auto_correction_manager() -> None:
+def _render_auto_correction_manager(active_model: str) -> None:
     """CRUD manager for the externalized VMware syntax auto-correction rules.
 
     Reads/writes ``data/autocorrect_rules.yaml`` and refreshes the in-session
@@ -123,6 +123,29 @@ Each **Original Pattern** is a regular expression that catches irregular syntax,
                         "description": d,
                         "enabled": bool(enabled),
                     })
+
+            with st.expander("✨ AI Assistant: Generate Rule from Natural Language", expanded=False):
+                st.caption("Describe the formatting in plain text and let AI build the regex for you.")
+                ai_desc = st.text_input(
+                    "Describe the correction rule in plain text",
+                    key=f"ac_{category}_ai_desc",
+                    placeholder="e.g. Change vlan to uppercase VLAN, or change gigabitethernet to Gi",
+                )
+                if st.button("🤖 Generate Regex Rule", key=f"ac_{category}_ai_gen", use_container_width=True):
+                    if ai_desc.strip():
+                        try:
+                            with st.spinner(f"Generating rule using {active_model}..."):
+                                result = generate_autocorrect_rule(ai_desc.strip(), active_model)
+                            st.session_state[f"ac_{category}_new_p"] = result["pattern"]
+                            st.session_state[f"ac_{category}_new_r"] = result["replacement"]
+                            st.session_state[f"ac_{category}_new_d"] = result["description"]
+                            st.session_state["autocorrect_ai_generated"] = True
+                            st.toast("Rule generated! Review and click '➕ Add Rule' to apply.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ AI rule generation failed: {e}")
+                    else:
+                        st.warning("⚠️ Please describe the correction first.")
 
             col_add_p, col_add_r, col_add_d = st.columns([3.0, 2.2, 3.0])
             with col_add_p:
@@ -423,7 +446,7 @@ def render_standards_tab(active_model):
                 st.rerun()
 
         # ── Auto-Correction Rule Manager (externalized to YAML) ────────
-        _render_auto_correction_manager()
+        _render_auto_correction_manager(active_model)
 
     # Tab 2: View Full Prompt (Read-Only)
     with tab2:
