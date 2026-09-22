@@ -306,10 +306,11 @@ def render_standards_tab(active_model):
 
             if variables_now:
                 edited_vars = {}
+                total_vars = len(var_names)
                 for idx, name in enumerate(var_names):
                     meta = variables_now.get(name) if isinstance(variables_now.get(name), dict) else {}
-                    # Each row: Name(2) + Label(2) + Placeholder(2) + Fill(1) + Opt(1) + Up/Dn/Del(2)
-                    c_nm, c_lb, c_ph, c_df, c_opt, c_act = st.columns([2, 2, 2, 1, 1, 2])
+                    # 8 fixed columns: Name, Label, Placeholder, Auto-Fill, Optional, ⬆️, ⬇️, 🗑️
+                    c_nm, c_lb, c_ph, c_df, c_opt, c_up, c_dn, c_del = st.columns([1.5, 2.0, 2.0, 1.2, 0.8, 0.4, 0.4, 0.4])
                     with c_nm:
                         var_key = st.text_input("Name", value=name, key=f"var_key_{name}").strip()
                     with c_lb:
@@ -320,22 +321,30 @@ def render_standards_tab(active_model):
                         var_def = st.text_input("Auto-Fill", value=meta.get("default", ""), key=f"var_def_{name}",
                                                help="Default value the Naming tab input starts with.")
                     with c_opt:
+                        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
                         var_opt = st.checkbox("Optional", value=bool(meta.get("optional")), key=f"var_opt_{name}",
                                               help="Optional variables start empty and are omitted when not filled.")
-                    with c_act:
-                        _sub_c_up, _sub_c_dn, _sub_c_del = st.columns([1, 1, 1])
-                        with _sub_c_up:
-                            if idx > 0 and st.button("⬆️", key=f"var_up_{idx}", help=f"Move <{name}> up"):
+                    with c_up:
+                        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                        if idx > 0:
+                            if st.button("⬆️", key=f"var_up_{idx}", help=f"Move <{name}> up"):
                                 var_names[idx - 1], var_names[idx] = var_names[idx], var_names[idx - 1]
                                 reordered = {k: variables_now[k] for k in var_names}
                                 _persist_variables(current_rules, reordered)
-                        with _sub_c_dn:
-                            if idx < len(var_names) - 1 and st.button("⬇️", key=f"var_dn_{idx}", help=f"Move <{name}> down"):
+                        else:
+                            st.empty()
+                    with c_dn:
+                        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                        if idx < total_vars - 1:
+                            if st.button("⬇️", key=f"var_dn_{idx}", help=f"Move <{name}> down"):
                                 var_names[idx], var_names[idx + 1] = var_names[idx + 1], var_names[idx]
                                 reordered = {k: variables_now[k] for k in var_names}
                                 _persist_variables(current_rules, reordered)
-                        with _sub_c_del:
-                            st.button("🗑️", key=f"var_del_{name}", help=f"Remove <{name}>")
+                        else:
+                            st.empty()
+                    with c_del:
+                        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                        st.button("🗑️", key=f"var_del_{name}", help=f"Remove <{name}>")
 
                     if st.session_state.get(f"var_del_{name}"):
                         edited_vars[name] = None
