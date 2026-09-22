@@ -330,6 +330,59 @@ def _interface_ref(opt):
     }.get(opt, ("Interface", ""))
 
 
+def _interface_ref_examples(intf_type):
+    """Return ``(header, records_text)`` for the active interface type.
+
+    **header** — status title rendered with ``st.markdown`` (bold).
+    **records_text** — lines joined by newlines, passed to ``st.code(... language=None)``
+    so every entry occupies its own monospace row matching Column 1's reference box.
+    """
+    from core.shared_backup_state import SharedBackupState
+    import re as _re
+
+    _, defaults = _interface_ref(intf_type)
+
+    patterns = {
+        INTERFACE_OPTIONS[0]: _re.compile(r'(?i)uplink|to_'),
+        INTERFACE_OPTIONS[1]: _re.compile(r'(?i)lacp|lag_member'),
+        INTERFACE_OPTIONS[2]: _re.compile(r'(?i)\bpo\d+|port.channel|lag\d+'),
+        INTERFACE_OPTIONS[3]: _re.compile(r'(?i)\bvlan|access|_eth|_nic|_poe'),
+        INTERFACE_OPTIONS[4]: _re.compile(r'(?i)\b(trust|untrust|dmz|zone|inside|outside|if)\b|\.\d+'),
+    }
+    rx = patterns.get(intf_type, patterns[INTERFACE_OPTIONS[0]])
+
+    objects = []
+    for endpoint in ("dcim/interfaces", "dcim_interfaces", "dcim/interface-templates"):
+        try:
+            objs = SharedBackupState.get_objects_by_type(endpoint)
+        except Exception:
+            objs = []
+        if objs:
+            objects = objs
+            break
+
+    matches = []
+    for obj in objects:
+        if not isinstance(obj, dict):
+            continue
+        desc = str(obj.get("description") or "").strip()
+        if not desc:
+            continue
+        if rx.search(desc):
+            device = obj.get("device") or obj.get("device_name") or obj.get("virtual_machine") or ""
+            if isinstance(device, dict):
+                device = device.get("name") or device.get("display") or ""
+            if_name = obj.get("name") or obj.get("interface") or ""
+            matches.append(f"{device} | {if_name}: \"{desc}\"")
+
+    matches = matches[:15]
+    if matches:
+        header = f"🟢 NetBox Interface Descriptions ({len(matches)}):"
+        return header, "\n".join(matches)
+
+    return f"🟡 Default Examples — No ingested interface descriptions found matching this type.", defaults
+
+
 def _render_esxi_pattern(pat: str, vals: dict, variables: dict) -> str:
     """Interpolate an ESXi description pattern through the unified rendering pipeline,
     which strips empty optional clauses before substitution. All fixed words (Active,
@@ -457,7 +510,10 @@ def _asset_class_1(case_mode, active_model, naming_patterns, variables):
         if st.button("AI Verify Interface Description", key="ai_chk_intf"):
             with st.spinner("Auditing..."):
                 st.info(verify_and_suggest_with_ai(gen, active_model, asset_type=ref_lbl, category_key="device", site_filter=""))
-        display_reference_box("device", ref_ex, ref_lbl, "")
+        with st.expander(f"💡 Click to view reference {ref_lbl} examples", expanded=False):
+            ih, it = _interface_ref_examples(intf_type)
+            st.markdown(f"**{ih}**")
+            st.code(it, language=None)
 
 
 def _asset_class_2(case_mode, active_model, naming_patterns, variables):
