@@ -216,6 +216,10 @@ def _normalize_rules(raw: dict) -> dict:
                 merged_vars[str(k)] = {"label": v, "placeholder": f"e.g. {k}"}
         variables = merged_vars
 
+    custom = raw.get("custom_patterns")
+    if isinstance(custom, list):
+        merged["custom_patterns"] = [{"label": str(c.get("label", "")), "key": str(c.get("key", "")), "pattern": str(c.get("pattern", ""))} for c in custom if isinstance(c, dict)]
+
     merged = dict(patterns)
     merged["naming_patterns"] = dict(patterns)
     merged["pattern_variables"] = variables
@@ -247,12 +251,31 @@ def get_pattern_variables(rules: dict) -> dict:
     return PATTERN_VARIABLES.copy()
 
 
+def get_custom_patterns(rules: dict) -> List[dict]:
+    """Return the list of user-defined custom patterns (label/key/pattern)."""
+    custom = rules.get("custom_patterns")
+    if isinstance(custom, list):
+        return [
+            {"label": str(c.get("label", "")), "key": str(c.get("key", "")), "pattern": str(c.get("pattern", ""))}
+            for c in custom if isinstance(c, dict)
+        ]
+    return []
+
+
 def get_naming_patterns(rules: dict) -> dict:
-    """Return the naming patterns dict from a rules structure (defaults if missing)."""
+    """Return the naming patterns dict from a rules structure (defaults if missing).
+
+    Custom patterns (stored under ``custom_patterns``) are merged in under their key so
+    they register dynamically across the application (Naming tab, prompt export, etc.).
+    """
     patterns = rules.get("naming_patterns")
-    if isinstance(patterns, dict) and patterns:
-        return patterns
-    return {k: v for k, v in rules.items() if _is_str(v)}
+    if not (isinstance(patterns, dict) and patterns):
+        patterns = {k: v for k, v in rules.items() if _is_str(v)}
+    merged = dict(patterns)
+    for cp in get_custom_patterns(rules):
+        if cp.get("key") and cp.get("pattern") is not None:
+            merged[cp["key"]] = cp["pattern"]
+    return merged
 
 
 def save_naming_rules(rules: Dict[str, str], source: str = "Manual Edit"):

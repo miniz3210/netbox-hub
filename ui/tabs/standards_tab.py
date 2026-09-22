@@ -1,10 +1,12 @@
+import re
+
 import streamlit as st
 from config.naming_rules import (
     load_naming_rules, save_naming_rules, export_rules_as_prompt,
     load_history, restore_from_history, clear_history,
-    get_pattern_variables, get_naming_patterns,
+    get_pattern_variables, get_naming_patterns, get_custom_patterns,
 )
-from core.naming_engine import parse_prompt_to_rules, generate_autocorrect_rule
+from core.naming_engine import generate_naming_pattern, generate_autocorrect_rule
 from utils.formatters import (
     load_auto_corrections, save_auto_corrections, reset_auto_corrections,
 )
@@ -16,42 +18,6 @@ def _persist_variables(rules: dict, variables: dict) -> None:
     st.session_state["naming_rules"] = rules.copy()
     st.session_state["variables_saved"] = True
     st.rerun()
-
-
-_FORM_WIDGET_KEY_MAP = {
-    "branch_switch": "form_switch",
-    "branch_stack": "form_stack",
-    "branch_ap": "form_ap",
-    "branch_firewall": "form_fw",
-    "branch_security": "form_fw",
-    "branch_ion": "form_ion",
-    "branch_router": "form_rtr",
-    "branch_va": "form_va",
-    "switch_uplink_desc": "form_uplink",
-    "switch_lag_member": "form_lag",
-    "switch_port_channel": "form_po",
-    "switch_access_desc": "form_access",
-    "firewall_interface": "form_fw_int",
-    "esxi_host": "form_esxi",
-    "vm_host": "form_vm",
-    "esxi_uplink": "form_esxi_uplink",
-    "esxi_portgroup_name": "form_esxi_pg_name",
-    "esxi_portgroup": "form_esxi_pg",
-    "esxi_vmkernel_name": "form_esxi_vmk_name",
-    "esxi_vmkernel": "form_esxi_vmk",
-    "netbox_server_yaml": "form_yaml",
-}
-
-
-def _load_parsed_into_form(rules: dict) -> None:
-    """Populate the Edit Standards form widget session keys from parsed rules.
-
-    Writes parsed pattern values straight into each ``form_*`` widget's session key
-    so the inputs below update immediately, letting the user review before saving.
-    """
-    for rule_key, widget_key in _FORM_WIDGET_KEY_MAP.items():
-        if rules.get(rule_key):
-            st.session_state[widget_key] = rules[rule_key]
 
 
 def _render_auto_correction_manager(active_model: str) -> None:
@@ -80,35 +46,30 @@ def _render_auto_correction_manager(active_model: str) -> None:
         st.info("No auto-correction categories defined.")
         return
 
-    with st.expander("💡 Quick User Guide: How Auto-Correction Works", expanded=False):
-        st.markdown(
-            """
-Each **Original Pattern** is a regular expression that catches irregular syntax, and the
-**Replacement** is the standardized format you want instead.
+    primary_category = categories[0]
 
-- **Original Pattern** — the regex target. E.g. `(?i)\\b(vswitch)(\\d+)\\b`
-  catches `vswitch0`, `VSWITCH1`, etc. (the `(?i)` makes it case-insensitive).
-- **Replacement** — the standard form, using capture groups. E.g. `vSwitch\\2`
-  normalizes the prefix to `vSwitch` while keeping the original port/switch number.
-
-**Common examples:**
-
-| Input             | Result     |
-|-------------------|------------|
-| `vswitch0`       | `vSwitch0`|
-| `dvswitch1`       | `dvSwitch1`|
-| `VMNIC0` / `nic0` / `eth0` | `vmnic0` |
-| `VMK0`            | `vmk0`     |
-
-**Actions:**
-
-- Edit any pattern/replacement inline, then click **💾 Save & Apply Changes** to
-  update `data/autocorrect_rules.yaml`.
-- Use the **On** checkbox to enable / disable a rule without deleting it.
-- Use **➕ Add Rule** to append custom conventions.
-- Use **🔄 Reset to Factory Defaults** to recover the original definitions.
-"""
+    with st.expander("✨ AI Assistant: Generate Rule from Natural Language", expanded=False):
+        st.caption("Describe the formatting in plain text and let AI build the regex for you.")
+        ai_desc = st.text_input(
+            "Describe the correction rule in plain text",
+            key=f"ac_{primary_category}_ai_desc",
+            placeholder="e.g. Change vlan to uppercase VLAN, or change gigabitethernet to Gi",
         )
+        if st.button("🤖 Generate Regex Rule", key=f"ac_{primary_category}_ai_gen", use_container_width=True):
+            if ai_desc.strip():
+                try:
+                    with st.spinner(f"Generating rule using {active_model}..."):
+                        result = generate_autocorrect_rule(ai_desc.strip(), active_model)
+                    st.session_state[f"ac_{primary_category}_new_p"] = result["pattern"]
+                    st.session_state[f"ac_{primary_category}_new_r"] = result["replacement"]
+                    st.session_state[f"ac_{primary_category}_new_d"] = result["description"]
+                    st.session_state["autocorrect_ai_generated"] = True
+                    st.toast("Rule generated! Review and click '➕ Add Rule' to apply.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ AI rule generation failed: {e}")
+            else:
+                st.warning("⚠️ Please describe the correction first.")
 
     for category in categories:
         with st.expander("🛠️ Auto-Correction Rules", expanded=True):
@@ -159,29 +120,6 @@ Each **Original Pattern** is a regular expression that catches irregular syntax,
                         "description": d,
                         "enabled": bool(enabled),
                     })
-
-            with st.expander("✨ AI Assistant: Generate Rule from Natural Language", expanded=False):
-                st.caption("Describe the formatting in plain text and let AI build the regex for you.")
-                ai_desc = st.text_input(
-                    "Describe the correction rule in plain text",
-                    key=f"ac_{category}_ai_desc",
-                    placeholder="e.g. Change vlan to uppercase VLAN, or change gigabitethernet to Gi",
-                )
-                if st.button("🤖 Generate Regex Rule", key=f"ac_{category}_ai_gen", use_container_width=True):
-                    if ai_desc.strip():
-                        try:
-                            with st.spinner(f"Generating rule using {active_model}..."):
-                                result = generate_autocorrect_rule(ai_desc.strip(), active_model)
-                            st.session_state[f"ac_{category}_new_p"] = result["pattern"]
-                            st.session_state[f"ac_{category}_new_r"] = result["replacement"]
-                            st.session_state[f"ac_{category}_new_d"] = result["description"]
-                            st.session_state["autocorrect_ai_generated"] = True
-                            st.toast("Rule generated! Review and click '➕ Add Rule' to apply.")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ AI rule generation failed: {e}")
-                    else:
-                        st.warning("⚠️ Please describe the correction first.")
 
             col_add_p, col_add_r, col_add_d = st.columns([3.0, 2.2, 3.0])
             with col_add_p:
@@ -263,51 +201,6 @@ def render_standards_tab(active_model):
     with tab1:
         st.markdown("##### Edit Naming Patterns")
         st.info("💡 Modify the naming patterns below. Changes are saved when you click 'Save Changes'. Use the **Pattern Variables Reference** tab to see all available variables.")
-        
-        # ── AI Assistant: Populate Naming Patterns from Natural Language ──
-        with st.expander("✨ AI Assistant: Populate Naming Patterns from Natural Language", expanded=False):
-            st.caption("Describe your naming standards in plain text and AI will parse them into the pattern fields below. Review the populated fields, then click **💾 Save Changes** to persist.")
-            imported_text = st.text_area(
-                "Paste Naming Guidelines",
-                placeholder="e.g., 'Switch naming should be SW followed by country code, site code, and sequence number...'\n\nDescribe your complete naming conventions in natural language.",
-                height=200,
-                key="import_prompt_text",
-            )
-            col_parse, col_example = st.columns([2, 1])
-            with col_parse:
-                if st.button("🤖 Parse & Apply with AI", type="primary", use_container_width=True):
-                    if imported_text.strip():
-                        with st.spinner(f"Parsing naming standards using {active_model}..."):
-                            try:
-                                extracted = parse_prompt_to_rules(imported_text, active_model)
-                                _load_parsed_into_form(extracted)
-                                st.session_state["naming_rules"] = {**current_rules, **extracted}
-                                st.success("✅ Standards parsed! Review the fields below, then click '💾 Save Changes'.")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"❌ Failed to parse prompt: {str(e)}")
-                                st.info("💡 Try providing more detailed descriptions of your naming patterns.")
-                    else:
-                        st.warning("⚠️ Please paste your naming guidelines text first.")
-            with col_example:
-                if st.button("📋 Show Example", use_container_width=True):
-                    with st.expander("Example Guidelines", expanded=True):
-                        st.code("""Network Device Naming:
-- Switches: SW + 2-letter country + site code + sequence (e.g., SWUSNYC01)
-- Access Points: WAP + country + site + number
-- Firewalls: FW + country + site + vendor + sequence
-
-Interface Descriptions:
-- Uplinks should show: Uplink_to_<remote device>_<port>
-- LAG members: LACP_to_<remote device>_<port>
-- Access ports: VLAN name - device name_port (VLAN optional)
-
-ESXi Hosts:
-- Format: <site><esx><number>.<domain>
-- IT domain: .example.corp
-- OT domain: .example.ot
-""", language="text")
-                        st.info("💡 Copy this example and modify it with your own standards, then paste above and click 'Parse & Apply'.")
         
         with st.form("naming_standards_form"):
             st.markdown("#### 1. Network & Security Devices")
@@ -461,9 +354,65 @@ ESXi Hosts:
                     autocomplete="off"
                 )
             
-            col_save, col_reset = st.columns([3, 1])
+            st.markdown("#### 3. NetBox Hardware YAML Schema")
+            netbox_server_yaml = st.text_area(
+                "NetBox Server YAML Guidelines",
+                value=current_rules.get("netbox_server_yaml", ""),
+                height=100,
+                help="Guidelines for generating NetBox device-type YAML files",
+                key="form_yaml",
+            )
+
+            st.markdown("---")
+            with st.expander("➕ Custom Pattern & AI Assistant", expanded=False):
+                st.caption("Describe a naming convention in plain text and let AI build a template for you. Verify the Label / Key / Template below, then click **➕ Add to Standards**.")
+                ai_desc = st.text_input(
+                    "Describe the naming convention",
+                    key="custom_ai_desc",
+                    placeholder="e.g. SAN storage naming: SAN + country + site + sequence",
+                )
+                if st.form_submit_button("🤖 Generate Pattern with AI", key="custom_ai_gen", use_container_width=True):
+                    if ai_desc.strip():
+                        with st.spinner(f"Generating pattern using {active_model}..."):
+                            try:
+                                generated = generate_naming_pattern(ai_desc.strip(), active_model)
+                                prefix = re.sub(r"[^A-Za-z0-9].*$", "", generated) or "CUSTOM"
+                                st.session_state["custom_new_label"] = prefix.upper()
+                                st.session_state["custom_new_key"] = prefix.lower() + "_pattern"
+                                st.session_state["custom_new_tpl"] = generated
+                                st.session_state["custom_ai_ready"] = True
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ AI pattern generation failed: {e}")
+                    else:
+                        st.warning("⚠️ Please describe the naming convention first.")
+                col_new_l, col_new_k, col_new_t = st.columns([3, 3, 4])
+                with col_new_l:
+                    custom_new_label = st.text_input(
+                        "Custom Pattern Label", value=st.session_state.get("custom_new_label", ""),
+                        key="custom_new_label", placeholder="e.g. SAN Storage",
+                    )
+                with col_new_k:
+                    custom_new_key = st.text_input(
+                        "Custom Pattern Key", value=st.session_state.get("custom_new_key", ""),
+                        key="custom_new_key", placeholder="e.g. san_pattern",
+                    )
+                with col_new_t:
+                    custom_new_tpl = st.text_input(
+                        "Custom Pattern Template", value=st.session_state.get("custom_new_tpl", ""),
+                        key="custom_new_tpl", placeholder="e.g. SAN<Country><Site><Seq>",
+                    )
+                existing_customs = get_custom_patterns(current_rules)
+                if existing_customs:
+                    with st.expander("Existing Custom Patterns", expanded=False):
+                        for ccp in existing_customs:
+                            st.markdown(f"- **{ccp.get('key')}** (`{ccp.get('pattern')}`) — {ccp.get('label')}")
+
+            col_save, col_add, col_reset = st.columns([2, 2, 1])
             with col_save:
                 submitted = st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
+            with col_add:
+                add_custom = st.form_submit_button("➕ Add to Standards", use_container_width=True)
             with col_reset:
                 reset = st.form_submit_button("🔄 Reset to Defaults", use_container_width=True)
             
@@ -493,7 +442,8 @@ ESXi Hosts:
                     "esxi_portgroup": esxi_portgroup,
                     "esxi_vmkernel_name": esxi_vmkernel_name,
                     "esxi_vmkernel": esxi_vmkernel,
-                    "netbox_server_yaml": current_rules.get("netbox_server_yaml", ""),
+                    "netbox_server_yaml": netbox_server_yaml,
+                    "custom_patterns": get_custom_patterns(current_rules),
                     "pattern_variables": session_variables,
                 }
                 try:
@@ -507,6 +457,29 @@ ESXi Hosts:
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ Failed to save: {str(e)}")
+
+            if add_custom:
+                if custom_new_key.strip() and custom_new_tpl.strip():
+                    try:
+                        existing_customs = list(get_custom_patterns(current_rules))
+                        existing_customs = [
+                            c for c in existing_customs if c["key"] != custom_new_key.strip()
+                        ]
+                        existing_customs.append({
+                            "label": custom_new_label.strip() or custom_new_key.strip(),
+                            "key": custom_new_key.strip(),
+                            "pattern": custom_new_tpl.strip(),
+                        })
+                        merged = {**current_rules, "custom_patterns": existing_customs}
+                        save_naming_rules(merged, source="Custom Pattern")
+                        st.session_state["naming_rules"] = merged
+                        st.session_state["custom_ai_ready"] = False
+                        st.session_state["standards_saved"] = True
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Failed to add custom pattern: {str(e)}")
+                else:
+                    st.warning("⚠️ Provide both a Pattern Key and a Pattern Template.")
             
             if reset:
                 from config.naming_rules import DEFAULT_RULES
@@ -519,23 +492,6 @@ ESXi Hosts:
 
         # ── Auto-Correction Rule Manager (externalized to YAML) ────────
         _render_auto_correction_manager(active_model)
-
-        st.markdown("---")
-        st.markdown("#### 3. NetBox Hardware YAML Schema")
-        netbox_server_yaml = st.text_area(
-            "NetBox Server YAML Guidelines",
-            value=current_rules.get("netbox_server_yaml", ""),
-            height=100,
-            help="Guidelines for generating NetBox device-type YAML files",
-            key="form_yaml",
-        )
-        if st.button("💾 Save NetBox YAML", type="primary", use_container_width=True, key="save_netbox_yaml"):
-            rules = load_naming_rules()
-            rules["netbox_server_yaml"] = netbox_server_yaml
-            save_naming_rules(rules, source="NetBox YAML Schema")
-            st.session_state["naming_rules"] = rules
-            st.session_state["standards_saved"] = True
-            st.rerun()
 
     # Tab 2: View Full Prompt (Read-Only)
     with tab2:
