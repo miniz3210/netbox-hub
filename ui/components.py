@@ -1,11 +1,17 @@
+import time
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Dict, List, Tuple
 from datetime import datetime
 
 import streamlit as st
 from config.constants import APP_VERSION
 from config.settings import AVAILABLE_MODELS, OPENROUTER_BASE_URL
-from core.ai_client import call_ai, test_model_connection, fetch_free_models
+from core.ai_client import (
+    call_ai,
+    fetch_free_models,
+    ping_model,
+    test_model_connection,
+)
 from core.backup_manager import (
     CSV_FILENAMES,
     OBJECT_LABELS,
@@ -1054,89 +1060,189 @@ def render_backup_uploader(scope_key: str) -> dict:
     _render_csv_upload_section(scope_key, csv_uploader_key)
     
     return meta
+def _sidebar_placeholder(loaded: bool, has_options: bool) -> str:
+    if not loaded:
+        return "-- Click refresh to load models --"
+    if not has_options:
+        return "-- No usable models available --"
+    return "-- Select a model --"
+
+
+def _sidebar_health_badge(ok: bool, latency: int, msg: str) -> None:
+    """Render a temporary status badge for the last ping result."""
+    if ok:
+        st.success(f"✅ **Operational** (Latency: {latency}ms)", icon="✅")
+    else:
+        st.error(f"❌ **Failed:** {msg}", icon="❌")
+
+
+def _run_single_ping(model: str) -> Tuple[bool, int, str]:
+    """Execute a quick pre-flight ping and store the result for the given model."""
+    ok, latency, msg = ping_model(model)
+    st.session_state["model_test_history"][model] = {
+        "ok": ok,
+        "latency": latency,
+        "msg": msg,
+        "ts": time.time(),
+    }
+    return ok, latency, msg
+
+
 def render_sidebar() -> str:
     with st.sidebar:
         st.header("⚙️ AI Engine Selection")
-        
+
         # 1. Preset Models from environment
         selected_preset = st.selectbox(
             "Preset Models",
             options=AVAILABLE_MODELS,
             index=0,
-            help="Configured environment presets."
+            help="Configured environment presets.",
         )
 
-        # 2. Load and cache free models list (only when user clicks refresh)
+        # 2. Sanitized quick-select cache (only populated when user clicks refresh)
         if "free_models_cache" not in st.session_state:
             st.session_state["free_models_cache"] = []
         if "models_loaded" not in st.session_state:
             st.session_state["models_loaded"] = False
-        
-        # Use cached models (empty by default until refresh is clicked)
-        test_models = st.session_state["free_models_cache"]
-        
-        # Filter candidate models to exclude any already in Preset Models
-        filtered_suggestions = [
-            m for m in test_models 
-            if m not in AVAILABLE_MODELS
-        ]
+        if "verified_models" not in st.session_state:
+            st.session_state["verified_models"] = {}
+        if "verified_only_mode" not in st.session_state:
+            st.session_state["verified_only_mode"] = False
+        if "model_test_history" not in st.session_state:
+            st.session_state["model_test_history"] = {}
 
-        # Quick-Select Test Model Pull-Down Menu
-        col1, col2 = st.columns([4, 1])
-        with col1:
-            if not st.session_state["models_loaded"]:
-                placeholder = "-- Click refresh to load models --"
-            elif len(filtered_suggestions) == 0:
-                placeholder = "-- No free models available --"
-            else:
-                placeholder = "-- Select a model --"
-            
+        test_models = st.session_state["free_models_cache"]
+
+        # Dropdown candidates: only sanitized models, minus any that are presets.
+        filtered_suggestions = [
+            m for m in test_models if m not in AVAILABLE_MODELS
+        ]
+        # Option B: restrict strictly to verified models when a scan has run.
+        verified_only = sorted(st.session_state["verified_models"].keys())
+        dropdown_options = (
+            verified_only if verified_only and st.session_state["verified_only_mode"]
+            else filtered_suggestions
+        )
+
+        placeholder = _sidebar_placeholder(
+            st.session_state["models_loaded"], bool(dropdown_options)
+        )
+
+        q1, q2 = st.columns([4, 1])
+        with q1:
             quick_pick = st.selectbox(
                 "Quick-Select Test Model",
-                options=[placeholder] + filtered_suggestions,
+                options=[placeholder] + dropdown_options,
                 index=0,
-                help="Click the refresh button to load free models from API."
+                help="Sanitized models. Refresh to reload; use Scan & Verify to keep only working models.",
             )
-        with col2:
+        with q2:
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("🔄", key="btn_refresh_models", help="Refresh model list"):
-                with st.spinner("Loading free models..."):
-                    fetched_models = fetch_free_models()
-                    st.session_state["free_models_cache"] = fetched_models
+            if st.button("🔄", key="btn_refresh_models", help="Refresh sanitized model list"):
+                with st.spinner("Loading models..."):
+                    fetched = fetch_free_models()
+                    st.session_state["free_models_cache"] = fetched
                     st.session_state["models_loaded"] = True
-                    if len(fetched_models) == 0:
-                        st.warning("No free models found. Check logs for details.")
+                    if not fetched:
+                        st.warning("No usable models found. Check logs for details.")
                     else:
-                        st.success(f"Loaded {len(fetched_models)} free models")
+                        st.success(f"Loaded {len(fetched)} usable models")
                 st.rerun()
 
-        # 3. Custom Manual Input
+        # Option B: Scan & Verify working models in the background, cached in session state.
+        s1, s2 = st.columns([3, 1])
+        with s1:
+            if st.button("🔍 Scan & Verify Working Models", key="btn_scan_verify", width="stretch"):
+                candidates = filtered_suggestions or test_models
+                if not candidates:
+                    st.warning("Refresh the model list first.")
+                else:
+                    verified: Dict[str, Tuple[int, str]] = {}
+                    fail_count = 0
+                    progress = st.progress(0.0)
+                    for i, candidate in enumerate(candidates):
+                        progress.progress((i + 1) / len(candidates))
+                        ok, latency, msg = ping_model(candidate)
+                        if ok:
+                            verified[candidate] = (latency, msg)
+                        else:
+                            fail_count += 1
+                    progress.empty()
+                    st.session_state["verified_models"] = verified
+                    st.session_state["verified_only_mode"] = True
+                    st.success(
+                        f"Verified {len(verified)}/{len(candidates)} working models "
+                        f"({fail_count} failed)."
+                    )
+                    if verified:
+                        st.session_state["free_models_cache"] = sorted(verified.keys())
+                    st.rerun()
+        with s2:
+            if st.button("⟨ All ⟩", key="btn_clear_verify", help="Show all sanitized models"):
+                st.session_state["verified_only_mode"] = False
+                st.rerun()
+
+        # Option A: on-demand pre-flight test against the currently selected model.
+        selected_quick = "" if quick_pick.startswith("--") else quick_pick
+        if selected_quick:
+            t1, t2 = st.columns([1, 1])
+            with t1:
+                if st.button("⚡ Test Model", key="btn_ping_quick", width="stretch"):
+                    with st.spinner(f"Pinging `{selected_quick}`..."):
+                        _run_single_ping(selected_quick)
+            with t2:
+                if st.button("➜ Apply", key="btn_apply_quick", type="primary", width="stretch",
+                            help="Only applied after the model passes a ping."):
+                    ok, _, msg = _run_single_ping(selected_quick)
+                    if ok:
+                        if "approved_model" not in st.session_state:
+                            st.session_state["approved_model"] = ""
+                        st.session_state["approved_model"] = selected_quick
+                    else:
+                        st.warning(f"Not applied: ping failed → {msg}")
+            _last = st.session_state["model_test_history"].get(selected_quick)
+            if _last:
+                _sidebar_health_badge(_last["ok"], _last["latency"], _last["msg"])
+
+        # 3. Custom Manual Input (with permissive session-state guard)
         default_manual = "" if quick_pick.startswith("--") else quick_pick
         custom_model = st.text_input(
             "Custom Model",
             value=default_manual,
             placeholder="Type or edit model slug...",
-            help="Overrides preset when populated."
+            help="Overrides preset when populated.",
         ).strip()
 
-        # Active Model Resolution
-        active_model = custom_model if custom_model else selected_preset
+        # Active Model Resolution + unverified guard: only apply a freshly typed / quick-selected
+        # model once the user has explicitly confirmed it via a successful ping.
+        if custom_model:
+            if custom_model in st.session_state["verified_models"]:
+                active_model = custom_model
+            elif custom_model == st.session_state.get("approved_model"):
+                active_model = custom_model
+            else:
+                pending_model = custom_model
+                active_model = selected_preset
+                if "unverified_model" not in st.session_state:
+                    st.session_state["unverified_model"] = pending_model
+                st.caption(
+                    f"⚪ `{pending_model}` selected but **unverified** — it will not be "
+                    f"used until it passes the ⚡ ping test."
+                )
+        else:
+            active_model = selected_preset
 
-        # Track model test results in session state
-        if "model_test_history" not in st.session_state:
-            st.session_state["model_test_history"] = {}
-
-        # 4. Connection Test Button
-        if st.button("🧪 Test Model Connection", key="btn_ping_model", width="stretch"):
+        # 4. Global connection test (legacy, heavier) kept for the full pipeline.
+        if st.button("🧪 Test Full Connection", key="btn_ping_model", width="stretch",
+                    help="Runs the heavier end-to-end connection test (max_tokens=100)."):
             with st.spinner(f"Testing `{active_model}`..."):
                 ok, latency, msg = test_model_connection(active_model)
                 st.session_state["model_test_history"][active_model] = {
-                    "ok": ok,
-                    "latency": latency,
-                    "msg": msg
+                    "ok": ok, "latency": latency, "msg": msg, "ts": time.time(),
                 }
 
-        # 5. Active Model Card with Latency or Strikethrough
+        # 5. Active Model Card with latency or failure detail.
         history = st.session_state["model_test_history"]
         if active_model in history:
             res = history[active_model]
@@ -1157,7 +1263,7 @@ def render_sidebar() -> str:
                         st.markdown(f"• ~~`{m_name}`~~: 🔴 **Fail**")
 
         st.caption(f"🔌 Routed via **OmniRoute** (`{OPENROUTER_BASE_URL}`)")
-        
+
         # Version badge at the bottom of sidebar
         st.markdown("---")
         st.markdown(

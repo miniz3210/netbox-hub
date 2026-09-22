@@ -9,9 +9,7 @@ from typing import Dict, List, Optional, Tuple
 
 from config.naming_rules import extract_tokens, save_naming_rules
 from utils.formatters import (
-    normalize_vswitch,
-    normalize_vmnic,
-    normalize_vmnic_list,
+    apply_auto_corrections,
     normalize_network_name,
 )
 from utils.pattern_formatter import apply_pattern
@@ -212,18 +210,12 @@ def render_esxi_network_inputs(pattern: str, variables: Dict, prefix: str, auto_
             value = st.text_input(label, value=default_val or "", placeholder=ph, key=wk).strip()
 
         if value:
-            if token == "vSwitch":
-                values[token] = normalize_vswitch(value)
-            elif token == "vmnic":
-                values[token] = normalize_vmnic(value) if auto_correct else value
-            elif token in ("Active_vmnics", "Standby_vmnics"):
-                values[token] = normalize_vmnic_list(value) if auto_correct else value
-            elif token == "Purpose":
+            if token == "Purpose":
                 values[token] = normalize_network_name(value)
             elif token in ("pg_network",):
                 values[token] = normalize_network_name(value) if auto_correct else value.strip()
-            elif token in ("vmk",):
-                values[token] = normalize_vmnic(value) if auto_correct else value
+            elif auto_correct:
+                values[token] = apply_auto_corrections(value, "vmware")
             else:
                 values[token] = value
         else:

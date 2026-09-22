@@ -2,7 +2,7 @@
 Application Constants and Versioning
 """
 
-APP_VERSION = "3.2.1.23"
+APP_VERSION = "3.2.1.24"
 APP_NAME = "NetBox Universal Library Hub"
 
 # GitHub Official Device-Type Library Source
@@ -19,6 +19,7 @@ OFFICIAL_GITHUB_BRANCH = BRANCH
 DATABASE_PATH = "data/netbox_hub.db"
 RULES_FILE = "data/naming_rules.yaml"
 RULES_HISTORY_FILE = "data/naming_rules_history.json"
+AUTOCORRECT_RULES_FILE = "data/autocorrect_rules.yaml"
 LOCAL_CACHE_DIR = "data/catalog_cache"
 CUSTOM_TEMPLATES_DIR = "data/custom_templates"
 
