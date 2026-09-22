@@ -44,8 +44,38 @@ def _render_auto_correction_manager() -> None:
         st.info("No auto-correction categories defined.")
         return
 
+    with st.expander("💡 Quick User Guide: How Auto-Correction Works", expanded=False):
+        st.markdown(
+            """
+Each **Original Pattern** is a regular expression that catches irregular syntax, and the
+**Replacement** is the standardized format you want instead.
+
+- **Original Pattern** — the regex target. E.g. `(?i)\\b(vswitch)(\\d+)\\b`
+  catches `vswitch0`, `VSWITCH1`, etc. (the `(?i)` makes it case-insensitive).
+- **Replacement** — the standard form, using capture groups. E.g. `vSwitch\\2`
+  normalizes the prefix to `vSwitch` while keeping the original port/switch number.
+
+**Common examples:**
+
+| Input             | Result     |
+|-------------------|------------|
+| `vswitch0`       | `vSwitch0`|
+| `dvswitch1`       | `dvSwitch1`|
+| `VMNIC0` / `nic0` / `eth0` | `vmnic0` |
+| `VMK0`            | `vmk0`     |
+
+**Actions:**
+
+- Edit any pattern/replacement inline, then click **💾 Save & Apply Changes** to
+  update `data/autocorrect_rules.yaml`.
+- Use the **On** checkbox to enable / disable a rule without deleting it.
+- Use **➕ Add Rule** to append custom conventions.
+- Use **🔄 Reset to Factory Defaults** to recover the original definitions.
+"""
+        )
+
     for category in categories:
-        with st.expander(f"📁 {category.capitalize()} Rules", expanded=True):
+        with st.expander("🛠️ Auto-Correction Rules", expanded=True):
             items = list(rules[category])
             updated = []
             pending_delete = None
@@ -160,9 +190,6 @@ def render_standards_tab(active_model):
     if "standards_reset" in st.session_state and st.session_state["standards_reset"]:
         st.success("✅ Reset to default standards!")
         st.session_state["standards_reset"] = False
-
-    # ── Auto-Correction Rule Manager (externalized to YAML) ──────────────
-    _render_auto_correction_manager()
 
     # Always reload rules from file to ensure fresh data after save
     current_rules = load_naming_rules()
@@ -394,7 +421,10 @@ def render_standards_tab(active_model):
                 st.session_state["standards_reset"] = True
                 # Force immediate rerun
                 st.rerun()
-    
+
+        # ── Auto-Correction Rule Manager (externalized to YAML) ────────
+        _render_auto_correction_manager()
+
     # Tab 2: View Full Prompt (Read-Only)
     with tab2:
         st.markdown("##### Active Infrastructure Guidelines")
