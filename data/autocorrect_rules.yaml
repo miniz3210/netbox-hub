@@ -1,0 +1,26 @@
+auto_corrections:
+  vmware:
+    - pattern: '(?i)\b(vswitch)(\d+)\b'
+      replacement: 'vSwitch\2'
+      description: 'Normalize vSwitch casing (vswitchX -> vSwitchX)'
+      enabled: true
+    - pattern: '(?i)\b(dvswitch)(\d+)\b'
+      replacement: 'dvSwitch\2'
+      description: 'Normalize dvSwitch casing (dvswitchX -> dvSwitchX)'
+      enabled: true
+    - pattern: '(?i)\b(?:VMNIC|VmnIc)\s*(\d+)\b'
+      replacement: 'vmnic\1'
+      description: 'Normalize VMNIC casing to lowercase vmnic'
+      enabled: true
+    - pattern: '(?i)\bnic\s*(\d+)\b'
+      replacement: 'vmnic\1'
+      description: 'Standardize nicX to vmnicX'
+      enabled: true
+    - pattern: '(?i)\beth\s*(\d+)\b'
+      replacement: 'vmnic\1'
+      description: 'Standardize ethX to vmnicX'
+      enabled: true
+    - pattern: '(?i)\b(vmk)(\d+)\b'
+      replacement: 'vmk\2'
+      description: 'Normalize VMkernel adapter casing (VMKX -> vmkX)'
+      enabled: true

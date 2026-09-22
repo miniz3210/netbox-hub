@@ -5,6 +5,9 @@ from config.naming_rules import (
     get_pattern_variables, get_naming_patterns,
 )
 from core.naming_engine import parse_prompt_to_rules
+from utils.formatters import (
+    load_auto_corrections, save_auto_corrections, reset_auto_corrections,
+)
 
 def _persist_variables(rules: dict, variables: dict) -> None:
     """Save updated ``pattern_variables`` to file and session state."""
@@ -13,6 +16,131 @@ def _persist_variables(rules: dict, variables: dict) -> None:
     st.session_state["naming_rules"] = rules.copy()
     st.session_state["variables_saved"] = True
     st.rerun()
+
+
+def _render_auto_correction_manager() -> None:
+    """CRUD manager for the externalized VMware syntax auto-correction rules.
+
+    Reads/writes ``data/autocorrect_rules.yaml`` and refreshes the in-session
+    cache immediately so the ESXi naming tab picks up changes without a restart.
+    """
+    st.markdown("---")
+    st.markdown("##### 🛠️ Manage Syntax Auto-Correction Rules")
+    st.caption(
+        "Edit the pattern/replacement pairs that auto-correct VMware syntax "
+        "(vswitch1 -> vSwitch1, nic0 -> vmnic0). Changes are written to "
+        "`data/autocorrect_rules.yaml` and applied live to the ESXi naming tab."
+    )
+
+    if st.session_state.pop("autocorrect_saved", False):
+        st.success("✅ Auto-correction rules saved & applied!")
+    if st.session_state.pop("autocorrect_reset", False):
+        st.success("✅ Auto-correction rules reset to factory defaults!")
+
+    rules = load_auto_corrections()
+    categories = list(rules.keys())
+
+    if not categories:
+        st.info("No auto-correction categories defined.")
+        return
+
+    for category in categories:
+        with st.expander(f"📁 {category.capitalize()} Rules", expanded=True):
+            items = list(rules[category])
+            updated = []
+            pending_delete = None
+            for idx, rule in enumerate(items):
+                col_p, col_r, col_d, col_e, col_del = st.columns([3.0, 2.2, 3.0, 0.7, 0.7])
+                with col_p:
+                    p = st.text_input(
+                        "Original Pattern",
+                        value=rule.get("pattern", ""),
+                        key=f"ac_{category}_p_{idx}",
+                        help="Python regex applied to the raw input.",
+                    )
+                with col_r:
+                    r = st.text_input(
+                        "Replacement",
+                        value=rule.get("replacement", ""),
+                        key=f"ac_{category}_r_{idx}",
+                        help="Replacement string (may reference regex groups, e.g. \\1).",
+                    )
+                with col_d:
+                    d = st.text_input(
+                        "Description",
+                        value=rule.get("description", ""),
+                        key=f"ac_{category}_d_{idx}",
+                    )
+                with col_e:
+                    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                    enabled = st.checkbox(
+                        "On",
+                        value=bool(rule.get("enabled", True)),
+                        key=f"ac_{category}_e_{idx}",
+                        help="Toggle this rule on/off without deleting it.",
+                    )
+                with col_del:
+                    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                    if st.button("🗑️", key=f"ac_{category}_del_{idx}", help="Delete this rule"):
+                        pending_delete = idx
+
+                if pending_delete == idx:
+                    continue
+                if p.strip():
+                    updated.append({
+                        "pattern": p,
+                        "replacement": r,
+                        "description": d,
+                        "enabled": bool(enabled),
+                    })
+
+            col_add_p, col_add_r, col_add_d = st.columns([3.0, 2.2, 3.0])
+            with col_add_p:
+                new_p = st.text_input("New Pattern", value="", key=f"ac_{category}_new_p",
+                                     placeholder=r"(?i)\b(vswitch)(\d+)\b")
+            with col_add_r:
+                new_r = st.text_input("New Replacement", value="", key=f"ac_{category}_new_r",
+                                     placeholder=r"vSwitch\2")
+            with col_add_d:
+                new_d = st.text_input("New Description", value="", key=f"ac_{category}_new_d",
+                                     placeholder="Describe the rule")
+
+            col_save, col_add, col_reset = st.columns([2, 2, 2])
+            with col_save:
+                if st.button("💾 Save & Apply Changes", key=f"ac_{category}_save", type="primary", use_container_width=True):
+                    final = dict(rules)
+                    final[category] = updated
+                    _persist_auto_corrections(final)
+            with col_add:
+                if st.button("➕ Add Rule", key=f"ac_{category}_add", use_container_width=True):
+                    if new_p.strip():
+                        final = dict(rules)
+                        final[category] = list(updated) + [{
+                            "pattern": new_p,
+                            "replacement": new_r,
+                            "description": new_d,
+                            "enabled": True,
+                        }]
+                        _persist_auto_corrections(final)
+                    else:
+                        st.warning("⚠️ Enter a regex pattern to add.")
+            with col_reset:
+                if st.button("🔄 Reset to Factory Defaults", key="ac_reset_factory", use_container_width=True):
+                    reset_auto_corrections()
+                    st.session_state["autocorrect_reset"] = True
+                    st.rerun()
+
+    st.markdown("---")
+
+
+def _persist_auto_corrections(data: dict) -> None:
+    """Save auto-correction rules to YAML and refresh the session cache."""
+    save_auto_corrections(data, source="Management UI")
+    st.session_state["autocorrect_rules_cache"] = data
+    st.session_state["autocorrect_saved"] = True
+    st.rerun()
+
+
 
 def render_standards_tab(active_model):
     st.subheader("📖 Infrastructure Naming Standards Configuration")
@@ -32,7 +160,10 @@ def render_standards_tab(active_model):
     if "standards_reset" in st.session_state and st.session_state["standards_reset"]:
         st.success("✅ Reset to default standards!")
         st.session_state["standards_reset"] = False
-    
+
+    # ── Auto-Correction Rule Manager (externalized to YAML) ──────────────
+    _render_auto_correction_manager()
+
     # Always reload rules from file to ensure fresh data after save
     current_rules = load_naming_rules()
     

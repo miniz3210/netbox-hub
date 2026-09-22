@@ -9,6 +9,146 @@ from core.exceptions import AIProviderError
 
 logger = logging.getLogger("netbox-hub")
 
+# Vendor families that are known to expose reliable OpenAI-compatible chat endpoints.
+RELIABLE_VENDORS = (
+    "openai",
+    "anthropic",
+    "google",
+    "gemini",
+    "deepseek",
+    "meta-llama",
+    "llama",
+    "mistralai",
+    "mistral",
+    "qwen",
+    "groq",
+    "cohere",
+    "command",
+    "gpt",
+    "claude",
+    "grok",
+)
+
+# Model families that are NOT chat/text-generation endpoints and must never be offered.
+NON_CHAT_SUBSTRINGS = (
+    "embedding",
+    "embeddings",
+    "rerank",
+    "moderation",
+    "whisper",
+    "transcribe",
+    "stt",
+    "tts",
+    "text-to-speech",
+    "speech",
+    "audio",
+    "image",
+    "dall-e",
+    "vision",
+)
+
+# Prefixes that indicate experimental / junk / internal placeholder models.
+EXPERIMENTAL_PREFIXES = (
+    "antigravity/",
+    "test/",
+    "testing/",
+    "experimental/",
+    "internal/",
+    "tmp/",
+    "scratch/",
+    "dev/",
+    "debug/",
+    "junk/",
+    ".internal/",
+    "org:",
+)
+
+
+def sanitize_model_id(model_id: str) -> bool:
+    """Return True when a raw model id is a credible, usable chat candidate.
+
+    Filters out non-chat model families, experimental/junk prefixes, and models that
+    do not map to a known reliable vendor family. This keeps the "Quick-Select Test
+    Model" dropdown compact and free of models that are almost guaranteed to fail.
+    """
+    if not model_id or not isinstance(model_id, str):
+        return False
+
+    lower = model_id.lower().strip()
+
+    # Experimental / junk prefixes are vetoed outright (e.g. "antigravity/").
+    if any(lower.startswith(prefix) for prefix in EXPERIMENTAL_PREFIXES):
+        return False
+
+    # Non-chat model families are vetoed outright.
+    if any(sub in lower for sub in NON_CHAT_SUBSTRINGS):
+        return False
+
+    # Must belong to a known reliable vendor family.
+    if not any(vendor in lower for vendor in RELIABLE_VENDORS):
+        return False
+
+    return True
+
+
+def sanitize_free_models(raw_models: list[str]) -> list[str]:
+    """Return only sanitized, de-duplicated, sorted model ids from raw candidates."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for m in raw_models or []:
+        m = (m or "").strip()
+        if not m or m in seen or not sanitize_model_id(m):
+            continue
+        seen.add(m)
+        result.append(m)
+    return sorted(result)
+
+
+def ping_model(model_name: str, timeout: int = 5) -> Tuple[bool, int, str]:
+    """Run a lightweight pre-flight healthcheck against a single model.
+
+    Sends the smallest possible chat payload (one token) with a tight timeout so the
+    check is quick and cheap. Returns ``(ok, latency_ms, message)``.
+
+    Args:
+        model_name: The model id to ping (e.g. ``"openai/gpt-4o-mini"``).
+        timeout: Seconds to wait before failing. Kept short (3-5s) on purpose.
+    """
+    base = OPENROUTER_BASE_URL.rstrip("/")
+    endpoint = f"{base}/chat/completions" if base.endswith("/v1") else f"{base}/v1/chat/completions"
+    clean_token = OPENROUTER_API_KEY.replace("Bearer ", "").strip()
+    headers = {
+        "Authorization": f"Bearer {clean_token}",
+        "HTTP-Referer": "http://localhost:8501",
+        "X-Title": "NetBox Hub",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model_name,
+        "max_tokens": 1,
+        "stream": False,
+        "messages": [
+            {"role": "user", "content": "hi"},
+        ],
+    }
+    start = time.time()
+    try:
+        resp = requests.post(endpoint, headers=headers, json=payload, timeout=timeout)
+        latency = round((time.time() - start) * 1000)
+        if resp.status_code == 200:
+            return True, latency, f"Operational ({latency}ms)"
+        try:
+            err_data = resp.json()
+            msg = err_data.get("error", {}).get("message", resp.text)
+        except Exception:
+            msg = resp.text
+        return False, 0, f"HTTP {resp.status_code}: {msg}"
+    except requests.exceptions.Timeout:
+        return False, 0, f"Timeout after {timeout}s"
+    except Exception as e:
+        return False, 0, f"Connection Error: {e}"
+
+
 def fetch_free_models() -> list[str]:
     """Fetch list of free models suitable for NetBox YAML generation from OmniRoute/OpenRouter API."""
     base = OPENROUTER_BASE_URL.rstrip("/")
@@ -19,41 +159,6 @@ def fetch_free_models() -> list[str]:
         "Content-Type": "application/json"
     }
     
-    # Exclude models unsuitable for text generation
-    exclude_patterns = [
-        "vision",
-        "image",
-        "whisper",
-        "tts",
-        "stt",
-        "embedding",
-        "moderation",
-        "preview",
-        "experimental",
-        "beta",
-    ]
-    
-    # Include patterns for suitable text generation models
-    suitable_patterns = [
-        "gpt",
-        "claude",
-        "gemini",
-        "llama",
-        "mistral",
-        "qwen",
-        "deepseek",
-        "command",
-        "cohere",
-        "mixtral",
-        "phi",
-        "solar",
-        "yi-",
-        "dolphin",
-        "openchat",
-        "zephyr",
-        "hermes",
-    ]
-    
     try:
         resp = requests.get(endpoint, headers=headers, timeout=10)
         logger.info(f"Fetching models from {endpoint}, status: {resp.status_code}")
@@ -63,31 +168,10 @@ def fetch_free_models() -> list[str]:
             models = data.get("data", [])
             logger.info(f"Total models received: {len(models)}")
             
-            available_models = []
-            for m in models:
-                model_id = m.get("id", "")
-                if not model_id:
-                    continue
-                    
-                model_id_lower = model_id.lower()
-                
-                # Log first few models to understand structure
-                if len(available_models) < 5:
-                    logger.info(f"Sample model: {model_id} | Pricing: {m.get('pricing', {})}")
-                
-                # Exclude unsuitable models
-                is_excluded = any(pattern in model_id_lower for pattern in exclude_patterns)
-                
-                # Only include models matching suitable patterns
-                is_suitable = any(pattern in model_id_lower for pattern in suitable_patterns)
-                
-                if not is_excluded and is_suitable:
-                    available_models.append(model_id)
-                    if len(available_models) <= 10:
-                        logger.info(f"✓ Added: {model_id}")
-            
-            logger.info(f"Available models count: {len(available_models)}")
-            return sorted(available_models)
+            raw_ids = [m.get("id", "") for m in models if m.get("id")]
+            available_models = sanitize_free_models(raw_ids)
+            logger.info(f"Sanitized models count: {len(available_models)}")
+            return available_models
         else:
             logger.warning(f"Failed to fetch models: HTTP {resp.status_code}, response: {resp.text[:200]}")
             return []

@@ -1,5 +1,146 @@
+import os
 import re
-from config.constants import NETWORKING_ACRONYMS
+from typing import Any, Dict, List, Optional
+
+import yaml
+
+from config.constants import NETWORKING_ACRONYMS, AUTOCORRECT_RULES_FILE
+
+# ── Auto-correction rules (externalized to data/autocorrect_rules.yaml) ──
+
+DEFAULT_AUTO_CORRECTIONS: Dict[str, List[Dict[str, Any]]] = {
+    "vmware": [
+        {
+            "pattern": r'(?i)\b(vswitch)(\d+)\b',
+            "replacement": r"vSwitch\2",
+            "description": "Normalize vSwitch casing (vswitchX -> vSwitchX)",
+            "enabled": True,
+        },
+        {
+            "pattern": r'(?i)\b(dvswitch)(\d+)\b',
+            "replacement": r"dvSwitch\2",
+            "description": "Normalize dvSwitch casing (dvswitchX -> dvSwitchX)",
+            "enabled": True,
+        },
+        {
+            "pattern": r'(?i)\b(?:VMNIC|VmnIc)\s*(\d+)\b',
+            "replacement": r"vmnic\1",
+            "description": "Normalize VMNIC casing to lowercase vmnic",
+            "enabled": True,
+        },
+        {
+            "pattern": r'(?i)\bnic\s*(\d+)\b',
+            "replacement": r"vmnic\1",
+            "description": "Standardize nicX to vmnicX",
+            "enabled": True,
+        },
+        {
+            "pattern": r'(?i)\beth\s*(\d+)\b',
+            "replacement": r"vmnic\1",
+            "description": "Standardize ethX to vmnicX",
+            "enabled": True,
+        },
+        {
+            "pattern": r'(?i)\b(vmk)(\d+)\b',
+            "replacement": r"vmk\2",
+            "description": "Normalize VMkernel adapter casing (VMKX -> vmkX)",
+            "enabled": True,
+        },
+    ],
+}
+
+
+def _coerce_rule(raw) -> Optional[Dict[str, Any]]:
+    """Normalize a single rule entry from YAML into a usable dict, or None."""
+    if not isinstance(raw, dict):
+        return None
+    pattern = raw.get("pattern")
+    replacement = raw.get("replacement")
+    if not isinstance(pattern, str) or not pattern:
+        return None
+    if not isinstance(replacement, str):
+        replacement = ""
+    return {
+        "pattern": pattern,
+        "replacement": replacement,
+        "description": raw.get("description") if isinstance(raw.get("description"), str) else "",
+        "enabled": bool(raw.get("enabled", True)),
+    }
+
+
+def _normalize_auto_corrections(raw) -> Dict[str, List[Dict[str, Any]]]:
+    """Validate and normalize the loaded ``auto_corrections`` structure."""
+    if not isinstance(raw, dict):
+        return {k: list(rules) for k, rules in DEFAULT_AUTO_CORRECTIONS.items()}
+    root = raw.get("auto_corrections")
+    if not isinstance(root, dict):
+        root = raw
+    result: Dict[str, List[Dict[str, Any]]] = {}
+    default_keys = set(DEFAULT_AUTO_CORRECTIONS.keys())
+    for category, entries in root.items():
+        if not isinstance(entries, list):
+            continue
+        coerced = [r for r in ( _coerce_rule(e) for e in entries ) if r is not None]
+        result[str(category)] = coerced
+    for key in default_keys:
+        if key not in result:
+            result[key] = list(DEFAULT_AUTO_CORRECTIONS[key])
+        elif not result[key]:
+            result[key] = list(DEFAULT_AUTO_CORRECTIONS[key])
+    return result
+
+
+def load_auto_corrections() -> Dict[str, List[Dict[str, Any]]]:
+    """Load auto-correction rules from ``data/autocorrect_rules.yaml``.
+
+    Falls back to safe, built-in defaults if the file is missing, the key is
+    absent, or the YAML is malformed.
+    """
+    if not os.path.exists(AUTOCORRECT_RULES_FILE):
+        return {k: list(rules) for k, rules in DEFAULT_AUTO_CORRECTIONS.items()}
+    try:
+        with open(AUTOCORRECT_RULES_FILE, "r", encoding="utf-8") as f:
+            raw = yaml.safe_load(f)
+        return _normalize_auto_corrections(raw)
+    except Exception:
+        return {k: list(rules) for k, rules in DEFAULT_AUTO_CORRECTIONS.items()}
+
+
+def save_auto_corrections(data: Dict[str, List[Dict[str, Any]]], source: str = "Management UI") -> Dict[str, List[Dict[str, Any]]]:
+    """Persist auto-correction rules back to YAML, preserving factory defaults for missing keys."""
+    normalized = _normalize_auto_corrections({"auto_corrections": data})
+    payload = {"auto_corrections": normalized}
+    os.makedirs(os.path.dirname(AUTOCORRECT_RULES_FILE) or ".", exist_ok=True)
+    with open(AUTOCORRECT_RULES_FILE, "w", encoding="utf-8") as f:
+        yaml.safe_dump(payload, f, sort_keys=False, allow_unicode=True, default_flow_style=False)
+        f.flush()
+        os.fsync(f.fileno())
+    return normalized
+
+
+def reset_auto_corrections() -> Dict[str, List[Dict[str, Any]]]:
+    """Restore the factory-default auto-correction rules."""
+    return save_auto_corrections(
+        {k: list(rules) for k, rules in DEFAULT_AUTO_CORRECTIONS.items()},
+        source="Reset to Factory Defaults",
+    )
+
+
+def apply_auto_corrections(text: str, category: str = "vmware") -> str:
+    """Apply all enabled rules for a category to ``text`` in order."""
+    if not text:
+        return text
+    rules = load_auto_corrections().get(category) or []
+    result = text
+    for rule in rules:
+        if not rule.get("enabled", True):
+            continue
+        try:
+            result = re.sub(rule["pattern"], rule["replacement"], result)
+        except re.error:
+            continue
+    return result
+
 
 def normalize_manufacturer_name(name: str) -> str:
     """Normalizes common manufacturer abbreviations to their canonical vendor names."""
@@ -200,25 +341,22 @@ def normalize_vswitch(name: str) -> str:
     val = name.strip()
     if not val:
         return ""
-    
-    # Extract the number if present (keep leading zeros)
-    match = re.match(r"^.*?(\d+)$", name.strip(), re.IGNORECASE)
-    number = match.group(1) if match else ""
-    
-    # Check if it's a dvSwitch variant
-    if name.strip().lower().startswith('dv'):
-        return f"dvSwitch{number}"
-    else:
-        # Regular vSwitch
-        return f"vSwitch{number}"
+    corrected = apply_auto_corrections(val, "vmware")
+    if corrected != val:
+        return corrected
+    low = val.lower()
+    if low.startswith("dv"):
+        return "dvSwitch"
+    if low in ("vs", "vswitch") or low.startswith("vswitch"):
+        return "vSwitch"
+    return val
 
 def normalize_vmnic(name: str) -> str:
     """Auto-corrects physical hypervisor interface naming (e.g. VMNIC0 -> vmnic0)."""
     val = name.strip()
     if not val:
         return ""
-    val = re.sub(r"^(?:vmnic|nic)\s*(\d+)$", r"vmnic\1", val, flags=re.IGNORECASE)
-    return val
+    return apply_auto_corrections(val, "vmware")
 
 def normalize_vmnic_list(names: str) -> str:
     """Normalizes a comma-separated list of vmnic identifiers."""

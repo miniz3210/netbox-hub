@@ -14,3 +14,4 @@ data/*.csv
 archive/
 project-prompt.md
 repomix-output.*.kilo/
+.vscode/
