@@ -1,7 +1,12 @@
 {
-  "branch_switch": "SW<Country><State><Site><Zone><Seq>-<StackID> / VS<Country><State><Site><Seq>-<StackID>",
+  "branch_switch": "SW<Country><State><Site><Zone><Seq>-<StackID>",
+  "branch_stack": "VS<Country><State><Site><Seq>-<StackID>",
   "branch_ap": "WAP<Country><State><Site><Seq>",
-  "branch_security": "FW<Country><State><Site><Vendor><Seq> / ION<Country><State><Site><Seq>",
+  "branch_firewall": "FW<Country><State><Site><Vendor><Seq>",
+  "branch_ion": "ION<Country><State><Site><Seq>",
+  "branch_router": "RTR<Country><State><Site><Zone><Seq>",
+  "branch_va": "VA<Country><State><Site><Zone><Seq>",
+  "branch_security": "FW<Country><State><Site><Vendor><Seq>",
   "switch_uplink_desc": "Uplink_to_<Remote_Device>_<Remote_Port_Short>",
   "switch_lag_member": "LACP_to_<Remote_Device>_<Remote_Port_Short>",
   "switch_port_channel": "<Local_Po_ID>_to_<Remote_Device>",
@@ -9,16 +14,21 @@
   "firewall_interface": "<Role_Zone>_<VLAN_ID>",
   "esxi_host": "<site_prefix><role_esx><host_seq>.<domain>",
   "vm_host": "<Country><Site><Role><Seq>",
-  "esxi_uplink": "<vmnic> - <vSwitch> <Purpose> <Status> ",
+  "esxi_uplink": "<vmnic> - <vSwitch> <Purpose> <Status>",
   "esxi_portgroup_name": "PG-<pg_network>",
-  "esxi_portgroup": "<PortGroup> (<Active_vmnics> Active / <Standby_vmnics> Standby)",
+  "esxi_portgroup": "<PortGroup> [<Active_vmnics> Active / <Standby_vmnics> Standby]",
   "esxi_vmkernel_name": "<vmk>",
   "esxi_vmkernel": "<Purpose> Network - <vSwitch> (<Active_vmnics> Active / <Standby_vmnics> Standby)",
   "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
   "naming_patterns": {
-    "branch_switch": "SW<Country><State><Site><Zone><Seq>-<StackID> / VS<Country><State><Site><Seq>-<StackID>",
+    "branch_switch": "SW<Country><State><Site><Zone><Seq>-<StackID>",
+    "branch_stack": "VS<Country><State><Site><Seq>-<StackID>",
     "branch_ap": "WAP<Country><State><Site><Seq>",
-    "branch_security": "FW<Country><State><Site><Vendor><Seq> / ION<Country><State><Site><Seq>",
+    "branch_firewall": "FW<Country><State><Site><Vendor><Seq>",
+    "branch_ion": "ION<Country><State><Site><Seq>",
+    "branch_router": "RTR<Country><State><Site><Zone><Seq>",
+    "branch_va": "VA<Country><State><Site><Zone><Seq>",
+    "branch_security": "FW<Country><State><Site><Vendor><Seq>",
     "switch_uplink_desc": "Uplink_to_<Remote_Device>_<Remote_Port_Short>",
     "switch_lag_member": "LACP_to_<Remote_Device>_<Remote_Port_Short>",
     "switch_port_channel": "<Local_Po_ID>_to_<Remote_Device>",
@@ -26,9 +36,9 @@
     "firewall_interface": "<Role_Zone>_<VLAN_ID>",
     "esxi_host": "<site_prefix><role_esx><host_seq>.<domain>",
     "vm_host": "<Country><Site><Role><Seq>",
-    "esxi_uplink": "<vmnic> - <vSwitch> <Purpose> <Status> ",
+    "esxi_uplink": "<vmnic> - <vSwitch> <Purpose> <Status>",
     "esxi_portgroup_name": "PG-<pg_network>",
-    "esxi_portgroup": "<PortGroup> (<Active_vmnics> Active / <Standby_vmnics> Standby)",
+    "esxi_portgroup": "<PortGroup> [<Active_vmnics> Active / <Standby_vmnics> Standby]",
     "esxi_vmkernel_name": "<vmk>",
     "esxi_vmkernel": "<Purpose> Network - <vSwitch> (<Active_vmnics> Active / <Standby_vmnics> Standby)",
     "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)"
@@ -42,7 +52,7 @@
     "State": {
       "label": "State / Region (Optional)",
       "placeholder": "e.g. NY, CA, TX, NSW",
-      "optional": false
+      "optional": true
     },
     "Site": {
       "label": "Site Code",
@@ -50,7 +60,7 @@
       "optional": false
     },
     "Zone": {
-      "label": "Zone / Role / Vendor (Optional)",
+      "label": "Zone / Role / Vendor",
       "placeholder": "e.g. CORE, DIST, EDGE, PA",
       "optional": false
     },
@@ -67,19 +77,22 @@
     "StackID": {
       "label": "Stack / Member ID (Optional)",
       "placeholder": "e.g. 0, 1",
-      "optional": false
+      "optional": true
     },
     "Local_Device": {
       "label": "Local Device Hostname",
-      "placeholder": "e.g. SWUSNYC01-0"
+      "placeholder": "e.g. SWUSNYC01-0",
+      "optional": false
     },
     "Local_Port": {
       "label": "Local Port",
-      "placeholder": "e.g. Gi1/0/48, Te1/0/1"
+      "placeholder": "e.g. Gi1/0/48, Te1/0/1",
+      "optional": false
     },
     "Local_Port_Short": {
       "label": "Local Port (Short)",
-      "placeholder": "e.g. Gi1/0/48, Te1/0/1"
+      "placeholder": "e.g. Gi1/0/48, Te1/0/1",
+      "optional": false
     },
     "Remote_Device": {
       "label": "Remote Device Hostname",
@@ -88,7 +101,8 @@
     },
     "Remote_Port": {
       "label": "Remote Port",
-      "placeholder": "e.g. Gi1/0/48, Te1/0/1"
+      "placeholder": "e.g. Gi1/0/48, Te1/0/1",
+      "optional": false
     },
     "Remote_Port_Short": {
       "label": "Remote Port (Short)",
@@ -97,7 +111,8 @@
     },
     "Local_Po_ID": {
       "label": "Local Port-Channel ID",
-      "placeholder": "LAG1",
+      "placeholder": "e.g. LAG1",
+      "default": "LAG1",
       "optional": false
     },
     "VLAN_Name": {
@@ -127,7 +142,8 @@
     },
     "site": {
       "label": "Site Prefix",
-      "placeholder": "e.g. age, nyc, lon, syd"
+      "placeholder": "e.g. age, nyc, lon, syd",
+      "optional": false
     },
     "site_prefix": {
       "label": "Site Prefix",
@@ -136,16 +152,18 @@
     },
     "role": {
       "label": "Host Role (Optional)",
-      "placeholder": "e.g. esx, otinfhost, infhost"
+      "placeholder": "e.g. esx, otinfhost, infhost",
+      "optional": false
     },
     "role_esx": {
       "label": "Host Role (Optional)",
-      "placeholder": "e.g. esx, host",
+      "placeholder": "e.g. esx, otinfhost, infhost",
       "optional": false
     },
     "seq": {
       "label": "Host Sequence Number",
-      "placeholder": "001"
+      "placeholder": "001",
+      "optional": false
     },
     "host_seq": {
       "label": "Host Sequence Number",
@@ -154,7 +172,8 @@
     },
     "Domain": {
       "label": "Domain Name (FQDN Suffix)",
-      "placeholder": "e.g. corp.example.com, internal.net"
+      "placeholder": "e.g. corp.example.com, internal.net",
+      "optional": false
     },
     "domain": {
       "label": "Domain Name (FQDN Suffix)",
@@ -168,7 +187,8 @@
     },
     "vm_site": {
       "label": "Site Prefix / Country & Site",
-      "placeholder": "e.g. age, usnyc, uklon"
+      "placeholder": "e.g. age, usnyc, uklon",
+      "optional": false
     },
     "vmnic": {
       "label": "vmnic Name",
@@ -188,7 +208,7 @@
       "optional": false
     },
     "Status": {
-      "label": "Status:  Active Uplink / Standby Uplink",
+      "label": "Status",
       "placeholder": "Active Uplink / Standby Uplink",
       "optional": false
     },

@@ -22,9 +22,14 @@ def _env_domain(key: str) -> str:
     return os.getenv(key, DOMAIN_DEFAULTS.get(key, "")).strip()
 
 DEFAULT_NAMING_PATTERNS = {
-    "branch_switch": "SW<Country><State><Site><Zone><Seq>-<StackID> / VS<Country><State><Site><Seq>-<StackID>",
+    "branch_switch": "SW<Country><State><Site><Zone><Seq>-<StackID>",
+    "branch_stack": "VS<Country><State><Site><Seq>-<StackID>",
     "branch_ap": "WAP<Country><State><Site><Seq>",
-    "branch_security": "FW<Country><State><Site><Vendor><Seq> / ION<Country><State><Site><Seq>",
+    "branch_firewall": "FW<Country><State><Site><Vendor><Seq>",
+    "branch_ion": "ION<Country><State><Site><Seq>",
+    "branch_router": "RTR<Country><State><Site><Zone><Seq>",
+    "branch_va": "VA<Country><State><Site><Zone><Seq>",
+    "branch_security": "FW<Country><State><Site><Vendor><Seq>",
     "switch_uplink_desc": "Uplink_to_<Remote_Device>_<Remote_Port_Short>",
     "switch_lag_member": "LACP_to_<Remote_Device>_<Remote_Port_Short>",
     "switch_port_channel": "<Local_Po_ID>_to_<Remote_Device>",
@@ -136,6 +141,32 @@ def _load_rules_dict_from_file() -> dict:
     return normalized
 
 
+def _split_legacy_device_patterns(patterns: dict) -> dict:
+    """Split slash-joined device templates into one canonical pattern per type."""
+    out = dict(patterns)
+    switch = out.get("branch_switch", "")
+    if " / " in switch:
+        parts = [p.strip() for p in switch.split(" / ") if p.strip()]
+        sw = next((p for p in parts if p.startswith("SW")), parts[0] if parts else "")
+        vs = next((p for p in parts if p.startswith("VS")), "")
+        if sw:
+            out["branch_switch"] = sw
+        if vs and not out.get("branch_stack"):
+            out["branch_stack"] = vs
+    security = out.get("branch_security", "")
+    if " / " in security:
+        parts = [p.strip() for p in security.split(" / ") if p.strip()]
+        fw = next((p for p in parts if p.startswith("FW")), parts[0] if parts else "")
+        ion = next((p for p in parts if p.startswith("ION")), "")
+        if fw:
+            out["branch_security"] = fw
+            if not out.get("branch_firewall"):
+                out["branch_firewall"] = fw
+        if ion and not out.get("branch_ion"):
+            out["branch_ion"] = ion
+    return out
+
+
 def extract_tokens(pattern: str) -> List[str]:
     """Extract unique token names from a pattern string.
 
@@ -167,6 +198,7 @@ def _normalize_rules(raw: dict) -> dict:
             if _is_str(v) and k not in ("pattern_variables", "naming_patterns")
         }
     patterns = {k: str(v) for k, v in raw_patterns.items()}
+    patterns = _split_legacy_device_patterns(patterns)
     for key in LEGACY_PATTERN_KEYS:
         if key not in patterns:
             patterns[key] = DEFAULT_NAMING_PATTERNS.get(key, "")
@@ -300,8 +332,12 @@ def export_rules_as_prompt(rules: Dict[str, str]) -> str:
 
 1. Network & Security Devices:
 - Switch Hostname: {p.get('branch_switch', '')}
+- Virtual Chassis / Stack Hostname: {p.get('branch_stack', '')}
 - Wireless AP Hostname: {p.get('branch_ap', '')}
-- Firewall / Security Hostname: {p.get('branch_security', '')}
+- Firewall Hostname: {p.get('branch_firewall', p.get('branch_security', ''))}
+- SD-WAN / Prisma Hostname: {p.get('branch_ion', '')}
+- Router Hostname: {p.get('branch_router', '')}
+- Virtual Appliance Hostname: {p.get('branch_va', '')}
 
 2. Switch & Firewall Interface Descriptions:
 - Switch Uplink Description: {p.get('switch_uplink_desc', '')}
