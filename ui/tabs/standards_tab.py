@@ -380,15 +380,6 @@ def render_standards_tab(active_model):
                     autocomplete="off"
                 )
             
-            st.markdown("#### 3. NetBox Hardware YAML Schema")
-            netbox_server_yaml = st.text_area(
-                "NetBox Server YAML Guidelines",
-                value=current_rules.get("netbox_server_yaml", ""),
-                height=100,
-                help="Guidelines for generating NetBox device-type YAML files",
-                key="form_yaml"
-            )
-            
             col_save, col_reset = st.columns([3, 1])
             with col_save:
                 submitted = st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
@@ -421,7 +412,7 @@ def render_standards_tab(active_model):
                     "esxi_portgroup": esxi_portgroup,
                     "esxi_vmkernel_name": esxi_vmkernel_name,
                     "esxi_vmkernel": esxi_vmkernel,
-                    "netbox_server_yaml": netbox_server_yaml,
+                    "netbox_server_yaml": current_rules.get("netbox_server_yaml", ""),
                     "pattern_variables": session_variables,
                 }
                 try:
@@ -447,6 +438,23 @@ def render_standards_tab(active_model):
 
         # ── Auto-Correction Rule Manager (externalized to YAML) ────────
         _render_auto_correction_manager(active_model)
+
+        st.markdown("---")
+        st.markdown("#### 3. NetBox Hardware YAML Schema")
+        netbox_server_yaml = st.text_area(
+            "NetBox Server YAML Guidelines",
+            value=current_rules.get("netbox_server_yaml", ""),
+            height=100,
+            help="Guidelines for generating NetBox device-type YAML files",
+            key="form_yaml",
+        )
+        if st.button("💾 Save NetBox YAML", type="primary", use_container_width=True, key="save_netbox_yaml"):
+            rules = load_naming_rules()
+            rules["netbox_server_yaml"] = netbox_server_yaml
+            save_naming_rules(rules, source="NetBox YAML Schema")
+            st.session_state["naming_rules"] = rules
+            st.session_state["standards_saved"] = True
+            st.rerun()
 
     # Tab 2: View Full Prompt (Read-Only)
     with tab2:
