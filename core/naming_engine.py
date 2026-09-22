@@ -129,3 +129,32 @@ def generate_autocorrect_rule(natural_language: str, model_name: str) -> Dict[st
         "replacement": replacement,
         "description": description if isinstance(description, str) else "",
     }
+
+
+def generate_naming_pattern(description: str, model_name: str) -> str:
+    """Generate a single naming pattern token template from a natural-language description.
+
+    Returns a raw pattern string (e.g. ``SAN<Country><Site><Seq>``) using valid
+    NetBox Hub tokens. Raises on failure.
+    """
+    system_msg = (
+        "You are an expert network infrastructure naming convention engineer.\n"
+        "Convert the user's plain-English naming requirement into ONE naming pattern string.\n"
+        "STRICT RULES:\n"
+        "1. Return ONLY the raw pattern string — no JSON, no explanation, no code fences.\n"
+        "2. Use ONLY NetBox Hub tokens from this list: <Country>, <State>, <Site>, <Zone>, "
+        "<Vendor>, <Seq>, <StackID>, <Role>, <site_prefix>, <role_esx>, <host_seq>, "
+        "<Domain>, <domain>, <vmnic>, <vSwitch>, <Purpose>, <Status>, <pg_network>, "
+        "<PortGroup>, <Active_vmnics>, <Standby_vmnics>, <vmk>.\n"
+        "3. The pattern MUST start with a short prefix (e.g. SAN, PDU, OOB, BLD, DCIM).\n"
+        "4. Tokens are case-sensitive and wrapped in angle brackets.\n"
+        "5. Do NOT include any extra text, markdown, or formatting."
+    )
+
+    prompt = f"Given this naming requirement, produce only the pattern string:\n\"{description}\""
+
+    raw_res = call_ai(prompt, model_name, custom_system_msg=system_msg)
+    result = raw_res.strip()
+    # Strip any accidental markdown fences
+    result = re.sub(r"^```(?:text)?\s*|```$", "", result, flags=re.IGNORECASE).strip()
+    return result
