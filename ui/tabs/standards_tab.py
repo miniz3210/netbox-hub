@@ -12,6 +12,46 @@ from utils.formatters import (
     load_auto_corrections, save_auto_corrections, reset_auto_corrections,
 )
 
+def _diff_rule_list(category: str, old_rules: list, new_rules: list) -> list:
+    """Return granular diff rows for an auto-correction rule list.
+
+    Compares individual rules by their description so rule edits surface as
+    ``[Modified]`` rows (Previous replacement -> New replacement) instead of
+    dumping the entire category array as a raw dict string.
+    """
+    rows = []
+    old_by_desc = {r.get("description"): r for r in old_rules}
+    new_by_desc = {r.get("description"): r for r in new_rules}
+
+    for desc in sorted(set(list(old_by_desc.keys()) + list(new_by_desc.keys()))):
+        old_rule = old_by_desc.get(desc)
+        new_rule = new_by_desc.get(desc)
+        if old_rule is not None and new_rule is not None:
+            old_rep = str(old_rule.get("replacement", ""))
+            new_rep = str(new_rule.get("replacement", ""))
+            if old_rule == new_rule:
+                continue
+            rows.append((
+                f"**[Modified]** `{category}`: {desc}",
+                old_rep,
+                new_rep,
+            ))
+        elif new_rule is not None:
+            rows.append((
+                f"**[Added]** `{category}`: {desc}",
+                "—",
+                str(new_rule.get("replacement", "")),
+            ))
+        elif old_rule is not None:
+            rows.append((
+                f"**[Removed]** `{category}`: {desc}",
+                str(old_rule.get("replacement", "")),
+                "—",
+            ))
+
+    return rows
+
+
 def _persist_variables(rules: dict, variables: dict) -> None:
     """Save updated ``pattern_variables`` to file and session state."""
     rules["pattern_variables"] = variables
@@ -828,26 +868,38 @@ def render_standards_tab(active_model):
                         prev_rules = history[idx + 1]["rules"] if idx + 1 < len(history) else {}
                         all_keys = sorted(set(list(rules.keys()) + list(prev_rules.keys())))
                         rows = []
+
+                        def _escape_cell(value: str) -> str:
+                            return str(value).replace("|", "\\|").replace("\n", " ").strip()
+
                         for key in all_keys:
                             old_val = prev_rules.get(key, None)
                             new_val = rules.get(key, None)
                             if old_val == new_val:
                                 continue
-                            if old_val is None:
-                                rows.append((f"**[Added]** `{key}`", "—", str(new_val)))
+                            if isinstance(old_val, list) and isinstance(new_val, list):
+                                for rule_row in _diff_rule_list(key, old_val, new_val):
+                                    rows.append(rule_row)
+                            elif old_val is None:
+                                rows.append((f"**[Added]** `{key}`", "—", _escape_cell(new_val)))
                             elif new_val is None:
-                                rows.append((f"**[Removed]** `{key}`", str(old_val), "—"))
+                                rows.append((f"**[Removed]** `{key}`", _escape_cell(old_val), "—"))
                             else:
-                                rows.append((f"`{key}`", str(old_val), str(new_val)))
+                                rows.append((f"`{key}`", _escape_cell(old_val), _escape_cell(new_val)))
 
                         if rows:
                             st.markdown("##### 📋 Delta Changes")
-                            st.markdown("| Setting / Pattern | Previous Value | New Value |")
-                            st.markdown("| :--- | :--- | :--- |")
+                            table_md = "| Setting / Pattern | Previous Value | New Value |\n"
+                            table_md += "| :--- | :--- | :--- |\n"
                             for setting, prev_val, new_val in rows:
-                                prev_disp = prev_val[:120] + "…" if len(prev_val) > 120 else prev_val
-                                new_disp = new_val[:120] + "…" if len(new_val) > 120 else new_val
-                                st.markdown(f"| {setting} | `{prev_disp}` | `{new_disp}` |")
+                                prev_disp = _escape_cell(prev_val)
+                                new_disp = _escape_cell(new_val)
+                                if len(prev_disp) > 120:
+                                    prev_disp = prev_disp[:120] + "…"
+                                if len(new_disp) > 120:
+                                    new_disp = new_disp[:120] + "…"
+                                table_md += f"| {setting} | `{prev_disp}` | `{new_disp}` |\n"
+                            st.markdown("\n\n" + table_md + "\n\n")
                         else:
                             st.info("No changes detected in this version (identical to previous).")
 
