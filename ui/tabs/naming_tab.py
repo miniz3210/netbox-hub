@@ -540,10 +540,11 @@ def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, varia
             gen = render_dynamic_pattern(pat, vals, variables)
         else:
             vals = render_token_widgets(pat, variables, f"intf_{ipk}")
-            # Auto-shorten port abbreviation tokens through the shared rules engine
-            for short_token in ("Local_Port_Short", "Remote_Port_Short"):
-                if short_token in vals and vals.get(short_token):
-                    vals[short_token] = normalize_port_shortname(vals[short_token])
+            # Auto-shorten port abbreviation tokens when the global toggle is ON
+            if st.session_state.get("esxi_auto_corr", True):
+                for short_token in ("Local_Port_Short", "Remote_Port_Short"):
+                    if short_token in vals and vals.get(short_token):
+                        vals[short_token] = normalize_port_shortname(vals[short_token])
             gen = render_dynamic_pattern(pat, vals, variables)
 
         st.caption("Generated Interface Description:")
