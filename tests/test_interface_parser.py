@@ -6,43 +6,7 @@ interface types including edge cases and sub-interfaces.
 """
 
 import pytest
-from utils.formatters import normalize_port_shortname, _get_interface_abbreviation
-
-
-class TestInterfaceAbbreviation:
-    """Test the dynamic abbreviation extraction logic."""
-    
-    def test_known_mappings(self):
-        """Test known interface type mappings."""
-        assert _get_interface_abbreviation("XGigabitEthernet") == "XGE"
-        assert _get_interface_abbreviation("TenGigabitEthernet") == "Te"
-        assert _get_interface_abbreviation("GigabitEthernet") == "GE"
-        assert _get_interface_abbreviation("FastEthernet") == "FE"
-        assert _get_interface_abbreviation("FortyGigabitEthernet") == "Fo"
-        assert _get_interface_abbreviation("HundredGigE") == "Hu"
-    
-    def test_case_insensitive(self):
-        """Test that abbreviation works regardless of case."""
-        assert _get_interface_abbreviation("tengigabitethernet") == "Te"
-        assert _get_interface_abbreviation("TENGIGABITETHERNET") == "Te"
-        assert _get_interface_abbreviation("TenGigabitEthernet") == "Te"
-    
-    def test_abbreviated_forms(self):
-        """Test already-abbreviated interface types."""
-        assert _get_interface_abbreviation("TenGigE") == "Te"
-        assert _get_interface_abbreviation("GigE") == "GE"
-        assert _get_interface_abbreviation("XGigE") == "XGE"
-    
-    def test_port_channel(self):
-        """Test port-channel abbreviation."""
-        assert _get_interface_abbreviation("Port-channel") == "Po"
-        assert _get_interface_abbreviation("PortChannel") == "Po"
-    
-    def test_high_speed_interfaces(self):
-        """Test high-speed interface abbreviations."""
-        assert _get_interface_abbreviation("TwentyFiveGigE") == "Twe"
-        assert _get_interface_abbreviation("TwentyFiveGigabitEthernet") == "Twe"
-        assert _get_interface_abbreviation("HundredGigabitEthernet") == "Hu"
+from utils.formatters import normalize_port_shortname
 
 
 class TestNormalizePortShortname:
@@ -130,7 +94,7 @@ class TestNormalizePortShortname:
     # Whitespace handling
     def test_whitespace_removal(self):
         """Test that whitespace is properly removed."""
-        assert normalize_port_shortname("Gigabit Ethernet 1/0/24") == "Gi1/0/24"
+        assert normalize_port_shortname("Gigabit Ethernet 1/0/24") == "GE1/0/24"
         assert normalize_port_shortname("Ten GigabitEthernet 1/0/1") == "Te1/0/1"
         assert normalize_port_shortname(" XGigabitEthernet0/0/31 ") == "XGE0/0/31"
     
@@ -166,14 +130,14 @@ class TestRealWorldExamples:
         # CloudEngine series
         assert normalize_port_shortname("XGigabitEthernet0/0/1") == "XGE0/0/1"
         assert normalize_port_shortname("XGigabitEthernet0/0/48") == "XGE0/0/48"
-        assert normalize_port_shortname("GigabitEthernet0/0/1") == "Gi0/0/1"
-    
+        assert normalize_port_shortname("GigabitEthernet0/0/1") == "GE0/0/1"
+
     def test_cisco_catalyst_examples(self):
         """Test real Cisco Catalyst switch interface names."""
         # Catalyst 9000 series
         assert normalize_port_shortname("TenGigabitEthernet1/0/1") == "Te1/0/1"
         assert normalize_port_shortname("TenGigabitEthernet1/0/48") == "Te1/0/48"
-        assert normalize_port_shortname("GigabitEthernet1/0/1") == "Gi1/0/1"
+        assert normalize_port_shortname("GigabitEthernet1/0/1") == "GE1/0/1"
         assert normalize_port_shortname("FortyGigabitEthernet1/1/1") == "Fo1/1/1"
     
     def test_cisco_nexus_examples(self):

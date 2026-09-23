@@ -258,6 +258,13 @@ def render_compact_toolbar(active_model):
     # Store the selection
     SSM.set_naming_case_mode(case_mode)
 
+    auto_correct = st.checkbox(
+        "⚡ Apply Syntax Auto-Correction (Port Shortening & VMware Conventions)",
+        value=True, key="esxi_auto_corr",
+        help="When checked, enables interface port regex shortening (<Local_Port_Short>/<Remote_Port_Short>) and VMware casing normalization across all asset classes, driven by the Auto-Correction Rules in the Standards Tab.",
+    )
+    st.session_state["auto_correct"] = bool(auto_correct)
+
     return case_mode
 
 
@@ -601,12 +608,8 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables):
 
 
 def _asset_class_3(case_mode, active_model, naming_patterns, variables, token_order_map=None):
-    token_order_map = token_order_map or {}
-    auto_correct = st.checkbox(
-        "Auto-Correct VMware Syntax (vswitch1 -> vSwitch1, nic0 -> vmnic0)",
-        value=True, key="esxi_auto_corr",
-        help="When checked, automatically normalizes vSwitch and vmnic naming.",
-    )
+token_order_map = token_order_map or {}
+    auto_correct = st.session_state.get("esxi_auto_corr", True)
     col_a, col_b, col_c = st.columns(3)
     with col_a:
         st.markdown("#### 1. Physical Uplink (PCIeX/PortX)")
