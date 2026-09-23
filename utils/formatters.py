@@ -9,6 +9,98 @@ from config.constants import NETWORKING_ACRONYMS, AUTOCORRECT_RULES_FILE
 # ── Auto-correction rules (externalized to data/autocorrect_rules.yaml) ──
 
 DEFAULT_AUTO_CORRECTIONS: Dict[str, List[Dict[str, Any]]] = {
+    "port_shortening": [
+        {
+            "pattern": r'(?i)\b(xgigabitethernet|xge)\s*(\d+[\d/:]*)\b',
+            "replacement": r"XGE\2",
+            "description": "Shorten XGigabitEthernet/XGE ports to XGE",
+            "enabled": True,
+        },
+        {
+            "pattern": r'(?i)\b(tengigabitethernet|te)\s*(\d+[\d/:]*)\b',
+            "replacement": r"Te\2",
+            "description": "Shorten TenGigabitEthernet/TE ports to Te",
+            "enabled": True,
+        },
+        {
+            "pattern": r'(?i)\b(gigabitethernet|ge)\s*(\d+[\d/:]*)\b',
+            "replacement": r"GE\2",
+            "description": "Shorten GigabitEthernet/GE ports to GE",
+            "enabled": True,
+        },
+        {
+            "pattern": r'(?i)\b(fastethernet|fe)\s*(\d+[\d/:]*)\b',
+            "replacement": r"FE\2",
+            "description": "Shorten FastEthernet/FE ports to FE",
+            "enabled": True,
+        },
+        {
+            "pattern": r'(?i)\b(ethernet|eth)\s*(\d+[\d/:]*)\b',
+            "replacement": r"Eth\2",
+            "description": "Shorten Ethernet/ETH ports to Eth",
+            "enabled": True,
+        },
+        {
+            "pattern": r'(?i)\b(port-channel|po)\s*(\d+)\b',
+            "replacement": r"Po\2",
+            "description": "Shorten Port-channel/PO ports to Po",
+            "enabled": True,
+        },
+        {
+            "pattern": r'(?i)\b(fortygigabitethernet|fo)\s*(\d+[\d/:]*)\b',
+            "replacement": r"Fo\2",
+            "description": "Shorten FortyGigabitEthernet/FO ports to Fo",
+            "enabled": True,
+        },
+        {
+            "pattern": r'(?i)\b(twentyfivegigabitethernet|twentyfivegige|twe)\s*(\d+[\d/:]*)\b',
+            "replacement": r"Twe\2",
+            "description": "Shorten 25GigabitEthernet ports to Twe",
+            "enabled": True,
+        },
+        {
+            "pattern": r'(?i)\b(hundredgigabitethernet|hundredgige|hu)\s*(\d+[\d/:]*)\b',
+            "replacement": r"Hu\2",
+            "description": "Shorten HundredGigabitEthernet ports to Hu",
+            "enabled": True,
+        },
+        {
+            "pattern": r'(?i)\b(twohundredgige|twohundredgigabitethernet)\s*(\d+[\d/:]*)\b',
+            "replacement": r"TwoHu\2",
+            "description": "Shorten 200GigabitEthernet ports to TwoHu",
+            "enabled": True,
+        },
+        {
+            "pattern": r'(?i)\b(fourhundredgige|fourhundredgigabitethernet)\s*(\d+[\d/:]*)\b',
+            "replacement": r"FourHu\2",
+            "description": "Shorten 400GigabitEthernet ports to FourHu",
+            "enabled": True,
+        },
+        {
+            "pattern": r'(?i)\b(management|mgmt)\s*(\d+[\d/:]*)\b',
+            "replacement": r"Mgmt\2",
+            "description": "Shorten Management/MGMT ports to Mgmt",
+            "enabled": True,
+        },
+        {
+            "pattern": r'(?i)\b(loopback|lo)\s*(\d+)\b',
+            "replacement": r"Lo\2",
+            "description": "Shorten Loopback/LO ports to Lo",
+            "enabled": True,
+        },
+        {
+            "pattern": r'(?i)\b(vlan)\s*(\d+)\b',
+            "replacement": r"Vlan\2",
+            "description": "Normalize VLAN interface naming",
+            "enabled": True,
+        },
+        {
+            "pattern": r'(?i)\b(tunnel|tu)\s*(\d+)\b',
+            "replacement": r"Tu\2",
+            "description": "Shorten Tunnel/TU ports to Tu",
+            "enabled": True,
+        },
+    ],
     "vmware": [
         {
             "pattern": r'(?i)\b(vswitch)(\d+)\b',
@@ -193,13 +285,17 @@ def normalize_port_shortname(port_name: str) -> str:
     """
     Dynamically parse network interface names and convert to standard short form.
     
+    Uses the externalized ``port_shortening`` auto-correction rules as the primary
+    shortening engine so both local and remote port abbreviations share the same
+    user-configurable rule set.
+
     Handles various vendor formats including Cisco, Huawei, Arista, etc.
     Supports sub-interfaces and gracefully handles already-shortened inputs.
     
     Examples:
         "XGigabitEthernet0/0/31" -> "XGE0/0/31"
         "TenGigabitEthernet1/0/1" -> "Te1/0/1"
-        "GigabitEthernet1/0/24" -> "Gi1/0/24"
+        "GigabitEthernet1/0/24" -> "GE1/0/24"
         "FortyGigabitEthernet0/1" -> "Fo0/1"
         "XGE0/0/31.100" -> "XGE0/0/31.100" (already short)
         "Port-channel10" -> "Po10"
@@ -219,13 +315,15 @@ def normalize_port_shortname(port_name: str) -> str:
     
     # Special case: "Port" followed by just a number (e.g., Port48) - keep as is
     if re.match(r'^Port\d+$', p, re.IGNORECASE):
-        # Normalize capitalization: Port48 or port48 -> Port48
         return re.sub(r'^port', 'Port', p, flags=re.IGNORECASE)
     
-    # Pattern to match: <InterfaceType><PortPath>[.SubInterface]
-    # Port path: digits, slashes, dots for sub-interfaces
-    match = re.match(r'^([a-zA-Z\-]+)([\d/]+(?:\.\d+)?)$', p, re.IGNORECASE)
+    # Apply the dynamic port_shortening auto-correction rules
+    shortened = apply_auto_corrections(p, "port_shortening")
+    if shortened != p:
+        return shortened
     
+    # Pattern to match: <InterfaceType><PortPath>[.SubInterface]
+    match = re.match(r'^([a-zA-Z\-]+)([\d/]+(?:\.\d+)?)$', p, re.IGNORECASE)
     if not match:
         return p
     
@@ -236,30 +334,30 @@ def normalize_port_shortname(port_name: str) -> str:
     if len(interface_type) <= 4 and interface_type[0].isupper():
         return p
     
-    # Normalize interface type to abbreviation
+    # Fall back to dynamic abbreviation extraction for unknown types
     abbreviation = _get_interface_abbreviation(interface_type)
-    
     return f"{abbreviation}{port_path}"
 
 
 def _get_interface_abbreviation(interface_type: str) -> str:
     """
     Dynamically extract interface abbreviation from full interface type name.
-    
-    Uses a hybrid approach:
-    1. Check known mappings for common/special cases
-    2. Extract capital letters for camelCase names
-    3. Fall back to intelligent prefix extraction
-    
+
+    This function is the *fallback*: the primary shortening path for common
+    interface types runs through the externalized ``port_shortening`` auto-correction
+    rules (``data/autocorrect_rules.yaml``) called by ``normalize_port_shortname``.
+    This fallback uses a known-mappings table for special cases and dynamic
+    camelCase extraction for arbitrary / unknown interface types.
+
     Args:
         interface_type: Full interface type (e.g., "XGigabitEthernet", "TenGigE")
-        
+
     Returns:
         Standard abbreviation (e.g., "XGE", "Te")
     """
     itype = interface_type.strip()
     itype_lower = itype.lower()
-    
+
     # Known mappings for common interfaces and special cases
     known_mappings = {
         'xgigabitethernet': 'XGE',
@@ -268,9 +366,9 @@ def _get_interface_abbreviation(interface_type: str) -> str:
         'tengige': 'Te',
         'tengig': 'Te',
         'teng': 'Te',
-        'gigabitethernet': 'Gi',
-        'gige': 'Gi',
-        'fastethernet': 'Fa',
+        'gigabitethernet': 'GE',
+        'gige': 'GE',
+        'fastethernet': 'FE',
         'twentyfivegige': 'Twe',
         'twentyfivegigabitethernet': 'Twe',
         'fortygigabitethernet': 'Fo',
@@ -290,11 +388,11 @@ def _get_interface_abbreviation(interface_type: str) -> str:
         'vlan': 'Vlan',
         'tunnel': 'Tu',
     }
-    
+
     # Check known mappings first
     if itype_lower in known_mappings:
         return known_mappings[itype_lower]
-    
+
     # Dynamic extraction for CamelCase or mixed case (e.g., "XGigabitEthernet" -> "XGE")
     # Extract capital letters and initial capital sequences
     capitals = []

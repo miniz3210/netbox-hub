@@ -34,9 +34,9 @@ def _get_interface_abbreviation(interface_type: str) -> str:
         'tengige': 'Te',
         'tengig': 'Te',
         'teng': 'Te',
-        'gigabitethernet': 'Gi',
-        'gige': 'Gi',
-        'fastethernet': 'Fa',
+        'gigabitethernet': 'GE',
+        'gige': 'GE',
+        'fastethernet': 'FE',
         'twentyfivegige': 'Twe',
         'twentyfivegigabitethernet': 'Twe',
         'fortygigabitethernet': 'Fo',
@@ -113,7 +113,7 @@ def normalize_port_shortname(port_name: str) -> str:
     Examples:
         "XGigabitEthernet0/0/31" -> "XGE0/0/31"
         "TenGigabitEthernet1/0/1" -> "Te1/0/1"
-        "GigabitEthernet1/0/24" -> "Gi1/0/24"
+        "GigabitEthernet1/0/24" -> "GE1/0/24"
         "FortyGigabitEthernet0/1" -> "Fo0/1"
         "XGE0/0/31.100" -> "XGE0/0/31.100" (already short)
         "Port-channel10" -> "Po10"
@@ -164,11 +164,11 @@ def run_tests():
         ("TenGigE1/1/1", "Te1/1/1"),
         
         # Cisco GigabitEthernet
-        ("GigabitEthernet1/0/24", "Gi1/0/24"),
-        ("GigabitEthernet0/0/1", "Gi0/0/1"),
-        
+("GigabitEthernet1/0/24", "GE1/0/24"),
+        ("GigabitEthernet0/0/1", "GE0/0/1"),
+
         # Cisco FastEthernet
-        ("FastEthernet0/1", "Fa0/1"),
+        ("FastEthernet0/1", "FE0/1"),
         
         # Cisco FortyGigabitEthernet
         ("FortyGigabitEthernet0/1", "Fo0/1"),
@@ -191,7 +191,7 @@ def run_tests():
         ("Gi1/0/24", "Gi1/0/24"),
         
         # Whitespace handling
-        ("Gigabit Ethernet 1/0/24", "Gi1/0/24"),
+        ("Gigabit Ethernet 1/0/24", "GE1/0/24"),
         (" XGigabitEthernet0/0/31 ", "XGE0/0/31"),
         
         # Management
