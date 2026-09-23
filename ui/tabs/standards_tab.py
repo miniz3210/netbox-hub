@@ -52,6 +52,29 @@ def _diff_rule_list(category: str, old_rules: list, new_rules: list) -> list:
     return rows
 
 
+def validate_regex_replacement(pattern_str: str, replacement_str: str) -> tuple:
+    """Validate that *replacement_str*'s backreferences fit *pattern_str*'s groups.
+    Returns ``(True, "")`` on success or ``(False, "error message")`` on failure.
+    """
+    if not pattern_str:
+        return True, ""
+    try:
+        compiled = re.compile(pattern_str)
+    except re.error as e:
+        return False, f"Regex syntax error in pattern '{pattern_str}': {e}"
+
+    num_groups = compiled.groups
+    refs = re.findall(r"(?:\\(\d+)|\\g<(\d+)>)", replacement_str)
+    for m in refs:
+        raw = m[0] or m[1]
+        if int(raw) > num_groups:
+            return False, (
+                f"Invalid group \\{raw} in replacement '{replacement_str}': "
+                f"pattern only has {num_groups} capture group(s)!"
+            )
+    return True, ""
+
+
 def _persist_variables(rules: dict, variables: dict) -> None:
     """Save updated ``pattern_variables`` to file and session state."""
     rules["pattern_variables"] = variables
@@ -170,20 +193,35 @@ def _render_auto_correction_manager(active_model: str) -> None:
             col_save, col_add, col_reset = st.columns([2, 2, 2])
             with col_save:
                 if st.button("💾 Save & Apply Changes", key=f"ac_{category}_save", type="primary", use_container_width=True):
-                    final = dict(rules)
-                    final[category] = updated
-                    _persist_auto_corrections(final)
+                    failed = []
+                    for rule in updated:
+                        pat = rule.get("pattern", "")
+                        repl = rule.get("replacement", "")
+                        ok, msg = validate_regex_replacement(pat, repl)
+                        if not ok:
+                            desc = rule.get("description", pat)
+                            failed.append(f"- `{desc}`: {msg}")
+                    if failed:
+                        st.error("❌ Cannot save — invalid rule(s):\n" + "\n".join(failed))
+                    else:
+                        final = dict(rules)
+                        final[category] = updated
+                        _persist_auto_corrections(final)
             with col_add:
                 if st.button("➕ Add Rule", key=f"ac_{category}_add", use_container_width=True):
                     if new_p.strip():
-                        final = dict(rules)
-                        final[category] = list(updated) + [{
-                            "pattern": new_p,
-                            "replacement": new_r,
-                            "description": new_d,
-                            "enabled": True,
-                        }]
-                        _persist_auto_corrections(final)
+                        ok, msg = validate_regex_replacement(new_p, new_r)
+                        if not ok:
+                            st.error(f"❌ Cannot add rule — {msg}")
+                        else:
+                            final = dict(rules)
+                            final[category] = list(updated) + [{
+                                "pattern": new_p,
+                                "replacement": new_r,
+                                "description": new_d,
+                                "enabled": True,
+                            }]
+                            _persist_auto_corrections(final)
                     else:
                         st.warning("⚠️ Enter a regex pattern to add.")
             with col_reset:
