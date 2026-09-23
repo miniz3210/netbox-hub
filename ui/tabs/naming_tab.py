@@ -27,7 +27,10 @@ from core.naming_dynamic_helper import (
     render_multi_edit_mode_ui,
     extract_tokens,
 )
-from config.naming_rules import load_naming_rules, get_naming_patterns, get_pattern_variables
+from config.naming_rules import (
+    load_naming_rules, get_naming_patterns, get_pattern_variables,
+    get_device_presets, get_interface_presets,
+)
 
 def build_naming_system_prompt(prompt: str) -> str:
     """Build the grounded naming/inventory system prompt for the AI Assistant."""
@@ -263,18 +266,10 @@ import re
 from config.naming_rules import get_naming_patterns, get_pattern_variables, load_naming_rules
 
 
-# Preset definitions are ordered and reference YAML pattern keys. Options are derived
-# dynamically from the keys present in data/naming_rules.yaml so adding/removing a
-# pattern in the Standards Tab is reflected immediately.
-DEVICE_PRESET_DEFS = [
-    ("SW", "Switch (SW / SWI)", "branch_switch"),
-    ("VS", "Virtual Chassis / Stack (VS)", "branch_stack"),
-    ("FW", "Firewall / Security (FW)", "branch_firewall"),
-    ("ION", "SD-WAN / Prisma (ION)", "branch_ion"),
-    ("WAP", "Wireless AP (WAP)", "branch_ap"),
-    ("RTR", "Router (RTR)", "branch_router"),
-    ("VA", "Virtual Appliance (VA)", "branch_va"),
-]
+# Preset choices (Device Type / Interface Type) are loaded dynamically from the structured
+# `device_presets` / `interface_presets` collections in data/naming_rules.yaml,
+# so any Add/Modify/Delete in the Standards Tab is reflected immediately here.
+# The dicts below are reference metadata keyed by preset code used for fallback examples.
 DEVICE_TYPE_LABELS = {
     "SW": "Switch (SW / SWI)",
     "VS": "Virtual Chassis / Stack (VS)",
@@ -284,14 +279,6 @@ DEVICE_TYPE_LABELS = {
     "RTR": "Router (RTR)",
     "VA": "Virtual Appliance (VA)",
 }
-
-INTERFACE_PRESET_DEFS = [
-    ("Uplink", "Switch Uplink (Inter-Switch)", "switch_uplink_desc"),
-    ("LAG", "Switch LAG Member (LACP)", "switch_lag_member"),
-    ("Po", "Switch Port-Channel (Logical)", "switch_port_channel"),
-    ("Access", "Switch Access Port (Endpoint)", "switch_access_desc"),
-    ("FW Zone", "Firewall Security Zone Interface", "firewall_interface"),
-]
 
 # Reference (label, filter/examples) metadata keyed by device preset code.
 DEVICE_REF_INFO = {
@@ -322,15 +309,18 @@ INTERFACE_REF_PATTERNS = {
 }
 
 
-def _device_presets(naming_patterns):
-    """Device preset (code, label, pattern_key) tuples whose key exists in the YAML rules."""
-    return [(code, DEVICE_TYPE_LABELS.get(code, label), key)
-            for code, label, key in DEVICE_PRESET_DEFS if key in naming_patterns]
+def _device_presets(rules, naming_patterns):
+    """Device preset (code, label, pattern_key) tuples loaded from YAML."""
+    presets = get_device_presets(rules)
+    return [(p["code"], p["label"], p["pattern_key"])
+            for p in presets if p["pattern_key"] in naming_patterns]
 
 
-def _interface_presets(naming_patterns):
-    """Interface preset (code, label, pattern_key) tuples whose key exists in the YAML rules."""
-    return [(code, label, key) for code, label, key in INTERFACE_PRESET_DEFS if key in naming_patterns]
+def _interface_presets(rules, naming_patterns):
+    """Interface preset (code, label, pattern_key) tuples loaded from YAML."""
+    presets = get_interface_presets(rules)
+    return [(p["code"], p["label"], p["pattern_key"])
+            for p in presets if p["pattern_key"] in naming_patterns]
 
 
 def _dev_pattern_key(dev_code, presets):
@@ -445,7 +435,7 @@ def render_naming_tab(active_model):
     st.markdown("---")
 
     if "1. Network" in naming_cat:
-        _asset_class_1(case_mode, active_model, naming_patterns, variables)
+        _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, variables)
     elif "2. Hosts" in naming_cat:
         _asset_class_2(case_mode, active_model, naming_patterns, variables)
     else:
@@ -453,7 +443,7 @@ def render_naming_tab(active_model):
         _asset_class_3(case_mode, active_model, naming_patterns, variables, token_order_map)
 
 
-def _asset_class_1(case_mode, active_model, naming_patterns, variables):
+def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, variables):
     st.markdown("##### Location & Site Code Assistant")
     loc_c1, loc_c2 = st.columns([2, 1])
     with loc_c1:
@@ -464,18 +454,24 @@ def _asset_class_1(case_mode, active_model, naming_patterns, variables):
     st.markdown("---")
 
     col_a, col_b = st.columns([1, 1])
-    # Presets derived dynamically from the pattern keys present in data/naming_rules.yaml.
-    dev_presets = _device_presets(naming_patterns)
-    intf_presets = _interface_presets(naming_patterns)
+    # Presets loaded from the structured device_presets / interface_presets in YAML.
+    dev_presets = _device_presets(naming_rules, naming_patterns)
+    intf_presets = _interface_presets(naming_rules, naming_patterns)
     dev_codes = [code for code, _label, _key in dev_presets]
     intf_codes = [code for code, _label, _key in intf_presets]
     if not intf_codes:
-        intf_codes = [code for code, _label, _key in INTERFACE_PRESET_DEFS]
+        intf_defaults = [p["code"] for p in get_interface_presets(naming_rules)]
+        intf_codes = intf_defaults or ["Uplink"]
     if not dev_codes:
-        dev_codes = [code for code, _label, _key in DEVICE_PRESET_DEFS]
+        dev_codes = [p["code"] for p in get_device_presets(naming_rules)] or ["SW"]
+
+    dev_label_map = {code: label for code, label, _key in dev_presets}
+    if not dev_label_map:
+        dev_label_map = {p["code"]: p["label"] for p in get_device_presets(naming_rules)}
+    intf_label_map = {code: label for code, label, _key in intf_presets}
     with col_a:
         st.markdown("#### Universal Device Hostname Generator")
-        dev_type = st.radio("Device Type", dev_codes, horizontal=True, key="dev_prefix_sel", help="Select the device class to generate a standardized hostname.")
+        dev_type = st.radio("Device Type", dev_codes, horizontal=True, key="dev_prefix_sel", help="Select the device class to generate a standardized hostname. Choices are configured in the Standards Tab (Device Type Presets).")
         pk = _dev_pattern_key(dev_type, dev_presets)
         edit_on = _edit_toggle(pk)
         pat = naming_patterns.get(pk, "")
@@ -495,7 +491,7 @@ def _asset_class_1(case_mode, active_model, naming_patterns, variables):
 
         if st.button("AI Verify / Suggest Device Hostname", key="ai_chk_dev"):
             with st.spinner("Auditing..."):
-                dev_label = DEVICE_TYPE_LABELS.get(dev_type, dev_type)
+                dev_label = dev_label_map.get(dev_type, dev_type)
                 st.info(verify_and_suggest_with_ai(final, active_model, asset_type=f"Network/Security Device ({dev_label})", category_key="device", site_filter=values.get("Site", "")))
 
         ref_lbl, ref_flt, ref_ex = _ref_info(dev_type)
@@ -508,7 +504,7 @@ def _asset_class_1(case_mode, active_model, naming_patterns, variables):
             intf_codes,
             horizontal=True,
             key="p_cat_sel",
-            help="Uplink = Inter-Switch | LAG = LACP member | Po = Port-Channel (logical) | Access = endpoint port | FW Zone = firewall security zone",
+            help="Select the interface class to format. Choices are configured in the Standards Tab (Interface Type Presets).",
         )
         ipk = _interface_key(intf_type, intf_presets)
         edit_on = _edit_toggle(ipk)

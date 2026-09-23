@@ -89,6 +89,39 @@ PATTERN_VARIABLES = {
     "vmk": {"label": "vmk Name", "placeholder": "vmk", "default": "vmk"},
 }
 
+# Structured Device / Interface presets driving the horizontal radio choices in the
+# Naming tab. Each item: code (e.g. SW, Uplink), label, pattern_key, description.
+# These live in data/naming_rules.yaml so the Standards Tab can fully modify them.
+DEVICE_PRESETS = [
+    {"code": "SW", "label": "Switch (SW / SWI)", "pattern_key": "branch_switch",
+     "description": "Layer 2/3 access/distribution switch"},
+    {"code": "VS", "label": "Virtual Chassis / Stack (VS)", "pattern_key": "branch_stack",
+     "description": "Virtual chassis or physical switch stack"},
+    {"code": "FW", "label": "Firewall / Security (FW)", "pattern_key": "branch_firewall",
+     "description": "Firewall / security appliance"},
+    {"code": "ION", "label": "SD-WAN / Prisma (ION)", "pattern_key": "branch_ion",
+     "description": "SD-WAN / Prisma Access gateway"},
+    {"code": "WAP", "label": "Wireless AP (WAP)", "pattern_key": "branch_ap",
+     "description": "Wireless access point"},
+    {"code": "RTR", "label": "Router (RTR)", "pattern_key": "branch_router",
+     "description": "Routing device"},
+    {"code": "VA", "label": "Virtual Appliance (VA)", "pattern_key": "branch_va",
+     "description": "Virtualised appliance / gateway"},
+]
+
+INTERFACE_PRESETS = [
+    {"code": "Uplink", "label": "Switch Uplink (Inter-Switch)", "pattern_key": "switch_uplink_desc",
+     "description": "Inter-switch uplink description"},
+    {"code": "LAG", "label": "Switch LAG Member (LACP)", "pattern_key": "switch_lag_member",
+     "description": "LACP aggregate member description"},
+    {"code": "Po", "label": "Switch Port-Channel (Logical)", "pattern_key": "switch_port_channel",
+     "description": "Logical port-channel / port-group description"},
+    {"code": "Access", "label": "Switch Access Port (Endpoint)", "pattern_key": "switch_access_desc",
+     "description": "Endpoint access-port description"},
+    {"code": "FW Zone", "label": "Firewall Security Zone Interface", "pattern_key": "firewall_interface",
+     "description": "Firewall security-zone interface description"},
+]
+
 LEGACY_PATTERN_KEYS = list(DEFAULT_NAMING_PATTERNS.keys())
 
 DOMAIN_ENV_KEYS = (
@@ -202,6 +235,15 @@ def _normalize_rules(raw: dict) -> dict:
         if key not in patterns:
             patterns[key] = DEFAULT_NAMING_PATTERNS.get(key, "")
 
+    merged = dict(patterns)
+
+    custom = raw.get("custom_patterns")
+    if isinstance(custom, list):
+        merged["custom_patterns"] = [{"label": str(c.get("label", "")), "key": str(c.get("key", "")), "pattern": str(c.get("pattern", ""))} for c in custom if isinstance(c, dict)]
+
+    merged["device_presets"] = _normalize_presets(raw.get("device_presets"), DEVICE_PRESETS)
+    merged["interface_presets"] = _normalize_presets(raw.get("interface_presets"), INTERFACE_PRESETS)
+
     variables = raw.get("pattern_variables")
     if not isinstance(variables, dict):
         variables = PATTERN_VARIABLES.copy()
@@ -215,11 +257,6 @@ def _normalize_rules(raw: dict) -> dict:
                 merged_vars[str(k)] = {"label": v, "placeholder": f"e.g. {k}"}
         variables = merged_vars
 
-    custom = raw.get("custom_patterns")
-    if isinstance(custom, list):
-        merged["custom_patterns"] = [{"label": str(c.get("label", "")), "key": str(c.get("key", "")), "pattern": str(c.get("pattern", ""))} for c in custom if isinstance(c, dict)]
-
-    merged = dict(patterns)
     merged["naming_patterns"] = dict(patterns)
     merged["pattern_variables"] = variables
     token_order = raw.get("token_order")
@@ -233,6 +270,45 @@ def _normalize_rules(raw: dict) -> dict:
         if normalized_to:
             merged["token_order"] = normalized_to
     return merged
+
+
+def _normalize_presets(raw_presets, defaults):
+    """Validate and normalise a device/interface presets list; falls back to defaults."""
+    if not isinstance(raw_presets, list):
+        return list(defaults)
+    normalized = []
+    for p in raw_presets:
+        if not isinstance(p, dict):
+            continue
+        code = str(p.get("code", "")).strip()
+        label = str(p.get("label", "")).strip()
+        pattern_key = str(p.get("pattern_key", "")).strip()
+        if code and label and pattern_key:
+            normalized.append({
+                "code": code,
+                "label": label,
+                "pattern_key": pattern_key,
+                "description": str(p.get("description", "")).strip(),
+            })
+    return normalized or list(defaults)
+
+
+def get_device_presets(rules: dict) -> list:
+    """Return the device presets list from a rules dict (defaults if missing)."""
+    raw = rules.get("device_presets")
+    return _normalize_presets(raw, DEVICE_PRESETS)
+
+
+def get_interface_presets(rules: dict) -> list:
+    """Return the interface presets list from a rules dict (defaults if missing)."""
+    raw = rules.get("interface_presets")
+    return _normalize_presets(raw, INTERFACE_PRESETS)
+
+
+def make_preset_key(code: str, prefix: str = "branch") -> str:
+    """Generate a safe, collision-free pattern key from a preset code."""
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", code.strip()).strip("_").lower()
+    return f"{prefix}_{slug}" if slug else f"{prefix}_custom"
 
 
 def load_naming_rules() -> Dict[str, str]:
