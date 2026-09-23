@@ -261,7 +261,7 @@ def render_compact_toolbar(active_model):
     auto_correct = st.checkbox(
         "⚡ Apply Syntax Auto-Correction (Port Shortening & VMware Conventions)",
         value=True, key="esxi_auto_corr",
-        help="When checked, enables interface port regex shortening (<Local_Port_Short>/<Remote_Port_Short>) and VMware casing normalization across all asset classes, driven by the Auto-Correction Rules in the Standards Tab.",
+        help="When checked, enables interface port regex shortening (<Local_Port>/<Remote_Port>) and VMware casing normalization across all asset classes, driven by the Auto-Correction Rules in the Standards Tab.",
     )
     st.session_state["auto_correct"] = bool(auto_correct)
 
@@ -540,11 +540,14 @@ def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, varia
             gen = render_dynamic_pattern(pat, vals, variables)
         else:
             vals = render_token_widgets(pat, variables, f"intf_{ipk}")
-            # Auto-shorten port abbreviation tokens when the global toggle is ON
+            # Auto-shorten port tokens when the global toggle is ON
             if st.session_state.get("esxi_auto_corr", True):
-                for short_token in ("Local_Port_Short", "Remote_Port_Short"):
-                    if short_token in vals and vals.get(short_token):
-                        vals[short_token] = normalize_port_shortname(vals[short_token])
+                for port_token in ("Local_Port", "Remote_Port"):
+                    if port_token in vals and vals.get(port_token):
+                        vals[port_token] = normalize_port_shortname(vals[port_token])
+            for port_token in ("Local_Port", "Remote_Port"):
+                if port_token in vals and vals.get(port_token):
+                    vals[port_token] = vals[port_token].strip()
             gen = render_dynamic_pattern(pat, vals, variables)
 
         st.caption("Generated Interface Description:")
