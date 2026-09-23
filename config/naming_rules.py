@@ -229,7 +229,7 @@ def _normalize_rules(raw: dict) -> dict:
         }
     patterns = {k: str(v) for k, v in raw_patterns.items()}
     patterns = _split_legacy_device_patterns(patterns)
-    patterns = migrate_port_short_tokens(patterns)
+    patterns = {k: (v.replace("<Local_Port_Short>", "<Local_Port>").replace("<Remote_Port_Short>", "<Remote_Port>") if isinstance(v, str) else v) for k, v in patterns.items()}
     for key in LEGACY_PATTERN_KEYS:
         if key not in patterns:
             patterns[key] = DEFAULT_NAMING_PATTERNS.get(key, "")
