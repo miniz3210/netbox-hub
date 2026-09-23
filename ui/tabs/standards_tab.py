@@ -152,7 +152,7 @@ def _render_auto_correction_manager(active_model: str) -> None:
                     else:
                         st.warning("⚠️ Enter a regex pattern to add.")
             with col_reset:
-                if st.button("🔄 Reset to Factory Defaults", key="ac_reset_factory", use_container_width=True):
+                if st.button("🔄 Reset to Factory Defaults", key=f"ac_reset_factory_{category}", use_container_width=True):
                     reset_auto_corrections()
                     st.session_state["autocorrect_reset"] = True
                     st.rerun()
