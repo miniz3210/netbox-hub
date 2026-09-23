@@ -19,6 +19,82 @@
   "esxi_vmkernel_name": "<vmk>",
   "esxi_vmkernel": "<Purpose> Network - <vSwitch> (<Active_vmnics> Active / <Standby_vmnics> Standby)",
   "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
+  "device_presets": [
+    {
+      "code": "SW",
+      "label": "Switch (SW / SWI)",
+      "pattern_key": "branch_switch",
+      "description": "Layer 2/3 access/distribution switch"
+    },
+    {
+      "code": "VS",
+      "label": "Virtual Chassis / Stack (VS)",
+      "pattern_key": "branch_stack",
+      "description": "Virtual chassis or physical switch stack"
+    },
+    {
+      "code": "FW",
+      "label": "Firewall / Security (FW)",
+      "pattern_key": "branch_firewall",
+      "description": "Firewall / security appliance"
+    },
+    {
+      "code": "ION",
+      "label": "SD-WAN / Prisma (ION)",
+      "pattern_key": "branch_ion",
+      "description": "SD-WAN / Prisma Access gateway"
+    },
+    {
+      "code": "WAP",
+      "label": "Wireless AP (WAP)",
+      "pattern_key": "branch_ap",
+      "description": "Wireless access point"
+    },
+    {
+      "code": "RTR",
+      "label": "Router (RTR)",
+      "pattern_key": "branch_router",
+      "description": "Routing device"
+    },
+    {
+      "code": "VA",
+      "label": "Virtual Appliance (VA)",
+      "pattern_key": "branch_va",
+      "description": "Virtualised appliance / gateway"
+    }
+  ],
+  "interface_presets": [
+    {
+      "code": "UPLINK",
+      "label": "Switch Uplink (Inter-Switch)",
+      "pattern_key": "switch_uplink_desc",
+      "description": "Inter-switch uplink description"
+    },
+    {
+      "code": "LAG",
+      "label": "Switch LAG Member (LACP)",
+      "pattern_key": "switch_lag_member",
+      "description": "LACP aggregate member description"
+    },
+    {
+      "code": "PORT-CHANNEL",
+      "label": "Switch Port-Channel (Logical)",
+      "pattern_key": "switch_port_channel",
+      "description": "Logical port-channel / port-group description"
+    },
+    {
+      "code": "ACCESS",
+      "label": "Switch Access Port (Endpoint)",
+      "pattern_key": "switch_access_desc",
+      "description": "Endpoint access-port description"
+    },
+    {
+      "code": "FW ZONE",
+      "label": "Firewall Security Zone Interface",
+      "pattern_key": "firewall_interface",
+      "description": "Firewall security-zone interface description"
+    }
+  ],
   "naming_patterns": {
     "branch_switch": "SW<Country><State><Site><Zone><Seq>-<StackID>",
     "branch_stack": "VS<Country><State><Site><Seq>-<StackID>",
