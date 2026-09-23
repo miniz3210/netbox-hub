@@ -104,6 +104,29 @@ def sanitize_free_models(raw_models: list[str]) -> list[str]:
     return sorted(result)
 
 
+def healthcheck_ai(selected_model: str) -> Tuple[bool, int, str]:
+    """Lightweight ping through the app's own ``call_ai`` pipeline.
+
+    Sends the smallest possible completion (prompt "ping", ``max_tokens=2``) via the
+    existing ``call_ai`` logic so the check exercises the exact code path used for real
+    generation (token auth, gateway routing, payload parsing). Returns ``(ok, latency_ms, msg)``.
+
+    Args:
+        selected_model: The model id to healthcheck (e.g. ``"openai/gpt-4o-mini"``).
+    """
+    start = time.time()
+    try:
+        call_ai("ping", selected_model)
+    except AIProviderError as exc:
+        latency = round((time.time() - start) * 1000)
+        return False, latency, str(exc)
+    except Exception as exc:  # pragma: no cover - defensive belt-and-suspenders
+        latency = round((time.time() - start) * 1000)
+        return False, latency, f"Unexpected error: {exc}"
+    latency = round((time.time() - start) * 1000)
+    return True, latency, f"Connected ({latency}ms)"
+
+
 def ping_model(model_name: str, timeout: int = 5) -> Tuple[bool, int, str]:
     """Run a lightweight pre-flight healthcheck against a single model.
 

@@ -264,22 +264,31 @@ from config.naming_rules import get_naming_patterns, get_pattern_variables, load
 
 
 DEVICE_TYPE_OPTIONS = [
-    "Switch (SW / SWI)",
-    "Virtual Chassis / Stack (VS)",
-    "Firewall / Security (FW)",
-    "SD-WAN / Prisma (ION)",
-    "Wireless AP (WAP)",
-    "Router (RTR)",
-    "Virtual Appliance (VA)",
+    "SW",
+    "VS",
+    "FW",
+    "ION",
+    "WAP",
+    "RTR",
+    "VA",
 ]
+DEVICE_TYPE_LABELS = {
+    "SW": "Switch (SW / SWI)",
+    "VS": "Virtual Chassis / Stack (VS)",
+    "FW": "Firewall / Security (FW)",
+    "ION": "SD-WAN / Prisma (ION)",
+    "WAP": "Wireless AP (WAP)",
+    "RTR": "Router (RTR)",
+    "VA": "Virtual Appliance (VA)",
+}
 DEVICE_PATTERN_KEYS = {
-    "Switch (SW / SWI)": "branch_switch",
-    "Virtual Chassis / Stack (VS)": "branch_stack",
-    "Firewall / Security (FW)": "branch_firewall",
-    "SD-WAN / Prisma (ION)": "branch_ion",
-    "Wireless AP (WAP)": "branch_ap",
-    "Router (RTR)": "branch_router",
-    "Virtual Appliance (VA)": "branch_va",
+    "SW": "branch_switch",
+    "VS": "branch_stack",
+    "FW": "branch_firewall",
+    "ION": "branch_ion",
+    "WAP": "branch_ap",
+    "RTR": "branch_router",
+    "VA": "branch_va",
 }
 INTERFACE_OPTIONS = [
     "Switch Uplink (Inter-Switch)",
@@ -393,13 +402,13 @@ def _render_esxi_pattern(pat: str, vals: dict, variables: dict) -> str:
 
 def _ref_info(dev_type):
     refs = {
-        "Switch (SW / SWI)": ("Switch", "SW", "SWUSNYC01-0       (Switch Stack, Member 0)\nSWIUSLON01        (London Switch 01)"),
-        "Virtual Chassis / Stack (VS)": ("Virtual Chassis", "VS", "VSUSNYC01-0       (Virtual Chassis, Member 0)\nVSUSLON01-1"),
-        "Firewall / Security (FW)": ("Firewall", "FW", "FWUSNYC01         (NYC Firewall 01)\nFWUSNYCPA01       (NYC Palo Alto FW 01)"),
-        "SD-WAN / Prisma (ION)": ("SD-WAN ION", "ION", "IONUSNYC01        (NYC SD-WAN 01)\nIONUSLON01"),
-        "Wireless AP (WAP)": ("Wireless AP", "WAP", "WAPUSNYC01        (Access Point NYC 01)\nWAPUSLON01        (Access Point London 01)"),
-        "Router (RTR)": ("Router", "RTR", "RTRUSNYC01        (NYC Router 01)\nRTRUSLON01"),
-        "Virtual Appliance (VA)": ("Virtual Appliance", "VA", "VAUSNYC01         (NYC Virtual Appliance 01)\nVAUSLON01"),
+        "SW": ("Switch", "SW", "SWUSNYC01-0       (Switch Stack, Member 0)\nSWIUSLON01        (London Switch 01)"),
+        "VS": ("Virtual Chassis", "VS", "VSUSNYC01-0       (Virtual Chassis, Member 0)\nVSUSLON01-1"),
+        "FW": ("Firewall", "FW", "FWUSNYC01         (NYC Firewall 01)\nFWUSNYCPA01       (NYC Palo Alto FW 01)"),
+        "ION": ("SD-WAN ION", "ION", "IONUSNYC01        (NYC SD-WAN 01)\nIONUSLON01"),
+        "WAP": ("Wireless AP", "WAP", "WAPUSNYC01        (Access Point NYC 01)\nWAPUSLON01        (Access Point London 01)"),
+        "RTR": ("Router", "RTR", "RTRUSNYC01        (NYC Router 01)\nRTRUSLON01"),
+        "VA": ("Virtual Appliance", "VA", "VAUSNYC01         (NYC Virtual Appliance 01)\nVAUSLON01"),
     }
     return refs.get(dev_type, ("Device", "", "SWUSNYC01-0       (Switch Stack)\nWAPUSNYC01        (Access Point 01)\nFWUSNYCPA01       (Firewall 01)"))
 
@@ -447,7 +456,7 @@ def _asset_class_1(case_mode, active_model, naming_patterns, variables):
     col_a, col_b = st.columns([1, 1])
     with col_a:
         st.markdown("#### Universal Device Hostname Generator")
-        dev_type = st.radio("Device Type", DEVICE_TYPE_OPTIONS, key="dev_prefix_sel")
+        dev_type = st.radio("Device Type", DEVICE_TYPE_OPTIONS, horizontal=True, key="dev_prefix_sel", help="Select the device class to generate a standardized hostname.")
         pk = _sel_pattern_key(dev_type)
         edit_on = _edit_toggle(pk)
         pat = naming_patterns.get(pk, "")
@@ -467,7 +476,8 @@ def _asset_class_1(case_mode, active_model, naming_patterns, variables):
 
         if st.button("AI Verify / Suggest Device Hostname", key="ai_chk_dev"):
             with st.spinner("Auditing..."):
-                st.info(verify_and_suggest_with_ai(final, active_model, asset_type=f"Network/Security Device ({dev_type})", category_key="device", site_filter=values.get("Site", "")))
+                dev_label = DEVICE_TYPE_LABELS.get(dev_type, dev_type)
+                st.info(verify_and_suggest_with_ai(final, active_model, asset_type=f"Network/Security Device ({dev_label})", category_key="device", site_filter=values.get("Site", "")))
 
         ref_lbl, ref_flt, ref_ex = _ref_info(dev_type)
         display_reference_box("device", ref_ex, ref_lbl, values.get("Site", ""), ref_flt)
@@ -502,6 +512,10 @@ def _asset_class_1(case_mode, active_model, naming_patterns, variables):
             gen = render_dynamic_pattern(pat, vals, variables)
         else:
             vals = render_token_widgets(pat, variables, f"intf_{ipk}")
+            # Auto-shorten port abbreviation tokens through the shared rules engine
+            for short_token in ("Local_Port_Short", "Remote_Port_Short"):
+                if short_token in vals and vals.get(short_token):
+                    vals[short_token] = normalize_port_shortname(vals[short_token])
             gen = render_dynamic_pattern(pat, vals, variables)
 
         st.caption("Generated Interface Description:")

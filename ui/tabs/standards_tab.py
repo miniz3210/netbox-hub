@@ -364,6 +364,7 @@ def render_standards_tab(active_model):
             )
 
             st.markdown("---")
+            st.markdown("#### 4. Custom Pattern & AI Assistant")
             with st.expander("➕ Custom Pattern & AI Assistant", expanded=False):
                 st.caption("Describe a naming convention in plain text and let AI build a template for you. Verify the Label / Key / Template below, then click **➕ Add to Standards**.")
                 ai_desc = st.text_input(

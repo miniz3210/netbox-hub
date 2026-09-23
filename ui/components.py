@@ -9,7 +9,9 @@ from config.settings import AVAILABLE_MODELS, OPENROUTER_BASE_URL
 from core.ai_client import (
     call_ai,
     fetch_free_models,
+    healthcheck_ai,
     ping_model,
+    sanitize_model_id,
     test_model_connection,
 )
 from core.backup_manager import (
@@ -1092,12 +1094,16 @@ def render_sidebar() -> str:
     with st.sidebar:
         st.header("⚙️ AI Engine Selection")
 
-        # 1. Preset Models from environment
+        # 1. Preset Models from environment (sanitized so deprecated/unreachable
+        #    endpoints never appear in the quick-select list).
+        verified_presets = [m for m in AVAILABLE_MODELS if sanitize_model_id(m)]
+        if not verified_presets:
+            verified_presets = AVAILABLE_MODELS
         selected_preset = st.selectbox(
             "Preset Models",
-            options=AVAILABLE_MODELS,
+            options=verified_presets,
             index=0,
-            help="Configured environment presets.",
+            help="Configured environment presets (sanitized to functional chat models).",
         )
 
         # 2. Sanitized quick-select cache (only populated when user clicks refresh)
@@ -1183,26 +1189,37 @@ def render_sidebar() -> str:
                 st.session_state["verified_only_mode"] = False
                 st.rerun()
 
-        # Option A: on-demand pre-flight test against the currently selected model.
+        # Option A: on-demand pre-flight healthcheck via the app's own call_ai pipeline.
         selected_quick = "" if quick_pick.startswith("--") else quick_pick
         if selected_quick:
             t1, t2 = st.columns([1, 1])
             with t1:
-                if st.button("⚡ Test Model", key="btn_ping_quick", width="stretch"):
+                if st.button("⚡ Ping / Healthcheck", key="btn_ping_quick", width="stretch"):
                     with st.spinner(f"Pinging `{selected_quick}`..."):
-                        _run_single_ping(selected_quick)
+                        st.session_state["model_test_history"][selected_quick] = {
+                            "ok": False, "latency": 0, "msg": "", "ts": time.time(),
+                        }
+                        ok, latency, msg = healthcheck_ai(selected_quick)
+                        st.session_state["model_test_history"][selected_quick] = {
+                            "ok": ok, "latency": latency, "msg": msg, "ts": time.time(),
+                        }
+                        if ok:
+                            st.success(f"✅ Connected: Response in {latency}ms")
+                        else:
+                            st.error(f"❌ Healthcheck failed: {msg}")
             with t2:
                 if st.button("➜ Apply", key="btn_apply_quick", type="primary", width="stretch",
-                            help="Only applied after the model passes a ping."):
-                    ok, _, msg = _run_single_ping(selected_quick)
+                            help="Only applied after the model passes a healthcheck."):
+                    ok, latency, msg = healthcheck_ai(selected_quick)
                     if ok:
                         if "approved_model" not in st.session_state:
                             st.session_state["approved_model"] = ""
                         st.session_state["approved_model"] = selected_quick
+                        st.success(f"✅ Connected: Response in {latency}ms")
                     else:
-                        st.warning(f"Not applied: ping failed → {msg}")
+                        st.warning(f"Not applied: healthcheck failed → {msg}")
             _last = st.session_state["model_test_history"].get(selected_quick)
-            if _last:
+            if _last and _last.get("msg"):
                 _sidebar_health_badge(_last["ok"], _last["latency"], _last["msg"])
 
         # 3. Custom Manual Input (with permissive session-state guard)

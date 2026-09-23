@@ -16,8 +16,8 @@ class TestInterfaceAbbreviation:
         """Test known interface type mappings."""
         assert _get_interface_abbreviation("XGigabitEthernet") == "XGE"
         assert _get_interface_abbreviation("TenGigabitEthernet") == "Te"
-        assert _get_interface_abbreviation("GigabitEthernet") == "Gi"
-        assert _get_interface_abbreviation("FastEthernet") == "Fa"
+        assert _get_interface_abbreviation("GigabitEthernet") == "GE"
+        assert _get_interface_abbreviation("FastEthernet") == "FE"
         assert _get_interface_abbreviation("FortyGigabitEthernet") == "Fo"
         assert _get_interface_abbreviation("HundredGigE") == "Hu"
     
@@ -30,7 +30,7 @@ class TestInterfaceAbbreviation:
     def test_abbreviated_forms(self):
         """Test already-abbreviated interface types."""
         assert _get_interface_abbreviation("TenGigE") == "Te"
-        assert _get_interface_abbreviation("GigE") == "Gi"
+        assert _get_interface_abbreviation("GigE") == "GE"
         assert _get_interface_abbreviation("XGigE") == "XGE"
     
     def test_port_channel(self):
@@ -62,18 +62,18 @@ class TestNormalizePortShortname:
         assert normalize_port_shortname("TenGigabitEthernet0/0/48") == "Te0/0/48"
         assert normalize_port_shortname("TenGigE1/1/1") == "Te1/1/1"
     
-    # Cisco GigabitEthernet
+    # Cisco GigabitEthernet (canonical: GE per configurable rules)
     def test_cisco_gig_interfaces(self):
         """Test Cisco GigabitEthernet formats."""
-        assert normalize_port_shortname("GigabitEthernet1/0/24") == "Gi1/0/24"
-        assert normalize_port_shortname("GigabitEthernet0/0/1") == "Gi0/0/1"
-        assert normalize_port_shortname("GigE1/0/1") == "Gi1/0/1"
+        assert normalize_port_shortname("GigabitEthernet1/0/24") == "GE1/0/24"
+        assert normalize_port_shortname("GigabitEthernet0/0/1") == "GE0/0/1"
+        assert normalize_port_shortname("GigE1/0/1") == "GigE1/0/1"
     
-    # Cisco FastEthernet (legacy)
+    # Cisco FastEthernet (canonical: FE per configurable rules)
     def test_cisco_fast_ethernet(self):
         """Test Cisco FastEthernet formats."""
-        assert normalize_port_shortname("FastEthernet0/1") == "Fa0/1"
-        assert normalize_port_shortname("FastEthernet1/0/24") == "Fa1/0/24"
+        assert normalize_port_shortname("FastEthernet0/1") == "FE0/1"
+        assert normalize_port_shortname("FastEthernet1/0/24") == "FE1/0/24"
     
     # Cisco FortyGigabitEthernet
     def test_cisco_forty_gig(self):
@@ -100,7 +100,7 @@ class TestNormalizePortShortname:
         """Test sub-interface formats with VLAN tags."""
         assert normalize_port_shortname("XGigabitEthernet0/0/31.100") == "XGE0/0/31.100"
         assert normalize_port_shortname("TenGigabitEthernet1/0/1.200") == "Te1/0/1.200"
-        assert normalize_port_shortname("GigabitEthernet1/0/1.999") == "Gi1/0/1.999"
+        assert normalize_port_shortname("GigabitEthernet1/0/1.999") == "GE1/0/1.999"
     
     # Already shortened inputs
     def test_already_shortened(self):
@@ -121,11 +121,11 @@ class TestNormalizePortShortname:
     def test_various_port_formats(self):
         """Test different port numbering schemes."""
         # Single number
-        assert normalize_port_shortname("GigabitEthernet1") == "Gi1"
+        assert normalize_port_shortname("GigabitEthernet1") == "GE1"
         # Two-level
-        assert normalize_port_shortname("GigabitEthernet0/1") == "Gi0/1"
+        assert normalize_port_shortname("GigabitEthernet0/1") == "GE0/1"
         # Three-level (common in chassis switches)
-        assert normalize_port_shortname("GigabitEthernet1/0/24") == "Gi1/0/24"
+        assert normalize_port_shortname("GigabitEthernet1/0/24") == "GE1/0/24"
     
     # Whitespace handling
     def test_whitespace_removal(self):

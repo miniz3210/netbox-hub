@@ -29,7 +29,6 @@ DEFAULT_NAMING_PATTERNS = {
     "branch_ion": "ION<Country><State><Site><Seq>",
     "branch_router": "RTR<Country><State><Site><Zone><Seq>",
     "branch_va": "VA<Country><State><Site><Zone><Seq>",
-    "branch_security": "FW<Country><State><Site><Vendor><Seq>",
     "switch_uplink_desc": "Uplink_to_<Remote_Device>_<Remote_Port_Short>",
     "switch_lag_member": "LACP_to_<Remote_Device>_<Remote_Port_Short>",
     "switch_port_channel": "<Local_Po_ID>_to_<Remote_Device>",
