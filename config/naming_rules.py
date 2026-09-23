@@ -29,8 +29,8 @@ DEFAULT_NAMING_PATTERNS = {
     "branch_ion": "ION<Country><State><Site><Seq>",
     "branch_router": "RTR<Country><State><Site><Zone><Seq>",
     "branch_va": "VA<Country><State><Site><Zone><Seq>",
-    "switch_uplink_desc": "Uplink_to_<Remote_Device>_<Remote_Port_Short>",
-    "switch_lag_member": "LACP_to_<Remote_Device>_<Remote_Port_Short>",
+    "switch_uplink_desc": "Uplink_to_<Remote_Device>_<Remote_Port>",
+    "switch_lag_member": "LACP_to_<Remote_Device>_<Remote_Port>",
     "switch_port_channel": "<Local_Po_ID>_to_<Remote_Device>",
     "switch_access_desc": "<VLAN_Name> - <Device>_<Port>",
     "firewall_interface": "<Role_Zone>_<VLAN_ID>",
@@ -58,10 +58,8 @@ PATTERN_VARIABLES = {
     "StackID": {"label": "Stack / Member ID (Optional)", "placeholder": "e.g. 0, 1"},
     "Local_Device": {"label": "Local Device Hostname", "placeholder": "e.g. SWUSNYC01-0"},
     "Local_Port": {"label": "Local Port", "placeholder": "e.g. Gi1/0/48, Te1/0/1"},
-    "Local_Port_Short": {"label": "Local Port (Short)", "placeholder": "e.g. Gi1/0/48, Te1/0/1"},
     "Remote_Device": {"label": "Remote Device Hostname", "placeholder": "e.g. SWUSNYC02-0"},
     "Remote_Port": {"label": "Remote Port", "placeholder": "e.g. Gi1/0/48, Te1/0/1"},
-    "Remote_Port_Short": {"label": "Remote Port (Short)", "placeholder": "e.g. Gi1/0/48, Te1/0/1"},
     "Local_Po_ID": {"label": "Local Port-Channel ID", "placeholder": "LAG1"},
     "VLAN_Name": {"label": "VLAN Name", "placeholder": "e.g. DATA, VOIP"},
     "VLAN_ID": {"label": "VLAN ID", "placeholder": "e.g. 10, 20"},
@@ -231,6 +229,7 @@ def _normalize_rules(raw: dict) -> dict:
         }
     patterns = {k: str(v) for k, v in raw_patterns.items()}
     patterns = _split_legacy_device_patterns(patterns)
+    patterns = migrate_port_short_tokens(patterns)
     for key in LEGACY_PATTERN_KEYS:
         if key not in patterns:
             patterns[key] = DEFAULT_NAMING_PATTERNS.get(key, "")
@@ -255,6 +254,8 @@ def _normalize_rules(raw: dict) -> dict:
                 merged_vars[str(k)] = {**existing, **v}
             elif _is_str(v):
                 merged_vars[str(k)] = {"label": v, "placeholder": f"e.g. {k}"}
+        merged_vars.pop("Local_Port_Short", None)
+        merged_vars.pop("Remote_Port_Short", None)
         variables = merged_vars
 
     merged["naming_patterns"] = dict(patterns)
