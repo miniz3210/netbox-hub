@@ -608,7 +608,7 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables):
 
 
 def _asset_class_3(case_mode, active_model, naming_patterns, variables, token_order_map=None):
-token_order_map = token_order_map or {}
+    token_order_map = token_order_map or {}
     auto_correct = st.session_state.get("esxi_auto_corr", True)
     col_a, col_b, col_c = st.columns(3)
     with col_a:
