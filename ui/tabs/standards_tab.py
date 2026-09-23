@@ -605,15 +605,15 @@ def render_standards_tab(active_model):
                         with st.expander("Existing Custom Patterns", expanded=False):
                             for ccp in existing_customs:
                                 st.markdown(f"- **{ccp.get('key')}** (`{ccp.get('pattern')}`) — {ccp.get('label')}")
-    
-                    col_save, col_add, col_reset = st.columns([2, 2, 1])
-                    with col_save:
-                        submitted = st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
-                    with col_add:
-                        add_custom = st.form_submit_button("➕ Add to Standards", use_container_width=True)
-                    with col_reset:
-                        reset = st.form_submit_button("🔄 Reset to Defaults", use_container_width=True)
-                
+
+                col_save, col_add, col_reset = st.columns([2, 2, 1])
+                with col_save:
+                    submitted = st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
+                with col_add:
+                    add_custom = st.form_submit_button("➕ Add to Standards", use_container_width=True)
+                with col_reset:
+                    reset = st.form_submit_button("🔄 Reset to Defaults", use_container_width=True)
+
                 if submitted:
                     # Preserve any user-defined pattern_variables added via Edit Mode
                     rules_session = st.session_state.get("naming_rules", {})
@@ -894,52 +894,5 @@ def render_standards_tab(active_model):
                                 st.error(f"❌ Failed to restore: {str(e)}")
                     
                     with col_view:
-                        if st.button(f"👁️ View Full Details", key=f"view_{idx}", use_container_width=True):
-                            st.session_state[f"show_details_{idx}"] = not st.session_state.get(f"show_details_{idx}", False)
-                            st.rerun()
-
-                    # Show delta / full details if toggled
-                    if st.session_state.get(f"show_details_{idx}", False):
-                        st.markdown("---")
-
-                        # Compute delta against previous entry
-                        prev_rules = history[idx + 1]["rules"] if idx + 1 < len(history) else {}
-                        all_keys = sorted(set(list(rules.keys()) + list(prev_rules.keys())))
-                        rows = []
-
-                        def _escape_cell(value: str) -> str:
-                            return str(value).replace("|", "\\|").replace("\n", " ").strip()
-
-                        for key in all_keys:
-                            old_val = prev_rules.get(key, None)
-                            new_val = rules.get(key, None)
-                            if old_val == new_val:
-                                continue
-                            if isinstance(old_val, list) and isinstance(new_val, list):
-                                for rule_row in _diff_rule_list(key, old_val, new_val):
-                                    rows.append(rule_row)
-                            elif old_val is None:
-                                rows.append((f"**[Added]** `{key}`", "—", _escape_cell(new_val)))
-                            elif new_val is None:
-                                rows.append((f"**[Removed]** `{key}`", _escape_cell(old_val), "—"))
-                            else:
-                                rows.append((f"`{key}`", _escape_cell(old_val), _escape_cell(new_val)))
-
-                        if rows:
-                            st.markdown("##### 📋 Delta Changes")
-                            table_md = "| Setting / Pattern | Previous Value | New Value |\n"
-                            table_md += "| :--- | :--- | :--- |\n"
-                            for setting, prev_val, new_val in rows:
-                                prev_disp = _escape_cell(prev_val)
-                                new_disp = _escape_cell(new_val)
-                                if len(prev_disp) > 120:
-                                    prev_disp = prev_disp[:120] + "…"
-                                if len(new_disp) > 120:
-                                    new_disp = new_disp[:120] + "…"
-                                table_md += f"| {setting} | `{prev_disp}` | `{new_disp}` |\n"
-                            st.markdown("\n\n" + table_md + "\n\n")
-                        else:
-                            st.info("No changes detected in this version (identical to previous).")
-
-                        with st.expander("📄 View Raw JSON", expanded=False):
+                        with st.expander("👁️ View Full Details", expanded=False):
                             st.json(rules)
