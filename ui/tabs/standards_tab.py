@@ -319,10 +319,10 @@ def render_standards_tab(active_model):
     
     # Tab 1: Editable Form Interface
     with tab1:
-        with st.expander("📝 1. Edit Naming Patterns", expanded=False):
+        with st.expander("📝 Edit Naming Patterns", expanded=False):
             st.info("💡 Modify the naming patterns below. Changes are saved when you click 'Save Changes'. Use the **Pattern Variables Reference** tab to see all available variables.")
             with st.form("naming_standards_form"):
-                with st.expander("1. Network & Security Devices", expanded=False):
+                with st.expander("Network & Security Devices", expanded=False):
                     st.caption("Define hostname and interface description patterns for switches, firewalls, routers, APs, SD-WAN appliances, and virtual appliances.")
                     row1a, row1b = st.columns(2)
                     with row1a:
@@ -426,7 +426,7 @@ def render_standards_tab(active_model):
                     with row7b:
                         st.markdown("")
     
-                with st.expander("2. Hypervisors & Virtual Machines", expanded=False):
+                with st.expander("Hypervisors & Virtual Machines", expanded=False):
                     st.caption("Define hostname patterns for ESXi hypervisors and VMs, plus ESXi networking interface descriptions (uplinks, port groups, VMkernel).")
                     col5, col6 = st.columns(2)
     
@@ -476,7 +476,7 @@ def render_standards_tab(active_model):
                             autocomplete="off"
                         )
     
-                with st.expander("3. NetBox Hardware YAML Schema", expanded=False):
+                with st.expander("NetBox Hardware YAML Schema", expanded=False):
                     netbox_server_yaml = st.text_area(
                         "NetBox Server YAML Guidelines",
                         value=current_rules.get("netbox_server_yaml", ""),
@@ -484,8 +484,7 @@ def render_standards_tab(active_model):
                         key="form_yaml",
                     )
     
-                st.markdown("---")
-                with st.expander("4. Custom Pattern & AI Assistant", expanded=False):
+                with st.expander("Custom Pattern & AI Assistant", expanded=False):
                     st.caption("Describe a naming convention in plain text and let AI build a template for you. Verify the Label / Key / Template below, then click **➕ Add to Standards**.")
                     ai_desc = st.text_input(
                         "Describe the naming convention",
@@ -611,11 +610,11 @@ def render_standards_tab(active_model):
                     # Force immediate rerun
                     st.rerun()
 
-        with st.expander("⚙️ 2. Device Type & Interface Type Presets", expanded=False):
-            _render_preset_manager(current_rules)
-
-        with st.expander("🛠️ 3. Manage Syntax Auto-Correction Rules", expanded=False):
+        with st.expander("🛠️ Manage Syntax Auto-Correction Rules", expanded=False):
             _render_auto_correction_manager(active_model)
+
+        with st.expander("⚙️ Device Type & Interface Type Presets", expanded=False):
+            _render_preset_manager(current_rules)
 
     # Tab 2: View Full Prompt (Read-Only)
     with tab2:
