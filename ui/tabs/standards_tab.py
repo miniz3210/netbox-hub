@@ -393,10 +393,10 @@ def render_standards_tab(active_model):
     st.session_state["naming_rules"] = current_rules
     
     # Create tabs for different editing modes
-    tab1, tab2, tab3, tab4 = st.tabs(["📝 Edit Standards", "📄 View Full Prompt", "📘 Pattern Variables Reference", "📜 Change History"])
+    tab_edit, tab_vars, tab_history = st.tabs(["📝 Edit Standards", "📘 Pattern Variables Reference", "📜 Change History"])
     
     # Tab 1: Editable Form Interface
-    with tab1:
+    with tab_edit:
         with st.expander("📝 Edit Naming Patterns", expanded=False):
             st.info("💡 Modify the naming patterns below. Changes are saved when you click 'Save Changes'. Use the **Pattern Variables Reference** tab to see all available variables.")
             with st.form("naming_standards_form"):
@@ -562,7 +562,7 @@ def render_standards_tab(active_model):
                         key="form_yaml",
                     )
     
-                with st.expander("Custom Pattern & AI Assistant", expanded=False):
+                with st.expander("✨ AI Assistant: Generate Custom Naming Pattern", expanded=False):
                     st.caption("Describe a naming convention in plain text and let AI build a template for you. Verify the Label / Key / Template below, then click **➕ Add to Standards**.")
                     ai_desc = st.text_input(
                         "Describe the naming convention",
@@ -584,35 +584,36 @@ def render_standards_tab(active_model):
                                     st.error(f"❌ AI pattern generation failed: {e}")
                         else:
                             st.warning("⚠️ Please describe the naming convention first.")
-                    col_new_l, col_new_k, col_new_t = st.columns([3, 3, 4])
-                    with col_new_l:
-                        custom_new_label = st.text_input(
-                            "Custom Pattern Label", value=st.session_state.get("custom_new_label", ""),
-                            key="custom_new_label", placeholder="e.g. SAN Storage",
-                        )
-                    with col_new_k:
-                        custom_new_key = st.text_input(
-                            "Custom Pattern Key", value=st.session_state.get("custom_new_key", ""),
-                            key="custom_new_key", placeholder="e.g. san_pattern",
-                        )
-                    with col_new_t:
-                        custom_new_tpl = st.text_input(
-                            "Custom Pattern Template", value=st.session_state.get("custom_new_tpl", ""),
-                            key="custom_new_tpl", placeholder="e.g. SAN<Country><Site><Seq>",
-                        )
-                    existing_customs = get_custom_patterns(current_rules)
-                    if existing_customs:
-                        with st.expander("Existing Custom Patterns", expanded=False):
-                            for ccp in existing_customs:
-                                st.markdown(f"- **{ccp.get('key')}** (`{ccp.get('pattern')}`) — {ccp.get('label')}")
 
-                col_save, col_add, col_reset = st.columns([2, 2, 1])
+                col_new_l, col_new_k, col_new_t = st.columns([3, 3, 4])
+                with col_new_l:
+                    custom_new_label = st.text_input(
+                        "Custom Pattern Label", value=st.session_state.get("custom_new_label", ""),
+                        key="custom_new_label", placeholder="e.g. SAN Storage",
+                    )
+                with col_new_k:
+                    custom_new_key = st.text_input(
+                        "Custom Pattern Key", value=st.session_state.get("custom_new_key", ""),
+                        key="custom_new_key", placeholder="e.g. san_pattern",
+                    )
+                with col_new_t:
+                    custom_new_tpl = st.text_input(
+                        "Custom Pattern Template", value=st.session_state.get("custom_new_tpl", ""),
+                        key="custom_new_tpl", placeholder="e.g. SAN<Country><Site><Seq>",
+                    )
+                existing_customs = get_custom_patterns(current_rules)
+                if existing_customs:
+                    with st.expander("Existing Custom Patterns", expanded=False):
+                        for ccp in existing_customs:
+                            st.markdown(f"- **{ccp.get('key')}** (`{ccp.get('pattern')}`) — {ccp.get('label')}")
+
+                col_save, col_add, col_reset = st.columns([1.5, 1.5, 1])
                 with col_save:
-                    submitted = st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
+                    submitted = st.form_submit_button("💾 Save Changes", type="primary")
                 with col_add:
-                    add_custom = st.form_submit_button("➕ Add to Standards", use_container_width=True)
+                    add_custom = st.form_submit_button("➕ Add to Standards")
                 with col_reset:
-                    reset = st.form_submit_button("🔄 Reset to Defaults", use_container_width=True)
+                    reset = st.form_submit_button("🔄 Reset to Defaults")
 
                 if submitted:
                     # Preserve any user-defined pattern_variables added via Edit Mode
@@ -694,33 +695,20 @@ def render_standards_tab(active_model):
         with st.expander("⚙️ Device Type & Interface Type Presets", expanded=False):
             _render_preset_manager(current_rules)
 
-    # Tab 2: View Full Prompt (Read-Only)
-    with tab2:
-        st.markdown("##### Active Infrastructure Guidelines")
-        st.caption("This is the complete prompt that AI uses to validate naming conventions. It's automatically generated from your configured patterns.")
-        
-        # Always reload from session state or file to ensure latest updates
-        if "naming_rules" in st.session_state:
-            current_rules_for_view = st.session_state["naming_rules"]
-        else:
-            current_rules_for_view = load_naming_rules()
-        
-        prompt_rep = export_rules_as_prompt(current_rules_for_view)
-        
-        # Use a dynamic key that changes when rules are updated to force widget refresh
-        text_area_key = f"standards_display_{hash(str(current_rules_for_view))}"
-        st.text_area("System Context", value=prompt_rep, height=500, disabled=True, key=text_area_key)
-        
-        st.download_button(
-            "📥 Download Guidelines Prompt (.txt)", 
-            prompt_rep, 
-            "naming_standards.txt", 
-            "text/plain",
-            use_container_width=True
-        )
+        # Export full system prompt at the bottom of Edit Standards
+        full_prompt_text = export_rules_as_prompt(current_rules)
+        with st.expander("📋 Export Full System Prompt for External AI", expanded=False):
+            st.caption("Copy this complete prompt directly into ChatGPT, Claude, or other external AI models to enforce your organization's naming standards.")
+            st.code(full_prompt_text, language="markdown")
+            st.download_button(
+                label="💾 Download Prompt (.txt)",
+                data=full_prompt_text,
+                file_name="infrastructure_naming_standards_prompt.txt",
+                mime="text/plain"
+            )
     
     # Tab 3: Pattern Variables Reference
-    with tab3:
+    with tab_vars:
         st.markdown("##### 📘 Pattern Variables Reference Guide")
         st.caption("All available pattern variables currently configured. These drive the dynamic input fields in the Naming tab.")
         variables_now = get_pattern_variables(current_rules)
@@ -833,7 +821,7 @@ def render_standards_tab(active_model):
         st.caption("Use these variables in your naming patterns. The Naming tab will automatically replace them with actual values; optional ones only appear when filled.")
     
     # Tab 4: Change History
-    with tab4:
+    with tab_history:
         st.markdown("##### 📜 Naming Standards Change History")
         st.caption("View and restore previous versions of your naming standards. The last 10 changes are saved automatically.")
         
