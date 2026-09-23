@@ -263,14 +263,17 @@ import re
 from config.naming_rules import get_naming_patterns, get_pattern_variables, load_naming_rules
 
 
-DEVICE_TYPE_OPTIONS = [
-    "SW",
-    "VS",
-    "FW",
-    "ION",
-    "WAP",
-    "RTR",
-    "VA",
+# Preset definitions are ordered and reference YAML pattern keys. Options are derived
+# dynamically from the keys present in data/naming_rules.yaml so adding/removing a
+# pattern in the Standards Tab is reflected immediately.
+DEVICE_PRESET_DEFS = [
+    ("SW", "Switch (SW / SWI)", "branch_switch"),
+    ("VS", "Virtual Chassis / Stack (VS)", "branch_stack"),
+    ("FW", "Firewall / Security (FW)", "branch_firewall"),
+    ("ION", "SD-WAN / Prisma (ION)", "branch_ion"),
+    ("WAP", "Wireless AP (WAP)", "branch_ap"),
+    ("RTR", "Router (RTR)", "branch_router"),
+    ("VA", "Virtual Appliance (VA)", "branch_va"),
 ]
 DEVICE_TYPE_LABELS = {
     "SW": "Switch (SW / SWI)",
@@ -281,22 +284,67 @@ DEVICE_TYPE_LABELS = {
     "RTR": "Router (RTR)",
     "VA": "Virtual Appliance (VA)",
 }
-DEVICE_PATTERN_KEYS = {
-    "SW": "branch_switch",
-    "VS": "branch_stack",
-    "FW": "branch_firewall",
-    "ION": "branch_ion",
-    "WAP": "branch_ap",
-    "RTR": "branch_router",
-    "VA": "branch_va",
-}
-INTERFACE_OPTIONS = [
-    "Switch Uplink (Inter-Switch)",
-    "Switch LAG Member (LACP)",
-    "Switch Port-Channel (Logical)",
-    "Switch Access Port (Endpoint)",
-    "Firewall Security Zone Interface",
+
+INTERFACE_PRESET_DEFS = [
+    ("Uplink", "Switch Uplink (Inter-Switch)", "switch_uplink_desc"),
+    ("LAG", "Switch LAG Member (LACP)", "switch_lag_member"),
+    ("Po", "Switch Port-Channel (Logical)", "switch_port_channel"),
+    ("Access", "Switch Access Port (Endpoint)", "switch_access_desc"),
+    ("FW Zone", "Firewall Security Zone Interface", "firewall_interface"),
 ]
+
+# Reference (label, filter/examples) metadata keyed by device preset code.
+DEVICE_REF_INFO = {
+    "SW": ("Switch", "SW", "SWUSNYC01-0       (Switch Stack, Member 0)\nSWIUSLON01        (London Switch 01)"),
+    "VS": ("Virtual Chassis", "VS", "VSUSNYC01-0       (Virtual Chassis, Member 0)\nVSUSLON01-1"),
+    "FW": ("Firewall", "FW", "FWUSNYC01         (NYC Firewall 01)\nFWUSNYCPA01       (NYC Palo Alto FW 01)"),
+    "ION": ("SD-WAN ION", "ION", "IONUSNYC01        (NYC SD-WAN 01)\nIONUSLON01"),
+    "WAP": ("Wireless AP", "WAP", "WAPUSNYC01        (Access Point NYC 01)\nWAPUSLON01        (Access Point London 01)"),
+    "RTR": ("Router", "RTR", "RTRUSNYC01        (NYC Router 01)\nRTRUSLON01"),
+    "VA": ("Virtual Appliance", "VA", "VAUSNYC01         (NYC Virtual Appliance 01)\nVAUSLON01"),
+}
+
+# Reference (label, default examples) metadata keyed by interface preset code.
+INTERFACE_REF_INFO = {
+    "Uplink": ("Switch Uplink Interface", "Uplink_to_SWUSNYC02-0_Gi1/0/48\nUplink_to_FWUSNYC01_Te1/0/1\nUplink_to_Huawei-Core_XGE0/0/31"),
+    "LAG": ("LAG Member Port", "LACP_to_SWUSNYC02-0_Gi1/0/1\nLACP_to_FWUSNYC01_Po1\nLACP_to_SWUSLONCORE01_Te1/0/1"),
+    "Po": ("Port-Channel Interface", "LAG1_to_SWUSNYC02-0\nLAG2_to_FWUSNYC01\nLAG5_to_CV-CPD"),
+    "Access": ("Access Port Interface", "Data - PC-001_eth0\nVoice - IP-Phone-101_PoE\nGuest - Printer-Lab_NIC1"),
+    "FW Zone": ("Firewall Interface", "TRUST_10\nUNTRUST_100\nDMZ_50"),
+}
+
+INTERFACE_REF_PATTERNS = {
+    "Uplink": re.compile(r'(?i)uplink|to_'),
+    "LAG": re.compile(r'(?i)lacp|lag_member'),
+    "Po": re.compile(r'(?i)\bpo\d+|port.channel|lag\d+'),
+    "Access": re.compile(r'(?i)\bvlan|access|_eth|_nic|_poe'),
+    "FW Zone": re.compile(r'(?i)\b(trust|untrust|dmz|zone|inside|outside|if)\b|\.\d+'),
+}
+
+
+def _device_presets(naming_patterns):
+    """Device preset (code, label, pattern_key) tuples whose key exists in the YAML rules."""
+    return [(code, DEVICE_TYPE_LABELS.get(code, label), key)
+            for code, label, key in DEVICE_PRESET_DEFS if key in naming_patterns]
+
+
+def _interface_presets(naming_patterns):
+    """Interface preset (code, label, pattern_key) tuples whose key exists in the YAML rules."""
+    return [(code, label, key) for code, label, key in INTERFACE_PRESET_DEFS if key in naming_patterns]
+
+
+def _dev_pattern_key(dev_code, presets):
+    for code, _label, key in presets:
+        if code == dev_code:
+            return key
+    return presets[0][2] if presets else "branch_switch"
+
+
+def _interface_ref(intf_code):
+    return INTERFACE_REF_INFO.get(intf_code, ("Interface", ""))
+
+def _ref_info(dev_code):
+    return DEVICE_REF_INFO.get(dev_code, ("Device", "", "SWUSNYC01-0       (Switch Stack)\nWAPUSNYC01        (Access Point 01)\nFWUSNYCPA01       (Firewall 01)"))
 
 
 def _edit_toggle(pattern_key):
@@ -315,31 +363,14 @@ def _edit_toggle(pattern_key):
     return bool(toggled)
 
 
-def _sel_pattern_key(dev_type_preset):
-    return DEVICE_PATTERN_KEYS.get(dev_type_preset, "branch_switch")
+def _interface_key(intf_code, presets):
+    for code, _label, key in presets:
+        if code == intf_code:
+            return key
+    return presets[0][2] if presets else "switch_uplink_desc"
 
 
-def _interface_key(opt):
-    return {
-        INTERFACE_OPTIONS[0]: "switch_uplink_desc",
-        INTERFACE_OPTIONS[1]: "switch_lag_member",
-        INTERFACE_OPTIONS[2]: "switch_port_channel",
-        INTERFACE_OPTIONS[3]: "switch_access_desc",
-        INTERFACE_OPTIONS[4]: "firewall_interface",
-    }.get(opt, "switch_uplink_desc")
-
-
-def _interface_ref(opt):
-    return {
-        INTERFACE_OPTIONS[0]: ("Switch Uplink Interface", "Uplink_to_SWUSNYC02-0_Gi1/0/48\nUplink_to_FWUSNYC01_Te1/0/1\nUplink_to_Huawei-Core_XGE0/0/31"),
-        INTERFACE_OPTIONS[1]: ("LAG Member Port", "LACP_to_SWUSNYC02-0_Gi1/0/1\nLACP_to_FWUSNYC01_Po1\nLACP_to_SWUSLONCORE01_Te1/0/1"),
-        INTERFACE_OPTIONS[2]: ("Port-Channel Interface", "LAG1_to_SWUSNYC02-0\nLAG2_to_FWUSNYC01\nLAG5_to_CV-CPD"),
-        INTERFACE_OPTIONS[3]: ("Access Port Interface", "Data - PC-001_eth0\nVoice - IP-Phone-101_PoE\nGuest - Printer-Lab_NIC1"),
-        INTERFACE_OPTIONS[4]: ("Firewall Interface", "TRUST_10\nUNTRUST_100\nDMZ_50"),
-    }.get(opt, ("Interface", ""))
-
-
-def _interface_ref_examples(intf_type):
+def _interface_ref_examples(intf_code):
     """Return ``(header, records_text)`` for the active interface type.
 
     **header** — status title rendered with ``st.markdown`` (bold).
@@ -347,18 +378,10 @@ def _interface_ref_examples(intf_type):
     so every entry occupies its own monospace row matching Column 1's reference box.
     """
     from core.shared_backup_state import SharedBackupState
-    import re as _re
 
-    _, defaults = _interface_ref(intf_type)
+    _, defaults = _interface_ref(intf_code)
 
-    patterns = {
-        INTERFACE_OPTIONS[0]: _re.compile(r'(?i)uplink|to_'),
-        INTERFACE_OPTIONS[1]: _re.compile(r'(?i)lacp|lag_member'),
-        INTERFACE_OPTIONS[2]: _re.compile(r'(?i)\bpo\d+|port.channel|lag\d+'),
-        INTERFACE_OPTIONS[3]: _re.compile(r'(?i)\bvlan|access|_eth|_nic|_poe'),
-        INTERFACE_OPTIONS[4]: _re.compile(r'(?i)\b(trust|untrust|dmz|zone|inside|outside|if)\b|\.\d+'),
-    }
-    rx = patterns.get(intf_type, patterns[INTERFACE_OPTIONS[0]])
+    rx = INTERFACE_REF_PATTERNS.get(intf_code, INTERFACE_REF_PATTERNS["Uplink"])
 
     objects = []
     for endpoint in ("dcim/interfaces", "dcim_interfaces", "dcim/interface-templates"):
@@ -398,19 +421,6 @@ def _render_esxi_pattern(pat: str, vals: dict, variables: dict) -> str:
     Standby, Network, etc.) come from the editable template - none are hardcoded
     here."""
     return render_dynamic_pattern(pat, vals, variables)
-
-
-def _ref_info(dev_type):
-    refs = {
-        "SW": ("Switch", "SW", "SWUSNYC01-0       (Switch Stack, Member 0)\nSWIUSLON01        (London Switch 01)"),
-        "VS": ("Virtual Chassis", "VS", "VSUSNYC01-0       (Virtual Chassis, Member 0)\nVSUSLON01-1"),
-        "FW": ("Firewall", "FW", "FWUSNYC01         (NYC Firewall 01)\nFWUSNYCPA01       (NYC Palo Alto FW 01)"),
-        "ION": ("SD-WAN ION", "ION", "IONUSNYC01        (NYC SD-WAN 01)\nIONUSLON01"),
-        "WAP": ("Wireless AP", "WAP", "WAPUSNYC01        (Access Point NYC 01)\nWAPUSLON01        (Access Point London 01)"),
-        "RTR": ("Router", "RTR", "RTRUSNYC01        (NYC Router 01)\nRTRUSLON01"),
-        "VA": ("Virtual Appliance", "VA", "VAUSNYC01         (NYC Virtual Appliance 01)\nVAUSLON01"),
-    }
-    return refs.get(dev_type, ("Device", "", "SWUSNYC01-0       (Switch Stack)\nWAPUSNYC01        (Access Point 01)\nFWUSNYCPA01       (Firewall 01)"))
 
 
 def render_naming_tab(active_model):
@@ -454,10 +464,19 @@ def _asset_class_1(case_mode, active_model, naming_patterns, variables):
     st.markdown("---")
 
     col_a, col_b = st.columns([1, 1])
+    # Presets derived dynamically from the pattern keys present in data/naming_rules.yaml.
+    dev_presets = _device_presets(naming_patterns)
+    intf_presets = _interface_presets(naming_patterns)
+    dev_codes = [code for code, _label, _key in dev_presets]
+    intf_codes = [code for code, _label, _key in intf_presets]
+    if not intf_codes:
+        intf_codes = [code for code, _label, _key in INTERFACE_PRESET_DEFS]
+    if not dev_codes:
+        dev_codes = [code for code, _label, _key in DEVICE_PRESET_DEFS]
     with col_a:
         st.markdown("#### Universal Device Hostname Generator")
-        dev_type = st.radio("Device Type", DEVICE_TYPE_OPTIONS, horizontal=True, key="dev_prefix_sel", help="Select the device class to generate a standardized hostname.")
-        pk = _sel_pattern_key(dev_type)
+        dev_type = st.radio("Device Type", dev_codes, horizontal=True, key="dev_prefix_sel", help="Select the device class to generate a standardized hostname.")
+        pk = _dev_pattern_key(dev_type, dev_presets)
         edit_on = _edit_toggle(pk)
         pat = naming_patterns.get(pk, "")
         if edit_on:
@@ -484,8 +503,14 @@ def _asset_class_1(case_mode, active_model, naming_patterns, variables):
 
     with col_b:
         st.markdown("#### Switch & Firewall Interface Formatter")
-        intf_type = st.radio("Interface Type", INTERFACE_OPTIONS, key="p_cat_sel")
-        ipk = _interface_key(intf_type)
+        intf_type = st.radio(
+            "Interface Type",
+            intf_codes,
+            horizontal=True,
+            key="p_cat_sel",
+            help="Uplink = Inter-Switch | LAG = LACP member | Po = Port-Channel (logical) | Access = endpoint port | FW Zone = firewall security zone",
+        )
+        ipk = _interface_key(intf_type, intf_presets)
         edit_on = _edit_toggle(ipk)
         pat = naming_patterns.get(ipk, "")
         if edit_on:

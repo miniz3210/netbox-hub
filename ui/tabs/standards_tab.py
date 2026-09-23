@@ -72,7 +72,11 @@ def _render_auto_correction_manager(active_model: str) -> None:
                 st.warning("⚠️ Please describe the correction first.")
 
     for category in categories:
-        with st.expander("🛠️ Auto-Correction Rules", expanded=True):
+        category_title = {
+            "port_shortening": "🔌 Port Abbreviation Rules (Interface Shortening)",
+            "vmware": "☁️ VMware Syntax Rules",
+        }.get(category, f"🛠️ Auto-Correction Rules — {category}")
+        with st.expander(category_title, expanded=True):
             items = list(rules[category])
             updated = []
             pending_delete = None
@@ -204,9 +208,10 @@ def render_standards_tab(active_model):
         
         with st.form("naming_standards_form"):
             st.markdown("#### 1. Network & Security Devices")
-            col1, col2 = st.columns(2)
-            
-            with col1:
+            # Row-by-row st.columns(2) pairs so left hostname and right interface
+            # description baselines align evenly.
+            row1a, row1b = st.columns(2)
+            with row1a:
                 branch_switch = st.text_input(
                     "Switch Hostname Pattern (SW / SWI)",
                     value=current_rules.get("branch_switch", ""),
@@ -214,50 +219,7 @@ def render_standards_tab(active_model):
                     key="form_switch",
                     autocomplete="off"
                 )
-                branch_stack = st.text_input(
-                    "Virtual Chassis / Stack Pattern (VS)",
-                    value=current_rules.get("branch_stack", ""),
-                    help="Format: VS<Country><State><Site><Seq>-<StackID>",
-                    key="form_stack",
-                    autocomplete="off"
-                )
-                branch_ap = st.text_input(
-                    "Wireless AP Pattern (WAP)",
-                    value=current_rules.get("branch_ap", ""),
-                    help="Format: WAP<Country><State><Site><Seq>",
-                    key="form_ap",
-                    autocomplete="off"
-                )
-                branch_firewall = st.text_input(
-                    "Firewall Pattern (FW)",
-                    value=current_rules.get("branch_firewall", current_rules.get("branch_security", "")),
-                    help="Format: FW<Country><State><Site><Vendor><Seq>",
-                    key="form_fw",
-                    autocomplete="off"
-                )
-                branch_ion = st.text_input(
-                    "SD-WAN / Prisma Pattern (ION)",
-                    value=current_rules.get("branch_ion", ""),
-                    help="Format: ION<Country><State><Site><Seq>",
-                    key="form_ion",
-                    autocomplete="off"
-                )
-                branch_router = st.text_input(
-                    "Router Pattern (RTR)",
-                    value=current_rules.get("branch_router", ""),
-                    help="Format: RTR<Country><State><Site><Zone><Seq>",
-                    key="form_rtr",
-                    autocomplete="off"
-                )
-                branch_va = st.text_input(
-                    "Virtual Appliance Pattern (VA)",
-                    value=current_rules.get("branch_va", ""),
-                    help="Format: VA<Country><State><Site><Zone><Seq>",
-                    key="form_va",
-                    autocomplete="off"
-                )
-            
-            with col2:
+            with row1b:
                 switch_uplink_desc = st.text_input(
                     "Switch Uplink Description",
                     value=current_rules.get("switch_uplink_desc", ""),
@@ -265,6 +227,17 @@ def render_standards_tab(active_model):
                     key="form_uplink",
                     autocomplete="off"
                 )
+
+            row2a, row2b = st.columns(2)
+            with row2a:
+                branch_stack = st.text_input(
+                    "Virtual Chassis / Stack Pattern (VS)",
+                    value=current_rules.get("branch_stack", ""),
+                    help="Format: VS<Country><State><Site><Seq>-<StackID>",
+                    key="form_stack",
+                    autocomplete="off"
+                )
+            with row2b:
                 switch_lag_member = st.text_input(
                     "LAG Member Description",
                     value=current_rules.get("switch_lag_member", ""),
@@ -272,6 +245,17 @@ def render_standards_tab(active_model):
                     key="form_lag",
                     autocomplete="off"
                 )
+
+            row3a, row3b = st.columns(2)
+            with row3a:
+                branch_ap = st.text_input(
+                    "Wireless AP Pattern (WAP)",
+                    value=current_rules.get("branch_ap", ""),
+                    help="Format: WAP<Country><State><Site><Seq>",
+                    key="form_ap",
+                    autocomplete="off"
+                )
+            with row3b:
                 switch_port_channel = st.text_input(
                     "Port-Channel Description",
                     value=current_rules.get("switch_port_channel", ""),
@@ -279,9 +263,17 @@ def render_standards_tab(active_model):
                     key="form_po",
                     autocomplete="off"
                 )
-            
-            col3, col4 = st.columns(2)
-            with col3:
+
+            row4a, row4b = st.columns(2)
+            with row4a:
+                branch_firewall = st.text_input(
+                    "Firewall Pattern (FW)",
+                    value=current_rules.get("branch_firewall", current_rules.get("branch_security", "")),
+                    help="Format: FW<Country><State><Site><Vendor><Seq>",
+                    key="form_fw",
+                    autocomplete="off"
+                )
+            with row4b:
                 switch_access_desc = st.text_input(
                     "Access Port Description",
                     value=current_rules.get("switch_access_desc", ""),
@@ -289,7 +281,17 @@ def render_standards_tab(active_model):
                     key="form_access",
                     autocomplete="off"
                 )
-            with col4:
+
+            row5a, row5b = st.columns(2)
+            with row5a:
+                branch_ion = st.text_input(
+                    "SD-WAN / Prisma Pattern (ION)",
+                    value=current_rules.get("branch_ion", ""),
+                    help="Format: ION<Country><State><Site><Seq>",
+                    key="form_ion",
+                    autocomplete="off"
+                )
+            with row5b:
                 firewall_interface = st.text_input(
                     "Firewall Interface Description",
                     value=current_rules.get("firewall_interface", ""),
@@ -297,6 +299,30 @@ def render_standards_tab(active_model):
                     key="form_fw_int",
                     autocomplete="off"
                 )
+
+            row6a, row6b = st.columns(2)
+            with row6a:
+                branch_router = st.text_input(
+                    "Router Pattern (RTR)",
+                    value=current_rules.get("branch_router", ""),
+                    help="Format: RTR<Country><State><Site><Zone><Seq>",
+                    key="form_rtr",
+                    autocomplete="off"
+                )
+            with row6b:
+                st.markdown("")
+
+            row7a, row7b = st.columns(2)
+            with row7a:
+                branch_va = st.text_input(
+                    "Virtual Appliance Pattern (VA)",
+                    value=current_rules.get("branch_va", ""),
+                    help="Format: VA<Country><State><Site><Zone><Seq>",
+                    key="form_va",
+                    autocomplete="off"
+                )
+            with row7b:
+                st.markdown("")
             
             st.markdown("#### 2. Hypervisors & Virtual Machines")
             col5, col6 = st.columns(2)
