@@ -5,6 +5,7 @@ from config.naming_rules import (
     load_naming_rules, save_naming_rules, export_rules_as_prompt,
     load_history, restore_from_history, clear_history,
     get_pattern_variables, get_naming_patterns, get_custom_patterns,
+    get_device_presets, get_interface_presets, make_preset_key,
 )
 from core.naming_engine import generate_naming_pattern, generate_autocorrect_rule
 from utils.formatters import (
@@ -77,6 +78,11 @@ def _render_auto_correction_manager(active_model: str) -> None:
             "vmware": "☁️ VMware Syntax Rules",
         }.get(category, f"🛠️ Auto-Correction Rules — {category}")
         with st.expander(category_title, expanded=True):
+            st.caption(
+                "Each row is a regex pattern → replacement pair. Edit inline or use "
+                "the AI generator above to create new rules. The **On** checkbox "
+                "enables/disables a rule without deleting it."
+            )
             items = list(rules[category])
             updated = []
             pending_delete = None
@@ -87,14 +93,12 @@ def _render_auto_correction_manager(active_model: str) -> None:
                         "Original Pattern",
                         value=rule.get("pattern", ""),
                         key=f"ac_{category}_p_{idx}",
-                        help="Python regex applied to the raw input.",
                     )
                 with col_r:
                     r = st.text_input(
                         "Replacement",
                         value=rule.get("replacement", ""),
                         key=f"ac_{category}_r_{idx}",
-                        help="Replacement string (may reference regex groups, e.g. \\1).",
                     )
                 with col_d:
                     d = st.text_input(
@@ -108,7 +112,6 @@ def _render_auto_correction_manager(active_model: str) -> None:
                         "On",
                         value=bool(rule.get("enabled", True)),
                         key=f"ac_{category}_e_{idx}",
-                        help="Toggle this rule on/off without deleting it.",
                     )
                 with col_del:
                     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
@@ -172,6 +175,126 @@ def _persist_auto_corrections(data: dict) -> None:
     st.rerun()
 
 
+def _save_presets(rules: dict) -> None:
+    """Persist an updated rules dict carrying device/interface presets and reload."""
+    save_naming_rules(rules, source="Presets Manager")
+    st.session_state["naming_rules"] = rules.copy()
+    st.session_state["presets_saved"] = True
+    st.rerun()
+
+
+def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str) -> None:
+    """CRUD editor for one preset type (device/interface).
+
+    Reads the structured preset list, lets the user edit code / label / pattern template
+    inline, delete (with a minimum-of-one guard) or add new presets, then persists
+    everything back to ``data/naming_rules.yaml`` via a single Save button.
+    """
+    patterns = dict(rules.get("naming_patterns") or {})
+    updated = []
+    pending_delete = None
+    patterns_updates = {}
+
+    if presets:
+        for idx, p in enumerate(presets):
+            code = p.get("code", "")
+            label = p.get("label", "")
+            pkey = p.get("pattern_key", "")
+            tpl = patterns.get(pkey, "")
+
+            c1, c2, c3, c4 = st.columns([1.1, 2.2, 3.2, 0.6])
+            with c1:
+                ncode = st.text_input("Code", value=code, key=f"{kind}_pre_code_{idx}").strip()
+            with c2:
+                nlbl = st.text_input("Label", value=label, key=f"{kind}_pre_lbl_{idx}").strip()
+            with c3:
+                ntpl = st.text_input("Pattern Template", value=tpl, key=f"{kind}_pre_tpl_{idx}").strip()
+            with c4:
+                st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
+                if st.button("🗑️", key=f"{kind}_pre_del_{idx}"):
+                    if len(presets) > 1:
+                        pending_delete = idx
+                    else:
+                        st.session_state[f"{kind}_preset_min_one"] = True
+
+            if pending_delete == idx:
+                continue
+            final_pkey = pkey or make_preset_key(ncode or label, prefix)
+            if ntpl:
+                patterns_updates[final_pkey] = ntpl
+            if ncode and final_pkey:
+                updated.append({
+                    "code": ncode.upper(),
+                    "label": nlbl or ncode.upper(),
+                    "pattern_key": final_pkey,
+                    "description": p.get("description", ""),
+                })
+    else:
+        st.info("No presets defined. Add one below.")
+
+    if st.session_state.pop(f"{kind}_preset_min_one", False):
+        st.warning("⚠️ At least one preset must remain. Delete a different entry first.")
+
+    st.markdown("**➕ Add New Preset**")
+    ca1, ca2, ca3, ca4 = st.columns([1.1, 1.8, 2.6, 2.6])
+    with ca1:
+        new_code = st.text_input("Code", value="", placeholder="e.g. SAN", key=f"{kind}_new_code").strip()
+    with ca2:
+        new_lbl = st.text_input("Display Label", value="", placeholder="e.g. SAN Storage (SAN)", key=f"{kind}_new_lbl").strip()
+    with ca3:
+        new_tpl = st.text_input("Pattern Template", value="", placeholder="e.g. SAN<Country><Site><Seq>", key=f"{kind}_new_tpl").strip()
+    with ca4:
+        new_desc = st.text_input("Description (Optional)", value="", placeholder="Describe this preset", key=f"{kind}_new_desc").strip()
+
+    if st.button("💾 Save Presets", key=f"{kind}_preset_save", type="primary", use_container_width=True):
+        final_presets = list(updated)
+        final_patterns = dict(patterns)
+        final_patterns.update(patterns_updates)
+        if new_code and new_tpl:
+            nkey = make_preset_key(new_code, prefix)
+            while nkey in final_patterns and nkey not in [p["pattern_key"] for p in final_presets]:
+                nkey = f"{nkey}_x"
+            final_patterns[nkey] = new_tpl
+            final_presets.append({
+                "code": new_code.upper(),
+                "label": new_lbl or new_code.upper(),
+                "pattern_key": nkey,
+                "description": new_desc,
+            })
+        elif new_code and not new_tpl:
+            st.error("⚠️ Provide a Pattern Template to add a new preset.")
+            return
+        if not final_presets:
+            st.error("⚠️ At least one preset is required.")
+            return
+        rules["naming_patterns"] = final_patterns
+        if kind == "device":
+            rules["device_presets"] = final_presets
+        else:
+            rules["interface_presets"] = final_presets
+        _save_presets(rules)
+
+
+def _render_preset_manager(current_rules) -> None:
+    """Full CRUD for Device Type and Interface Type presets (Standards Tab)."""
+    st.markdown("---")
+    st.markdown("##### 🧩 Device Type & Interface Type Presets")
+    st.caption(
+        "Manage the horizontal radio choices used in the Naming tab. Edit code, label, or "
+        "pattern template inline, delete a preset, or add a new one (e.g. SAN / OOB / CONSOLE). "
+        "Changes are written to `data/naming_rules.yaml` and reflected in the Naming tab immediately."
+    )
+
+    device_presets = get_device_presets(current_rules)
+    interface_presets = get_interface_presets(current_rules)
+
+    with st.expander("🔧 Device Type Presets", expanded=True):
+        _preset_type_editor("device", device_presets, current_rules, prefix="branch")
+
+    with st.expander("🖧 Interface Type Presets", expanded=True):
+        _preset_type_editor("interface", interface_presets, current_rules, prefix="iface")
+
+
 
 def render_standards_tab(active_model):
     st.subheader("📖 Infrastructure Naming Standards Configuration")
@@ -181,6 +304,10 @@ def render_standards_tab(active_model):
     if "variables_saved" in st.session_state and st.session_state["variables_saved"]:
         st.success("✅ Variables saved successfully!")
         st.session_state["variables_saved"] = False
+
+    if "presets_saved" in st.session_state and st.session_state["presets_saved"]:
+        st.success("✅ Presets saved successfully!")
+        st.session_state["presets_saved"] = False
 
     # Check for save success message
     if "standards_saved" in st.session_state and st.session_state["standards_saved"]:
@@ -520,6 +647,9 @@ def render_standards_tab(active_model):
         # ── Auto-Correction Rule Manager (externalized to YAML) ────────
         _render_auto_correction_manager(active_model)
 
+        # ── Device / Interface Preset Manager (drives Naming tab radios) ──
+        _render_preset_manager(current_rules)
+
     # Tab 2: View Full Prompt (Read-Only)
     with tab2:
         st.markdown("##### Active Infrastructure Guidelines")
@@ -574,12 +704,10 @@ def render_standards_tab(active_model):
                     with c_ph:
                         var_ph = st.text_input("Placeholder", value=meta.get("placeholder", ""), key=f"var_ph_{name}").strip()
                     with c_df:
-                        var_def = st.text_input("Auto-Fill", value=meta.get("default", ""), key=f"var_def_{name}",
-                                               help="Default value the Naming tab input starts with.")
+                        var_def = st.text_input("Auto-Fill", value=meta.get("default", ""), key=f"var_def_{name}")
                     with c_opt:
                         st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-                        var_opt = st.checkbox("Optional", value=bool(meta.get("optional")), key=f"var_opt_{name}",
-                                              help="Optional variables start empty and are omitted when not filled.")
+                        var_opt = st.checkbox("Optional", value=bool(meta.get("optional")), key=f"var_opt_{name}")
                     with c_up:
                         st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
                         if idx > 0:
@@ -629,12 +757,10 @@ def render_standards_tab(active_model):
             new_name = st.text_input("Variable Name (e.g. Speed, Standby_vmnics)", value="", key="var_new_name").strip()
             new_label = st.text_input("Display Label", value="", placeholder="e.g. Interface Speed", key="var_new_label").strip()
             new_ph = st.text_input("Placeholder Example", value="", placeholder="e.g. 10G, 25G", key="var_new_ph").strip()
-            new_def = st.text_input("Default Auto-Fill (Optional)", value="", placeholder="e.g. vmnic0", key="var_new_def",
-                                   help="Default value the Naming tab input starts with.")
+            new_def = st.text_input("Default Auto-Fill (Optional)", value="", placeholder="e.g. vmnic0", key="var_new_def")
             new_optional = st.checkbox(
                 "Optional (default empty unless user inputs)", value=True,
                 key="var_new_optional",
-                help="Optional variables start blank and are omitted from output when not filled.",
             )
             if st.button("➕ Add Variable", key="var_new_add", type="primary"):
                 if new_name:
