@@ -334,23 +334,20 @@ def render_standards_tab(active_model):
         st.info("💡 Modify the naming patterns below. Changes are saved when you click 'Save Changes'. Use the **Pattern Variables Reference** tab to see all available variables.")
         
         with st.form("naming_standards_form"):
-            st.markdown("#### 1. Network & Security Devices")
-            # Row-by-row st.columns(2) pairs so left hostname and right interface
-            # description baselines align evenly.
-            row1a, row1b = st.columns(2)
-            with row1a:
-                branch_switch = st.text_input(
-                    "Switch Hostname Pattern (SW / SWI)",
-                    value=current_rules.get("branch_switch", ""),
-                    help="Format: SW<Country><State><Site><Zone><Seq>-<StackID>",
-                    key="form_switch",
-                    autocomplete="off"
-                )
+            with st.expander("1. Network & Security Devices", expanded=True):
+                st.caption("Define hostname and interface description patterns for switches, firewalls, routers, APs, SD-WAN appliances, and virtual appliances.")
+                row1a, row1b = st.columns(2)
+                with row1a:
+                    branch_switch = st.text_input(
+                        "Switch Hostname Pattern (SW / SWI)",
+                        value=current_rules.get("branch_switch", ""),
+                        key="form_switch",
+                        autocomplete="off"
+                    )
             with row1b:
                 switch_uplink_desc = st.text_input(
                     "Switch Uplink Description",
                     value=current_rules.get("switch_uplink_desc", ""),
-                    help="Available: <Local_Device>, <Local_Port>, <Local_Port_Short>, <Remote_Device>, <Remote_Port>, <Remote_Port_Short>",
                     key="form_uplink",
                     autocomplete="off"
                 )
@@ -360,7 +357,6 @@ def render_standards_tab(active_model):
                 branch_stack = st.text_input(
                     "Virtual Chassis / Stack Pattern (VS)",
                     value=current_rules.get("branch_stack", ""),
-                    help="Format: VS<Country><State><Site><Seq>-<StackID>",
                     key="form_stack",
                     autocomplete="off"
                 )
@@ -368,7 +364,6 @@ def render_standards_tab(active_model):
                 switch_lag_member = st.text_input(
                     "LAG Member Description",
                     value=current_rules.get("switch_lag_member", ""),
-                    help="Available: <Remote_Device>, <Remote_Port>, <Remote_Port_Short>",
                     key="form_lag",
                     autocomplete="off"
                 )
@@ -378,7 +373,6 @@ def render_standards_tab(active_model):
                 branch_ap = st.text_input(
                     "Wireless AP Pattern (WAP)",
                     value=current_rules.get("branch_ap", ""),
-                    help="Format: WAP<Country><State><Site><Seq>",
                     key="form_ap",
                     autocomplete="off"
                 )
@@ -386,7 +380,6 @@ def render_standards_tab(active_model):
                 switch_port_channel = st.text_input(
                     "Port-Channel Description",
                     value=current_rules.get("switch_port_channel", ""),
-                    help="Available: <Local_Po_ID>, <Remote_Device>",
                     key="form_po",
                     autocomplete="off"
                 )
@@ -396,7 +389,6 @@ def render_standards_tab(active_model):
                 branch_firewall = st.text_input(
                     "Firewall Pattern (FW)",
                     value=current_rules.get("branch_firewall", current_rules.get("branch_security", "")),
-                    help="Format: FW<Country><State><Site><Vendor><Seq>",
                     key="form_fw",
                     autocomplete="off"
                 )
@@ -404,7 +396,6 @@ def render_standards_tab(active_model):
                 switch_access_desc = st.text_input(
                     "Access Port Description",
                     value=current_rules.get("switch_access_desc", ""),
-                    help="Available: <VLAN_ID>, <VLAN_Name>, <Device>, <Port>",
                     key="form_access",
                     autocomplete="off"
                 )
@@ -414,7 +405,6 @@ def render_standards_tab(active_model):
                 branch_ion = st.text_input(
                     "SD-WAN / Prisma Pattern (ION)",
                     value=current_rules.get("branch_ion", ""),
-                    help="Format: ION<Country><State><Site><Seq>",
                     key="form_ion",
                     autocomplete="off"
                 )
@@ -422,7 +412,6 @@ def render_standards_tab(active_model):
                 firewall_interface = st.text_input(
                     "Firewall Interface Description",
                     value=current_rules.get("firewall_interface", ""),
-                    help="Available: <Role_Zone>, <VLAN_ID>",
                     key="form_fw_int",
                     autocomplete="off"
                 )
@@ -432,7 +421,6 @@ def render_standards_tab(active_model):
                 branch_router = st.text_input(
                     "Router Pattern (RTR)",
                     value=current_rules.get("branch_router", ""),
-                    help="Format: RTR<Country><State><Site><Zone><Seq>",
                     key="form_rtr",
                     autocomplete="off"
                 )
@@ -444,29 +432,27 @@ def render_standards_tab(active_model):
                 branch_va = st.text_input(
                     "Virtual Appliance Pattern (VA)",
                     value=current_rules.get("branch_va", ""),
-                    help="Format: VA<Country><State><Site><Zone><Seq>",
                     key="form_va",
                     autocomplete="off"
                 )
             with row7b:
                 st.markdown("")
             
-            st.markdown("#### 2. Hypervisors & Virtual Machines")
-            col5, col6 = st.columns(2)
+            with st.expander("2. Hypervisors & Virtual Machines", expanded=True):
+                st.caption("Define hostname patterns for ESXi hypervisors and VMs, plus ESXi networking interface descriptions (uplinks, port groups, VMkernel).")
+                col5, col6 = st.columns(2)
             
             with col5:
                 esxi_host = st.text_area(
                     "ESXi Hypervisor Pattern",
                     value=current_rules.get("esxi_host", ""),
                     height=80,
-                    help="Format: <Site><Role><Seq>.<Domain> (e.g., ageesx001.example.corp, nycotinfhost1.example.ot)",
                     key="form_esxi"
                 )
                 vm_host = st.text_area(
                     "Virtual Machine Pattern",
                     value=current_rules.get("vm_host", ""),
                     height=80,
-                    help="Format: <Site><Role><Seq> (e.g., ageapp01, nycdb02, sydfs001)",
                     key="form_vm"
                 )
             
@@ -474,35 +460,30 @@ def render_standards_tab(active_model):
                 esxi_uplink = st.text_input(
                     "ESXi Physical Uplink",
                     value=current_rules.get("esxi_uplink", ""),
-                    help="Available: <vmnic>, <vSwitch>, <Purpose>, <Status>",
                     key="form_esxi_uplink",
                     autocomplete="off"
                 )
                 esxi_portgroup_name = st.text_input(
                     "ESXi Port Group Name",
                     value=current_rules.get("esxi_portgroup_name", ""),
-                    help="Available: <pg_network> (e.g. PG-<pg_network>)",
                     key="form_esxi_pg_name",
                     autocomplete="off"
                 )
                 esxi_portgroup = st.text_input(
                     "ESXi Port Group Description",
                     value=current_rules.get("esxi_portgroup", ""),
-                    help="Available: <PortGroup>, <Active_vmnics>, <Standby_vmnics>",
                     key="form_esxi_pg",
                     autocomplete="off"
                 )
                 esxi_vmkernel_name = st.text_input(
                     "ESXi VMkernel Name",
                     value=current_rules.get("esxi_vmkernel_name", ""),
-                    help="Available: <vmk> (e.g. <vmk>)",
                     key="form_esxi_vmk_name",
                     autocomplete="off"
                 )
                 esxi_vmkernel = st.text_input(
                     "ESXi VMkernel Description",
                     value=current_rules.get("esxi_vmkernel", ""),
-                    help="Available: <Purpose>, <vSwitch>, <Active_vmnics>, <Standby_vmnics>",
                     key="form_esxi_vmk",
                     autocomplete="off"
                 )
@@ -512,7 +493,6 @@ def render_standards_tab(active_model):
                 "NetBox Server YAML Guidelines",
                 value=current_rules.get("netbox_server_yaml", ""),
                 height=100,
-                help="Guidelines for generating NetBox device-type YAML files",
                 key="form_yaml",
             )
 
@@ -853,9 +833,37 @@ def render_standards_tab(active_model):
                         if st.button(f"👁️ View Full Details", key=f"view_{idx}", use_container_width=True):
                             st.session_state[f"show_details_{idx}"] = not st.session_state.get(f"show_details_{idx}", False)
                             st.rerun()
-                    
-                    # Show full details if toggled
+
+                    # Show delta / full details if toggled
                     if st.session_state.get(f"show_details_{idx}", False):
                         st.markdown("---")
-                        st.markdown("**Complete Pattern Configuration:**")
-                        st.json(rules)
+
+                        # Compute delta against previous entry
+                        prev_rules = history[idx + 1]["rules"] if idx + 1 < len(history) else {}
+                        all_keys = sorted(set(list(rules.keys()) + list(prev_rules.keys())))
+                        rows = []
+                        for key in all_keys:
+                            old_val = prev_rules.get(key, None)
+                            new_val = rules.get(key, None)
+                            if old_val == new_val:
+                                continue
+                            if old_val is None:
+                                rows.append((f"**[Added]** `{key}`", "—", str(new_val)))
+                            elif new_val is None:
+                                rows.append((f"**[Removed]** `{key}`", str(old_val), "—"))
+                            else:
+                                rows.append((f"`{key}`", str(old_val), str(new_val)))
+
+                        if rows:
+                            st.markdown("##### 📋 Delta Changes")
+                            st.markdown("| Setting / Pattern | Previous Value | New Value |")
+                            st.markdown("| :--- | :--- | :--- |")
+                            for setting, prev_val, new_val in rows:
+                                prev_disp = prev_val[:120] + "…" if len(prev_val) > 120 else prev_val
+                                new_disp = new_val[:120] + "…" if len(new_val) > 120 else new_val
+                                st.markdown(f"| {setting} | `{prev_disp}` | `{new_disp}` |")
+                        else:
+                            st.info("No changes detected in this version (identical to previous).")
+
+                        with st.expander("📄 View Raw JSON", expanded=False):
+                            st.json(rules)
