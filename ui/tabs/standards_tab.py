@@ -3,7 +3,7 @@ import re
 import streamlit as st
 from config.naming_rules import (
     load_naming_rules, save_naming_rules, export_rules_as_prompt,
-    load_history, restore_from_history, clear_history,
+    load_history, restore_from_history, clear_history, add_to_history,
     get_pattern_variables, get_naming_patterns, get_custom_patterns,
     get_device_presets, get_interface_presets, make_preset_key,
 )
@@ -49,29 +49,6 @@ def _render_auto_correction_manager(active_model: str) -> None:
 
     primary_category = categories[0]
 
-    with st.expander("✨ AI Assistant: Generate Rule from Natural Language", expanded=False):
-        st.caption("Describe the formatting in plain text and let AI build the regex for you.")
-        ai_desc = st.text_input(
-            "Describe the correction rule in plain text",
-            key=f"ac_{primary_category}_ai_desc",
-            placeholder="e.g. Change vlan to uppercase VLAN, or change gigabitethernet to Gi",
-        )
-        if st.button("🤖 Generate Regex Rule", key=f"ac_{primary_category}_ai_gen", use_container_width=True):
-            if ai_desc.strip():
-                try:
-                    with st.spinner(f"Generating rule using {active_model}..."):
-                        result = generate_autocorrect_rule(ai_desc.strip(), active_model)
-                    st.session_state[f"ac_{primary_category}_new_p"] = result["pattern"]
-                    st.session_state[f"ac_{primary_category}_new_r"] = result["replacement"]
-                    st.session_state[f"ac_{primary_category}_new_d"] = result["description"]
-                    st.session_state["autocorrect_ai_generated"] = True
-                    st.toast("Rule generated! Review and click '➕ Add Rule' to apply.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ AI rule generation failed: {e}")
-            else:
-                st.warning("⚠️ Please describe the correction first.")
-
     for category in categories:
         category_title = {
             "port_shortening": "🔌 Port Abbreviation Rules (Interface Shortening)",
@@ -80,7 +57,7 @@ def _render_auto_correction_manager(active_model: str) -> None:
         with st.expander(category_title, expanded=True):
             st.caption(
                 "Each row is a regex pattern → replacement pair. Edit inline or use "
-                "the AI generator above to create new rules. The **On** checkbox "
+                "the AI generator below to create new rules. The **On** checkbox "
                 "enables/disables a rule without deleting it."
             )
             items = list(rules[category])
@@ -334,7 +311,7 @@ def render_standards_tab(active_model):
         st.info("💡 Modify the naming patterns below. Changes are saved when you click 'Save Changes'. Use the **Pattern Variables Reference** tab to see all available variables.")
         
         with st.form("naming_standards_form"):
-            with st.expander("1. Network & Security Devices", expanded=True):
+            with st.expander("1. Network & Security Devices", expanded=False):
                 st.caption("Define hostname and interface description patterns for switches, firewalls, routers, APs, SD-WAN appliances, and virtual appliances.")
                 row1a, row1b = st.columns(2)
                 with row1a:
@@ -438,7 +415,7 @@ def render_standards_tab(active_model):
             with row7b:
                 st.markdown("")
             
-            with st.expander("2. Hypervisors & Virtual Machines", expanded=True):
+            with st.expander("2. Hypervisors & Virtual Machines", expanded=False):
                 st.caption("Define hostname patterns for ESXi hypervisors and VMs, plus ESXi networking interface descriptions (uplinks, port groups, VMkernel).")
                 col5, col6 = st.columns(2)
             
@@ -488,13 +465,13 @@ def render_standards_tab(active_model):
                     autocomplete="off"
                 )
             
-            st.markdown("#### 3. NetBox Hardware YAML Schema")
-            netbox_server_yaml = st.text_area(
-                "NetBox Server YAML Guidelines",
-                value=current_rules.get("netbox_server_yaml", ""),
-                height=100,
-                key="form_yaml",
-            )
+            with st.expander("3. NetBox Hardware YAML Schema", expanded=False):
+                netbox_server_yaml = st.text_area(
+                    "NetBox Server YAML Guidelines",
+                    value=current_rules.get("netbox_server_yaml", ""),
+                    height=100,
+                    key="form_yaml",
+                )
 
             st.markdown("---")
             st.markdown("#### 4. Custom Pattern & AI Assistant")
@@ -625,7 +602,8 @@ def render_standards_tab(active_model):
                 st.rerun()
 
         # ── Auto-Correction Rule Manager (externalized to YAML) ────────
-        _render_auto_correction_manager(active_model)
+        with st.expander("4. Manage Syntax Auto-Correction Rules", expanded=False):
+            _render_auto_correction_manager(active_model)
 
         # ── Device / Interface Preset Manager (drives Naming tab radios) ──
         _render_preset_manager(current_rules)
