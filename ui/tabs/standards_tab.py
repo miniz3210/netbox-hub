@@ -409,7 +409,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str) -> N
             with c3:
                 ntpl = st.text_input("Pattern Template", value=tpl, key=f"{kind}_pre_tpl_{idx}", label_visibility="collapsed").strip()
             with c4:
-                if st.button("🗑️", key=f"{kind}_pre_del_{idx}", width="stretch"):
+                if st.button("🗑️", key=f"{kind}_pre_del_{idx}"):
                     if len(presets) > 1:
                         st.session_state[_pending_del_key] = idx
                         st.rerun()
@@ -584,7 +584,7 @@ def _host_editor(rules: dict) -> None:
             ntpl = st.text_input("Pattern Template", value=tpl, key=f"host_{idx}_tpl", label_visibility="collapsed").strip()
         with c4:
             if code != "ESXi":
-                if st.button("🗑️", key=f"host_del_{idx}", width="stretch"):
+                if st.button("🗑️", key=f"host_del_{idx}"):
                     if len(host_presets) > 1:
                         st.session_state["_host_vm_del_idx"] = idx
                         st.rerun()
@@ -685,7 +685,7 @@ def _vm_editor(rules: dict) -> None:
         with c3:
             ntpl = st.text_input("Pattern Template", value=tpl, key=f"vm_tpl_{idx}", label_visibility="collapsed").strip()
         with c4:
-            if st.button("🗑️", key=f"vm_role_del_{idx}", width="stretch"):
+            if st.button("🗑️", key=f"vm_role_del_{idx}"):
                 if len(vm_presets) > 1:
                     st.session_state["_del_vm_role_idx"] = idx
                     st.rerun()
@@ -898,7 +898,7 @@ def render_standards_tab(active_model):
                         var_opt = st.checkbox("Optional", value=bool(meta.get("optional")), key=f"var_opt_{name}", label_visibility="collapsed")
                     with c_up:
                         if idx > 0:
-                            st.button("⬆️", key=f"var_up_{idx}", help=f"Move <{name}> up", width="stretch")
+                            st.button("⬆️", key=f"var_up_{idx}", help=f"Move <{name}> up")
                             if st.session_state.get(f"var_up_{idx}"):
                                 var_names[idx - 1], var_names[idx] = var_names[idx], var_names[idx - 1]
                                 reordered = {k: variables_now[k] for k in var_names}
@@ -907,7 +907,7 @@ def render_standards_tab(active_model):
                             st.markdown("<div style='min-height: 38px;'></div>", unsafe_allow_html=True)
                     with c_dn:
                         if idx < total_vars - 1:
-                            st.button("⬇️", key=f"var_dn_{idx}", help=f"Move <{name}> down", width="stretch")
+                            st.button("⬇️", key=f"var_dn_{idx}", help=f"Move <{name}> down")
                             if st.session_state.get(f"var_dn_{idx}"):
                                 var_names[idx], var_names[idx + 1] = var_names[idx + 1], var_names[idx]
                                 reordered = {k: variables_now[k] for k in var_names}
@@ -915,7 +915,7 @@ def render_standards_tab(active_model):
                         else:
                             st.markdown("<div style='min-height: 38px;'></div>", unsafe_allow_html=True)
                     with c_del:
-                        st.button("🗑️", key=f"var_del_{name}", help=f"Remove <{name}>", width="stretch")
+                        st.button("🗑️", key=f"var_del_{name}", help=f"Remove <{name}>")
 
                     if st.session_state.get(f"var_del_{name}"):
                         edited_vars[name] = None
