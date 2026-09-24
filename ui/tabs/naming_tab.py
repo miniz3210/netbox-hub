@@ -464,21 +464,27 @@ def render_naming_tab(active_model):
 
 def _site_code_assistant_compact(naming_rules, prefix: str) -> str:
     with st.expander("📍 Site Code Assistant", expanded=False):
-        loc = st.text_input(
-            "City / Location", value="", placeholder="e.g. Sydney, New York",
-            key=f"loc_compact_{prefix}",
-            help="Enter a city/location to compute its site code. City-to-code mappings follow the Original Pattern → Replacement format. Configured in Standards Tab > Naming Rules YAML (site_code_rules.exact_mappings).",
-        )
-        if st.button("Suggest and Fill", key=f"site_suggest_{prefix}"):
-            code = compute_suggested_site_code(loc, naming_rules)
-            st.session_state[f"_suggested_site_{prefix}"] = code
-            st.rerun()
-        if st.session_state.get(f"_suggested_site_{prefix}"):
-            code = st.session_state[f"_suggested_site_{prefix}"]
-            st.markdown(f"<div style='background:#1f77b4;color:white;padding:4px 8px;border-radius:6px;text-align:center;font-weight:bold'>Site: {code}</div>", unsafe_allow_html=True)
-            if st.button("Clear", key=f"site_clear_{prefix}"):
-                st.session_state.pop(f"_suggested_site_{prefix}", None)
+        loc_c, btn_c, badge_c, clear_c = st.columns([3, 1.2, 2.5, 1], vertical_alignment="center")
+        with loc_c:
+            loc = st.text_input(
+                "City / Location", value="", placeholder="Enter city e.g. Bristol, Sydney...",
+                key=f"loc_compact_{prefix}", label_visibility="collapsed",
+                help="Enter a city/location to compute its site code. City-to-code mappings follow the Original Pattern → Replacement format. Configured in Standards Tab > Site Code Mapping Rules.",
+            )
+        with btn_c:
+            if st.button("Suggest & Fill", key=f"site_suggest_{prefix}", width='stretch'):
+                code = compute_suggested_site_code(loc, naming_rules)
+                st.session_state[f"_suggested_site_{prefix}"] = code
                 st.rerun()
+        with badge_c:
+            if st.session_state.get(f"_suggested_site_{prefix}"):
+                code = st.session_state[f"_suggested_site_{prefix}"]
+                st.success(f"Site: **{code}**")
+        with clear_c:
+            if st.session_state.get(f"_suggested_site_{prefix}"):
+                if st.button("Clear", key=f"site_clear_{prefix}", width='stretch'):
+                    st.session_state.pop(f"_suggested_site_{prefix}", None)
+                    st.rerun()
     return st.session_state.get(f"_suggested_site_{prefix}", "")
 
 def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, variables, global_site=""):
