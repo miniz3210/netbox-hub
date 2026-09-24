@@ -34,7 +34,7 @@ DEFAULT_NAMING_PATTERNS = {
     "switch_port_channel": "<Local_Po_ID>_to_<Remote_Device>",
     "switch_access_desc": "<VLAN_Name> - <Device>_<Port>",
     "firewall_interface": "<Role_Zone>_<VLAN_ID>",
-    "esxi_host": "<site_prefix><role_esx><host_seq>.<domain>",
+    "esxi_host": "<site_prefix><role_esx><seq>.<domain>",
     "vm_host": "<Country><Site><Role><Seq>",
     "esxi_uplink": "<vmnic> - <vSwitch> <Purpose> <Status>",
     "esxi_portgroup_name": "PG-<pg_network>",
@@ -66,15 +66,12 @@ PATTERN_VARIABLES = {
     "Device": {"label": "Connected Device", "placeholder": "e.g. WAP01"},
     "Port": {"label": "Connected Port", "placeholder": "e.g. Gi0/1"},
     "Role_Zone": {"label": "Security Zone / Role", "placeholder": "e.g. INSIDE, OUTSIDE"},
+    "seq": {"label": "Host Sequence Number", "placeholder": "001"},
+    "domain": {"label": "Domain Name (FQDN Suffix)", "placeholder": "e.g. corp.example.com, internal.net"},
+    "role": {"label": "Role Code / Workload", "placeholder": "e.g. app, web, db, fs, dc"},
+    "role_esx": {"label": "Host Role (Optional)", "placeholder": "e.g. esx, otinfhost, infhost"},
     "site": {"label": "Site Prefix", "placeholder": "e.g. age, nyc, lon, syd"},
     "site_prefix": {"label": "Site Prefix", "placeholder": "e.g. age, nyc, lon, syd"},
-    "role": {"label": "Host Role (Optional)", "placeholder": "e.g. esx, otinfhost, infhost"},
-    "role_esx": {"label": "Host Role (Optional)", "placeholder": "e.g. esx, otinfhost, infhost"},
-    "seq": {"label": "Host Sequence Number", "placeholder": "001"},
-    "host_seq": {"label": "Host Sequence Number", "placeholder": "001"},
-    "Domain": {"label": "Domain Name (FQDN Suffix)", "placeholder": "e.g. corp.example.com, internal.net"},
-    "domain": {"label": "Domain Name (FQDN Suffix)", "placeholder": "e.g. corp.example.com, internal.net"},
-    "Role": {"label": "Role Code / Workload", "placeholder": "e.g. app, web, db, fs, dc"},
     "vm_site": {"label": "Site Prefix / Country & Site", "placeholder": "e.g. age, usnyc, uklon"},
     "vmnic": {"label": "vmnic Name", "placeholder": "vmnic", "default": "vmnic"},
     "vSwitch": {"label": "vSwitch Name", "placeholder": "vSwitch", "default": "vSwitch"},
@@ -139,6 +136,14 @@ ESXI_NETWORK_PRESETS = [
 ]
 
 LEGACY_PATTERN_KEYS = list(DEFAULT_NAMING_PATTERNS.keys())
+
+# Canonical variable key consolidation: legacy/pre-normalization keys map onto their
+# canonical snake_case counterpart so templates referencing old spellings still resolve.
+VARIABLE_ALIASES = {
+    "host_seq": "seq",
+    "Domain": "domain",
+    "Role": "role",
+}
 
 DOMAIN_ENV_KEYS = (
     "CORP_DOMAIN_IT",
@@ -248,6 +253,12 @@ def _normalize_rules(raw: dict) -> dict:
     patterns = {k: str(v) for k, v in raw_patterns.items()}
     patterns = _split_legacy_device_patterns(patterns)
     patterns = {k: (v.replace("<Local_Port_Short>", "<Local_Port>").replace("<Remote_Port_Short>", "<Remote_Port>") if isinstance(v, str) else v) for k, v in patterns.items()}
+    # Normalize legacy variable spellings to canonical snake_case keys so historical
+    # patterns (<Domain>, <Role>, <host_seq>) still resolve against the deduplicated set.
+    patterns = {
+        k: (v.replace("<Domain>", "<domain>").replace("<Role>", "<role>").replace("<host_seq>", "<seq>") if isinstance(v, str) else v)
+        for k, v in patterns.items()
+    }
     for key in LEGACY_PATTERN_KEYS:
         if key not in patterns:
             patterns[key] = DEFAULT_NAMING_PATTERNS.get(key, "")
@@ -276,6 +287,12 @@ def _normalize_rules(raw: dict) -> dict:
                 merged_vars[str(k)] = {"label": v, "placeholder": f"e.g. {k}"}
         merged_vars.pop("Local_Port_Short", None)
         merged_vars.pop("Remote_Port_Short", None)
+        # Consolidate legacy uppercase/duplicate keys into canonical snake_case names
+        for alias, canon in VARIABLE_ALIASES.items():
+            if alias in merged_vars and canon in merged_vars:
+                merged_vars.pop(alias, None)
+            elif alias in merged_vars and canon not in merged_vars:
+                merged_vars[canon] = merged_vars.pop(alias)
         variables = merged_vars
 
     merged["naming_patterns"] = dict(patterns)

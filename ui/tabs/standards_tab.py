@@ -14,10 +14,11 @@ from utils.formatters import (
     load_auto_corrections, save_auto_corrections, reset_auto_corrections,
 )
 
+def _normalize_var_name(raw: str) -> str:
+    return re.sub(r"[^a-z0-9_]", "", raw.strip().lower().replace(" ", "_"))
+
 def _diff_rule_list(category: str, old_rules: list, new_rules: list) -> list:
     """Return granular diff rows for an auto-correction rule list.
-
-    Compares individual rules by their description so rule edits surface as
     ``[Modified]`` rows (Previous replacement -> New replacement) instead of
     dumping the entire category array as a raw dict string.
     """
@@ -507,6 +508,7 @@ def render_standards_tab(active_model):
                     c_nm, c_lb, c_ph, c_df, c_opt, c_up, c_dn, c_del = st.columns([1.5, 2.0, 2.0, 1.2, 0.8, 0.4, 0.4, 0.4])
                     with c_nm:
                         var_key = st.text_input("Name", value=name, key=f"var_key_{name}").strip()
+                        var_key = _normalize_var_name(var_key)
                     with c_lb:
                         var_lbl = st.text_input("Label", value=meta.get("label", name), key=f"var_lbl_{name}").strip()
                     with c_ph:
@@ -563,6 +565,7 @@ def render_standards_tab(active_model):
         st.markdown("#### ➕ Add New Variable")
         with st.expander("➕ Add a New Variable", expanded=True):
             new_name = st.text_input("Variable Name (e.g. Speed, Standby_vmnics)", value="", key="var_new_name").strip()
+            new_name = _normalize_var_name(new_name)
             new_label = st.text_input("Display Label", value="", placeholder="e.g. Interface Speed", key="var_new_label").strip()
             new_ph = st.text_input("Placeholder Example", value="", placeholder="e.g. 10G, 25G", key="var_new_ph").strip()
             new_def = st.text_input("Default Auto-Fill (Optional)", value="", placeholder="e.g. vmnic0", key="var_new_def")
