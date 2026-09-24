@@ -6,10 +6,11 @@
   "branch_ion": "ION<Country><State><Site><Seq>",
   "branch_router": "RTR<Country><State><Site><Zone><Seq>",
   "branch_va": "VA<Country><State><Site><Zone><Seq>",
-  "switch_uplink_desc": "Uplink_to_<Remote_Device>_<Remote_Port_Short>",
-  "switch_lag_member": "LACP_to_<Remote_Device>_<Remote_Port_Short>",
+  "branch_security": "FW<Country><State><Site><Vendor><Seq>",
+  "switch_uplink_desc": "Uplink_to_<Remote_Device>_<Remote_Port>",
+  "switch_lag_member": "LACP_to_<Remote_Device>_<Remote_Port>",
   "switch_port_channel": "<Local_Po_ID>_to_<Remote_Device>",
-  "switch_access_desc": "<VLAN_Name> - <Device>_<Port>",
+  "switch_access_desc": "<VLAN_Name>-<Device>_<Port>",
   "firewall_interface": "<Role_Zone>_<VLAN_ID>",
   "esxi_host": "<site_prefix><role_esx><host_seq>.<domain>",
   "vm_host": "<Country><Site><Role><Seq>",
@@ -19,6 +20,7 @@
   "esxi_vmkernel_name": "<vmk>",
   "esxi_vmkernel": "<Purpose> Network - <vSwitch> (<Active_vmnics> Active / <Standby_vmnics> Standby)",
   "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
+  "custom_patterns": [],
   "device_presets": [
     {
       "code": "SW",
@@ -65,7 +67,7 @@
   ],
   "interface_presets": [
     {
-      "code": "Uplink",
+      "code": "UPLINK",
       "label": "Switch Uplink (Inter-Switch)",
       "pattern_key": "switch_uplink_desc",
       "description": "Inter-switch uplink description"
@@ -77,19 +79,19 @@
       "description": "LACP aggregate member description"
     },
     {
-      "code": "Po",
+      "code": "PORT-CHANNEL",
       "label": "Switch Port-Channel (Logical)",
       "pattern_key": "switch_port_channel",
       "description": "Logical port-channel / port-group description"
     },
     {
-      "code": "Access",
+      "code": "ACCESS",
       "label": "Switch Access Port (Endpoint)",
       "pattern_key": "switch_access_desc",
       "description": "Endpoint access-port description"
     },
     {
-      "code": "FW Zone",
+      "code": "FW ZONE",
       "label": "Firewall Security Zone Interface",
       "pattern_key": "firewall_interface",
       "description": "Firewall security-zone interface description"
@@ -103,10 +105,11 @@
     "branch_ion": "ION<Country><State><Site><Seq>",
     "branch_router": "RTR<Country><State><Site><Zone><Seq>",
     "branch_va": "VA<Country><State><Site><Zone><Seq>",
-    "switch_uplink_desc": "Uplink_to_<Remote_Device>_<Remote_Port_Short>",
-    "switch_lag_member": "LACP_to_<Remote_Device>_<Remote_Port_Short>",
+    "branch_security": "FW<Country><State><Site><Vendor><Seq>",
+    "switch_uplink_desc": "Uplink_to_<Remote_Device>_<Remote_Port>",
+    "switch_lag_member": "LACP_to_<Remote_Device>_<Remote_Port>",
     "switch_port_channel": "<Local_Po_ID>_to_<Remote_Device>",
-    "switch_access_desc": "<VLAN_Name> - <Device>_<Port>",
+    "switch_access_desc": "<VLAN_Name>-<Device>_<Port>",
     "firewall_interface": "<Role_Zone>_<VLAN_ID>",
     "esxi_host": "<site_prefix><role_esx><host_seq>.<domain>",
     "vm_host": "<Country><Site><Role><Seq>",
@@ -154,20 +157,12 @@
       "label": "Local Port",
       "placeholder": "e.g. Gi1/0/48, Te1/0/1"
     },
-    "Local_Port_Short": {
-      "label": "Local Port (Short)",
-      "placeholder": "e.g. Gi1/0/48, Te1/0/1"
-    },
     "Remote_Device": {
       "label": "Remote Device Hostname",
       "placeholder": "e.g. SWUSNYC02-0"
     },
     "Remote_Port": {
       "label": "Remote Port",
-      "placeholder": "e.g. Gi1/0/48, Te1/0/1"
-    },
-    "Remote_Port_Short": {
-      "label": "Remote Port (Short)",
       "placeholder": "e.g. Gi1/0/48, Te1/0/1"
     },
     "Local_Po_ID": {
