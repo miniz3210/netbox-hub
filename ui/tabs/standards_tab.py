@@ -6,7 +6,8 @@ from config.naming_rules import (
     load_history, restore_from_history, clear_history, add_to_history,
     get_pattern_variables, get_naming_patterns, get_custom_patterns,
     get_device_presets, get_interface_presets, get_host_vm_presets,
-    get_esxi_network_presets, make_preset_key,
+    get_esxi_network_presets, make_preset_key, default_presets_for,
+    DEFAULT_PRESET_KEY_FIELD, DEFAULT_NAMING_PATTERNS,
 )
 from core.naming_engine import generate_naming_pattern, generate_autocorrect_rule
 from utils.formatters import (
@@ -319,7 +320,23 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str) -> N
     with ca4:
         new_desc = st.text_input("Description (Optional)", value="", placeholder="Describe this preset", key=f"{kind}_new_desc").strip()
 
-    if st.button("💾 Save Presets", key=f"{kind}_preset_save", type="primary", use_container_width=True):
+    col_save, col_reset = st.columns(2)
+    with col_save:
+        saved_presets = st.button(
+            "💾 Save Presets", key=f"{kind}_preset_save", type="primary",
+            use_container_width=True,
+        )
+    with col_reset:
+        reset_presets = st.button(
+            "🔄 Reset to Defaults", key=f"{kind}_preset_reset",
+            use_container_width=True,
+        )
+
+    if reset_presets:
+        _reset_presets(kind, rules)
+        return
+
+    if saved_presets:
         final_presets = list(updated)
         final_patterns = dict(patterns)
         final_patterns.update(patterns_updates)
@@ -345,33 +362,21 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str) -> N
         _save_presets(rules)
 
 
-def _render_preset_manager(current_rules) -> None:
-    """Full CRUD for Device Type, Interface Type, Host/VM, and ESXi Network presets."""
-    st.markdown("---")
-    st.markdown("##### 🎛️ Naming Presets Management")
-    st.caption(
-        "Manage the horizontal radio choices used in the Naming tab. Edit code, label, or "
-        "pattern template inline, delete a preset, or add a new one (e.g. SAN / OOB / CONSOLE). "
-        "Changes are written to `data/naming_rules.yaml` and reflected in the Naming tab immediately."
-    )
-
-    device_presets = get_device_presets(current_rules)
-    interface_presets = get_interface_presets(current_rules)
-    host_vm_presets = get_host_vm_presets(current_rules)
-    esxi_network_presets = get_esxi_network_presets(current_rules)
-
-    with st.expander("🔧 Device Type Presets", expanded=False):
-        _preset_type_editor("device", device_presets, current_rules, prefix="branch")
-
-    with st.expander("🖧 Interface Type Presets", expanded=False):
-        _preset_type_editor("interface", interface_presets, current_rules, prefix="iface")
-
-    with st.expander("🖥️ Hosts & Virtual Machines Presets", expanded=False):
-        _preset_type_editor("host_vm", host_vm_presets, current_rules, prefix="hostvm")
-
-    with st.expander("☁️ ESXi Network Description Presets", expanded=False):
-        _preset_type_editor("esxi_network", esxi_network_presets, current_rules, prefix="esxinet")
-
+def _reset_presets(kind: str, rules: dict) -> None:
+    """Restore one preset *kind* and its tied patterns to factory defaults."""
+    key_field = DEFAULT_PRESET_KEY_FIELD.get(kind)
+    if not key_field:
+        return
+    defaults = default_presets_for(kind)
+    default_patterns = dict(DEFAULT_NAMING_PATTERNS)
+    patterns = dict(rules.get("naming_patterns") or {})
+    for p in defaults:
+        pkey = p.get("pattern_key", "")
+        if pkey in default_patterns:
+            patterns[pkey] = default_patterns[pkey]
+    rules["naming_patterns"] = patterns
+    rules[key_field] = defaults
+    _save_presets(rules)
 
 
 def render_standards_tab(active_model):
@@ -408,8 +413,8 @@ def render_standards_tab(active_model):
     
     # Tab 1: Editable Form Interface
     with tab_edit:
-        with st.expander("📝 Edit Naming Patterns", expanded=False):
-            st.info("💡 Modify the naming patterns below. Changes are saved when you click 'Save Changes'. Use the **Pattern Variables Reference** tab to see all available variables.")
+        with st.expander("🎛️ Infrastructure Naming Patterns & Presets", expanded=False):
+            st.info("💡 Configure naming patterns and the dynamic presets powering the Naming tab's radio selectors. Changes are saved when you click 'Save Changes' / 'Save Presets', or reset per category with 'Reset to Defaults'. Use the **Pattern Variables Reference** tab to see all available variables.")
             with st.form("naming_standards_form"):
                 with st.expander("🔌 Interface Description Patterns (Network & Security)", expanded=False):
                     st.caption("Define interface description patterns for switches, firewalls, and related network devices. Device hostname patterns are managed via Device Type Presets.")
@@ -576,11 +581,20 @@ def render_standards_tab(active_model):
                     # Force immediate rerun
                     st.rerun()
 
+        with st.expander("🔧 Device Type Presets", expanded=False):
+            _preset_type_editor("device", get_device_presets(current_rules), current_rules, prefix="branch")
+
+        with st.expander("🔌 Interface Type Presets", expanded=False):
+            _preset_type_editor("interface", get_interface_presets(current_rules), current_rules, prefix="iface")
+
+        with st.expander("🖥️ Hosts & Virtual Machines Presets", expanded=False):
+            _preset_type_editor("host_vm", get_host_vm_presets(current_rules), current_rules, prefix="hostvm")
+
+        with st.expander("☁️ ESXi Network Description Presets", expanded=False):
+            _preset_type_editor("esxi_network", get_esxi_network_presets(current_rules), current_rules, prefix="esxinet")
+
         with st.expander("🛠️ Manage Syntax Auto-Correction Rules", expanded=False):
             _render_auto_correction_manager(active_model)
-
-        with st.expander("🎛️ Naming Presets Management", expanded=False):
-            _render_preset_manager(current_rules)
 
         # Export full system prompt at the bottom of Edit Standards
         full_prompt_text = export_rules_as_prompt(current_rules)
