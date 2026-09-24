@@ -85,13 +85,13 @@
       "description": "Logical port-channel / port-group description"
     },
     {
-      "code": "Access",
+      "code": "ACCESS",
       "label": "Switch Access Port (Endpoint)",
       "pattern_key": "switch_access_desc",
       "description": "Endpoint access-port description"
     },
     {
-      "code": "FW Zone",
+      "code": "FW ZONE",
       "label": "Firewall Security Zone Interface",
       "pattern_key": "firewall_interface",
       "description": "Firewall security-zone interface description"
