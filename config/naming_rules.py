@@ -22,25 +22,25 @@ def _env_domain(key: str) -> str:
     return os.getenv(key, DOMAIN_DEFAULTS.get(key, "")).strip()
 
 DEFAULT_NAMING_PATTERNS = {
-    "branch_switch": "SW<Country><State><Site><Zone><Seq>-<StackID>",
-    "branch_stack": "VS<Country><State><Site><Seq>-<StackID>",
-    "branch_ap": "WAP<Country><State><Site><Seq>",
-    "branch_firewall": "FW<Country><State><Site><Vendor><Seq>",
-    "branch_ion": "ION<Country><State><Site><Seq>",
-    "branch_router": "RTR<Country><State><Site><Zone><Seq>",
-    "branch_va": "VA<Country><State><Site><Zone><Seq>",
-    "switch_uplink_desc": "Uplink_to_<Remote_Device>_<Remote_Port>",
-    "switch_lag_member": "LACP_to_<Remote_Device>_<Remote_Port>",
-    "switch_port_channel": "<Local_Po_ID>_to_<Remote_Device>",
-    "switch_access_desc": "<VLAN_Name> - <Device>_<Port>",
-    "firewall_interface": "<Role_Zone>_<VLAN_ID>",
+    "branch_switch": "SW<country><state><site><zone><seq>-<stack_id>",
+    "branch_stack": "VS<country><state><site><seq>-<stack_id>",
+    "branch_ap": "WAP<country><state><site><seq>",
+    "branch_firewall": "FW<country><state><site><vendor><seq>",
+    "branch_ion": "ION<country><state><site><seq>",
+    "branch_router": "RTR<country><state><site><zone><seq>",
+    "branch_va": "VA<country><state><site><zone><seq>",
+    "switch_uplink_desc": "Uplink_to_<remote_device>_<remote_port>",
+    "switch_lag_member": "LACP_to_<remote_device>_<remote_port>",
+    "switch_port_channel": "<local_po_id>_to_<remote_device>",
+    "switch_access_desc": "<vlan_name> - <device>_<port>",
+    "firewall_interface": "<role_zone>_<vlan_id>",
     "esxi_host": "<site_prefix><role_esx><seq>.<domain>",
-    "vm_host": "<Country><Site><Role><Seq>",
-    "esxi_uplink": "<vmnic> - <vSwitch> <Purpose> <Status>",
+    "vm_host": "<country><site><role><seq>",
+    "esxi_uplink": "<vmnic> - <v_switch> <purpose> <status>",
     "esxi_portgroup_name": "PG-<pg_network>",
-    "esxi_portgroup": "<PortGroup> [<Active_vmnics> Active / <Standby_vmnics> Standby]",
+    "esxi_portgroup": "<port_group> [<active_vmnics> Active / <standby_vmnics> Standby]",
     "esxi_vmkernel_name": "<vmk>",
-    "esxi_vmkernel": "<Purpose> Network - <vSwitch> (<Active_vmnics> Active / <Standby_vmnics> Standby)",
+    "esxi_vmkernel": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
     "netbox_server_yaml": (
         "console-ports: Serial (de-9); "
         "module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; "
@@ -49,38 +49,36 @@ DEFAULT_NAMING_PATTERNS = {
 }
 
 PATTERN_VARIABLES = {
-    "Country": {"label": "Country Code (2-letter)", "placeholder": "e.g. US, UK, AU, DE, JP"},
-    "State": {"label": "State / Region (Optional)", "placeholder": "e.g. NY, CA, TX, NSW"},
-    "Site": {"label": "Site Code", "placeholder": "e.g. NYC, LON, SYD, AGE"},
-    "Zone": {"label": "Zone / Role / Vendor (Optional)", "placeholder": "e.g. CORE, DIST, EDGE, PA"},
-    "Vendor": {"label": "Vendor (Optional)", "placeholder": "e.g. PA, CISCO, HUAWEI"},
-    "Seq": {"label": "Sequence Number", "placeholder": "e.g. 01, 02"},
-    "StackID": {"label": "Stack / Member ID (Optional)", "placeholder": "e.g. 0, 1"},
-    "Local_Device": {"label": "Local Device Hostname", "placeholder": "e.g. SWUSNYC01-0"},
-    "Local_Port": {"label": "Local Port", "placeholder": "e.g. Gi1/0/48, Te1/0/1"},
-    "Remote_Device": {"label": "Remote Device Hostname", "placeholder": "e.g. SWUSNYC02-0"},
-    "Remote_Port": {"label": "Remote Port", "placeholder": "e.g. Gi1/0/48, Te1/0/1"},
-    "Local_Po_ID": {"label": "Local Port-Channel ID", "placeholder": "LAG1"},
-    "VLAN_Name": {"label": "VLAN Name", "placeholder": "e.g. DATA, VOIP"},
-    "VLAN_ID": {"label": "VLAN ID", "placeholder": "e.g. 10, 20"},
-    "Device": {"label": "Connected Device", "placeholder": "e.g. WAP01"},
-    "Port": {"label": "Connected Port", "placeholder": "e.g. Gi0/1"},
-    "Role_Zone": {"label": "Security Zone / Role", "placeholder": "e.g. INSIDE, OUTSIDE"},
-    "seq": {"label": "Host Sequence Number", "placeholder": "001"},
+    "country": {"label": "Country Code (2-letter)", "placeholder": "e.g. US, UK, AU, DE, JP"},
+    "state": {"label": "State / Region (Optional)", "placeholder": "e.g. NY, CA, TX, NSW"},
+    "site": {"label": "Site Code", "placeholder": "e.g. NYC, LON, SYD, AGE"},
+    "zone": {"label": "Zone / Role / Vendor (Optional)", "placeholder": "e.g. CORE, DIST, EDGE, PA"},
+    "vendor": {"label": "Vendor (Optional)", "placeholder": "e.g. PA, CISCO, HUAWEI"},
+    "seq": {"label": "Sequence Number", "placeholder": "e.g. 01, 02"},
+    "stack_id": {"label": "Stack / Member ID (Optional)", "placeholder": "e.g. 0, 1"},
+    "local_device": {"label": "Local Device Hostname", "placeholder": "e.g. SWUSNYC01-0"},
+    "local_port": {"label": "Local Port", "placeholder": "e.g. Gi1/0/48, Te1/0/1"},
+    "remote_device": {"label": "Remote Device Hostname", "placeholder": "e.g. SWUSNYC02-0"},
+    "remote_port": {"label": "Remote Port", "placeholder": "e.g. Gi1/0/48, Te1/0/1"},
+    "local_po_id": {"label": "Local Port-Channel ID", "placeholder": "LAG1"},
+    "vlan_name": {"label": "VLAN Name", "placeholder": "e.g. DATA, VOIP"},
+    "vlan_id": {"label": "VLAN ID", "placeholder": "e.g. 10, 20"},
+    "device": {"label": "Connected Device", "placeholder": "e.g. WAP01"},
+    "port": {"label": "Connected Port", "placeholder": "e.g. Gi0/1"},
+    "role_zone": {"label": "Security Zone / Role", "placeholder": "e.g. INSIDE, OUTSIDE"},
     "domain": {"label": "Domain Name (FQDN Suffix)", "placeholder": "e.g. corp.example.com, internal.net"},
     "role": {"label": "Role Code / Workload", "placeholder": "e.g. app, web, db, fs, dc"},
     "role_esx": {"label": "Host Role (Optional)", "placeholder": "e.g. esx, otinfhost, infhost"},
-    "site": {"label": "Site Prefix", "placeholder": "e.g. age, nyc, lon, syd"},
     "site_prefix": {"label": "Site Prefix", "placeholder": "e.g. age, nyc, lon, syd"},
     "vm_site": {"label": "Site Prefix / Country & Site", "placeholder": "e.g. age, usnyc, uklon"},
     "vmnic": {"label": "vmnic Name", "placeholder": "vmnic", "default": "vmnic"},
-    "vSwitch": {"label": "vSwitch Name", "placeholder": "vSwitch", "default": "vSwitch"},
-    "Purpose": {"label": "Purpose / Service", "placeholder": "e.g. Management, vMotion, Storage"},
-    "Status": {"label": "Status", "placeholder": "Active Uplink / Standby Uplink"},
+    "v_switch": {"label": "vSwitch Name", "placeholder": "vSwitch", "default": "vSwitch"},
+    "purpose": {"label": "Purpose / Service", "placeholder": "e.g. Management, vMotion, Storage"},
+    "status": {"label": "Status", "placeholder": "Active Uplink / Standby Uplink"},
     "pg_network": {"label": "Network", "placeholder": "e.g. VM Network"},
-    "PortGroup": {"label": "Port Group / vSwitch", "placeholder": "e.g. vSwitch0", "default": "vSwitch"},
-    "Active_vmnics": {"label": "Active vmnics", "placeholder": "e.g. vmnic0, vmnic1", "default": "vmnic"},
-    "Standby_vmnics": {"label": "Standby vmnics (Optional)", "placeholder": "e.g. vmnic2"},
+    "port_group": {"label": "Port Group / vSwitch", "placeholder": "e.g. vSwitch0", "default": "vSwitch"},
+    "active_vmnics": {"label": "Active vmnics", "placeholder": "e.g. vmnic0, vmnic1", "default": "vmnic"},
+    "standby_vmnics": {"label": "Standby vmnics (Optional)", "placeholder": "e.g. vmnic2"},
     "vmk": {"label": "vmk Name", "placeholder": "vmk", "default": "vmk"},
 }
 
@@ -144,6 +142,120 @@ VARIABLE_ALIASES = {
     "Domain": "domain",
     "Role": "role",
 }
+
+# Legacy PascalCase/CamelCase variable keys → canonical lower_snake_case. This is the
+# source of truth for the automated migration pass that runs on startup/load so the UI
+# never displays legacy uppercase keys and every pattern token matches snake_case.
+LEGACY_VARIABLE_MIGRATION = {
+    "Country": "country",
+    "State": "state",
+    "Site": "site",
+    "Zone": "zone",
+    "Vendor": "vendor",
+    "Seq": "seq",
+    "StackID": "stack_id",
+    "Local_Device": "local_device",
+    "Local_Port": "local_port",
+    "Remote_Device": "remote_device",
+    "Remote_Port": "remote_port",
+    "Local_Po_ID": "local_po_id",
+    "VLAN_Name": "vlan_name",
+    "VLAN_ID": "vlan_id",
+    "Device": "device",
+    "Port": "port",
+    "Role_Zone": "role_zone",
+    "vSwitch": "v_switch",
+    "Purpose": "purpose",
+    "Status": "status",
+    "PortGroup": "port_group",
+    "Active_vmnics": "active_vmnics",
+    "Standby_vmnics": "standby_vmnics",
+}
+
+
+def _snake_case(name: str) -> str:
+    """Convert a CamelCase/PascalCase identifier to lower_snake_case."""
+    s = re.sub(r"(?<!^)(?=[A-Z])", "_", str(name))
+    s = s.replace(" ", "_")
+    s = re.sub(r"_+", "_", s)
+    return s.strip("_").lower()
+
+
+def migrate_variable_names(rules: dict) -> dict:
+    """Automated variable-name normalization pass over a rules dict (in place).
+
+    Converts every legacy PascalCase/CamelCase variable key to its canonical
+    lower_snake_case form, rewrites each ``<OldToken>`` reference in all pattern
+    templates, syncs ``naming_patterns`` / ``token_order``, and drops duplicate
+    legacy keys. Safe to run repeatedly (idempotent).
+    """
+    mapped = dict(LEGACY_VARIABLE_MIGRATION)
+    for alias, canon in VARIABLE_ALIASES.items():
+        mapped.setdefault(alias, canon)
+
+    variables = rules.get("pattern_variables")
+    if isinstance(variables, dict):
+        for key in list(variables.keys()):
+            canon = mapped.get(key) or _snake_case(key)
+            if canon and canon != key:
+                if canon not in variables:
+                    variables[canon] = variables[key]
+                mapped.setdefault(key, canon)
+
+    def _rewrite(value):
+        if not _is_str(value):
+            return value
+        out = value
+        for legacy, canon in mapped.items():
+            if legacy and canon and legacy != canon:
+                out = out.replace(f"<{legacy}>", f"<{canon}>")
+        return out
+
+    for key in list(rules.keys()):
+        rules[key] = _rewrite(rules[key])
+
+    patterns = rules.get("naming_patterns")
+    if isinstance(patterns, dict):
+        for key, val in list(patterns.items()):
+            patterns[key] = _rewrite(val)
+        for legacy, canon in mapped.items():
+            if legacy != canon and legacy in patterns and canon not in patterns:
+                patterns[canon] = patterns.pop(legacy)
+
+    if isinstance(variables, dict):
+        for legacy, canon in mapped.items():
+            if legacy != canon and legacy in variables:
+                if canon in variables:
+                    variables.pop(legacy, None)
+                else:
+                    variables[canon] = variables.pop(legacy)
+
+    to = rules.get("token_order")
+    if isinstance(to, dict):
+        rules["token_order"] = {
+            str(k): [mapped.get(x, x) for x in v]
+            for k, v in to.items() if isinstance(v, (list, tuple))
+        }
+    return rules
+
+
+def _migrate_and_persist():
+    """Run the variable-name migration and persist normalized data back to disk."""
+    if not os.path.exists(RULES_FILE):
+        return
+    try:
+        with open(RULES_FILE, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception:
+        return
+    if not isinstance(raw, dict):
+        return
+    migrated = migrate_variable_names(dict(raw))
+    if migrated != raw:
+        with open(RULES_FILE, "w", encoding="utf-8") as f:
+            json.dump(migrated, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
 
 DOMAIN_ENV_KEYS = (
     "CORP_DOMAIN_IT",
@@ -244,6 +356,7 @@ def _normalize_rules(raw: dict) -> dict:
     compatibility) and additionally exposes ``naming_patterns`` and ``pattern_variables``
     sub-dictionaries consumed by the dynamic UI.
     """
+    raw = migrate_variable_names(raw)
     raw_patterns = raw.get("naming_patterns")
     if not isinstance(raw_patterns, dict):
         raw_patterns = {
@@ -384,6 +497,7 @@ def make_preset_key(code: str, prefix: str = "branch") -> str:
 
 
 def load_naming_rules() -> Dict[str, str]:
+    _migrate_and_persist()
     rules = _load_rules_dict_from_file()
     if not rules:
         return _normalize_rules(DEFAULT_NAMING_PATTERNS.copy())
@@ -425,19 +539,54 @@ def get_naming_patterns(rules: dict) -> dict:
     return merged
 
 
+def compute_delta(old: dict, new: dict) -> dict:
+    """Return the minimal set of changed fields between two rules dicts.
+
+    Only genuinely changed keys are included, keyed by field name with the previous and new
+    values. Structural sub-dicts (``naming_patterns`` / ``pattern_variables``) are
+    diffed key-by-key so unchanged preset categories never appear in history.
+    """
+    if not old:
+        return {k: {"old": None, "new": v} for k, v in (new or {}).items()}
+
+    def _patterns_of(d):
+        if isinstance(d, dict) and isinstance(d.get("naming_patterns"), dict):
+            return d["naming_patterns"]
+        return {k: v for k, v in (d or {}).items() if _is_str(v)}
+
+    old_pat = _patterns_of(old)
+    new_pat = _patterns_of(new)
+    delta = {}
+    for k in list(old_pat.keys()) + list(new_pat.keys()):
+        if old_pat.get(k) != new_pat.get(k):
+            delta[k] = {"old": old_pat.get(k), "new": new_pat.get(k)}
+
+    for cat in (
+        "custom_patterns", "device_presets", "interface_presets",
+        "host_vm_presets", "esxi_network_presets",
+    ):
+        if old.get(cat) != new.get(cat):
+            delta[cat] = {"old": old.get(cat), "new": new.get(cat)}
+    return delta
+
+
 def save_naming_rules(rules: Dict[str, str], source: str = "Manual Edit"):
     """Save naming rules and add to history."""
     os.makedirs(os.path.dirname(RULES_FILE), exist_ok=True)
 
+    old_raw = {}
     if os.path.exists(RULES_FILE):
         try:
             with open(RULES_FILE, "r", encoding="utf-8") as f:
-                old_rules = json.load(f)
-            add_to_history(old_rules, source)
+                old_raw = json.load(f)
         except Exception:
-            pass
+            old_raw = {}
 
     stored = _normalize_rules(dict(rules))
+    old = _normalize_rules(dict(old_raw)) if isinstance(old_raw, dict) and old_raw else {}
+    delta = compute_delta(old, stored)
+    add_to_history(delta, source)
+    migrate_variable_names(stored)
     with open(RULES_FILE, "w", encoding="utf-8") as f:
         json.dump(stored, f, indent=2, ensure_ascii=False)
         f.flush()
@@ -445,14 +594,28 @@ def save_naming_rules(rules: Dict[str, str], source: str = "Manual Edit"):
 
 DEFAULT_RULES = _normalize_rules(DEFAULT_NAMING_PATTERNS.copy())
 
-def add_to_history(rules: Dict[str, str], source: str = "Manual Edit"):
-    """Add rules to history with timestamp."""
+def add_to_history(delta: Dict[str, str], source: str = "Manual Edit"):
+    """Add a delta entry to the change history.
+
+    ``delta`` is the result of ``compute_delta``: ``{field: {"old": ..., "new": ...}}``.
+    The full snapshot is also stored for restoration via ``restore_from_history``.
+    """
     history = load_history()
+    snapshot = {}
+    try:
+        if os.path.exists(RULES_FILE):
+            with open(RULES_FILE, "r", encoding="utf-8") as f:
+                snapshot = json.load(f)
+    except Exception:
+        pass
 
     entry = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "source": source,
-        "rules": rules
+        "delta": delta,
+        "rules": snapshot,
+        "change_count": len(delta),
+        "changed_keys": list(delta.keys()),
     }
 
     # Add to beginning of list

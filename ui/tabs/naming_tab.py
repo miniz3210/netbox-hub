@@ -81,6 +81,10 @@ def apply_case(text: str, mode: str) -> str:
     return text.upper() if mode == "UPPERCASE" else text.lower()
 
 
+def _copy_to_clipboard(text: str):
+    st.session_state["_last_copied"] = text
+
+
 def _render_casing_selector():
     """Return the active casing mode ('UPPERCASE'/'lowercase') selected globally."""
     if "naming_case_radio" not in st.session_state:
@@ -498,7 +502,7 @@ def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, varia
 
         defaults = {}
         if auto_code:
-            defaults["Site"] = auto_code
+            defaults["site"] = auto_code
         values = render_token_widgets(pat, variables, f"dev_{pk}", defaults)
         interpolated = render_dynamic_pattern(pat, values, variables)
         final = apply_case(interpolated, case_mode)
@@ -508,10 +512,10 @@ def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, varia
         if st.button("AI Verify / Suggest Device Hostname", key="ai_chk_dev"):
             with st.spinner("Auditing..."):
                 dev_label = dev_label_map.get(dev_type, dev_type)
-                st.info(verify_and_suggest_with_ai(final, active_model, asset_type=f"Network/Security Device ({dev_label})", category_key="device", site_filter=values.get("Site", "")))
+                st.info(verify_and_suggest_with_ai(final, active_model, asset_type=f"Network/Security Device ({dev_label})", category_key="device", site_filter=values.get("site", "")))
 
         ref_lbl, ref_flt, ref_ex = _ref_info(dev_type)
-        display_reference_box("device", ref_ex, ref_lbl, values.get("Site", ""), ref_flt)
+        display_reference_box("device", ref_ex, ref_lbl, values.get("site", ""), ref_flt)
 
     with col_b:
         st.markdown("#### Switch & Firewall Interface Formatter")
@@ -536,25 +540,24 @@ def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, varia
             vlan_name = ""
             dev_end = ""
             port_end = ""
-            if "VLAN_ID" in tokens:
+            if "vlan_id" in tokens:
                 vlan_id = st.text_input("Access VLAN ID (Optional)", value="", placeholder="e.g. 10, 100", key="ac_vlan").strip()
-            if "VLAN_Name" in tokens:
+            if "vlan_name" in tokens:
                 vlan_name = st.text_input("VLAN Name (Optional)", value="", placeholder="e.g. Data, Voice", key="ac_vlan_name").strip()
-            if "Device" in tokens:
+            if "device" in tokens:
                 dev_end = st.text_input("Connected Device/Host", value="", placeholder="e.g. PC-001", key="ac_device").strip()
-            if "Port" in tokens:
+            if "port" in tokens:
                 port_end = st.text_input("Endpoint Port (Optional)", value="", placeholder="e.g. eth0", key="ac_port").strip()
             vlan_disp = vlan_name or (f"VLAN{vlan_id}" if vlan_id else "")
-            vals = {"VLAN_ID": vlan_id or "<VLAN_ID>", "VLAN_Name": vlan_disp, "Device": dev_end or "<Device>", "Port": port_end or "<Port>"}
+            vals = {"vlan_id": vlan_id or "<vlan_id>", "vlan_name": vlan_disp, "device": dev_end or "<device>", "port": port_end or "<port>"}
             gen = render_dynamic_pattern(pat, vals, variables)
         else:
             vals = render_token_widgets(pat, variables, f"intf_{ipk}")
-            # Auto-shorten port tokens when the global toggle is ON
             if st.session_state.get("esxi_auto_corr", True):
-                for port_token in ("Local_Port", "Remote_Port"):
+                for port_token in ("local_port", "remote_port"):
                     if port_token in vals and vals.get(port_token):
                         vals[port_token] = normalize_port_shortname(vals[port_token])
-            for port_token in ("Local_Port", "Remote_Port"):
+            for port_token in ("local_port", "remote_port"):
                 if port_token in vals and vals.get(port_token):
                     vals[port_token] = vals[port_token].strip()
             gen = render_dynamic_pattern(pat, vals, variables)
@@ -644,8 +647,8 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables):
             st.code(gen, language="text")
             if st.button("AI Verify VM Hostname", key="ai_chk_vm"):
                 with st.spinner("Auditing..."):
-                    st.info(verify_and_suggest_with_ai(gen, active_model, asset_type="Virtual Machine (VM) Hostname", category_key="vm", site_filter=values.get("Site", "")))
-            display_reference_box("vm", "USNYCAPP01     (NYC Application Server 01)\nUKLONDB01\nAUSYDFS01", "Virtual Machine", site_filter=values.get("Site", ""))
+                    st.info(verify_and_suggest_with_ai(gen, active_model, asset_type="Virtual Machine (VM) Hostname", category_key="vm", site_filter=values.get("site", "")))
+            display_reference_box("vm", "USNYCAPP01     (NYC Application Server 01)\nUKLONDB01\nAUSYDFS01", "Virtual Machine", site_filter=values.get("site", ""))
     else:
         col_a, col_b = st.columns(2)
         with col_a:
@@ -665,8 +668,8 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables):
             st.code(gen, language="text")
             if st.button("AI Verify VM Hostname", key=f"ai_chk_vm_{pk}"):
                 with st.spinner("Auditing..."):
-                    st.info(verify_and_suggest_with_ai(gen, active_model, asset_type=f"VM ({label_map.get(preset_type, 'VM')})", category_key="vm", site_filter=values.get("Site", "")))
-            display_reference_box("vm", "USNYCAPP01\nUKLONDB01\nAUSYDFS01", "Virtual Machine", site_filter=values.get("Site", ""))
+                    st.info(verify_and_suggest_with_ai(gen, active_model, asset_type=f"VM ({label_map.get(preset_type, 'VM')})", category_key="vm", site_filter=values.get("site", "")))
+            display_reference_box("vm", "USNYCAPP01\nUKLONDB01\nAUSYDFS01", "Virtual Machine", site_filter=values.get("site", ""))
         with col_b:
             st.empty()
 
@@ -695,20 +698,22 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables, token_or
     st.markdown("---")
 
     if preset_type == "Uplink":
-        with st.container():
+        pk = key_map.get("Uplink", "esxi_uplink")
+        pat = naming_patterns.get(pk, "")
+        if _edit_toggle(pk):
+            render_edit_mode_ui(pk, pat, variables)
+            st.stop()
+            return
+        col_in, col_out = st.columns(2, vertical_alignment="top")
+        with col_in:
             st.markdown(f"#### 1. Physical Uplink (PCIeX/PortX) — {label_map.get('Uplink', 'Physical Uplink')}")
-            pk = key_map.get("Uplink", "esxi_uplink")
-            pat = naming_patterns.get(pk, "")
-            if _edit_toggle(pk):
-                render_edit_mode_ui(pk, pat, variables)
-                st.stop()
-                return
             vals = render_esxi_network_inputs(pat, variables, "uplink", auto_correct)
+        with col_out:
             gen = render_dynamic_pattern(pat, vals, variables)
-            st.caption("Generated Physical Uplink Description:")
+            st.markdown("##### ✨ Generated Name & Description")
             st.code(gen, language="text")
+            st.button("📋 Copy", key="esxi_copy_uplink", help="Copy generated description", on_click=_copy_to_clipboard, args=(gen,))
     elif preset_type == "PortGroup":
-        st.markdown(f"#### 2. Port Group Teaming (Network) — {label_map.get('PortGroup', 'Port Group')}")
         pk = key_map.get("PortGroup", "esxi_portgroup")
         pat = naming_patterns.get(pk, "")
         name_pk = "esxi_portgroup_name"
@@ -717,19 +722,24 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables, token_or
             render_multi_edit_mode_ui([(name_pk, name_pat), (pk, pat)], variables)
             st.stop()
             return
-        vals = render_esxi_network_inputs(
-            pat, variables, "portgroup", auto_correct,
-            extra_pattern=name_pat,
-            token_order=token_order_map.get(pk, ["pg_network", "PortGroup", "Active_vmnics", "Standby_vmnics"]),
-        )
-        gen_desc = _render_esxi_pattern(pat, vals, variables)
-        gen_prefix = render_dynamic_pattern(name_pat, vals, variables)
-        st.caption("Generated Port Group Name:")
-        st.code(gen_prefix, language="text")
-        st.caption("Generated Port Group Description:")
-        st.code(gen_desc, language="text")
+        col_in, col_out = st.columns(2, vertical_alignment="top")
+        with col_in:
+            st.markdown(f"#### 2. Port Group Teaming (Network) — {label_map.get('PortGroup', 'Port Group')}")
+            vals = render_esxi_network_inputs(
+                pat, variables, "portgroup", auto_correct,
+                extra_pattern=name_pat,
+                token_order=token_order_map.get(pk, ["pg_network", "port_group", "active_vmnics", "standby_vmnics"]),
+            )
+        with col_out:
+            gen_desc = _render_esxi_pattern(pat, vals, variables)
+            gen_prefix = render_dynamic_pattern(name_pat, vals, variables)
+            st.markdown("##### ✨ Generated Name & Description")
+            st.caption("Generated Port Group Name:")
+            st.code(gen_prefix, language="text")
+            st.caption("Generated Port Group Description:")
+            st.code(gen_desc, language="text")
+            st.button("📋 Copy", key="esxi_copy_portgroup", help="Copy generated description", on_click=_copy_to_clipboard, args=(gen_desc,))
     else:
-        st.markdown(f"#### 3. VMkernel Adapter (vmk) — {label_map.get('VMkernel', 'VMkernel')}")
         pk = key_map.get("VMkernel", "esxi_vmkernel")
         pat = naming_patterns.get(pk, "")
         name_pk = "esxi_vmkernel_name"
@@ -738,14 +748,20 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables, token_or
             render_multi_edit_mode_ui([(name_pk, name_pat), (pk, pat)], variables)
             st.stop()
             return
-        vals = render_esxi_network_inputs(
-            pat, variables, "vmk", auto_correct,
-            extra_pattern=name_pat,
-            token_order=token_order_map.get(pk, ["vmk", "Purpose", "vSwitch", "Active_vmnics", "Standby_vmnics"]),
-        )
-        gen = _render_esxi_pattern(pat, vals, variables)
-        vmk_name = render_dynamic_pattern(name_pat, vals, variables)
-        st.caption("Generated vmk Name:")
-        st.code(vmk_name, language="text")
-        st.caption("Generated VMkernel Description:")
-        st.code(gen, language="text")
+        col_in, col_out = st.columns(2, vertical_alignment="top")
+        with col_in:
+            st.markdown(f"#### 3. VMkernel Adapter (vmk) — {label_map.get('VMkernel', 'VMkernel')}")
+            vals = render_esxi_network_inputs(
+                pat, variables, "vmk", auto_correct,
+                extra_pattern=name_pat,
+                token_order=token_order_map.get(pk, ["vmk", "purpose", "v_switch", "active_vmnics", "standby_vmnics"]),
+            )
+        with col_out:
+            gen = _render_esxi_pattern(pat, vals, variables)
+            vmk_name = render_dynamic_pattern(name_pat, vals, variables)
+            st.markdown("##### ✨ Generated Name & Description")
+            st.caption("Generated vmk Name:")
+            st.code(vmk_name, language="text")
+            st.caption("Generated VMkernel Description:")
+            st.code(gen, language="text")
+            st.button("📋 Copy", key="esxi_copy_vmkernel", help="Copy generated description", on_click=_copy_to_clipboard, args=(gen,))

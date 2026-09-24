@@ -1,6 +1,9 @@
+import os
+import json
 import re
 
 import streamlit as st
+from config.constants import RULES_FILE
 from config.naming_rules import (
     load_naming_rules, save_naming_rules, export_rules_as_prompt,
     load_history, restore_from_history, clear_history, add_to_history,
@@ -238,8 +241,24 @@ def _render_auto_correction_manager(active_model: str) -> None:
 
 def _persist_auto_corrections(data: dict) -> None:
     """Save auto-correction rules to YAML and refresh the session cache."""
+    from config.naming_rules import compute_delta
     save_auto_corrections(data, source="Management UI")
-    add_to_history(data, source="Auto-Correction: Management UI")
+    old_rules = {}
+    if os.path.exists(RULES_FILE):
+        from config.constants import RULES_FILE
+        try:
+            with open(RULES_FILE, "r", encoding="utf-8") as f:
+                old_rules = json.load(f)
+        except Exception:
+            old_rules = {}
+    from config.naming_rules import load_naming_rules
+    old_normalized = load_naming_rules() if old_rules else {}
+    new_normalized = dict(old_normalized)
+    new_normalized["autocorrect_rules"] = data
+    delta = compute_delta(old_normalized, new_normalized)
+    if not delta:
+        delta = {"auto_correction_rules": {"old": None, "new": data}}
+    add_to_history(delta, source="Auto-Correction: Management UI")
     st.session_state["autocorrect_rules_cache"] = data
     st.session_state["autocorrect_saved"] = True
     st.rerun()
@@ -378,6 +397,58 @@ def _reset_presets(kind: str, rules: dict) -> None:
     rules["naming_patterns"] = patterns
     rules[key_field] = defaults
     _save_presets(rules)
+
+
+def _fmt_delta_val(value) -> str:
+    """Render a delta value compactly for display in the diff table."""
+    if value is None:
+        return "—"
+    if isinstance(value, (dict, list)):
+        import json as _json
+        try:
+            return _json.dumps(value, ensure_ascii=False)
+        except Exception:
+            return str(value)
+    return str(value)
+
+
+def _render_delta_table(delta: dict) -> None:
+    """Render a clean Field | Previous Value | New Value diff table for a delta dict."""
+    catalog = ["custom_patterns", "device_presets", "interface_presets",
+              "host_vm_presets", "esxi_network_presets"]
+    if not delta:
+        st.info("No field-level changes recorded for this entry.")
+        return
+
+    for key, change in delta.items():
+        if not isinstance(change, dict):
+            continue
+        field = key
+        old_v = change.get("old")
+        new_v = change.get("new")
+        if key in catalog:
+            st.markdown(f"**{field}**")
+            old_cnt = len(old_v) if isinstance(old_v, (list, dict)) else 0
+            new_cnt = len(new_v) if isinstance(new_v, (list, dict)) else 0
+            st.dataframe(
+                {
+                    "Field / Key": [f"{field} (presets)"],
+                    "Previous Value": [f"{old_cnt} item(s)"],
+                    "New Value": [f"{new_cnt} item(s)"],
+                },
+                use_container_width=True,
+                hide_index=True,
+            )
+            continue
+        st.dataframe(
+            {
+                "Field / Key": [field],
+                "Previous Value": [_fmt_delta_val(old_v)],
+                "New Value": [_fmt_delta_val(new_v)],
+            },
+            use_container_width=True,
+            hide_index=True,
+        )
 
 
 def render_standards_tab(active_model):
@@ -625,26 +696,36 @@ def render_standards_tab(active_model):
             for idx, entry in enumerate(history):
                 timestamp = entry.get("timestamp", "Unknown")
                 source = entry.get("source", "Unknown")
+                delta = entry.get("delta") if isinstance(entry.get("delta"), dict) else {}
                 rules = entry.get("rules", {})
-                
-                with st.expander(f"🕐 **{timestamp}** - {source}", expanded=(idx == 0)):
-                    # Show summary of changes
-                    st.markdown("**Pattern Summary:**")
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown("##### Network Devices")
-                        st.code(f"Switch: {rules.get('branch_switch', 'N/A')[:60]}", language="text")
-                        st.code(f"Stack: {rules.get('branch_stack', 'N/A')[:60]}", language="text")
-                        st.code(f"AP: {rules.get('branch_ap', 'N/A')[:60]}", language="text")
-                        st.code(f"Firewall: {rules.get('branch_firewall', rules.get('branch_security', 'N/A'))[:60]}", language="text")
-                        st.code(f"ION: {rules.get('branch_ion', 'N/A')[:60]}", language="text")
-                    
-                    with col2:
-                        st.markdown("##### Interface Descriptions")
-                        st.code(f"Uplink: {rules.get('switch_uplink_desc', 'N/A')[:60]}...", language="text")
-                        st.code(f"LAG: {rules.get('switch_lag_member', 'N/A')[:60]}...", language="text")
-                        st.code(f"Access: {rules.get('switch_access_desc', 'N/A')[:60]}...", language="text")
+                change_count = entry.get("change_count", len(delta))
+                changed_keys = entry.get("changed_keys") or list(delta.keys())
+
+                if delta:
+                    header = f"🕐 **{timestamp}** - {source} — Modified {change_count} rule(s): {', '.join(str(k) for k in changed_keys)}"
+                else:
+                    header = f"🕐 **{timestamp}** - {source}"
+
+                with st.expander(header, expanded=(idx == 0)):
+                    if delta:
+                        st.markdown("**Delta Changes (Previous → New):**")
+                        _render_delta_table(delta)
+                    else:
+                        st.markdown("**Pattern Summary:**")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.markdown("##### Network Devices")
+                            st.code(f"Switch: {rules.get('branch_switch', 'N/A')[:60]}", language="text")
+                            st.code(f"Stack: {rules.get('branch_stack', 'N/A')[:60]}", language="text")
+                            st.code(f"AP: {rules.get('branch_ap', 'N/A')[:60]}", language="text")
+                            st.code(f"Firewall: {rules.get('branch_firewall', rules.get('branch_security', 'N/A'))[:60]}", language="text")
+                            st.code(f"ION: {rules.get('branch_ion', 'N/A')[:60]}", language="text")
+
+                        with col2:
+                            st.markdown("##### Interface Descriptions")
+                            st.code(f"Uplink: {rules.get('switch_uplink_desc', 'N/A')[:60]}...", language="text")
+                            st.code(f"LAG: {rules.get('switch_lag_member', 'N/A')[:60]}...", language="text")
+                            st.code(f"Access: {rules.get('switch_access_desc', 'N/A')[:60]}...", language="text")
                     
                     # Action buttons
                     col_restore, col_view = st.columns([1, 1])
