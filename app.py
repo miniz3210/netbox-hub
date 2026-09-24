@@ -135,6 +135,17 @@ if "active_tab_index" not in st.session_state:
 
 # Use radio buttons for tab selection to preserve state across reruns
 tab_labels = [label for label, _, _ in TABS]
+st.markdown(
+    """
+    <style>
+    div[data-testid="stRadio"] > div[role="radiogroup"] label {
+        font-size: 14px !important;
+        font-weight: 400 !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 selected_tab = st.radio(
     "Select Tab",
     options=tab_labels,
