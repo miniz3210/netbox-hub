@@ -134,7 +134,7 @@ def generate_autocorrect_rule(natural_language: str, model_name: str) -> Dict[st
 def generate_naming_pattern(description: str, model_name: str) -> str:
     """Generate a single naming pattern token template from a natural-language description.
 
-    Returns a raw pattern string (e.g. ``SAN<Country><Site><Seq>``) using valid
+    Returns a raw pattern string (e.g. ``SAN<country><site><seq>``) using valid
     NetBox Hub tokens. Raises on failure.
     """
     system_msg = (
@@ -142,10 +142,10 @@ def generate_naming_pattern(description: str, model_name: str) -> str:
         "Convert the user's plain-English naming requirement into ONE naming pattern string.\n"
         "STRICT RULES:\n"
         "1. Return ONLY the raw pattern string — no JSON, no explanation, no code fences.\n"
-        "2. Use ONLY NetBox Hub tokens from this list: <Country>, <State>, <Site>, <Zone>, "
-        "<Vendor>, <Seq>, <StackID>, <Role>, <site_prefix>, <role_esx>, <host_seq>, "
-        "<Domain>, <domain>, <vmnic>, <vSwitch>, <Purpose>, <Status>, <pg_network>, "
-        "<PortGroup>, <Active_vmnics>, <Standby_vmnics>, <vmk>.\n"
+        "2. Use ONLY NetBox Hub tokens from this list: <country>, <state>, <site>, <zone>, "
+        "<vendor>, <seq>, <stack_id>, <role>, <site_prefix>, <role_esx>, "
+        "<domain>, <vmnic>, <v_switch>, <purpose>, <status>, <pg_network>, "
+        "<port_group>, <active_vmnics>, <standby_vmnics>, <vmk>.\n"
         "3. The pattern MUST start with a short prefix (e.g. SAN, PDU, OOB, BLD, DCIM).\n"
         "4. Tokens are case-sensitive and wrapped in angle brackets.\n"
         "5. Do NOT include any extra text, markdown, or formatting."
