@@ -453,104 +453,218 @@ def _render_delta_table(delta: dict) -> None:
 def _host_editor(rules: dict) -> None:
     all_presets = list(get_host_vm_presets(rules))
     esxi = [p for p in all_presets if p.get("code") == "ESXi"]
-    vm_presets = [p for p in all_presets if p.get("pattern_key") == "vm_host"]
     patterns = dict(rules.get("naming_patterns") or {})
     p = esxi[0] if esxi else {"code": "ESXi", "label": "ESXi Host", "pattern_key": "esxi_host", "description": ""}
     pkey = p.get("pattern_key", "esxi_host")
-    tpl = patterns.get(pkey, "")
 
-    c1, c2, c3 = st.columns([1, 2, 4])
-    with c1:
-        st.text_input("Code", value=p.get("code", ""), key="host_code_esxi", disabled=True)
-    with c2:
-        st.text_input("Label", value=p.get("label", ""), key="host_lbl_esxi", disabled=True)
-    with c3:
-        ntpl = st.text_input("Pattern Template", value=tpl, key="host_tpl_esxi").strip()
+    st.markdown(f"**🖥️ Hosts Type Presets (ESXi)** &nbsp;&nbsp;&nbsp;`{len(all_presets)} presets`")
+    st.caption("Manage the ESXi host naming pattern and associated virtual machine role presets.")
 
-    col_save, col_reset = st.columns(2)
-    with col_save:
-        if st.button("💾 Save ESXi Pattern", key="host_preset_save", type="primary", use_container_width=True):
-            patterns[pkey] = ntpl or patterns.get(pkey, "<site_prefix>esx<seq>.<domain>")
-            merged = [{"code": "ESXi", "label": "ESXi Host", "pattern_key": pkey, "description": "ESXi Hypervisor Host"}] + vm_presets
-            rules["naming_patterns"] = patterns
-            rules["host_vm_presets"] = merged
-            _save_presets(rules)
-    with col_reset:
-        if st.button("🔄 Reset to Defaults", key="host_preset_reset", use_container_width=True):
-            _reset_presets("host_vm", rules)
+    col_hdr_code, col_hdr_lbl, col_hdr_tpl, col_hdr_act = st.columns([1.1, 2.2, 3.2, 0.6])
+    with col_hdr_code:
+        st.markdown("**Code**")
+    with col_hdr_lbl:
+        st.markdown("**Label**")
+    with col_hdr_tpl:
+        st.markdown("**Pattern Template**")
+    with col_hdr_act:
+        st.markdown("**Action**")
 
+    updated = []
+    patterns_updates = {}
+    stale_del = st.session_state.pop("_host_vm_del_idx", None)
 
-def _vm_editor(rules: dict) -> None:
-    patterns = dict(rules.get("naming_patterns") or {})
-    all_presets = list(get_host_vm_presets(rules))
-    esxi_presets = [p for p in all_presets if p.get("code") == "ESXi"]
-    vm_presets = [p for p in all_presets if p.get("pattern_key") == "vm_host"]
+    for idx, preset in enumerate(all_presets):
+        code = preset.get("code", "")
+        label = preset.get("label", "")
+        pk = preset.get("pattern_key", "")
+        tpl = patterns.get(pk, "")
 
-    tpl = patterns.get("vm_host", "")
-    ntpl = st.text_input("VM Pattern Template", value=tpl, key="vm_tpl",
-                         placeholder="<country><site><role><seq>").strip()
-    patterns["vm_host"] = ntpl or "<country><site><role><seq>"
+        c1, c2, c3, c4 = st.columns([1.1, 2.2, 3.2, 0.6])
+        with c1:
+            if code == "ESXi":
+                st.text_input("Code", value=code, key=f"host_{idx}_code", disabled=True)
+            else:
+                ncode = st.text_input("Code", value=code, key=f"host_{idx}_code").strip()
+        with c2:
+            if code == "ESXi":
+                st.text_input("Label", value=label, key=f"host_{idx}_lbl", disabled=True)
+            else:
+                nlbl = st.text_input("Label", value=label, key=f"host_{idx}_lbl").strip()
+        with c3:
+            ntpl = st.text_input("Pattern Template", value=tpl, key=f"host_{idx}_tpl").strip()
+        with c4:
+            st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
+            if code != "ESXi":
+                if st.button("🗑️", key=f"host_del_{idx}"):
+                    if len(all_presets) > 1:
+                        st.session_state["_host_vm_del_idx"] = idx
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ At least one preset must remain.")
 
-    st.markdown("**Role Options**")
-    st.caption("Each role appears as a selectable option in the Naming tab's VM Role radio.")
+        if stale_del == idx:
+            continue
+        final_pk = pk or make_preset_key(code or label, "host_vm")
+        if ntpl:
+            patterns_updates[final_pk] = ntpl
+        if final_pk:
+            updated.append({
+                "code": code.upper() if code else "ESXi",
+                "label": label or code or "ESXi Host",
+                "pattern_key": final_pk,
+                "description": preset.get("description", ""),
+            })
 
-    updated_vm = list(vm_presets)
-    stale_vm_del = st.session_state.pop("_del_vm_role_idx", None)
-    if stale_vm_del is not None and 0 <= stale_vm_del < len(updated_vm):
-        updated_vm.pop(stale_vm_del)
-        rules["naming_patterns"] = patterns
-        rules["host_vm_presets"] = esxi_presets + updated_vm
+    if stale_del is not None:
+        rules["naming_patterns"] = {**patterns, **patterns_updates}
+        rules["host_vm_presets"] = updated
         _save_presets(rules)
         return
 
-    for idx, p in enumerate(updated_vm):
-        c1, c2, c3 = st.columns([1, 3, 1])
+    st.markdown("**➕ Add New Preset**")
+    ca1, ca2, ca3, ca4 = st.columns([1.1, 2.2, 3.2, 0.6])
+    with ca1:
+        new_code = st.text_input("New Code", value="", placeholder="e.g. HYPV", key="host_new_code").strip()
+    with ca2:
+        new_lbl = st.text_input("New Label", value="", placeholder="e.g. Hyper-V Host", key="host_new_lbl").strip()
+    with ca3:
+        new_tpl = st.text_input("New Pattern Template", value="", placeholder="<site_prefix>hyp<seq>.<domain>", key="host_new_tpl").strip()
+    with ca4:
+        st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
+        add_clicked = st.button("➕", key="host_add_btn")
+
+    col_save, col_reset = st.columns(2)
+    with col_save:
+        saved = st.button("💾 Save Hosts Presets", key="host_preset_save", type="primary", use_container_width=True)
+    with col_reset:
+        reset = st.button("🔄 Reset to Defaults", key="host_preset_reset", use_container_width=True)
+
+    if reset:
+        _reset_presets("host_vm", rules)
+        return
+
+    if add_clicked:
+        if new_code and new_tpl:
+            nkey = make_preset_key(new_code, "host_vm")
+            patterns[nkey] = new_tpl
+            updated.append({
+                "code": new_code.upper(),
+                "label": new_lbl or new_code.upper(),
+                "pattern_key": nkey,
+                "description": "",
+            })
+            rules["naming_patterns"] = {**patterns, **patterns_updates}
+            rules["host_vm_presets"] = updated
+            _save_presets(rules)
+        elif new_code and not new_tpl:
+            st.error("⚠️ Provide a Pattern Template to add a new preset.")
+
+    if saved:
+        final_patterns = {**patterns, **patterns_updates}
+        rules["naming_patterns"] = final_patterns
+        rules["host_vm_presets"] = updated
+        _save_presets(rules)
+
+
+def _vm_editor(rules: dict) -> None:
+    all_presets = list(get_host_vm_presets(rules))
+    esxi_presets = [p for p in all_presets if p.get("code") == "ESXi"]
+    vm_presets = [p for p in all_presets if p.get("pattern_key") == "vm_host"]
+    patterns = dict(rules.get("naming_patterns") or {})
+    tpl = patterns.get("vm_host", "")
+
+    st.markdown(f"**🖱️ Virtual Machine Presets** &nbsp;&nbsp;&nbsp;`{len(vm_presets)} presets`")
+    st.caption("Manage the virtual machine role options and their shared pattern template.")
+
+    col_hdr_code, col_hdr_lbl, col_hdr_tpl, col_hdr_act = st.columns([1.1, 2.2, 3.2, 0.6])
+    with col_hdr_code:
+        st.markdown("**Code**")
+    with col_hdr_lbl:
+        st.markdown("**Label**")
+    with col_hdr_tpl:
+        st.markdown("**Pattern Template**")
+    with col_hdr_act:
+        st.markdown("**Action**")
+
+    updated = []
+    stale_del = st.session_state.pop("_del_vm_role_idx", None)
+
+    for idx, p in enumerate(vm_presets):
+        c1, c2, c3, c4 = st.columns([1.1, 2.2, 3.2, 0.6])
         with c1:
-            code = st.text_input("Code", value=p.get("code", ""), key=f"vm_code_{idx}").strip()
+            ncode = st.text_input("Code", value=p.get("code", ""), key=f"vm_code_{idx}").strip()
         with c2:
-            label = st.text_input("Label", value=p.get("label", ""), key=f"vm_lbl_{idx}").strip()
+            nlbl = st.text_input("Label", value=p.get("label", ""), key=f"vm_lbl_{idx}").strip()
         with c3:
+            ntpl = st.text_input("Pattern Template", value=tpl, key=f"vm_tpl_{idx}").strip()
+        with c4:
             st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
             if st.button("🗑️", key=f"vm_role_del_{idx}"):
-                if len(updated_vm) > 1:
+                if len(vm_presets) > 1:
                     st.session_state["_del_vm_role_idx"] = idx
                     st.rerun()
                 else:
                     st.warning("⚠️ At least one role must remain.")
 
-        p["code"] = code.lower() if code else p.get("code", "")
-        p["label"] = label or code or p.get("label", "")
+        if stale_del == idx:
+            continue
+        tpl = ntpl or tpl or "<country><site><role><seq>"
+        p["code"] = ncode.lower() if ncode else p.get("code", "")
+        p["label"] = nlbl or ncode or p.get("label", "")
         p["pattern_key"] = "vm_host"
         p["description"] = ""
+        updated.append(dict(p))
+
+    if stale_del is not None:
+        patterns["vm_host"] = tpl
+        rules["naming_patterns"] = patterns
+        rules["host_vm_presets"] = esxi_presets + updated
+        _save_presets(rules)
+        return
 
     st.markdown("**➕ Add Role**")
-    nc1, nc2 = st.columns([1, 3])
+    nc1, nc2, nc3, nc4 = st.columns([1.1, 2.2, 3.2, 0.6])
     with nc1:
-        new_code = st.text_input("Code", key="vm_new_code", placeholder="e.g. cvi").strip()
+        new_code = st.text_input("New Code", value="", key="vm_new_code", placeholder="e.g. cvi").strip()
     with nc2:
-        new_label = st.text_input("Label", key="vm_new_lbl", placeholder="e.g. Core Virtualization (cvi)").strip()
+        new_label = st.text_input("New Label", value="", key="vm_new_lbl", placeholder="e.g. Core Virtualization (cvi)").strip()
+    with nc3:
+        new_tpl = st.text_input("New Pattern Template", value="", key="vm_new_tpl", placeholder="<country><site><role><seq>").strip()
+    with nc4:
+        st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
+        add_clicked = st.button("➕", key="vm_add_btn")
 
-    c_save, c_add, c_reset = st.columns(3)
+    c_save, c_reset = st.columns(2)
     with c_save:
-        if st.button("💾 Save VM Presets", key="vm_save", type="primary", use_container_width=True):
-            rules["naming_patterns"] = patterns
-            rules["host_vm_presets"] = esxi_presets + updated_vm
-            _save_presets(rules)
-    with c_add:
-        if st.button("➕ Add Role", key="vm_add", use_container_width=True):
-            if new_code:
-                updated_vm.append({
-                    "code": new_code.lower(),
-                    "label": new_label or new_code,
-                    "pattern_key": "vm_host",
-                    "description": "",
-                })
-                rules["naming_patterns"] = patterns
-                rules["host_vm_presets"] = esxi_presets + updated_vm
-                _save_presets(rules)
+        saved = st.button("💾 Save VM Presets", key="vm_save", type="primary", use_container_width=True)
     with c_reset:
-        if st.button("🔄 Reset to Defaults", key="vm_reset", use_container_width=True):
-            _reset_presets("host_vm", rules)
+        reset = st.button("🔄 Reset to Defaults", key="vm_reset", use_container_width=True)
+
+    if reset:
+        _reset_presets("host_vm", rules)
+        return
+
+    if add_clicked:
+        if new_code:
+            patterns["vm_host"] = new_tpl or tpl or "<country><site><role><seq>"
+            updated.append({
+                "code": new_code.lower(),
+                "label": new_label or new_code,
+                "pattern_key": "vm_host",
+                "description": "",
+            })
+            rules["naming_patterns"] = patterns
+            rules["host_vm_presets"] = esxi_presets + updated
+            _save_presets(rules)
+        else:
+            st.warning("⚠️ Please enter a role code.")
+
+    if saved:
+        patterns["vm_host"] = tpl or "<country><site><role><seq>"
+        rules["naming_patterns"] = patterns
+        rules["host_vm_presets"] = esxi_presets + updated
+        _save_presets(rules)
 
 
 def render_standards_tab(active_model):
