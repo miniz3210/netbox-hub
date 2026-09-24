@@ -678,19 +678,16 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables, token_or
         col = {"uplink": col1, "portgroup": col2, "vmk": col3}[prefix]
         with col:
             st.markdown("---")
-            hdr = st.columns([5, 1])
-            with hdr[0]:
-                st.markdown(f"#### {title} — {label_map.get(preset_code, title)}")
-            with hdr[1]:
-                if _edit_toggle(pk):
-                    if has_name:
-                        render_multi_edit_mode_ui(
-                            [(name_pk, name_pat), (pk, pat)],
-                            variables,
-                        )
-                    else:
-                        render_edit_mode_ui(pk, pat, variables)
-                    st.stop()
+            st.markdown(f"#### {title} — {label_map.get(preset_code, title)}")
+            if _edit_toggle(pk):
+                if has_name:
+                    render_multi_edit_mode_ui(
+                        [(name_pk, name_pat), (pk, pat)],
+                        variables,
+                    )
+                else:
+                    render_edit_mode_ui(pk, pat, variables)
+                st.stop()
             if has_name:
                 vals = render_esxi_network_inputs(
                     pat, variables, prefix, auto_correct,
