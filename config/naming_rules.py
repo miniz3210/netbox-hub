@@ -120,6 +120,24 @@ INTERFACE_PRESETS = [
      "description": "Firewall security-zone interface description"},
 ]
 
+HOST_VM_PRESETS = [
+    {"code": "ESXi", "label": "ESXi Host", "pattern_key": "esxi_host",
+     "description": "ESXi Hypervisor Host"},
+    {"code": "cvi", "label": "Core Virtualization (cvi)", "pattern_key": "vm_host",
+     "description": "Core / Virtualization VM"},
+    {"code": "afs", "label": "App & File Services (afs)", "pattern_key": "vm_host",
+     "description": "Application / File Services VM"},
+]
+
+ESXI_NETWORK_PRESETS = [
+    {"code": "Uplink", "label": "Physical Uplink", "pattern_key": "esxi_uplink",
+     "description": "vmnic Uplink Interface"},
+    {"code": "PortGroup", "label": "Port Group", "pattern_key": "esxi_portgroup",
+     "description": "Standard / Distributed Port Group"},
+    {"code": "VMkernel", "label": "VMkernel", "pattern_key": "esxi_vmkernel",
+     "description": "VMkernel Management / vMotion / Storage"},
+]
+
 LEGACY_PATTERN_KEYS = list(DEFAULT_NAMING_PATTERNS.keys())
 
 DOMAIN_ENV_KEYS = (
@@ -242,6 +260,8 @@ def _normalize_rules(raw: dict) -> dict:
 
     merged["device_presets"] = _normalize_presets(raw.get("device_presets"), DEVICE_PRESETS)
     merged["interface_presets"] = _normalize_presets(raw.get("interface_presets"), INTERFACE_PRESETS)
+    merged["host_vm_presets"] = _normalize_presets(raw.get("host_vm_presets"), HOST_VM_PRESETS)
+    merged["esxi_network_presets"] = _normalize_presets(raw.get("esxi_network_presets"), ESXI_NETWORK_PRESETS)
 
     variables = raw.get("pattern_variables")
     if not isinstance(variables, dict):
@@ -304,6 +324,18 @@ def get_interface_presets(rules: dict) -> list:
     """Return the interface presets list from a rules dict (defaults if missing)."""
     raw = rules.get("interface_presets")
     return _normalize_presets(raw, INTERFACE_PRESETS)
+
+
+def get_host_vm_presets(rules: dict) -> list:
+    """Return the host/virtual-machine presets list from a rules dict."""
+    raw = rules.get("host_vm_presets")
+    return _normalize_presets(raw, HOST_VM_PRESETS)
+
+
+def get_esxi_network_presets(rules: dict) -> list:
+    """Return the ESXi network description presets list from a rules dict."""
+    raw = rules.get("esxi_network_presets")
+    return _normalize_presets(raw, ESXI_NETWORK_PRESETS)
 
 
 def make_preset_key(code: str, prefix: str = "branch") -> str:
