@@ -99,31 +99,31 @@
   ],
   "host_vm_presets": [
     {
-      "code": "ESXi",
+      "code": "ESXI",
       "label": "ESXi Host",
       "pattern_key": "esxi_host",
       "description": "ESXi Hypervisor Host"
     },
     {
-      "code": "cvi",
+      "code": "CVI",
       "label": "Core Virtualization (cvi)",
       "pattern_key": "vm_host",
       "description": "Core / Virtualization VM"
     },
     {
-      "code": "afs",
+      "code": "AFS",
       "label": "App & File Services (afs)",
       "pattern_key": "vm_host",
       "description": "Application / File Services VM"
     },
     {
-      "code": "sani",
+      "code": "SANI",
       "label": "Storage Infrastructure (sani)",
       "pattern_key": "vm_host",
       "description": "Storage Infrastructure VM"
     },
     {
-      "code": "vlab",
+      "code": "VLAB",
       "label": "Virtual Lab / Test (vlab)",
       "pattern_key": "vm_host",
       "description": "Virtual Lab / Test VM"
@@ -149,32 +149,6 @@
       "description": "VMkernel Management / vMotion / Storage"
     }
   ],
-  "site_code_rules": {
-    "separators": [" ", "-", "_"],
-    "multi_word_chars_per_word": [2, 2],
-    "single_word_max_chars": 4,
-    "fallback": "SITE",
-    "exact_mappings": {
-      "new york": "NYC",
-      "london": "LON",
-      "sydney": "SYD",
-      "singapore": "SIN",
-      "tokyo": "TYO",
-      "hong kong": "HKG",
-      "amsterdam": "AMS",
-      "frankfurt": "FRA",
-      "paris": "PAR",
-      "chicago": "CHI",
-      "los angeles": "LAX",
-      "san francisco": "SFO",
-      "dallas": "DAL",
-      "seattle": "SEA",
-      "boston": "BOS",
-      "toronto": "TOR",
-      "bristol": "BRI",
-      "age": "AGE"
-    }
-  },
   "naming_patterns": {
     "branch_switch": "SW<country><state><site><zone><seq>-<stack_id>",
     "branch_stack": "VS<country><state><site><seq>-<stack_id>",
@@ -358,6 +332,39 @@
       "placeholder": "vmk",
       "default": "vmk",
       "optional": false
+    }
+  },
+  "site_code_rules": {
+    "separators": [
+      " ",
+      "-",
+      "_"
+    ],
+    "multi_word_chars_per_word": [
+      2,
+      2
+    ],
+    "single_word_max_chars": 4,
+    "fallback": "SITE",
+    "exact_mappings": {
+      "new york": "NYC",
+      "london": "LON",
+      "sydney": "SYD",
+      "singapore": "SIN",
+      "tokyo": "TYO",
+      "hong kong": "HKG",
+      "amsterdam": "AMS",
+      "frankfurt": "FRA",
+      "paris": "PAR",
+      "chicago": "CHI",
+      "los angeles": "LAX",
+      "san francisco": "SFO",
+      "dallas": "DAL",
+      "seattle": "SEA",
+      "boston": "BOS",
+      "toronto": "TOR",
+      "bristol": "BRI",
+      "age": "AGE"
     }
   }
 }
