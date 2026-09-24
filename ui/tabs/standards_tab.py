@@ -430,13 +430,29 @@ def render_standards_tab(active_model):
 
         with st.expander("📋 NetBox Server & Hardware YAML Guidelines", expanded=False):
             st.caption("Document and enforce the NetBox server hardware YAML schema used across your environment.")
-            with st.expander("NetBox Hardware YAML Schema", expanded=False):
-                st.text_area(
-                    "NetBox Server YAML Guidelines",
-                    value=current_rules.get("netbox_server_yaml", ""),
-                    height=100,
-                    key="form_yaml",
+            with st.expander("✨ AI Assistant: Generate NetBox Server YAML Specs", expanded=False):
+                ai_desc = st.text_input(
+                    "Describe the NetBox server hardware YAML spec",
+                    key="custom_ai_desc",
+                    placeholder="e.g. Generate server hardware YAML for a Dell R740 with dual 25G NICs and 4x 2.5in drive bays",
                 )
+                if st.button("Generate NetBox Server YAML Specs with AI", key="custom_ai_gen", use_container_width=True):
+                    if ai_desc.strip():
+                        with st.spinner(f"Generating spec using {active_model}..."):
+                            try:
+                                generated = generate_naming_pattern(ai_desc.strip(), active_model)
+                                st.session_state["form_yaml"] = generated
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ AI spec generation failed: {e}")
+                    else:
+                        st.warning("⚠️ Please describe the server hardware YAML spec first.")
+            st.text_area(
+                "NetBox Server YAML Guidelines",
+                value=current_rules.get("netbox_server_yaml", ""),
+                height=120,
+                key="form_yaml",
+            )
             col_save_yaml, col_reset_yaml = st.columns(2)
             with col_save_yaml:
                 if st.button("💾 Save Guidelines", type="primary", use_container_width=True):
@@ -454,22 +470,6 @@ def render_standards_tab(active_model):
                     save_naming_rules(rules, source="YAML Guidelines Reset")
                     st.session_state["naming_rules"] = rules.copy()
                     st.rerun()
-            ai_desc = st.text_input(
-                "Describe the NetBox server hardware YAML spec",
-                key="custom_ai_desc",
-                placeholder="e.g. Generate server hardware YAML for a Dell R740 with dual 25G NICs and 4x 2.5in drive bays",
-            )
-            if st.button("🤖 Generate NetBox Server YAML Specs with AI", key="custom_ai_gen", use_container_width=True):
-                if ai_desc.strip():
-                    with st.spinner(f"Generating spec using {active_model}..."):
-                        try:
-                            generated = generate_naming_pattern(ai_desc.strip(), active_model)
-                            st.session_state["form_yaml"] = generated
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ AI spec generation failed: {e}")
-                else:
-                    st.warning("⚠️ Please describe the server hardware YAML spec first.")
 
         # Export full system prompt at the bottom of Edit Standards
         full_prompt_text = export_rules_as_prompt(current_rules)
