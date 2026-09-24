@@ -424,7 +424,7 @@ def _render_esxi_pattern(pat: str, vals: dict, variables: dict) -> str:
 
 
 def render_naming_tab(active_model):
-    st.subheader("Standardized Infrastructure Naming Generator")
+    st.subheader("Standardized Infrastructure Naming Generator", help="Generate and validate standardized hostnames and interface descriptions. All preset-driven patterns are configured in the Standards Tab.")
     st.caption("Generate and validate standardized hostnames for network devices, servers, VMs, and ESXi configurations using AI-powered naming conventions aligned with your NetBox inventory data.")
 
     naming_rules = load_naming_rules()
@@ -443,23 +443,36 @@ def render_naming_tab(active_model):
                 "3. ESXi Network Descriptions (vmnic, PortGroup, VMkernel)",
             ],
             horizontal=True,
+            help="Select the asset class to generate standardized infrastructure names. Each class loads its preset-driven form. Configured in the Standards Tab > Device Type Presets / Interface Type Presets / ESXi Network Description Presets.",
         )
     with ac_row_c2:
         case_mode = _render_casing_selector()
+
+    global_site = ""
+    if "1. Network" in naming_cat or "2. Hosts" in naming_cat:
+        global_site = _site_code_assistant_compact(naming_rules, "global")
     st.markdown("---")
 
     if "1. Network" in naming_cat:
-        _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, variables)
+        _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, variables, global_site)
     elif "2. Hosts" in naming_cat:
-        _asset_class_2(case_mode, active_model, naming_patterns, variables)
+        _asset_class_2(case_mode, active_model, naming_patterns, variables, global_site)
     else:
         token_order_map = naming_rules.get("token_order", {})
         _asset_class_3(case_mode, active_model, naming_patterns, variables, token_order_map)
 
 
 def _site_code_assistant_compact(naming_rules, prefix: str) -> str:
-    with st.expander("📍 Site Code Assistant", expanded=False):
-        loc = st.text_input("City / Location", value="", placeholder="e.g. Sydney, New York", key=f"loc_compact_{prefix}")
+    with st.expander(
+        "📍 Site Code Assistant",
+        expanded=False,
+        help="City/location site code lookup using exact_mappings (Original Pattern → Replacement format). Configured in Standards Tab > Naming Rules YAML (site_code_rules.exact_mappings).",
+    ):
+        loc = st.text_input(
+            "City / Location", value="", placeholder="e.g. Sydney, New York",
+            key=f"loc_compact_{prefix}",
+            help="Enter a city/location to compute its site code. City-to-code mappings follow the Original Pattern → Replacement format. Configured in Standards Tab > Naming Rules YAML (site_code_rules.exact_mappings).",
+        )
         if st.button("Suggest and Fill", key=f"site_suggest_{prefix}"):
             code = compute_suggested_site_code(loc, naming_rules)
             st.session_state[f"_suggested_site_{prefix}"] = code
@@ -472,9 +485,8 @@ def _site_code_assistant_compact(naming_rules, prefix: str) -> str:
                 st.rerun()
     return st.session_state.get(f"_suggested_site_{prefix}", "")
 
-def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, variables):
+def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, variables, global_site=""):
     col_a, col_b = st.columns([1, 1])
-    # Presets loaded from the structured device_presets / interface_presets in YAML.
     dev_presets = _device_presets(naming_rules, naming_patterns)
     intf_presets = _interface_presets(naming_rules, naming_patterns)
     dev_codes = [code for code, _label, _key in dev_presets]
@@ -490,8 +502,8 @@ def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, varia
         dev_label_map = {p["code"]: p["label"] for p in get_device_presets(naming_rules)}
     intf_label_map = {code: label for code, label, _key in intf_presets}
     with col_a:
-        st.markdown("#### Universal Device Hostname Generator")
-        auto_code = _site_code_assistant_compact(naming_rules, "dev")
+        st.subheader("Universal Device Hostname Generator", help="Generate standardized device hostnames using preset-driven patterns. Device type and interface presets are configured in the Standards Tab > Device Type Presets / Interface Type Presets.")
+        auto_code = global_site
         dev_type = st.radio("Device Type", dev_codes, horizontal=True, key="dev_prefix_sel", help="Select the device class to generate a standardized hostname. Choices are configured in the Standards Tab (Device Type Presets).")
         pk = _dev_pattern_key(dev_type, dev_presets)
         edit_on = _edit_toggle(pk)
@@ -519,7 +531,7 @@ def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, varia
         display_reference_box("device", ref_ex, ref_lbl, values.get("site", ""), ref_flt)
 
     with col_b:
-        st.markdown("#### Switch & Firewall Interface Formatter")
+        st.subheader("Switch & Firewall Interface Formatter", help="Select the interface class to format. Choices are configured in the Standards Tab > Interface Type Presets.")
         intf_type = st.radio(
             "Interface Type",
             intf_codes,
@@ -589,7 +601,7 @@ def _esxi_network_presets_fn(rules, naming_patterns):
             for p in presets if p["pattern_key"] in naming_patterns]
 
 
-def _asset_class_2(case_mode, active_model, naming_patterns, variables):
+def _asset_class_2(case_mode, active_model, naming_patterns, variables, global_site=""):
     naming_rules = st.session_state.get("naming_rules", load_naming_rules())
     presets = _host_vm_presets(naming_rules, naming_patterns)
 
@@ -604,9 +616,12 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables):
     vm_keys = [code for code, _label, key in presets if key == "vm_host"]
     vm_label_map = {code: label for code, label, _key in presets}
 
+    hst_defaults = {"site_prefix": global_site, "site": global_site} if global_site else {}
+    vm_defaults = {"site": global_site} if global_site else {}
+
     col_a, col_b = st.columns(2)
     with col_a:
-        st.markdown("#### Host Type")
+        st.subheader("Host Type", help="Select the host type to generate a hostname. Choices are configured in the Standards Tab > Hosts Type Presets.")
         host_type = st.radio(
             "Host Type",
             host_keys,
@@ -620,7 +635,7 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables):
             render_edit_mode_ui(host_pk, pat, variables)
             st.stop()
             return
-        values = render_token_widgets(pat, variables, f"hst_{host_pk}")
+        values = render_token_widgets(pat, variables, f"hst_{host_pk}", defaults=hst_defaults)
         gen_raw = render_dynamic_pattern(pat, values, variables)
         gen_raw = re.sub(r"\s*\([^)]*\)", "", gen_raw).strip()
         gen_raw = re.sub(r"<[^>]+>", "", gen_raw)
@@ -638,7 +653,7 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables):
                 st.info(verify_and_suggest_with_ai(gen, active_model, asset_type=f"{host_label} Hypervisor Hostname", category_key="hypervisor", site_filter=values.get("site_prefix", "")))
         display_reference_box("hypervisor", "NYCESX001.corp.internal\nLONESX001.corp.internal\nSYDESX01.corp.local", "Hypervisor", site_filter=values.get("site_prefix", ""))
     with col_b:
-        st.markdown("#### Virtual Machine (VM) Hostname")
+        st.subheader("Virtual Machine (VM) Hostname", help="Select the VM role/type to generate a hostname. Choices are configured in the Standards Tab > Virtual Machine Presets.")
         vm_type = st.radio(
             "VM Role / Type",
             vm_keys,
@@ -651,7 +666,7 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables):
             render_edit_mode_ui(vm_pk, vm_pat, variables)
             st.stop()
             return
-        values = render_token_widgets(vm_pat, variables, "vm")
+        values = render_token_widgets(vm_pat, variables, "vm", defaults=vm_defaults)
         gen_raw = render_dynamic_pattern(vm_pat, values, variables)
         gen_raw = re.sub(r"\s*\([^)]*\)", "", gen_raw).strip()
         gen_raw = re.sub(r"\s+or\s+.*", "", gen_raw).strip()
@@ -679,6 +694,12 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables, token_or
         ("vmk", "VMkernel", "esxi_vmkernel", "3. VMkernel Adapter (vmk)", True),
     ]
 
+    help_map = {
+        "1. Physical Uplink (PCIeX/PortX)": "Standard uplink naming conventions. Configured in Standards Tab > ESXi Uplink Presets.",
+        "2. Port Group Teaming (Network)": "Standard Port Group naming conventions. Configured in Standards Tab > Port Group Presets.",
+        "3. VMkernel Adapter (vmk)": "Standard VMkernel naming conventions. Configured in Standards Tab > VMkernel Presets.",
+    }
+
     col1, col2, col3 = st.columns(3)
 
     for prefix, preset_code, default_key, title, has_name in sections:
@@ -693,7 +714,7 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables, token_or
         col = {"uplink": col1, "portgroup": col2, "vmk": col3}[prefix]
         with col:
             st.markdown("---")
-            st.markdown(f"#### {title}")
+            st.subheader(title, help=help_map.get(title, ""))
             if _edit_toggle(pk):
                 if has_name:
                     render_multi_edit_mode_ui(

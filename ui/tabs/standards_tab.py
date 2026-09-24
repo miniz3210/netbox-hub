@@ -192,7 +192,7 @@ def _render_auto_correction_manager(active_model: str) -> None:
                     key=f"ac_ai_input_{category}",
                     placeholder="e.g., Shorten GigabitEthernet to Gi, or standardize nic0 to vmnic0",
                 )
-                if st.button("Generate Regex Rule", key=f"ac_ai_btn_{category}", use_container_width=True):
+                if st.button("Generate Regex Rule", key=f"ac_ai_btn_{category}", width='stretch'):
                     if ai_prompt.strip():
                         try:
                             with st.spinner(f"Generating rule using {active_model}..."):
@@ -220,7 +220,7 @@ def _render_auto_correction_manager(active_model: str) -> None:
 
             col_save, col_add, col_reset = st.columns([2, 2, 2])
             with col_save:
-                if st.button("💾 Save & Apply Changes", key=f"ac_{category}_save", type="primary", use_container_width=True):
+                if st.button("💾 Save & Apply Changes", key=f"ac_{category}_save", type="primary", width='stretch'):
                     failed = []
                     for rule in updated:
                         pat = rule.get("pattern", "")
@@ -236,7 +236,7 @@ def _render_auto_correction_manager(active_model: str) -> None:
                         final[category] = updated
                         _persist_auto_corrections(final)
             with col_add:
-                if st.button("➕ Add Rule", key=f"ac_{category}_add", use_container_width=True):
+                if st.button("➕ Add Rule", key=f"ac_{category}_add", width='stretch'):
                     if new_p.strip():
                         ok, msg = validate_regex_replacement(new_p, new_r)
                         if not ok:
@@ -253,7 +253,7 @@ def _render_auto_correction_manager(active_model: str) -> None:
                     else:
                         st.warning("⚠️ Enter a regex pattern to add.")
             with col_reset:
-                if st.button("🔄 Reset to Factory Defaults", key=f"ac_reset_factory_{category}", use_container_width=True):
+                if st.button("🔄 Reset to Factory Defaults", key=f"ac_reset_factory_{category}", width='stretch'):
                     reset_auto_corrections()
                     st.session_state["autocorrect_reset"] = True
                     st.rerun()
@@ -383,12 +383,12 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str) -> N
     with col_save:
         saved_presets = st.button(
             "💾 Save Presets", key=f"{kind}_preset_save", type="primary",
-            use_container_width=True,
+            width='stretch',
         )
     with col_reset:
         reset_presets = st.button(
             "🔄 Reset to Defaults", key=f"{kind}_preset_reset",
-            use_container_width=True,
+            width='stretch',
         )
 
     if reset_presets:
@@ -477,7 +477,7 @@ def _render_delta_table(delta: dict) -> None:
 
     st.dataframe(
         rows,
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
     )
 
@@ -567,9 +567,9 @@ def _host_editor(rules: dict) -> None:
 
     col_save, col_reset = st.columns(2)
     with col_save:
-        saved = st.button("💾 Save Hosts Presets", key="host_preset_save", type="primary", use_container_width=True)
+        saved = st.button("💾 Save Hosts Presets", key="host_preset_save", type="primary", width='stretch')
     with col_reset:
-        reset = st.button("🔄 Reset to Defaults", key="host_preset_reset", use_container_width=True)
+        reset = st.button("🔄 Reset to Defaults", key="host_preset_reset", width='stretch')
 
     if reset:
         _reset_presets("host_vm", rules)
@@ -664,9 +664,9 @@ def _vm_editor(rules: dict) -> None:
 
     c_save, c_reset = st.columns(2)
     with c_save:
-        saved = st.button("💾 Save VM Presets", key="vm_save", type="primary", use_container_width=True)
+        saved = st.button("💾 Save VM Presets", key="vm_save", type="primary", width='stretch')
     with c_reset:
-        reset = st.button("🔄 Reset to Defaults", key="vm_reset", use_container_width=True)
+        reset = st.button("🔄 Reset to Defaults", key="vm_reset", width='stretch')
 
     if reset:
         _reset_presets("host_vm", rules)
@@ -756,7 +756,7 @@ def render_standards_tab(active_model):
                     key="custom_ai_desc",
                     placeholder="e.g. Generate server hardware YAML for a Dell R740 with dual 25G NICs and 4x 2.5in drive bays",
                 )
-                if st.button("Generate NetBox Server YAML Specs with AI", key="custom_ai_gen", use_container_width=True):
+                if st.button("Generate NetBox Server YAML Specs with AI", key="custom_ai_gen", width='stretch'):
                     if ai_desc.strip():
                         with st.spinner(f"Generating spec using {active_model}..."):
                             try:
@@ -775,7 +775,7 @@ def render_standards_tab(active_model):
             )
             col_save_yaml, col_reset_yaml = st.columns(2)
             with col_save_yaml:
-                if st.button("💾 Save Guidelines", type="primary", use_container_width=True):
+                if st.button("💾 Save Guidelines", type="primary", width='stretch'):
                     yaml_text = st.session_state.get("form_yaml", "")
                     rules = load_naming_rules()
                     rules["netbox_server_yaml"] = yaml_text
@@ -783,7 +783,7 @@ def render_standards_tab(active_model):
                     st.session_state["naming_rules"] = rules.copy()
                     st.toast("Guidelines saved successfully!", icon="✅")
             with col_reset_yaml:
-                if st.button("🔄 Reset to Default", use_container_width=True):
+                if st.button("🔄 Reset to Default", width='stretch'):
                     default_yaml = DEFAULT_RULES.get("netbox_server_yaml", DEFAULT_NAMING_PATTERNS.get("netbox_server_yaml", ""))
                     rules = load_naming_rules()
                     rules["netbox_server_yaml"] = default_yaml
@@ -951,7 +951,7 @@ def render_standards_tab(active_model):
             # Add clear history button
             col_info, col_clear = st.columns([3, 1])
             with col_clear:
-                if st.button("🗑️ Clear History", use_container_width=True):
+                if st.button("🗑️ Clear History", width='stretch'):
                     clear_history()
                     st.success("✅ History cleared!")
                     st.rerun()
@@ -997,7 +997,7 @@ def render_standards_tab(active_model):
                     col_restore, col_view = st.columns([1, 1])
                     
                     with col_restore:
-                        if st.button(f"↩️ Restore This Version", key=f"restore_{idx}", use_container_width=True):
+                        if st.button(f"↩️ Restore This Version", key=f"restore_{idx}", width='stretch'):
                             try:
                                 restored_rules = restore_from_history(idx)
                                 save_naming_rules(restored_rules, source=f"Restored from {timestamp}")

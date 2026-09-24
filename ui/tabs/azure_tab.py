@@ -245,7 +245,7 @@ def render_azure_tab(active_model=None):
             )
         with c_clr:
             if saved_upload:
-                if st.button("🗑️ Clear Azure CSV", key="clear_azure_csv_btn", help="Clear Azure CSV data", use_container_width=True):
+                if st.button("🗑️ Clear Azure CSV", key="clear_azure_csv_btn", help="Clear Azure CSV data", width='stretch'):
                     clear_azure_csv_upload()
                     # Clear session state
                     st.session_state.azure_vms_parsed = None
@@ -257,7 +257,7 @@ def render_azure_tab(active_model=None):
                     st.session_state.azure_last_uploaded_file = None
                     st.rerun()
         with c_ref:
-            if st.button("🔄 Refresh", key="ref_azure_btn", use_container_width=True, help="Reload the view"):
+            if st.button("🔄 Refresh", key="ref_azure_btn", width='stretch', help="Reload the view"):
                 # Clear preview table cache to force rebuild
                 st.session_state.azure_preview_table_df = None
                 st.rerun()

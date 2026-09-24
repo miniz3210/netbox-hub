@@ -274,7 +274,7 @@ def render_custom_backup_selector(scope_key: str = "naming") -> None:
             file_name=filename,
             mime="text/plain",
             key=f"btn_download_custom_{scope_key}",
-            use_container_width=True,
+            width='stretch',
             help=f"Download {filename} with {selected_count} selected endpoints"
         )
     
@@ -310,22 +310,22 @@ def render_custom_backup_selector(scope_key: str = "naming") -> None:
                     st.markdown(f"**{category}** — {category_selected}/{len(endpoints)} selected ({category_essential} essential)")
                 
                 with col_sel_all:
-                    if st.button("✅ All", key=f"btn_select_all_{category}_{scope_key}", use_container_width=True, help="Select all endpoints in this category"):
+                    if st.button("✅ All", key=f"btn_select_all_{category}_{scope_key}", width='stretch', help="Select all endpoints in this category"):
                         _select_all_in_category(category, scope_key)
                         st.rerun()
                 
                 with col_sel_none:
-                    if st.button("❌ None", key=f"btn_deselect_all_{category}_{scope_key}", use_container_width=True, help="Deselect all endpoints in this category"):
+                    if st.button("❌ None", key=f"btn_deselect_all_{category}_{scope_key}", width='stretch', help="Deselect all endpoints in this category"):
                         _deselect_all_in_category(category, scope_key)
                         st.rerun()
                 
                 with col_reset_full:
-                    if st.button("🔄 Full", key=f"btn_reset_full_{category}_{scope_key}", use_container_width=True, help="Reset to Full backup (all 112 endpoints)"):
+                    if st.button("🔄 Full", key=f"btn_reset_full_{category}_{scope_key}", width='stretch', help="Reset to Full backup (all 112 endpoints)"):
                         _reset_to_full(scope_key)
                         st.rerun()
                 
                 with col_reset_min:
-                    if st.button("🔄 Minimal", key=f"btn_reset_min_{category}_{scope_key}", use_container_width=True, help="Reset to Minimal backup (64 essential endpoints)"):
+                    if st.button("🔄 Minimal", key=f"btn_reset_min_{category}_{scope_key}", width='stretch', help="Reset to Minimal backup (64 essential endpoints)"):
                         _reset_to_minimal(scope_key)
                         st.rerun()
                 
