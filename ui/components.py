@@ -598,7 +598,7 @@ def _render_backup_contents_section(scope_key: str, meta: dict) -> None:
                     st.caption(f"📊 {len(csv_endpoints)} CSV endpoint(s)")
                 with col_btn:
                     edit_mode_key = f"csv_edit_mode_{scope_key}"
-                    if st.button("📊 Manage CSV", key=f"btn_manage_csv_{scope_key}", use_container_width=True):
+                    if st.button("📊 Manage CSV", key=f"btn_manage_csv_{scope_key}", width='stretch'):
                         st.session_state[edit_mode_key] = True
                         st.rerun()
                 
@@ -648,7 +648,7 @@ def _render_backup_contents_section(scope_key: str, meta: dict) -> None:
                     with col_clear:
                         # Show count in the Clear All CSV button
                         csv_count = len(csv_endpoints)
-                        if st.button(f"🗑️ Clear All CSV ({csv_count})", key=f"btn_clear_all_csv_{scope_key}", use_container_width=True, help=f"Remove all {csv_count} CSV endpoints at once"):
+                        if st.button(f"🗑️ Clear All CSV ({csv_count})", key=f"btn_clear_all_csv_{scope_key}", width='stretch', help=f"Remove all {csv_count} CSV endpoints at once"):
                             # Clear all CSV entries
                             count = SharedBackupState.clear_csv_only()
                             if count > 0:
@@ -657,7 +657,7 @@ def _render_backup_contents_section(scope_key: str, meta: dict) -> None:
                             st.rerun()
                     
                     with col_done:
-                        if st.button("✅ Done", key=f"btn_done_manage_{scope_key}", type="primary", use_container_width=True):
+                        if st.button("✅ Done", key=f"btn_done_manage_{scope_key}", type="primary", width='stretch'):
                             st.session_state[edit_mode_key] = False
                             st.rerun()
     else:
@@ -993,11 +993,11 @@ def _render_csv_upload_section(scope_key: str, csv_uploader_key: str) -> None:
         # Confirmation buttons
         col_confirm, col_cancel = st.columns([1, 1])
         with col_confirm:
-            if st.button("✅ Confirm & Import", key=f"btn_confirm_csv_{scope_key}", type="primary", use_container_width=True):
+            if st.button("✅ Confirm & Import", key=f"btn_confirm_csv_{scope_key}", type="primary", width='stretch'):
                 _process_confirmed_csv_uploads(scope_key, confirmed_classifications)
                 st.rerun()
         with col_cancel:
-            if st.button("❌ Cancel", key=f"btn_cancel_csv_{scope_key}", use_container_width=True):
+            if st.button("❌ Cancel", key=f"btn_cancel_csv_{scope_key}", width='stretch'):
                 # Clear pending confirmation
                 del st.session_state[pending_key]
                 # Clear the file uploader
