@@ -680,7 +680,7 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables, token_or
     auto_correct = st.session_state.get("esxi_auto_corr", True)
     naming_rules = st.session_state.get("naming_rules", load_naming_rules())
     presets = _esxi_network_presets_fn(naming_rules, naming_patterns)
-    label_map = {code: label for code, _label, _key in presets}
+    label_map = {code: _label for code, _label, _key in presets}
     key_map = {code: key for code, _label, _key in presets}
 
     sections = [

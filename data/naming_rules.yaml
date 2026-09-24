@@ -115,6 +115,18 @@
       "label": "App & File Services (afs)",
       "pattern_key": "vm_host",
       "description": "Application / File Services VM"
+    },
+    {
+      "code": "sani",
+      "label": "Storage Infrastructure (sani)",
+      "pattern_key": "vm_host",
+      "description": "Storage Infrastructure VM"
+    },
+    {
+      "code": "vlab",
+      "label": "Virtual Lab / Test (vlab)",
+      "pattern_key": "vm_host",
+      "description": "Virtual Lab / Test VM"
     }
   ],
   "esxi_network_presets": [

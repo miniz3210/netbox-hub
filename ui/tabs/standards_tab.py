@@ -336,7 +336,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str) -> N
     with ca2:
         new_lbl = st.text_input("Display Label", value="", placeholder="e.g. SAN Storage (SAN)", key=f"{kind}_new_lbl").strip()
     with ca3:
-        new_tpl = st.text_input("Pattern Template", value="", placeholder="e.g. SAN<Country><Site><Seq>", key=f"{kind}_new_tpl").strip()
+        new_tpl = st.text_input("Pattern Template", value="", placeholder="e.g. SAN<country><site><seq>", key=f"{kind}_new_tpl").strip()
     with ca4:
         new_desc = st.text_input("Description (Optional)", value="", placeholder="Describe this preset", key=f"{kind}_new_desc").strip()
 
@@ -413,42 +413,34 @@ def _fmt_delta_val(value) -> str:
 
 
 def _render_delta_table(delta: dict) -> None:
-    """Render a clean Field | Previous Value | New Value diff table for a delta dict."""
-    catalog = ["custom_patterns", "device_presets", "interface_presets",
-              "host_vm_presets", "esxi_network_presets"]
+    """Render a granular Path / Field | Previous Value | New Value diff table.
+
+    ``compute_delta`` already expands nested dicts and list items into leaf paths, so each
+    entry renders as its own row instead of a summarised ``"X item(s)"`` count.
+    """
     if not delta:
         st.info("No field-level changes recorded for this entry.")
         return
 
+    rows = []
     for key, change in delta.items():
         if not isinstance(change, dict):
             continue
-        field = key
-        old_v = change.get("old")
-        new_v = change.get("new")
-        if key in catalog:
-            st.markdown(f"**{field}**")
-            old_cnt = len(old_v) if isinstance(old_v, (list, dict)) else 0
-            new_cnt = len(new_v) if isinstance(new_v, (list, dict)) else 0
-            st.dataframe(
-                {
-                    "Field / Key": [f"{field} (presets)"],
-                    "Previous Value": [f"{old_cnt} item(s)"],
-                    "New Value": [f"{new_cnt} item(s)"],
-                },
-                use_container_width=True,
-                hide_index=True,
-            )
-            continue
-        st.dataframe(
-            {
-                "Field / Key": [field],
-                "Previous Value": [_fmt_delta_val(old_v)],
-                "New Value": [_fmt_delta_val(new_v)],
-            },
-            use_container_width=True,
-            hide_index=True,
-        )
+        rows.append({
+            "Path / Field": key,
+            "Previous Value": _fmt_delta_val(change.get("old")),
+            "New Value": _fmt_delta_val(change.get("new")),
+        })
+
+    if not rows:
+        st.info("No field-level changes recorded for this entry.")
+        return
+
+    st.dataframe(
+        rows,
+        use_container_width=True,
+        hide_index=True,
+    )
 
 
 def render_standards_tab(active_model):
