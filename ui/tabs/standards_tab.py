@@ -7,7 +7,7 @@ from config.naming_rules import (
     get_pattern_variables, get_naming_patterns, get_custom_patterns,
     get_device_presets, get_interface_presets, get_host_vm_presets,
     get_esxi_network_presets, make_preset_key, default_presets_for,
-    DEFAULT_PRESET_KEY_FIELD, DEFAULT_NAMING_PATTERNS,
+    DEFAULT_PRESET_KEY_FIELD, DEFAULT_NAMING_PATTERNS, DEFAULT_RULES,
 )
 from core.naming_engine import generate_naming_pattern, generate_autocorrect_rule
 from utils.formatters import (
@@ -437,6 +437,23 @@ def render_standards_tab(active_model):
                     height=100,
                     key="form_yaml",
                 )
+            col_save_yaml, col_reset_yaml = st.columns(2)
+            with col_save_yaml:
+                if st.button("💾 Save Guidelines", type="primary", use_container_width=True):
+                    yaml_text = st.session_state.get("form_yaml", "")
+                    rules = load_naming_rules()
+                    rules["netbox_server_yaml"] = yaml_text
+                    save_naming_rules(rules, source="YAML Guidelines Save")
+                    st.session_state["naming_rules"] = rules.copy()
+                    st.toast("Guidelines saved successfully!", icon="✅")
+            with col_reset_yaml:
+                if st.button("🔄 Reset to Default", use_container_width=True):
+                    default_yaml = DEFAULT_RULES.get("netbox_server_yaml", DEFAULT_NAMING_PATTERNS.get("netbox_server_yaml", ""))
+                    rules = load_naming_rules()
+                    rules["netbox_server_yaml"] = default_yaml
+                    save_naming_rules(rules, source="YAML Guidelines Reset")
+                    st.session_state["naming_rules"] = rules.copy()
+                    st.rerun()
             ai_desc = st.text_input(
                 "Describe the NetBox server hardware YAML spec",
                 key="custom_ai_desc",
