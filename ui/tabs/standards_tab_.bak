@@ -20,7 +20,7 @@ from utils.formatters import (
 # Shared column width ratios enforced across preset table headers and all data rows.
 PRESET_COLS = [1.2, 2.2, 4.5, 0.6]
 # Manage Pattern Variables columns: Name, Label, Placeholder, Auto-Fill, Optional, Up, Down, Delete.
-VARIABLE_COLS = [1.5, 2.5, 2.5, 1.5, 0.9, 0.5, 0.5, 0.5]
+VARIABLE_COLS = [1.5, 2.5, 2.5, 1.5, 1.0, 0.5, 0.5, 0.5]
 # Auto-Correction rule columns: Original Pattern, Replacement, Description, On, Action.
 AUTOCORRECT_COLS = [3.0, 2.2, 3.0, 0.7, 0.7]
 
@@ -28,6 +28,10 @@ def _normalize_var_name(raw: str) -> str:
     return re.sub(r"[^a-z0-9_]", "", raw.strip().lower().replace(" ", "_"))
 
 def _diff_rule_list(category: str, old_rules: list, new_rules: list) -> list:
+    """Return granular diff rows for an auto-correction rule list.
+    ``[Modified]`` rows (Previous replacement -> New replacement) instead of
+    dumping the entire category array as a raw dict string.
+    """
     rows = []
     old_by_desc = {r.get("description"): r for r in old_rules}
     new_by_desc = {r.get("description"): r for r in new_rules}
@@ -62,6 +66,9 @@ def _diff_rule_list(category: str, old_rules: list, new_rules: list) -> list:
 
 
 def validate_regex_replacement(pattern_str: str, replacement_str: str) -> tuple:
+    """Validate that *replacement_str*'s backreferences fit *pattern_str*'s groups.
+    Returns ``(True, "")`` on success or ``(False, "error message")`` on failure.
+    """
     if not pattern_str:
         return True, ""
     try:
@@ -82,6 +89,7 @@ def validate_regex_replacement(pattern_str: str, replacement_str: str) -> tuple:
 
 
 def _persist_variables(rules: dict, variables: dict) -> None:
+    """Save updated ``pattern_variables`` to file and session state."""
     rules["pattern_variables"] = variables
     save_naming_rules(rules, source="Variable Manager")
     st.session_state["naming_rules"] = rules.copy()
@@ -90,6 +98,11 @@ def _persist_variables(rules: dict, variables: dict) -> None:
 
 
 def _render_auto_correction_manager(active_model: str) -> None:
+    """CRUD manager for the externalized VMware syntax auto-correction rules.
+
+    Reads/writes ``data/autocorrect_rules.yaml`` and refreshes the in-session
+    cache immediately so the ESXi naming tab picks up changes without a restart.
+    """
     if st.session_state.pop("autocorrect_saved", False):
         st.success("✅ Auto-correction rules saved & applied!")
     if st.session_state.pop("autocorrect_reset", False):
@@ -113,7 +126,7 @@ def _render_auto_correction_manager(active_model: str) -> None:
                 "the AI generator below to create new rules. The **On** checkbox "
                 "enables/disables a rule without deleting it."
             )
-            ch_p, ch_r, ch_d, ch_e, ch_del = st.columns(AUTOCORRECT_COLS, vertical_alignment="center")
+            ch_p, ch_r, ch_d, ch_e, ch_del = st.columns(AUTOCORRECT_COLS)
             with ch_p:
                 st.markdown("**Original Pattern**")
             with ch_r:
@@ -121,15 +134,15 @@ def _render_auto_correction_manager(active_model: str) -> None:
             with ch_d:
                 st.markdown("**Description**")
             with ch_e:
-                st.markdown("<div style='text-align: center; font-weight: 600;'>On</div>", unsafe_allow_html=True)
+                st.markdown("**On**")
             with ch_del:
-                st.markdown("<div style='text-align: center; font-weight: 600;'>Action</div>", unsafe_allow_html=True)
+                st.markdown("**Action**")
 
             items = list(rules[category])
             updated = []
             pending_delete = None
             for idx, rule in enumerate(items):
-                col_p, col_r, col_d, col_e, col_del = st.columns(AUTOCORRECT_COLS, vertical_alignment="center")
+                col_p, col_r, col_d, col_e, col_del = st.columns(AUTOCORRECT_COLS)
                 with col_p:
                     p = st.text_input(
                         "Original Pattern",
@@ -152,14 +165,15 @@ def _render_auto_correction_manager(active_model: str) -> None:
                         label_visibility="collapsed",
                     )
                 with col_e:
+                    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
                     enabled = st.checkbox(
                         "On",
                         value=bool(rule.get("enabled", True)),
                         key=f"ac_{category}_e_{idx}",
-                        label_visibility="collapsed",
                     )
                 with col_del:
-                    if st.button("🗑️", key=f"ac_{category}_del_{idx}", help="Delete this rule", width="stretch"):
+                    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                    if st.button("🗑️", key=f"ac_{category}_del_{idx}", help="Delete this rule"):
                         pending_delete = idx
 
                 if pending_delete == idx:
@@ -250,6 +264,12 @@ def _render_auto_correction_manager(active_model: str) -> None:
 
 
 def _render_site_code_mapping_manager() -> None:
+    """CRUD manager for city/location → site code exact mappings.
+
+    Reads/writes ``site_code_rules.exact_mappings`` inside ``data/naming_rules.yaml``
+    and refreshes the in-session cache so the Naming tab site code assistant picks up
+    changes immediately.
+    """
     from config.naming_rules import get_site_code_rules
 
     with st.expander("📍 Site Code Mapping Rules (City / Location to Code)", expanded=False):
@@ -262,19 +282,19 @@ def _render_site_code_mapping_manager() -> None:
         sr = get_site_code_rules(rules)
         exact = dict(sr.get("exact_mappings") or {})
 
-        m_col_p, m_col_r, m_col_del = st.columns([3.0, 2.2, 0.7], vertical_alignment="center")
+        m_col_p, m_col_r, m_col_del = st.columns([3.0, 2.2, 0.7])
         with m_col_p:
             st.markdown("**Original Pattern (City / Location)**")
         with m_col_r:
             st.markdown("**Replacement (Site Code)**")
         with m_col_del:
-            st.markdown("<div style='text-align: center; font-weight: 600;'>Action</div>", unsafe_allow_html=True)
+            st.markdown("**Action**")
 
         items = list(exact.items())
         updated = {}
         pending_delete = None
         for idx, (pat, code) in enumerate(items):
-            col_p, col_r, col_del = st.columns([3.0, 2.2, 0.7], vertical_alignment="center")
+            col_p, col_r, col_del = st.columns([3.0, 2.2, 0.7])
             with col_p:
                 np_ = st.text_input(
                     "Original Pattern", value=pat, key=f"sitecode_{idx}_p",
@@ -286,7 +306,8 @@ def _render_site_code_mapping_manager() -> None:
                     label_visibility="collapsed",
                 )
             with col_del:
-                if st.button("🗑️", key=f"sitecode_{idx}_del", help="Delete this mapping", width="stretch"):
+                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                if st.button("🗑️", key=f"sitecode_{idx}_del", help="Delete this mapping"):
                     pending_delete = idx
 
             if pending_delete == idx:
@@ -323,6 +344,7 @@ def _render_site_code_mapping_manager() -> None:
 
 
 def _persist_site_code_mappings(rules: dict) -> None:
+    """Save site code exact mappings to YAML and refresh the session cache."""
     from config.naming_rules import compute_delta, add_to_history
 
     old_rules = load_naming_rules()
@@ -338,10 +360,12 @@ def _persist_site_code_mappings(rules: dict) -> None:
 
 
 def _persist_auto_corrections(data: dict) -> None:
+    """Save auto-correction rules to YAML and refresh the session cache."""
     from config.naming_rules import compute_delta
     save_auto_corrections(data, source="Management UI")
     old_rules = {}
     if os.path.exists(RULES_FILE):
+        from config.constants import RULES_FILE
         try:
             with open(RULES_FILE, "r", encoding="utf-8") as f:
                 old_rules = json.load(f)
@@ -361,6 +385,7 @@ def _persist_auto_corrections(data: dict) -> None:
 
 
 def _save_presets(rules: dict) -> None:
+    """Persist an updated rules dict carrying device/interface presets and reload."""
     save_naming_rules(rules, source="Presets Manager")
     st.session_state["naming_rules"] = rules.copy()
     st.session_state["presets_saved"] = True
@@ -368,6 +393,12 @@ def _save_presets(rules: dict) -> None:
 
 
 def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str) -> None:
+    """CRUD editor for one preset type (device/interface/host_vm/esxi_network).
+
+    Reads the structured preset list, lets the user edit code / label / pattern template
+    inline, delete (with a minimum-of-one guard) or add new presets, then persists
+    everything back to ``data/naming_rules.yaml`` via a single Save button.
+    """
     patterns = dict(rules.get("naming_patterns") or {})
     key_field = "device_presets" if kind == "device" else (
         "interface_presets" if kind == "interface" else (
@@ -401,7 +432,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str) -> N
             pkey = p.get("pattern_key", "")
             tpl = patterns.get(pkey, "")
 
-            c1, c2, c3, c4 = st.columns(PRESET_COLS, vertical_alignment="center")
+            c1, c2, c3, c4 = st.columns(PRESET_COLS)
             with c1:
                 ncode = st.text_input("Code", value=code, key=f"{kind}_pre_code_{idx}", label_visibility="collapsed").strip()
             with c2:
@@ -409,7 +440,8 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str) -> N
             with c3:
                 ntpl = st.text_input("Pattern Template", value=tpl, key=f"{kind}_pre_tpl_{idx}", label_visibility="collapsed").strip()
             with c4:
-                if st.button("🗑️", key=f"{kind}_pre_del_{idx}", width="stretch"):
+                st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
+                if st.button("🗑️", key=f"{kind}_pre_del_{idx}"):
                     if len(presets) > 1:
                         st.session_state[_pending_del_key] = idx
                         st.rerun()
@@ -488,6 +520,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str) -> N
 
 
 def _reset_presets(kind: str, rules: dict) -> None:
+    """Restore one preset *kind* and its tied patterns to factory defaults."""
     key_field = DEFAULT_PRESET_KEY_FIELD.get(kind)
     if not key_field:
         return
@@ -504,17 +537,24 @@ def _reset_presets(kind: str, rules: dict) -> None:
 
 
 def _fmt_delta_val(value) -> str:
+    """Render a delta value compactly for display in the diff table."""
     if value is None:
         return "—"
     if isinstance(value, (dict, list)):
+        import json as _json
         try:
-            return json.dumps(value, ensure_ascii=False)
+            return _json.dumps(value, ensure_ascii=False)
         except Exception:
             return str(value)
     return str(value)
 
 
 def _render_delta_table(delta: dict) -> None:
+    """Render a granular Path / Field | Previous Value | New Value diff table.
+
+    ``compute_delta`` already expands nested dicts and list items into leaf paths, so each
+    entry renders as its own row instead of a summarised ``"X item(s)"`` count.
+    """
     if not delta:
         st.info("No field-level changes recorded for this entry.")
         return
@@ -542,12 +582,15 @@ def _render_delta_table(delta: dict) -> None:
 
 def _host_editor(rules: dict) -> None:
     all_presets = list(get_host_vm_presets(rules))
-    host_presets = [p for p in all_presets if p.get("pattern_key") != "vm_host"]
+    esxi = [p for p in all_presets if p.get("code") == "ESXi"]
     vm_presets = [p for p in all_presets if p.get("pattern_key") == "vm_host"]
+    host_presets = [p for p in all_presets if p.get("pattern_key") != "vm_host"]
     patterns = dict(rules.get("naming_patterns") or {})
+    p = esxi[0] if esxi else {"code": "ESXi", "label": "ESXi Host", "pattern_key": "esxi_host", "description": ""}
+    pkey = p.get("pattern_key", "esxi_host")
 
     st.markdown(f"**🖥️ Hosts Type Presets** &nbsp;&nbsp;&nbsp;`{len(host_presets)} presets`")
-    st.caption("Manage physical host naming patterns and presets.")
+    st.caption("Manage the ESXi host naming pattern and associated physical host presets.")
 
     col_hdr_code, col_hdr_lbl, col_hdr_tpl, col_hdr_act = st.columns(PRESET_COLS, vertical_alignment="center")
     with col_hdr_code:
@@ -569,7 +612,7 @@ def _host_editor(rules: dict) -> None:
         pk = preset.get("pattern_key", "")
         tpl = patterns.get(pk, "")
 
-        c1, c2, c3, c4 = st.columns(PRESET_COLS, vertical_alignment="center")
+        c1, c2, c3, c4 = st.columns(PRESET_COLS)
         with c1:
             if code == "ESXi":
                 st.text_input("Code", value=code, key=f"host_{idx}_code", disabled=True)
@@ -583,15 +626,14 @@ def _host_editor(rules: dict) -> None:
         with c3:
             ntpl = st.text_input("Pattern Template", value=tpl, key=f"host_{idx}_tpl", label_visibility="collapsed").strip()
         with c4:
+            st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
             if code != "ESXi":
-                if st.button("🗑️", key=f"host_del_{idx}", width="stretch"):
+                if st.button("🗑️", key=f"host_del_{idx}"):
                     if len(host_presets) > 1:
                         st.session_state["_host_vm_del_idx"] = idx
                         st.rerun()
                     else:
                         st.warning("⚠️ At least one preset must remain.")
-            else:
-                st.markdown("<div style='min-height: 38px;'></div>", unsafe_allow_html=True)
 
         if stale_del == idx:
             continue
@@ -677,7 +719,7 @@ def _vm_editor(rules: dict) -> None:
     stale_del = st.session_state.pop("_del_vm_role_idx", None)
 
     for idx, p in enumerate(vm_presets):
-        c1, c2, c3, c4 = st.columns(PRESET_COLS, vertical_alignment="center")
+        c1, c2, c3, c4 = st.columns(PRESET_COLS)
         with c1:
             ncode = st.text_input("Code", value=p.get("code", ""), key=f"vm_code_{idx}", label_visibility="collapsed").strip()
         with c2:
@@ -685,7 +727,8 @@ def _vm_editor(rules: dict) -> None:
         with c3:
             ntpl = st.text_input("Pattern Template", value=tpl, key=f"vm_tpl_{idx}", label_visibility="collapsed").strip()
         with c4:
-            if st.button("🗑️", key=f"vm_role_del_{idx}", width="stretch"):
+            st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
+            if st.button("🗑️", key=f"vm_role_del_{idx}"):
                 if len(vm_presets) > 1:
                     st.session_state["_del_vm_role_idx"] = idx
                     st.rerun()
@@ -750,6 +793,7 @@ def render_standards_tab(active_model):
     st.subheader("📖 Infrastructure Naming Standards Configuration")
     st.caption("Define and manage your organization's naming conventions. All patterns configured here are automatically applied in the Naming tab.")
     
+    # Check for variable manager save success message
     if "variables_saved" in st.session_state and st.session_state["variables_saved"]:
         st.success("✅ Variables saved successfully!")
         st.session_state["variables_saved"] = False
@@ -758,23 +802,32 @@ def render_standards_tab(active_model):
         st.success("✅ Presets saved successfully!")
         st.session_state["presets_saved"] = False
 
+    # Check for save success message
     if "standards_saved" in st.session_state and st.session_state["standards_saved"]:
         st.success("✅ Naming standards saved successfully!")
         st.session_state["standards_saved"] = False
     
+    # Check for reset success message
     if "standards_reset" in st.session_state and st.session_state["standards_reset"]:
         st.success("✅ Reset to default standards!")
         st.session_state["standards_reset"] = False
 
+    # Check for site code mapping save success message
     if st.session_state.pop("site_code_saved", False):
         st.success("✅ Site code mapping rules saved & applied!")
 
+    # Always reload rules from file to ensure fresh data after save
     current_rules = load_naming_rules()
+    
+    # Update session state with fresh rules
     st.session_state["naming_rules"] = current_rules
     
+    # Create tabs for different editing modes
     tab_edit, tab_vars, tab_history = st.tabs(["📝 Edit Standards", "📘 Pattern Variables Reference", "📜 Change History"])
     
+    # Tab 1: Editable Form Interface
     with tab_edit:
+        # Section 1: Network & Security Devices
         with st.expander("🔧 Network & Security Devices", expanded=False):
             with st.expander("🔧 Device Type Presets", expanded=False):
                 _preset_type_editor("device", get_device_presets(current_rules), current_rules, prefix="branch")
@@ -782,6 +835,7 @@ def render_standards_tab(active_model):
             with st.expander("🔌 Interface Type Presets", expanded=False):
                 _preset_type_editor("interface", get_interface_presets(current_rules), current_rules, prefix="iface")
 
+        # Section 2: Hosts & Virtual Machines
         with st.expander("🖥️ Hosts & Virtual Machines", expanded=False):
             with st.expander("🖥️ Hosts Type Presets", expanded=False):
                 _host_editor(current_rules)
@@ -789,6 +843,7 @@ def render_standards_tab(active_model):
             with st.expander("🖱️ Virtual Machine Presets", expanded=False):
                 _vm_editor(current_rules)
 
+        # Section 3: ESXi Network Description Presets
         with st.expander("☁️ ESXi Network Description Presets", expanded=False):
             _preset_type_editor("esxi_network", get_esxi_network_presets(current_rules), current_rules, prefix="esxinet")
 
@@ -838,6 +893,7 @@ def render_standards_tab(active_model):
                     st.session_state["naming_rules"] = rules.copy()
                     st.rerun()
 
+        # Export full system prompt at the bottom of Edit Standards
         full_prompt_text = export_rules_as_prompt(current_rules)
         with st.expander("📋 Export Full System Prompt for External AI", expanded=False):
             st.caption("Copy this complete prompt directly into ChatGPT, Claude, or other external AI models to enforce your organization's naming standards.")
@@ -849,20 +905,23 @@ def render_standards_tab(active_model):
                 mime="text/plain"
             )
     
+    # Tab 3: Pattern Variables Reference
     with tab_vars:
         st.markdown("##### 📘 Pattern Variables Reference Guide")
         st.caption("All available pattern variables currently configured. These drive the dynamic input fields in the Naming tab.")
         variables_now = get_pattern_variables(current_rules)
         patterns_now = get_naming_patterns(current_rules)
 
+        # Editable variable manager
         st.markdown("#### ✏️ Manage Pattern Variables")
         st.caption("Add, edit, or remove variables. New variables default to **optional** (shown empty; omitted from output unless filled). Use `<Name>` in your naming patterns.")
 
+        # In-place editable variable rows
         with st.expander("🔧 Edit Existing Variables", expanded=True):
             var_names = list(variables_now.keys())
 
             if variables_now:
-                c_nh_nm, c_nh_lb, c_nh_ph, c_nh_df, c_nh_opt, c_nh_up, c_nh_dn, c_nh_del = st.columns(VARIABLE_COLS, vertical_alignment="center")
+                c_nh_nm, c_nh_lb, c_nh_ph, c_nh_df, c_nh_opt, c_nh_up, c_nh_dn, c_nh_del = st.columns(VARIABLE_COLS)
                 with c_nh_nm:
                     st.markdown("**Name**")
                 with c_nh_lb:
@@ -872,19 +931,20 @@ def render_standards_tab(active_model):
                 with c_nh_df:
                     st.markdown("**Auto-Fill**")
                 with c_nh_opt:
-                    st.markdown("<div style='text-align: center; font-weight: 600;'>Optional</div>", unsafe_allow_html=True)
+                    st.markdown("**Optional**")
                 with c_nh_up:
-                    st.markdown("<div style='text-align: center; font-weight: 600;'>⬆️</div>", unsafe_allow_html=True)
+                    st.markdown("**⬆️**")
                 with c_nh_dn:
-                    st.markdown("<div style='text-align: center; font-weight: 600;'>⬇️</div>", unsafe_allow_html=True)
+                    st.markdown("**⬇️**")
                 with c_nh_del:
-                    st.markdown("<div style='text-align: center; font-weight: 600;'>🗑️</div>", unsafe_allow_html=True)
+                    st.markdown("**🗑️**")
 
                 edited_vars = {}
                 total_vars = len(var_names)
                 for idx, name in enumerate(var_names):
                     meta = variables_now.get(name) if isinstance(variables_now.get(name), dict) else {}
-                    c_nm, c_lb, c_ph, c_df, c_opt, c_up, c_dn, c_del = st.columns(VARIABLE_COLS, vertical_alignment="center")
+                    # 8 fixed columns: Name, Label, Placeholder, Auto-Fill, Optional, ⬆️, ⬇️, 🗑️
+                    c_nm, c_lb, c_ph, c_df, c_opt, c_up, c_dn, c_del = st.columns(VARIABLE_COLS)
                     with c_nm:
                         var_key = st.text_input("Name", value=name, key=f"var_key_{name}", label_visibility="collapsed").strip()
                         var_key = _normalize_var_name(var_key)
@@ -895,27 +955,28 @@ def render_standards_tab(active_model):
                     with c_df:
                         var_def = st.text_input("Auto-Fill", value=meta.get("default", ""), key=f"var_def_{name}", label_visibility="collapsed")
                     with c_opt:
+                        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
                         var_opt = st.checkbox("Optional", value=bool(meta.get("optional")), key=f"var_opt_{name}", label_visibility="collapsed")
                     with c_up:
                         if idx > 0:
-                            st.button("⬆️", key=f"var_up_{idx}", help=f"Move <{name}> up", width="stretch")
+                            st.button("⬆️", key=f"var_up_{idx}", help=f"Move <{name}> up")
                             if st.session_state.get(f"var_up_{idx}"):
                                 var_names[idx - 1], var_names[idx] = var_names[idx], var_names[idx - 1]
                                 reordered = {k: variables_now[k] for k in var_names}
                                 _persist_variables(current_rules, reordered)
                         else:
-                            st.markdown("<div style='min-height: 38px;'></div>", unsafe_allow_html=True)
+                            c_up.empty()
                     with c_dn:
                         if idx < total_vars - 1:
-                            st.button("⬇️", key=f"var_dn_{idx}", help=f"Move <{name}> down", width="stretch")
+                            st.button("⬇️", key=f"var_dn_{idx}", help=f"Move <{name}> down")
                             if st.session_state.get(f"var_dn_{idx}"):
                                 var_names[idx], var_names[idx + 1] = var_names[idx + 1], var_names[idx]
                                 reordered = {k: variables_now[k] for k in var_names}
                                 _persist_variables(current_rules, reordered)
                         else:
-                            st.markdown("<div style='min-height: 38px;'></div>", unsafe_allow_html=True)
+                            c_dn.empty()
                     with c_del:
-                        st.button("🗑️", key=f"var_del_{name}", help=f"Remove <{name}>", width="stretch")
+                        st.button("🗑️", key=f"var_del_{name}", help=f"Remove <{name}>")
 
                     if st.session_state.get(f"var_del_{name}"):
                         edited_vars[name] = None
@@ -976,6 +1037,7 @@ def render_standards_tab(active_model):
         st.markdown("---")
         st.caption("Use these variables in your naming patterns. The Naming tab will automatically replace them with actual values; optional ones only appear when filled.")
     
+    # Tab 4: Change History
     with tab_history:
         st.markdown("##### 📜 Naming Standards Change History")
         st.caption("View and restore previous versions of your naming standards. The last 10 changes are saved automatically.")
@@ -987,6 +1049,7 @@ def render_standards_tab(active_model):
         else:
             st.success(f"📊 {len(history)} version(s) in history")
             
+            # Add clear history button
             col_info, col_clear = st.columns([3, 1])
             with col_clear:
                 if st.button("🗑️ Clear History", width='stretch'):
@@ -996,6 +1059,7 @@ def render_standards_tab(active_model):
             
             st.markdown("---")
             
+            # Display each history entry
             for idx, entry in enumerate(history):
                 timestamp = entry.get("timestamp", "Unknown")
                 source = entry.get("source", "Unknown")
@@ -1030,6 +1094,7 @@ def render_standards_tab(active_model):
                             st.code(f"LAG: {rules.get('switch_lag_member', 'N/A')[:60]}...", language="text")
                             st.code(f"Access: {rules.get('switch_access_desc', 'N/A')[:60]}...", language="text")
                     
+                    # Action buttons
                     col_restore, col_view = st.columns([1, 1])
                     
                     with col_restore:
