@@ -133,56 +133,6 @@ def _render_tab(label: str, renderer: Callable, requires_catalog: bool) -> None:
 if "active_tab_index" not in st.session_state:
     st.session_state.active_tab_index = 0
 
-# Prominent main-application header navbar styling for the top-level tab selector.
-st.markdown(
-    """
-    <style>
-    div[data-testid="stRadio"] > div[role="radiogroup"][aria-label="Select Tab"],
-    div[data-testid="stRadio"] > div[role="radiogroup"] {
-        gap: 0.75rem;
-        align-items: center;
-    }
-    div[data-testid="stRadio"] label[data-testid="stWidgetLabel"] { display: none; }
-    div[data-testid="stRadio"] label {
-        font-size: 17px;
-        font-weight: 600;
-        padding: 0.55rem 1.1rem;
-        border-radius: 10px;
-        background-color: rgba(80, 120, 220, 0.10);
-        border: 1px solid rgba(80, 120, 220, 0.35);
-        transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-    }
-    div[data-testid="stRadio"] label:hover {
-        background-color: rgba(80, 120, 220, 0.20);
-        border-color: rgba(80, 120, 220, 0.60);
-    }
-    div[data-testid="stRadio"] label:has(input[type="radio"]:checked) {
-        background: linear-gradient(135deg, #3f6ad8, #274b9e);
-        border-color: #3f6ad8;
-        color: #ffffff;
-        font-weight: 700;
-        box-shadow: 0 3px 10px rgba(63, 106, 216, 0.4);
-    }
-    div[data-testid="stRadio"] label p {
-        font-size: 17px;
-        font-weight: 600;
-    }
-    div[data-testid="stRadio"] label:has(input[type="radio"]:checked) p {
-        color: #ffffff;
-        font-weight: 700;
-    }
-    div[data-testid="stRadio"] input[type="radio"] {
-        accent-color: #3f6ad8;
-        width: 17px;
-        height: 17px;
-        vertical-align: middle;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
 # Use radio buttons for tab selection to preserve state across reruns
 tab_labels = [label for label, _, _ in TABS]
 selected_tab = st.radio(
