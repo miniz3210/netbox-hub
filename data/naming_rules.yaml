@@ -14,7 +14,7 @@
   "firewall_interface": "<role_zone>_<vlan_id>",
   "esxi_host": "<site_prefix><role_esx><seq>.<domain>",
   "vm_host": "<country><site><role><seq>",
-  "esxi_uplink": "<vmnic> - <v_switch> <purpose> <status>",
+  "esxi_uplink": "<vmnic> - <v_switch> <purpose> <status><vmnic>",
   "esxi_portgroup_name": "PG-<pg_network>",
   "esxi_portgroup": "<port_group> [<active_vmnics> Active / <standby_vmnics> Standby]",
   "esxi_vmkernel_name": "<vmk>",
@@ -96,12 +96,6 @@
       "label": "Firewall Security Zone Interface",
       "pattern_key": "firewall_interface",
       "description": "Firewall security-zone interface description"
-    },
-    {
-      "code": "SWITCH ZONE",
-      "label": "Switch Zone Inteface",
-      "pattern_key": "iface_switch_zone",
-      "description": ""
     }
   ],
   "host_vm_presets": [
@@ -138,19 +132,19 @@
   ],
   "esxi_network_presets": [
     {
-      "code": "Uplink",
+      "code": "UPLINK",
       "label": "Physical Uplink",
       "pattern_key": "esxi_uplink",
       "description": "vmnic Uplink Interface"
     },
     {
-      "code": "PortGroup",
+      "code": "PORTGROUP",
       "label": "Port Group",
       "pattern_key": "esxi_portgroup",
       "description": "Standard / Distributed Port Group"
     },
     {
-      "code": "VMkernel",
+      "code": "VMKERNEL",
       "label": "VMkernel",
       "pattern_key": "esxi_vmkernel",
       "description": "VMkernel Management / vMotion / Storage"
@@ -172,7 +166,7 @@
     "firewall_interface": "<role_zone>_<vlan_id>",
     "esxi_host": "<site_prefix><role_esx><seq>.<domain>",
     "vm_host": "<country><site><role><seq>",
-    "esxi_uplink": "<vmnic> - <v_switch> <purpose> <status>",
+    "esxi_uplink": "<vmnic> - <v_switch> <purpose> <status><vmnic>",
     "esxi_portgroup_name": "PG-<pg_network>",
     "esxi_portgroup": "<port_group> [<active_vmnics> Active / <standby_vmnics> Standby]",
     "esxi_vmkernel_name": "<vmk>",

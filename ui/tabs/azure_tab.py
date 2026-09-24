@@ -46,7 +46,7 @@ from core.netbox_object_checker import (
 def render_azure_tab(active_model=None):
     """Render the Azure VM import tab in Streamlit UI."""
     
-    st.header("☁️ Azure VM Import for NetBox")
+    st.markdown("### ☁️ Azure VM Import for NetBox")
     
     # KQL query stored for reference.
     kql_query = '''Resources
@@ -147,7 +147,7 @@ def render_azure_tab(active_model=None):
     ['Raw_Tags_JSON'] = RawTags'''
     
     # File uploader section with status indicator
-    st.subheader("1️⃣ Upload Azure VM CSV Export")
+    st.markdown("**1️⃣ Upload Azure VM CSV Export**")
     
     # Check if there's a saved upload
     saved_upload = get_azure_csv_upload()
@@ -1017,7 +1017,7 @@ def render_azure_tab(active_model=None):
         vm_records = st.session_state.azure_vms_parsed
         
         # Show that data is loaded
-        st.subheader("2️⃣ Preview Azure VMs")
+        st.markdown("**2️⃣ Preview Azure VMs**")
         st.caption(f"📊 {len(vm_records)} VMs loaded (data persists across page refreshes)")
         
         # Build export dataset
