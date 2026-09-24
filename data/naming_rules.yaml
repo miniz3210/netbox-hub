@@ -6,6 +6,7 @@
   "branch_ion": "ION<country><state><site><seq>",
   "branch_router": "RTR<country><state><site><zone><seq>",
   "branch_va": "VA<country><state><site><zone><seq>",
+  "branch_security": "FW<country><state><site><vendor><seq>",
   "switch_uplink_desc": "Uplink_to_<remote_device>_<remote_port>",
   "switch_lag_member": "LACP_to_<remote_device>_<remote_port>",
   "switch_port_channel": "<local_po_id>_to_<remote_device>",
@@ -136,6 +137,32 @@
       "description": "VMkernel Management / vMotion / Storage"
     }
   ],
+  "site_code_rules": {
+    "separators": [" ", "-", "_"],
+    "multi_word_chars_per_word": [2, 2],
+    "single_word_max_chars": 4,
+    "fallback": "SITE",
+    "exact_mappings": {
+      "new york": "NYC",
+      "london": "LON",
+      "sydney": "SYD",
+      "singapore": "SIN",
+      "tokyo": "TYO",
+      "hong kong": "HKG",
+      "amsterdam": "AMS",
+      "frankfurt": "FRA",
+      "paris": "PAR",
+      "chicago": "CHI",
+      "los angeles": "LAX",
+      "san francisco": "SFO",
+      "dallas": "DAL",
+      "seattle": "SEA",
+      "boston": "BOS",
+      "toronto": "TOR",
+      "bristol": "BRI",
+      "age": "AGE"
+    }
+  },
   "naming_patterns": {
     "branch_switch": "SW<country><state><site><zone><seq>-<stack_id>",
     "branch_stack": "VS<country><state><site><seq>-<stack_id>",

@@ -56,34 +56,28 @@ if catalog is None:
     catalog = SSM.get_catalog()
 
 
-def _device_tab(catalog, active_model):
-    from ui.tabs.device_tab import render_device_tab as _fn
-
-    _fn(catalog, active_model)
-
-
-def _module_tab(catalog, active_model):
-    from ui.tabs.module_tab import render_module_tab as _fn
-
-    _fn(catalog, active_model)
-
-
-def _rack_tab(catalog, active_model):
-    from ui.tabs.rack_tab import render_rack_tab as _fn
-
-    _fn(catalog, active_model)
-
-
-def _image_tab(catalog, _active_model):
-    from ui.tabs.image_tab import render_image_tab as _fn
-
-    _fn(catalog)
-
-
-def _batch_tab(catalog, active_model):
-    from ui.tabs.batch_tab import render_batch_tab as _fn
-
-    _fn(catalog, active_model)
+def _hardware_catalog_tab(catalog, active_model):
+    subtab = st.radio(
+        "Hardware Catalog",
+        ["Device Types", "Module Types", "Rack Types", "Elevation Images", "Batch Import"],
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+    if subtab == "Device Types":
+        from ui.tabs.device_tab import render_device_tab as _fn
+        _fn(catalog, active_model)
+    elif subtab == "Module Types":
+        from ui.tabs.module_tab import render_module_tab as _fn
+        _fn(catalog, active_model)
+    elif subtab == "Rack Types":
+        from ui.tabs.rack_tab import render_rack_tab as _fn
+        _fn(catalog, active_model)
+    elif subtab == "Elevation Images":
+        from ui.tabs.image_tab import render_image_tab as _fn
+        _fn(catalog)
+    else:
+        from ui.tabs.batch_tab import render_batch_tab as _fn
+        _fn(catalog, active_model)
 
 
 def _ipam_tab(active_model):
@@ -112,15 +106,11 @@ def _azure_tab(active_model):
 
 # Tab registry: (label, renderer, requires_catalog)
 TABS: List[Tuple[str, Callable, bool]] = [
-    ("🖥️ Device Types", _device_tab, True),
-    ("🧩 Module Types", _module_tab, True),
-    ("🗄️ Rack Types", _rack_tab, True),
-    ("🎨 Images", _image_tab, True),
-    ("📦 Batch", _batch_tab, True),
+    ("📦 Hardware Catalog", _hardware_catalog_tab, True),
     ("🌐 IPAM", _ipam_tab, False),
     ("🏷️ Naming", _naming_tab, False),
     ("☁️ Azure VMs", _azure_tab, False),
-    ("📖 Standards", _standards_tab, False),
+    ("📋 Standards", _standards_tab, False),
 ]
 
 

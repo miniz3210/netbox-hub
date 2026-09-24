@@ -410,10 +410,12 @@ def _normalize_rules(raw: dict) -> dict:
 
     merged["naming_patterns"] = dict(patterns)
     merged["pattern_variables"] = variables
-    token_order = raw.get("token_order")
-    if isinstance(token_order, dict):
+    if isinstance(raw.get("site_code_rules"), dict):
+        merged["site_code_rules"] = raw["site_code_rules"]
+
+    if isinstance(raw.get("token_order"), dict):
         normalized_to = {}
-        for k, v in token_order.items():
+        for k, v in raw["token_order"].items():
             if isinstance(v, (list, tuple)):
                 normalized_to[str(k)] = [str(x) for x in v]
             elif _is_str(v):
@@ -466,6 +468,63 @@ def get_esxi_network_presets(rules: dict) -> list:
     """Return the ESXi network description presets list from a rules dict."""
     raw = rules.get("esxi_network_presets")
     return _normalize_presets(raw, ESXI_NETWORK_PRESETS)
+
+
+# ── Site Code Calculation Rules (data-driven from YAML, no hardcoded logic) ──
+
+DEFAULT_SITE_CODE_RULES = {
+    "separators": [" ", "-", "_"],
+    "multi_word_chars_per_word": [2, 2],
+    "single_word_max_chars": 4,
+    "fallback": "SITE",
+    "exact_mappings": {},
+}
+
+def get_site_code_rules(rules):
+    raw = rules.get("site_code_rules")
+    if isinstance(raw, dict) and raw:
+        merged = dict(DEFAULT_SITE_CODE_RULES)
+        for k, v in raw.items():
+            merged[k] = v
+        return merged
+    return dict(DEFAULT_SITE_CODE_RULES)
+
+def compute_suggested_site_code(location_name: str, rules=None) -> str:
+    rules = rules if isinstance(rules, dict) else {}
+    sr = get_site_code_rules(rules)
+    cleaned = re.sub(r"[^a-zA-Z\s\-_]", "", (location_name or "")).strip()
+    if not cleaned:
+        return str(sr.get("fallback", "SITE"))
+
+    # Normalise to single-space lowercase for exact matching.
+    key = re.sub(r"[\s\-_]+", " ", cleaned).strip().lower()
+    exact = sr.get("exact_mappings")
+    if isinstance(exact, dict):
+        for pat, code in exact.items():
+            pat_str = str(pat).strip().lower()
+            if key == pat_str or key.startswith(pat_str + " "):
+                return str(code).upper()
+
+    words = [w for w in re.split(r"[\s\-_]+", cleaned) if w]
+    if len(words) >= 2:
+        per = sr.get("multi_word_chars_per_word", [2, 2])
+        try:
+            n1 = int(str(per[0]).strip()) if per else 2
+        except (ValueError, IndexError):
+            n1 = 2
+        try:
+            n2 = int(str(per[1]).strip()) if len(per) > 1 else 2
+        except (ValueError, IndexError):
+            n2 = 2
+        return (words[0][:n1] + words[1][:n2]).upper()
+    elif len(words) == 1:
+        w = words[0]
+        try:
+            maxc = int(sr.get("single_word_max_chars", 4))
+        except (ValueError, TypeError):
+            maxc = 4
+        return w[:maxc].upper()
+    return str(sr.get("fallback", "SITE"))
 
 
 DEFAULT_PRESET_DEFS = {

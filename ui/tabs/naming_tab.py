@@ -1,8 +1,5 @@
 import streamlit as st
-from utils.formatters import (
-    compute_suggested_site_code,
-    normalize_port_shortname,
-)
+from utils.formatters import normalize_port_shortname
 from utils.pattern_formatter import apply_pattern
 from core.naming_engine import verify_and_suggest_with_ai
 from datetime import datetime
@@ -30,7 +27,7 @@ from core.naming_dynamic_helper import (
 from config.naming_rules import (
     load_naming_rules, get_naming_patterns, get_pattern_variables,
     get_device_presets, get_interface_presets, get_host_vm_presets,
-    get_esxi_network_presets,
+    get_esxi_network_presets, compute_suggested_site_code,
 )
 
 def build_naming_system_prompt(prompt: str) -> str:
@@ -460,19 +457,22 @@ def render_naming_tab(active_model):
         _asset_class_3(case_mode, active_model, naming_patterns, variables, token_order_map)
 
 
-def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, variables):
-    st.markdown("##### Location & Site Code Assistant")
-    loc_c1, loc_c2 = st.columns([3, 1])
-    with loc_c1:
-        loc = st.text_input("City", value="", placeholder="e.g. Sydney, London", key="loc_input_help", label_visibility="collapsed")
-    with loc_c2:
-        auto_code = compute_suggested_site_code(loc) if loc else ""
-        if auto_code:
-            st.markdown(f"<div style='background:#1f77b4;color:white;padding:4px 8px;border-radius:6px;text-align:center;font-weight:bold;margin-top:4px'>Site: {auto_code}</div>", unsafe_allow_html=True)
-        else:
-            st.markdown("<div style='padding:4px 8px;text-align:center;margin-top:4px'> </div>", unsafe_allow_html=True)
-    st.markdown("---")
+def _site_code_assistant_compact(naming_rules, prefix: str) -> str:
+    with st.expander("📍 Site Code Assistant", expanded=False):
+        loc = st.text_input("City / Location", value="", placeholder="e.g. Sydney, New York", key=f"loc_compact_{prefix}")
+        if st.button("Suggest and Fill", key=f"site_suggest_{prefix}"):
+            code = compute_suggested_site_code(loc, naming_rules)
+            st.session_state[f"_suggested_site_{prefix}"] = code
+            st.rerun()
+        if st.session_state.get(f"_suggested_site_{prefix}"):
+            code = st.session_state[f"_suggested_site_{prefix}"]
+            st.markdown(f"<div style='background:#1f77b4;color:white;padding:4px 8px;border-radius:6px;text-align:center;font-weight:bold'>Site: {code}</div>", unsafe_allow_html=True)
+            if st.button("Clear", key=f"site_clear_{prefix}"):
+                st.session_state.pop(f"_suggested_site_{prefix}", None)
+                st.rerun()
+    return st.session_state.get(f"_suggested_site_{prefix}", "")
 
+def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, variables):
     col_a, col_b = st.columns([1, 1])
     # Presets loaded from the structured device_presets / interface_presets in YAML.
     dev_presets = _device_presets(naming_rules, naming_patterns)
@@ -491,6 +491,7 @@ def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, varia
     intf_label_map = {code: label for code, label, _key in intf_presets}
     with col_a:
         st.markdown("#### Universal Device Hostname Generator")
+        auto_code = _site_code_assistant_compact(naming_rules, "dev")
         dev_type = st.radio("Device Type", dev_codes, horizontal=True, key="dev_prefix_sel", help="Select the device class to generate a standardized hostname. Choices are configured in the Standards Tab (Device Type Presets).")
         pk = _dev_pattern_key(dev_type, dev_presets)
         edit_on = _edit_toggle(pk)
@@ -679,89 +680,58 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables, token_or
     auto_correct = st.session_state.get("esxi_auto_corr", True)
     naming_rules = st.session_state.get("naming_rules", load_naming_rules())
     presets = _esxi_network_presets_fn(naming_rules, naming_patterns)
-    codes = [code for code, _label, _key in presets]
-    label_map = {code: label for code, label, _key in presets}
-    default_keys = {
-        "Uplink": "esxi_uplink",
-        "PortGroup": "esxi_portgroup",
-        "VMkernel": "esxi_vmkernel",
-    }
-    key_map = {code: key for code, _label, key in presets}
+    label_map = {code: label for code, _label, _key in presets}
+    key_map = {code: key for code, _label, _key in presets}
 
-    preset_type = st.radio(
-        "ESXi Network Description Type",
-        codes,
-        horizontal=True,
-        key="esxi_network_preset_sel",
-        help="Select the ESXi network description type. Choices are configured in the Standards Tab (ESXi Network Description Presets).",
-    )
-    st.markdown("---")
+    sections = [
+        ("uplink", "Uplink", "esxi_uplink", "1. Physical Uplink (PCIeX/PortX)", False),
+        ("portgroup", "PortGroup", "esxi_portgroup", "2. Port Group Teaming (Network)", True),
+        ("vmk", "VMkernel", "esxi_vmkernel", "3. VMkernel Adapter (vmk)", True),
+    ]
 
-    if preset_type == "Uplink":
-        pk = key_map.get("Uplink", "esxi_uplink")
+    for prefix, preset_code, default_key, title, has_name in sections:
+        st.markdown("---")
+        pk = key_map.get(preset_code, default_key)
         pat = naming_patterns.get(pk, "")
+        name_pk = None
+        name_pat = None
+        if has_name:
+            name_pk = "esxi_portgroup_name" if preset_code == "PortGroup" else "esxi_vmkernel_name"
+            name_pat = naming_patterns.get(name_pk, "")
+
         if _edit_toggle(pk):
-            render_edit_mode_ui(pk, pat, variables)
+            if name_pk:
+                render_multi_edit_mode_ui([(name_pk, name_pat), (pk, pat)], variables)
+            else:
+                render_edit_mode_ui(pk, pat, variables)
             st.stop()
             return
+
         col_in, col_out = st.columns(2, vertical_alignment="top")
         with col_in:
-            st.markdown(f"#### 1. Physical Uplink (PCIeX/PortX) — {label_map.get('Uplink', 'Physical Uplink')}")
-            vals = render_esxi_network_inputs(pat, variables, "uplink", auto_correct)
+            st.markdown(f"#### {title} — {label_map.get(preset_code, title)}")
+            if has_name:
+                vals = render_esxi_network_inputs(
+                    pat, variables, prefix, auto_correct,
+                    extra_pattern=name_pat,
+                    token_order=token_order_map.get(pk),
+                )
+            else:
+                vals = render_esxi_network_inputs(pat, variables, prefix, auto_correct)
         with col_out:
-            gen = render_dynamic_pattern(pat, vals, variables)
             st.markdown("##### ✨ Generated Name & Description")
-            st.code(gen, language="text")
-            st.button("📋 Copy", key="esxi_copy_uplink", help="Copy generated description", on_click=_copy_to_clipboard, args=(gen,))
-    elif preset_type == "PortGroup":
-        pk = key_map.get("PortGroup", "esxi_portgroup")
-        pat = naming_patterns.get(pk, "")
-        name_pk = "esxi_portgroup_name"
-        name_pat = naming_patterns.get(name_pk, "")
-        if _edit_toggle(pk):
-            render_multi_edit_mode_ui([(name_pk, name_pat), (pk, pat)], variables)
-            st.stop()
-            return
-        col_in, col_out = st.columns(2, vertical_alignment="top")
-        with col_in:
-            st.markdown(f"#### 2. Port Group Teaming (Network) — {label_map.get('PortGroup', 'Port Group')}")
-            vals = render_esxi_network_inputs(
-                pat, variables, "portgroup", auto_correct,
-                extra_pattern=name_pat,
-                token_order=token_order_map.get(pk, ["pg_network", "port_group", "active_vmnics", "standby_vmnics"]),
-            )
-        with col_out:
-            gen_desc = _render_esxi_pattern(pat, vals, variables)
-            gen_prefix = render_dynamic_pattern(name_pat, vals, variables)
-            st.markdown("##### ✨ Generated Name & Description")
-            st.caption("Generated Port Group Name:")
-            st.code(gen_prefix, language="text")
-            st.caption("Generated Port Group Description:")
-            st.code(gen_desc, language="text")
-            st.button("📋 Copy", key="esxi_copy_portgroup", help="Copy generated description", on_click=_copy_to_clipboard, args=(gen_desc,))
-    else:
-        pk = key_map.get("VMkernel", "esxi_vmkernel")
-        pat = naming_patterns.get(pk, "")
-        name_pk = "esxi_vmkernel_name"
-        name_pat = naming_patterns.get(name_pk, "")
-        if _edit_toggle(pk):
-            render_multi_edit_mode_ui([(name_pk, name_pat), (pk, pat)], variables)
-            st.stop()
-            return
-        col_in, col_out = st.columns(2, vertical_alignment="top")
-        with col_in:
-            st.markdown(f"#### 3. VMkernel Adapter (vmk) — {label_map.get('VMkernel', 'VMkernel')}")
-            vals = render_esxi_network_inputs(
-                pat, variables, "vmk", auto_correct,
-                extra_pattern=name_pat,
-                token_order=token_order_map.get(pk, ["vmk", "purpose", "v_switch", "active_vmnics", "standby_vmnics"]),
-            )
-        with col_out:
-            gen = _render_esxi_pattern(pat, vals, variables)
-            vmk_name = render_dynamic_pattern(name_pat, vals, variables)
-            st.markdown("##### ✨ Generated Name & Description")
-            st.caption("Generated vmk Name:")
-            st.code(vmk_name, language="text")
-            st.caption("Generated VMkernel Description:")
-            st.code(gen, language="text")
-            st.button("📋 Copy", key="esxi_copy_vmkernel", help="Copy generated description", on_click=_copy_to_clipboard, args=(gen,))
+            if not has_name:
+                gen = render_dynamic_pattern(pat, vals, variables)
+                st.code(gen, language="text")
+            else:
+                gen_desc = _render_esxi_pattern(pat, vals, variables)
+                gen_prefix = render_dynamic_pattern(name_pat, vals, variables)
+                if preset_code == "PortGroup":
+                    st.caption("Generated Port Group Name:")
+                    st.code(gen_prefix, language="text")
+                    st.caption("Generated Port Group Description:")
+                else:
+                    st.caption("Generated vmk Name:")
+                    st.code(gen_prefix, language="text")
+                    st.caption("Generated VMkernel Description:")
+                st.code(gen_desc, language="text")
