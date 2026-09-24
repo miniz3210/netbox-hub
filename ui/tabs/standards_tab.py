@@ -20,12 +20,18 @@ from utils.formatters import (
 # Shared column width ratios enforced across preset table headers and all data rows.
 PRESET_COLS = [1.2, 2.2, 4.5, 0.6]
 # Manage Pattern Variables columns: Name, Label, Placeholder, Auto-Fill, Optional, Up, Down, Delete.
-VARIABLE_COLS = [1.5, 2.5, 2.5, 1.5, 0.9, 0.5, 0.5, 0.5]
+VARIABLE_COLS = [1.5, 2.5, 2.5, 1.5, 0.9, 0.45, 0.45, 0.45]
 # Auto-Correction rule columns: Original Pattern, Replacement, Description, On, Action.
 AUTOCORRECT_COLS = [3.0, 2.2, 3.0, 0.7, 0.7]
 
 def _normalize_var_name(raw: str) -> str:
     return re.sub(r"[^a-z0-9_]", "", raw.strip().lower().replace(" ", "_"))
+
+def _render_centered_del_btn(key: str, help_text: str = "Delete this entry") -> bool:
+    """Helper to render a perfectly centered square delete icon button."""
+    _, c_btn, _ = st.columns([1, 2, 1])
+    with c_btn:
+        return st.button("🗑️", key=key, help=help_text)
 
 def _diff_rule_list(category: str, old_rules: list, new_rules: list) -> list:
     rows = []
@@ -159,7 +165,7 @@ def _render_auto_correction_manager(active_model: str) -> None:
                         label_visibility="collapsed",
                     )
                 with col_del:
-                    if st.button("🗑️", key=f"ac_{category}_del_{idx}", help="Delete this rule", width="stretch"):
+                    if _render_centered_del_btn(f"ac_{category}_del_{idx}", "Delete this rule"):
                         pending_delete = idx
 
                 if pending_delete == idx:
@@ -286,7 +292,7 @@ def _render_site_code_mapping_manager() -> None:
                     label_visibility="collapsed",
                 )
             with col_del:
-                if st.button("🗑️", key=f"sitecode_{idx}_del", help="Delete this mapping", width="stretch"):
+                if _render_centered_del_btn(f"sitecode_{idx}_del", "Delete this mapping"):
                     pending_delete = idx
 
             if pending_delete == idx:
@@ -409,7 +415,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str) -> N
             with c3:
                 ntpl = st.text_input("Pattern Template", value=tpl, key=f"{kind}_pre_tpl_{idx}", label_visibility="collapsed").strip()
             with c4:
-                if st.button("🗑️", key=f"{kind}_pre_del_{idx}"):
+                if _render_centered_del_btn(f"{kind}_pre_del_{idx}"):
                     if len(presets) > 1:
                         st.session_state[_pending_del_key] = idx
                         st.rerun()
@@ -584,14 +590,14 @@ def _host_editor(rules: dict) -> None:
             ntpl = st.text_input("Pattern Template", value=tpl, key=f"host_{idx}_tpl", label_visibility="collapsed").strip()
         with c4:
             if code != "ESXi":
-                if st.button("🗑️", key=f"host_del_{idx}"):
+                if _render_centered_del_btn(f"host_del_{idx}"):
                     if len(host_presets) > 1:
                         st.session_state["_host_vm_del_idx"] = idx
                         st.rerun()
                     else:
                         st.warning("⚠️ At least one preset must remain.")
             else:
-                st.markdown("<div style='min-height: 38px;'></div>", unsafe_allow_html=True)
+                st.button(" ", key=f"spacer_host_{idx}", disabled=True)
 
         if stale_del == idx:
             continue
@@ -685,7 +691,7 @@ def _vm_editor(rules: dict) -> None:
         with c3:
             ntpl = st.text_input("Pattern Template", value=tpl, key=f"vm_tpl_{idx}", label_visibility="collapsed").strip()
         with c4:
-            if st.button("🗑️", key=f"vm_role_del_{idx}"):
+            if _render_centered_del_btn(f"vm_role_del_{idx}"):
                 if len(vm_presets) > 1:
                     st.session_state["_del_vm_role_idx"] = idx
                     st.rerun()
@@ -872,7 +878,7 @@ def render_standards_tab(active_model):
                 with c_nh_df:
                     st.markdown("**Auto-Fill**")
                 with c_nh_opt:
-                    st.markdown("<div style='text-align: center; font-weight: 600;'>Optional</div>", unsafe_allow_html=True)
+                    st.markdown("**Optional**")
                 with c_nh_up:
                     st.markdown("<div style='text-align: center; font-weight: 600;'>⬆️</div>", unsafe_allow_html=True)
                 with c_nh_dn:
@@ -904,7 +910,7 @@ def render_standards_tab(active_model):
                                 reordered = {k: variables_now[k] for k in var_names}
                                 _persist_variables(current_rules, reordered)
                         else:
-                            st.markdown("<div style='min-height: 38px;'></div>", unsafe_allow_html=True)
+                            st.button(" ", key=f"spacer_up_{idx}", disabled=True)
                     with c_dn:
                         if idx < total_vars - 1:
                             st.button("⬇️", key=f"var_dn_{idx}", help=f"Move <{name}> down")
@@ -913,7 +919,7 @@ def render_standards_tab(active_model):
                                 reordered = {k: variables_now[k] for k in var_names}
                                 _persist_variables(current_rules, reordered)
                         else:
-                            st.markdown("<div style='min-height: 38px;'></div>", unsafe_allow_html=True)
+                            st.button(" ", key=f"spacer_dn_{idx}", disabled=True)
                     with c_del:
                         st.button("🗑️", key=f"var_del_{name}", help=f"Remove <{name}>")
 
