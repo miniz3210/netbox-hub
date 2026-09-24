@@ -20,6 +20,7 @@
   "esxi_vmkernel_name": "<vmk>",
   "esxi_vmkernel": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
   "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
+  "iface_switch_zone": "<switch_zone>_<port>",
   "custom_patterns": [],
   "device_presets": [
     {
@@ -95,6 +96,12 @@
       "label": "Firewall Security Zone Interface",
       "pattern_key": "firewall_interface",
       "description": "Firewall security-zone interface description"
+    },
+    {
+      "code": "SWITCH ZONE",
+      "label": "Switch Zone Inteface",
+      "pattern_key": "iface_switch_zone",
+      "description": ""
     }
   ],
   "host_vm_presets": [
@@ -170,7 +177,8 @@
     "esxi_portgroup": "<port_group> [<active_vmnics> Active / <standby_vmnics> Standby]",
     "esxi_vmkernel_name": "<vmk>",
     "esxi_vmkernel": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
-    "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)"
+    "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
+    "iface_switch_zone": "<switch_zone>_<port>"
   },
   "pattern_variables": {
     "country": {

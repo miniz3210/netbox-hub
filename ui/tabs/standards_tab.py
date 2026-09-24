@@ -285,8 +285,14 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str) -> N
             "host_vm_presets" if kind == "host_vm" else "esxi_network_presets"
         )
     )
+    _pending_del_key = f"_pending_del_{kind}"
+    stale_del = st.session_state.pop(_pending_del_key, None)
+    if stale_del is not None and 0 <= stale_del < len(presets):
+        rules[key_field] = [p for i, p in enumerate(presets) if i != stale_del]
+        _save_presets(rules)
+        return
+
     updated = []
-    pending_delete = None
     patterns_updates = {}
 
     if presets:
@@ -307,11 +313,12 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str) -> N
                 st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
                 if st.button("🗑️", key=f"{kind}_pre_del_{idx}"):
                     if len(presets) > 1:
-                        pending_delete = idx
+                        st.session_state[_pending_del_key] = idx
+                        st.rerun()
                     else:
                         st.session_state[f"{kind}_preset_min_one"] = True
 
-            if pending_delete == idx:
+            if stale_del == idx:
                 continue
             final_pkey = pkey or make_preset_key(ncode or label, prefix)
             if ntpl:
@@ -443,6 +450,109 @@ def _render_delta_table(delta: dict) -> None:
     )
 
 
+def _host_editor(rules: dict) -> None:
+    all_presets = list(get_host_vm_presets(rules))
+    esxi = [p for p in all_presets if p.get("code") == "ESXi"]
+    vm_presets = [p for p in all_presets if p.get("pattern_key") == "vm_host"]
+    patterns = dict(rules.get("naming_patterns") or {})
+    p = esxi[0] if esxi else {"code": "ESXi", "label": "ESXi Host", "pattern_key": "esxi_host", "description": ""}
+    pkey = p.get("pattern_key", "esxi_host")
+    tpl = patterns.get(pkey, "")
+
+    c1, c2, c3 = st.columns([1, 2, 4])
+    with c1:
+        st.text_input("Code", value=p.get("code", ""), key="host_code_esxi", disabled=True)
+    with c2:
+        st.text_input("Label", value=p.get("label", ""), key="host_lbl_esxi", disabled=True)
+    with c3:
+        ntpl = st.text_input("Pattern Template", value=tpl, key="host_tpl_esxi").strip()
+
+    col_save, col_reset = st.columns(2)
+    with col_save:
+        if st.button("💾 Save ESXi Pattern", key="host_preset_save", type="primary", use_container_width=True):
+            patterns[pkey] = ntpl or patterns.get(pkey, "<site_prefix>esx<seq>.<domain>")
+            merged = [{"code": "ESXi", "label": "ESXi Host", "pattern_key": pkey, "description": "ESXi Hypervisor Host"}] + vm_presets
+            rules["naming_patterns"] = patterns
+            rules["host_vm_presets"] = merged
+            _save_presets(rules)
+    with col_reset:
+        if st.button("🔄 Reset to Defaults", key="host_preset_reset", use_container_width=True):
+            _reset_presets("host_vm", rules)
+
+
+def _vm_editor(rules: dict) -> None:
+    patterns = dict(rules.get("naming_patterns") or {})
+    all_presets = list(get_host_vm_presets(rules))
+    esxi_presets = [p for p in all_presets if p.get("code") == "ESXi"]
+    vm_presets = [p for p in all_presets if p.get("pattern_key") == "vm_host"]
+
+    tpl = patterns.get("vm_host", "")
+    ntpl = st.text_input("VM Pattern Template", value=tpl, key="vm_tpl",
+                         placeholder="<country><site><role><seq>").strip()
+    patterns["vm_host"] = ntpl or "<country><site><role><seq>"
+
+    st.markdown("**Role Options**")
+    st.caption("Each role appears as a selectable option in the Naming tab's VM Role radio.")
+
+    updated_vm = list(vm_presets)
+    stale_vm_del = st.session_state.pop("_del_vm_role_idx", None)
+    if stale_vm_del is not None and 0 <= stale_vm_del < len(updated_vm):
+        updated_vm.pop(stale_vm_del)
+        rules["naming_patterns"] = patterns
+        rules["host_vm_presets"] = esxi_presets + updated_vm
+        _save_presets(rules)
+        return
+
+    for idx, p in enumerate(updated_vm):
+        c1, c2, c3 = st.columns([1, 3, 1])
+        with c1:
+            code = st.text_input("Code", value=p.get("code", ""), key=f"vm_code_{idx}").strip()
+        with c2:
+            label = st.text_input("Label", value=p.get("label", ""), key=f"vm_lbl_{idx}").strip()
+        with c3:
+            st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
+            if st.button("🗑️", key=f"vm_role_del_{idx}"):
+                if len(updated_vm) > 1:
+                    st.session_state["_del_vm_role_idx"] = idx
+                    st.rerun()
+                else:
+                    st.warning("⚠️ At least one role must remain.")
+
+        p["code"] = code.lower() if code else p.get("code", "")
+        p["label"] = label or code or p.get("label", "")
+        p["pattern_key"] = "vm_host"
+        p["description"] = ""
+
+    st.markdown("**➕ Add Role**")
+    nc1, nc2 = st.columns([1, 3])
+    with nc1:
+        new_code = st.text_input("Code", key="vm_new_code", placeholder="e.g. cvi").strip()
+    with nc2:
+        new_label = st.text_input("Label", key="vm_new_lbl", placeholder="e.g. Core Virtualization (cvi)").strip()
+
+    c_save, c_add, c_reset = st.columns(3)
+    with c_save:
+        if st.button("💾 Save VM Presets", key="vm_save", type="primary", use_container_width=True):
+            rules["naming_patterns"] = patterns
+            rules["host_vm_presets"] = esxi_presets + updated_vm
+            _save_presets(rules)
+    with c_add:
+        if st.button("➕ Add Role", key="vm_add", use_container_width=True):
+            if new_code:
+                updated_vm.append({
+                    "code": new_code.lower(),
+                    "label": new_label or new_code,
+                    "pattern_key": "vm_host",
+                    "description": "",
+                })
+                rules["naming_patterns"] = patterns
+                rules["host_vm_presets"] = esxi_presets + updated_vm
+                _save_presets(rules)
+    with c_reset:
+        if st.button("🔄 Reset to Defaults", key="vm_reset", use_container_width=True):
+            _reset_presets("host_vm", rules)
+
+
 def render_standards_tab(active_model):
     st.subheader("📖 Infrastructure Naming Standards Configuration")
     st.caption("Define and manage your organization's naming conventions. All patterns configured here are automatically applied in the Naming tab.")
@@ -477,15 +587,23 @@ def render_standards_tab(active_model):
     
     # Tab 1: Editable Form Interface
     with tab_edit:
-        with st.expander("🔧 Device Type Presets", expanded=False):
-            _preset_type_editor("device", get_device_presets(current_rules), current_rules, prefix="branch")
+        # Section 1: Network & Security Devices
+        with st.expander("🔧 Network & Security Devices", expanded=False):
+            with st.expander("🔧 Device Type Presets", expanded=False):
+                _preset_type_editor("device", get_device_presets(current_rules), current_rules, prefix="branch")
 
-        with st.expander("🔌 Interface Type Presets", expanded=False):
-            _preset_type_editor("interface", get_interface_presets(current_rules), current_rules, prefix="iface")
+            with st.expander("🔌 Interface Type Presets", expanded=False):
+                _preset_type_editor("interface", get_interface_presets(current_rules), current_rules, prefix="iface")
 
-        with st.expander("🖥️ Hosts & Virtual Machines Presets", expanded=False):
-            _preset_type_editor("host_vm", get_host_vm_presets(current_rules), current_rules, prefix="hostvm")
+        # Section 2: Hosts & Virtual Machines
+        with st.expander("🖥️ Hosts & Virtual Machines", expanded=False):
+            with st.expander("🖥️ Hosts Type Presets (ESXi)", expanded=False):
+                _host_editor(current_rules)
 
+            with st.expander("🖱️ Virtual Machine Presets", expanded=False):
+                _vm_editor(current_rules)
+
+        # Section 3: ESXi Network Description Presets
         with st.expander("☁️ ESXi Network Description Presets", expanded=False):
             _preset_type_editor("esxi_network", get_esxi_network_presets(current_rules), current_rules, prefix="esxinet")
 
