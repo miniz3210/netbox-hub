@@ -412,7 +412,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str) -> N
         _save_presets(rules)
         return
 
-    col_hdr_code, col_hdr_lbl, col_hdr_tpl, col_hdr_act = st.columns(PRESET_COLS)
+    col_hdr_code, col_hdr_lbl, col_hdr_tpl, col_hdr_act = st.columns(PRESET_COLS, vertical_alignment="center")
     with col_hdr_code:
         st.markdown("**Code**")
     with col_hdr_lbl:
@@ -592,7 +592,7 @@ def _host_editor(rules: dict) -> None:
     st.markdown(f"**🖥️ Hosts Type Presets (ESXi)** &nbsp;&nbsp;&nbsp;`{len(host_presets)} presets`")
     st.caption("Manage the ESXi host naming pattern and associated physical host presets.")
 
-    col_hdr_code, col_hdr_lbl, col_hdr_tpl, col_hdr_act = st.columns(PRESET_COLS)
+    col_hdr_code, col_hdr_lbl, col_hdr_tpl, col_hdr_act = st.columns(PRESET_COLS, vertical_alignment="center")
     with col_hdr_code:
         st.markdown("**Code**")
     with col_hdr_lbl:
@@ -705,7 +705,7 @@ def _vm_editor(rules: dict) -> None:
     st.markdown(f"**🖱️ Virtual Machine Presets** &nbsp;&nbsp;&nbsp;`{len(vm_presets)} presets`")
     st.caption("Manage the virtual machine role options and their shared pattern template.")
 
-    col_hdr_code, col_hdr_lbl, col_hdr_tpl, col_hdr_act = st.columns(PRESET_COLS)
+    col_hdr_code, col_hdr_lbl, col_hdr_tpl, col_hdr_act = st.columns(PRESET_COLS, vertical_alignment="center")
     with col_hdr_code:
         st.markdown("**Code**")
     with col_hdr_lbl:
@@ -965,7 +965,7 @@ def render_standards_tab(active_model):
                                 reordered = {k: variables_now[k] for k in var_names}
                                 _persist_variables(current_rules, reordered)
                         else:
-                            st.empty()
+                            st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
                     with c_dn:
                         st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
                         if idx < total_vars - 1:
@@ -974,7 +974,7 @@ def render_standards_tab(active_model):
                                 reordered = {k: variables_now[k] for k in var_names}
                                 _persist_variables(current_rules, reordered)
                         else:
-                            st.empty()
+                            st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
                     with c_del:
                         st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
                         st.button("🗑️", key=f"var_del_{name}", help=f"Remove <{name}>")

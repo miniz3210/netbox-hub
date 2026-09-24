@@ -204,8 +204,7 @@ def render_esxi_network_inputs(pattern: str, variables: Dict, prefix: str, auto_
         value = ""
         is_optional = _meta.get("optional")
         if is_optional:
-            value = st.text_input(label, value=default_val or "", placeholder=ph, key=wk,
-                               help="Optional - Leave empty if no standby uplinks").strip()
+            value = st.text_input(label, value=default_val or "", placeholder=ph, key=wk).strip()
         else:
             value = st.text_input(label, value=default_val or "", placeholder=ph, key=wk).strip()
 
