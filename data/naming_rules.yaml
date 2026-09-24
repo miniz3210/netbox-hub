@@ -108,12 +108,6 @@
       "description": "ESXi Hypervisor Host"
     },
     {
-      "code": "Proxmox",
-      "label": "Proxmox Host",
-      "pattern_key": "host_vm_proxmox_x",
-      "description": ""
-    },
-    {
       "code": "CVI",
       "label": "Core Virtualization (cvi)",
       "pattern_key": "vm_host",
