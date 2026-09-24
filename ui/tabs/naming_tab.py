@@ -592,87 +592,62 @@ def _esxi_network_presets_fn(rules, naming_patterns):
 def _asset_class_2(case_mode, active_model, naming_patterns, variables):
     naming_rules = st.session_state.get("naming_rules", load_naming_rules())
     presets = _host_vm_presets(naming_rules, naming_patterns)
-    codes = [code for code, _label, _key in presets]
-    label_map = {code: label for code, label, _key in presets}
-    key_map = {code: key for code, _label, key in presets}
 
-    preset_type = st.radio(
-        "Host / VM Type",
-        codes,
-        horizontal=True,
-        key="host_vm_preset_sel",
-        help="Select the host or VM type. Choices are configured in the Standards Tab (Hosts & Virtual Machines Presets).",
-    )
-    pk = key_map.get(preset_type, "esxi_host")
+    esxi_pk = "esxi_host"
+    vm_pk = "vm_host"
+    vm_keys = [code for code, _label, key in presets if key == "vm_host"]
+    vm_label_map = {code: label for code, label, _key in presets}
 
-    if preset_type == "ESXi":
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.markdown(f"#### {label_map.get(preset_type, 'ESXi Hypervisor')} Hostname")
-            pat = naming_patterns.get(pk, "")
-            if _edit_toggle(pk):
-                render_edit_mode_ui(pk, pat, variables)
-                st.stop()
-                return
-            values = render_token_widgets(pat, variables, "esx")
-            gen_raw = render_dynamic_pattern(pat, values, variables)
-            gen_raw = re.sub(r"\s*\([^)]*\)", "", gen_raw).strip()
-            gen_raw = re.sub(r"<[^>]+>", "", gen_raw)
-            gen_raw = re.sub(r"\.+", ".", gen_raw).strip(".")
-            if "." in gen_raw:
-                parts = gen_raw.split(".", 1)
-                gen = f"{apply_case(parts[0], case_mode)}.{parts[1].lower()}"
-            else:
-                gen = apply_case(gen_raw, case_mode)
-            st.caption("Generated ESXi Hostname:")
-            st.code(gen, language="text")
-            if st.button("AI Verify ESXi Host", key="ai_chk_esx"):
-                with st.spinner("Auditing..."):
-                    st.info(verify_and_suggest_with_ai(gen, active_model, asset_type="ESXi Hypervisor Hostname", category_key="hypervisor", site_filter=values.get("site_prefix", "")))
-            display_reference_box("hypervisor", "NYCESX001.corp.internal\nLONESX001.corp.internal\nSYDESX01.corp.local", "Hypervisor", site_filter=values.get("site_prefix", ""))
-        with col_b:
-            st.markdown("#### Virtual Machine (VM) Hostname")
-            vm_pk = "vm_host"
-            vm_pat = naming_patterns.get(vm_pk, "")
-            if _edit_toggle(vm_pk):
-                render_edit_mode_ui(vm_pk, vm_pat, variables)
-                st.stop()
-                return
-            values = render_token_widgets(vm_pat, variables, "vm")
-            gen_raw = render_dynamic_pattern(vm_pat, values, variables)
-            gen_raw = re.sub(r"\s*\([^)]*\)", "", gen_raw).strip()
-            gen_raw = re.sub(r"\s+or\s+.*", "", gen_raw).strip()
-            gen_raw = re.sub(r"<[^>]+>", "", gen_raw)
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.markdown("#### ESXi Host Hostname")
+        pat = naming_patterns.get(esxi_pk, "")
+        if _edit_toggle(esxi_pk):
+            render_edit_mode_ui(esxi_pk, pat, variables)
+            st.stop()
+            return
+        values = render_token_widgets(pat, variables, "esx")
+        gen_raw = render_dynamic_pattern(pat, values, variables)
+        gen_raw = re.sub(r"\s*\([^)]*\)", "", gen_raw).strip()
+        gen_raw = re.sub(r"<[^>]+>", "", gen_raw)
+        gen_raw = re.sub(r"\.+", ".", gen_raw).strip(".")
+        if "." in gen_raw:
+            parts = gen_raw.split(".", 1)
+            gen = f"{apply_case(parts[0], case_mode)}.{parts[1].lower()}"
+        else:
             gen = apply_case(gen_raw, case_mode)
-            st.caption("Generated VM Hostname:")
-            st.code(gen, language="text")
-            if st.button("AI Verify VM Hostname", key="ai_chk_vm"):
-                with st.spinner("Auditing..."):
-                    st.info(verify_and_suggest_with_ai(gen, active_model, asset_type="Virtual Machine (VM) Hostname", category_key="vm", site_filter=values.get("site", "")))
-            display_reference_box("vm", "USNYCAPP01     (NYC Application Server 01)\nUKLONDB01\nAUSYDFS01", "Virtual Machine", site_filter=values.get("site", ""))
-    else:
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.markdown(f"#### {label_map.get(preset_type, 'VM')} Hostname")
-            pat = naming_patterns.get(pk, "")
-            if _edit_toggle(pk):
-                render_edit_mode_ui(pk, pat, variables)
-                st.stop()
-                return
-            values = render_token_widgets(pat, variables, f"hostvm_{pk}")
-            gen_raw = render_dynamic_pattern(pat, values, variables)
-            gen_raw = re.sub(r"\s*\([^)]*\)", "", gen_raw).strip()
-            gen_raw = re.sub(r"\s+or\s+.*", "", gen_raw).strip()
-            gen_raw = re.sub(r"<[^>]+>", "", gen_raw)
-            gen = apply_case(gen_raw, case_mode)
-            st.caption(f"Generated {label_map.get(preset_type, 'VM')} Hostname:")
-            st.code(gen, language="text")
-            if st.button("AI Verify VM Hostname", key=f"ai_chk_vm_{pk}"):
-                with st.spinner("Auditing..."):
-                    st.info(verify_and_suggest_with_ai(gen, active_model, asset_type=f"VM ({label_map.get(preset_type, 'VM')})", category_key="vm", site_filter=values.get("site", "")))
-            display_reference_box("vm", "USNYCAPP01\nUKLONDB01\nAUSYDFS01", "Virtual Machine", site_filter=values.get("site", ""))
-        with col_b:
-            st.empty()
+        st.caption("Generated ESXi Hostname:")
+        st.code(gen, language="text")
+        if st.button("AI Verify ESXi Host", key="ai_chk_esx"):
+            with st.spinner("Auditing..."):
+                st.info(verify_and_suggest_with_ai(gen, active_model, asset_type="ESXi Hypervisor Hostname", category_key="hypervisor", site_filter=values.get("site_prefix", "")))
+        display_reference_box("hypervisor", "NYCESX001.corp.internal\nLONESX001.corp.internal\nSYDESX01.corp.local", "Hypervisor", site_filter=values.get("site_prefix", ""))
+    with col_b:
+        st.markdown("#### Virtual Machine (VM) Hostname")
+        vm_type = st.radio(
+            "VM Role / Type",
+            vm_keys,
+            horizontal=True,
+            key="host_vm_vm_role",
+            help="Select the VM role/type. Choices are configured in the Standards Tab (Hosts & Virtual Machines Presets).",
+        )
+        vm_pat = naming_patterns.get(vm_pk, "")
+        if _edit_toggle(vm_pk):
+            render_edit_mode_ui(vm_pk, vm_pat, variables)
+            st.stop()
+            return
+        values = render_token_widgets(vm_pat, variables, "vm")
+        gen_raw = render_dynamic_pattern(vm_pat, values, variables)
+        gen_raw = re.sub(r"\s*\([^)]*\)", "", gen_raw).strip()
+        gen_raw = re.sub(r"\s+or\s+.*", "", gen_raw).strip()
+        gen_raw = re.sub(r"<[^>]+>", "", gen_raw)
+        gen = apply_case(gen_raw, case_mode)
+        st.caption(f"Generated {vm_label_map.get(vm_type, 'VM')} Hostname:")
+        st.code(gen, language="text")
+        if st.button("AI Verify VM Hostname", key="ai_chk_vm"):
+            with st.spinner("Auditing..."):
+                st.info(verify_and_suggest_with_ai(gen, active_model, asset_type="Virtual Machine (VM) Hostname", category_key="vm", site_filter=values.get("site", "")))
+        display_reference_box("vm", "USNYCAPP01     (NYC Application Server 01)\nUKLONDB01\nAUSYDFS01", "Virtual Machine", site_filter=values.get("site", ""))
 
 
 def _asset_class_3(case_mode, active_model, naming_patterns, variables, token_order_map=None):
