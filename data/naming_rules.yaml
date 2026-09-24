@@ -12,8 +12,8 @@
   "switch_port_channel": "<Local_Po_ID>_to_<Remote_Device>",
   "switch_access_desc": "<VLAN_Name>-<Device>_<Port>",
   "firewall_interface": "<Role_Zone>_<VLAN_ID>",
-  "esxi_host": "<site_prefix><role_esx><host_seq>.<domain>",
-  "vm_host": "<Country><Site><Role><Seq>",
+  "esxi_host": "<site_prefix><role_esx><seq>.<domain>",
+  "vm_host": "<Country><Site><role><Seq>",
   "esxi_uplink": "<vmnic> - <vSwitch> <Purpose> <Status>",
   "esxi_portgroup_name": "PG-<pg_network>",
   "esxi_portgroup": "<PortGroup> [<Active_vmnics> Active / <Standby_vmnics> Standby]",
@@ -151,8 +151,8 @@
     "switch_port_channel": "<Local_Po_ID>_to_<Remote_Device>",
     "switch_access_desc": "<VLAN_Name>-<Device>_<Port>",
     "firewall_interface": "<Role_Zone>_<VLAN_ID>",
-    "esxi_host": "<site_prefix><role_esx><host_seq>.<domain>",
-    "vm_host": "<Country><Site><Role><Seq>",
+    "esxi_host": "<site_prefix><role_esx><seq>.<domain>",
+    "vm_host": "<Country><Site><role><Seq>",
     "esxi_uplink": "<vmnic> - <vSwitch> <Purpose> <Status>",
     "esxi_portgroup_name": "PG-<pg_network>",
     "esxi_portgroup": "<PortGroup> [<Active_vmnics> Active / <Standby_vmnics> Standby]",
@@ -246,14 +246,14 @@
       "placeholder": "e.g. INSIDE, OUTSIDE",
       "optional": false
     },
-    "site": {
-      "label": "Site Prefix",
-      "placeholder": "e.g. age, nyc, lon, syd",
+    "seq": {
+      "label": "Host Sequence Number",
+      "placeholder": "001",
       "optional": false
     },
-    "site_prefix": {
-      "label": "Site Prefix",
-      "placeholder": "e.g. age, nyc, lon, syd",
+    "domain": {
+      "label": "Domain Name (FQDN Suffix)",
+      "placeholder": "e.g. corp.example.com, internal.net",
       "optional": false
     },
     "role": {
@@ -266,29 +266,14 @@
       "placeholder": "e.g. esx, otinfhost, infhost",
       "optional": true
     },
-    "seq": {
-      "label": "Host Sequence Number",
-      "placeholder": "001",
+    "site": {
+      "label": "Site Prefix",
+      "placeholder": "e.g. age, nyc, lon, syd",
       "optional": false
     },
-    "host_seq": {
-      "label": "Host Sequence Number",
-      "placeholder": "001",
-      "optional": false
-    },
-    "Domain": {
-      "label": "Domain Name (FQDN Suffix)",
-      "placeholder": "e.g. corp.example.com, internal.net",
-      "optional": false
-    },
-    "domain": {
-      "label": "Domain Name (FQDN Suffix)",
-      "placeholder": "e.g. corp.example.com, internal.net",
-      "optional": false
-    },
-    "Role": {
-      "label": "Role Code / Workload",
-      "placeholder": "e.g. app, web, db, fs, dc",
+    "site_prefix": {
+      "label": "Site Prefix",
+      "placeholder": "e.g. age, nyc, lon, syd",
       "optional": false
     },
     "vm_site": {

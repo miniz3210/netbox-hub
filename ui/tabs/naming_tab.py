@@ -80,6 +80,22 @@ You have DIRECT ACCESS to the complete inventory database. Analyze the user's re
 def apply_case(text: str, mode: str) -> str:
     return text.upper() if mode == "UPPERCASE" else text.lower()
 
+
+def _render_casing_selector():
+    """Return the active casing mode ('UPPERCASE'/'lowercase') selected globally."""
+    if "naming_case_radio" not in st.session_state:
+        st.session_state["naming_case_radio"] = "UPPERCASE"
+    case_mode = st.radio(
+        "Casing",
+        ["UPPERCASE", "lowercase"],
+        index=0 if st.session_state.get("naming_case_radio") == "UPPERCASE" else 1,
+        horizontal=True,
+        key="naming_case_radio",
+        help="Render output in UPPERCASE or lowercase.",
+    )
+    SSM.set_naming_case_mode(case_mode)
+    return case_mode
+
 def handle_csv_upload(uploader_key: str):
     """Universal file upload handler using dynamic schema classification."""
     uploaded_files = st.session_state.get(uploader_key)
@@ -246,27 +262,12 @@ def render_compact_toolbar(active_model):
         build_system_prompt=build_naming_system_prompt,
     )
 
-    # Casing selector with radio buttons on same line
-    case_mode = st.radio(
-        "Casing",
-        ["UPPERCASE", "lowercase"],
-        index=0 if SSM.get_naming_case_mode() == "UPPERCASE" else 1,
-        horizontal=True,
-        key="naming_case_radio",
-        help="Render output in UPPERCASE or lowercase."
-    )
-    
-    # Store the selection
-    SSM.set_naming_case_mode(case_mode)
-
     auto_correct = st.checkbox(
         "⚡ Apply Syntax Auto-Correction (Port Shortening & VMware Conventions)",
         value=True, key="esxi_auto_corr",
         help="When checked, enables interface port regex shortening (<Local_Port>/<Remote_Port>) and VMware casing normalization across all asset classes, driven by the Auto-Correction Rules in the Standards Tab.",
     )
     st.session_state["auto_correct"] = bool(auto_correct)
-
-    return case_mode
 
 
 import re
@@ -429,17 +430,21 @@ def render_naming_tab(active_model):
     st.session_state["naming_rules"] = naming_rules
     naming_patterns = get_naming_patterns(naming_rules)
     variables = get_pattern_variables(naming_rules)
-    case_mode = render_compact_toolbar(active_model)
+    render_compact_toolbar(active_model)
 
-    naming_cat = st.radio(
-        "Select Asset Class",
-        [
-            "1. Network & Security Devices (Switches, APs, Firewalls, Routers)",
-            "2. Hosts & Virtual Machines (ESXi & VMs)",
-            "3. ESXi Network Descriptions (vmnic, PortGroup, VMkernel)",
-        ],
-        horizontal=True,
-    )
+    ac_row_c1, ac_row_c2 = st.columns([3, 1], vertical_alignment="bottom")
+    with ac_row_c1:
+        naming_cat = st.radio(
+            "Select Asset Class",
+            [
+                "1. Network & Security Devices (Switches, APs, Firewalls, Routers)",
+                "2. Hosts & Virtual Machines (ESXi & VMs)",
+                "3. ESXi Network Descriptions (vmnic, PortGroup, VMkernel)",
+            ],
+            horizontal=True,
+        )
+    with ac_row_c2:
+        case_mode = _render_casing_selector()
     st.markdown("---")
 
     if "1. Network" in naming_cat:
@@ -453,12 +458,15 @@ def render_naming_tab(active_model):
 
 def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, variables):
     st.markdown("##### Location & Site Code Assistant")
-    loc_c1, loc_c2 = st.columns([2, 1])
+    loc_c1, loc_c2 = st.columns([3, 1])
     with loc_c1:
-        loc = st.text_input("Location / City Name", value="", placeholder="e.g. Sydney, London", key="loc_input_help")
+        loc = st.text_input("City", value="", placeholder="e.g. Sydney, London", key="loc_input_help", label_visibility="collapsed")
     with loc_c2:
         auto_code = compute_suggested_site_code(loc) if loc else ""
-        st.info(f"Suggested Site Code: **{auto_code or '----'}**")
+        if auto_code:
+            st.markdown(f"<div style='background:#1f77b4;color:white;padding:4px 8px;border-radius:6px;text-align:center;font-weight:bold;margin-top:4px'>Site: {auto_code}</div>", unsafe_allow_html=True)
+        else:
+            st.markdown("<div style='padding:4px 8px;text-align:center;margin-top:4px'> </div>", unsafe_allow_html=True)
     st.markdown("---")
 
     col_a, col_b = st.columns([1, 1])
