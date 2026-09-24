@@ -258,7 +258,105 @@ def _render_auto_correction_manager(active_model: str) -> None:
                     st.session_state["autocorrect_reset"] = True
                     st.rerun()
 
+    _render_site_code_mapping_manager()
+
     st.markdown("---")
+
+
+def _render_site_code_mapping_manager() -> None:
+    """CRUD manager for city/location → site code exact mappings.
+
+    Reads/writes ``site_code_rules.exact_mappings`` inside ``data/naming_rules.yaml``
+    and refreshes the in-session cache so the Naming tab site code assistant picks up
+    changes immediately.
+    """
+    from config.naming_rules import get_site_code_rules
+
+    with st.expander("📍 Site Code Mapping Rules (City / Location to Code)", expanded=False):
+        st.caption(
+            "Each row maps a city/location pattern → site code. The Naming tab's Site Code "
+            "Assistant uses these exact mappings directly. A location that matches a pattern is "
+            "resolved to its code before any algorithmic fallback."
+        )
+        rules = load_naming_rules()
+        sr = get_site_code_rules(rules)
+        exact = dict(sr.get("exact_mappings") or {})
+
+        m_col_p, m_col_r, m_col_del = st.columns([3.0, 2.2, 0.7])
+        with m_col_p:
+            st.markdown("**Original Pattern (City / Location)**")
+        with m_col_r:
+            st.markdown("**Replacement (Site Code)**")
+        with m_col_del:
+            st.markdown("**Action**")
+
+        items = list(exact.items())
+        updated = {}
+        pending_delete = None
+        for idx, (pat, code) in enumerate(items):
+            col_p, col_r, col_del = st.columns([3.0, 2.2, 0.7])
+            with col_p:
+                np_ = st.text_input(
+                    "Original Pattern", value=pat, key=f"sitecode_{idx}_p",
+                    label_visibility="collapsed",
+                )
+            with col_r:
+                nr_ = st.text_input(
+                    "Replacement", value=code, key=f"sitecode_{idx}_r",
+                    label_visibility="collapsed",
+                )
+            with col_del:
+                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                if st.button("🗑️", key=f"sitecode_{idx}_del", help="Delete this mapping"):
+                    pending_delete = idx
+
+            if pending_delete == idx:
+                continue
+            key = np_.strip().lower()
+            if key:
+                updated[key] = nr_.strip().upper()
+
+        s_col_add, s_col_addcode = st.columns([3.0, 2.2])
+        with s_col_add:
+            new_p = st.text_input("New City / Location", value="", key="sitecode_new_p",
+                                 placeholder="e.g. bristol")
+        with s_col_addcode:
+            new_code = st.text_input("New Site Code", value="", key="sitecode_new_code",
+                                    placeholder="e.g. BRI")
+
+        col_save, col_add = st.columns(2)
+        with col_save:
+            if st.button("💾 Save & Apply Changes", key="sitecode_save", type="primary", width='stretch'):
+                final = dict(rules)
+                final["site_code_rules"] = dict(sr)
+                final["site_code_rules"]["exact_mappings"] = updated
+                _persist_site_code_mappings(final)
+        with col_add:
+            if st.button("➕ Add Mapping", key="sitecode_add", width='stretch'):
+                if new_p.strip() and new_code.strip():
+                    final = dict(rules)
+                    final["site_code_rules"] = dict(sr)
+                    final["site_code_rules"]["exact_mappings"] = dict(updated)
+                    final["site_code_rules"]["exact_mappings"][new_p.strip().lower()] = new_code.strip().upper()
+                    _persist_site_code_mappings(final)
+                else:
+                    st.warning("⚠️ Enter both a city/location and a site code to add.")
+
+
+def _persist_site_code_mappings(rules: dict) -> None:
+    """Save site code exact mappings to YAML and refresh the session cache."""
+    from config.naming_rules import compute_delta, add_to_history
+
+    old_rules = load_naming_rules()
+    save_naming_rules(rules, source="Site Code Mapping Rules: Management UI")
+    delta = compute_delta(old_rules, rules)
+    if not delta:
+        delta = {"site_code_rules": {"old": dict(old_rules.get("site_code_rules") or {}),
+                                    "new": dict(rules.get("site_code_rules") or {})}}
+    add_to_history(delta, source="Site Code Mapping Rules: Management UI")
+    st.session_state["naming_rules"] = load_naming_rules()
+    st.session_state["site_code_saved"] = True
+    st.rerun()
 
 
 def _persist_auto_corrections(data: dict) -> None:
@@ -713,6 +811,10 @@ def render_standards_tab(active_model):
     if "standards_reset" in st.session_state and st.session_state["standards_reset"]:
         st.success("✅ Reset to default standards!")
         st.session_state["standards_reset"] = False
+
+    # Check for site code mapping save success message
+    if st.session_state.pop("site_code_saved", False):
+        st.success("✅ Site code mapping rules saved & applied!")
 
     # Always reload rules from file to ensure fresh data after save
     current_rules = load_naming_rules()
