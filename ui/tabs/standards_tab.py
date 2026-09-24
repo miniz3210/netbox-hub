@@ -420,7 +420,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str) -> N
     with col_hdr_tpl:
         st.markdown("**Pattern Template**")
     with col_hdr_act:
-        st.markdown("**Action**")
+        st.markdown("<div style='text-align: center; font-weight: 600;'>Action</div>", unsafe_allow_html=True)
 
     updated = []
     patterns_updates = {}
@@ -589,7 +589,7 @@ def _host_editor(rules: dict) -> None:
     p = esxi[0] if esxi else {"code": "ESXi", "label": "ESXi Host", "pattern_key": "esxi_host", "description": ""}
     pkey = p.get("pattern_key", "esxi_host")
 
-    st.markdown(f"**🖥️ Hosts Type Presets (ESXi)** &nbsp;&nbsp;&nbsp;`{len(host_presets)} presets`")
+    st.markdown(f"**🖥️ Hosts Type Presets** &nbsp;&nbsp;&nbsp;`{len(host_presets)} presets`")
     st.caption("Manage the ESXi host naming pattern and associated physical host presets.")
 
     col_hdr_code, col_hdr_lbl, col_hdr_tpl, col_hdr_act = st.columns(PRESET_COLS, vertical_alignment="center")
@@ -600,7 +600,7 @@ def _host_editor(rules: dict) -> None:
     with col_hdr_tpl:
         st.markdown("**Pattern Template**")
     with col_hdr_act:
-        st.markdown("**Action**")
+        st.markdown("<div style='text-align: center; font-weight: 600;'>Action</div>", unsafe_allow_html=True)
 
     updated = []
     patterns_updates = {}
@@ -713,7 +713,7 @@ def _vm_editor(rules: dict) -> None:
     with col_hdr_tpl:
         st.markdown("**Pattern Template**")
     with col_hdr_act:
-        st.markdown("**Action**")
+        st.markdown("<div style='text-align: center; font-weight: 600;'>Action</div>", unsafe_allow_html=True)
 
     updated = []
     stale_del = st.session_state.pop("_del_vm_role_idx", None)
@@ -837,7 +837,7 @@ def render_standards_tab(active_model):
 
         # Section 2: Hosts & Virtual Machines
         with st.expander("🖥️ Hosts & Virtual Machines", expanded=False):
-            with st.expander("🖥️ Hosts Type Presets (ESXi)", expanded=False):
+            with st.expander("🖥️ Hosts Type Presets", expanded=False):
                 _host_editor(current_rules)
 
             with st.expander("🖱️ Virtual Machine Presets", expanded=False):
@@ -958,25 +958,24 @@ def render_standards_tab(active_model):
                         st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
                         var_opt = st.checkbox("Optional", value=bool(meta.get("optional")), key=f"var_opt_{name}", label_visibility="collapsed")
                     with c_up:
-                        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
                         if idx > 0:
-                            if st.button("⬆️", key=f"var_up_{idx}", help=f"Move <{name}> up"):
+                            st.button("⬆️", key=f"var_up_{idx}", help=f"Move <{name}> up")
+                            if st.session_state.get(f"var_up_{idx}"):
                                 var_names[idx - 1], var_names[idx] = var_names[idx], var_names[idx - 1]
                                 reordered = {k: variables_now[k] for k in var_names}
                                 _persist_variables(current_rules, reordered)
                         else:
-                            st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                            c_up.empty()
                     with c_dn:
-                        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
                         if idx < total_vars - 1:
-                            if st.button("⬇️", key=f"var_dn_{idx}", help=f"Move <{name}> down"):
+                            st.button("⬇️", key=f"var_dn_{idx}", help=f"Move <{name}> down")
+                            if st.session_state.get(f"var_dn_{idx}"):
                                 var_names[idx], var_names[idx + 1] = var_names[idx + 1], var_names[idx]
                                 reordered = {k: variables_now[k] for k in var_names}
                                 _persist_variables(current_rules, reordered)
                         else:
-                            st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                            c_dn.empty()
                     with c_del:
-                        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
                         st.button("🗑️", key=f"var_del_{name}", help=f"Remove <{name}>")
 
                     if st.session_state.get(f"var_del_{name}"):
