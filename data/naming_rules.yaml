@@ -21,6 +21,7 @@
   "esxi_vmkernel": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
   "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
   "iface_switch_zone": "<switch_zone>_<port>",
+  "host_vm_proxmox": "<site_prefix><role_esx><seq>.<domain>",
   "custom_patterns": [],
   "device_presets": [
     {
@@ -106,6 +107,12 @@
       "description": "ESXi Hypervisor Host"
     },
     {
+      "code": "Proxmox",
+      "label": "Proxmox Host",
+      "pattern_key": "host_vm_proxmox",
+      "description": ""
+    },
+    {
       "code": "CVI",
       "label": "Core Virtualization (cvi)",
       "pattern_key": "vm_host",
@@ -172,7 +179,8 @@
     "esxi_vmkernel_name": "<vmk>",
     "esxi_vmkernel": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
     "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
-    "iface_switch_zone": "<switch_zone>_<port>"
+    "iface_switch_zone": "<switch_zone>_<port>",
+    "host_vm_proxmox": "<site_prefix><role_esx><seq>.<domain>"
   },
   "pattern_variables": {
     "country": {

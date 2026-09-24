@@ -17,6 +17,13 @@ from utils.formatters import (
     load_auto_corrections, save_auto_corrections, reset_auto_corrections,
 )
 
+# Shared column width ratios enforced across preset table headers and all data rows.
+PRESET_COLS = [1.2, 2.2, 4.5, 0.6]
+# Manage Pattern Variables columns: Name, Label, Placeholder, Auto-Fill, Optional, Up, Down, Delete.
+VARIABLE_COLS = [1.5, 2.5, 2.5, 1.5, 1.0, 0.5, 0.5, 0.5]
+# Auto-Correction rule columns: Original Pattern, Replacement, Description, On, Action.
+AUTOCORRECT_COLS = [3.0, 2.2, 3.0, 0.7, 0.7]
+
 def _normalize_var_name(raw: str) -> str:
     return re.sub(r"[^a-z0-9_]", "", raw.strip().lower().replace(" ", "_"))
 
@@ -119,28 +126,43 @@ def _render_auto_correction_manager(active_model: str) -> None:
                 "the AI generator below to create new rules. The **On** checkbox "
                 "enables/disables a rule without deleting it."
             )
+            ch_p, ch_r, ch_d, ch_e, ch_del = st.columns(AUTOCORRECT_COLS)
+            with ch_p:
+                st.markdown("**Original Pattern**")
+            with ch_r:
+                st.markdown("**Replacement**")
+            with ch_d:
+                st.markdown("**Description**")
+            with ch_e:
+                st.markdown("**On**")
+            with ch_del:
+                st.markdown("**Action**")
+
             items = list(rules[category])
             updated = []
             pending_delete = None
             for idx, rule in enumerate(items):
-                col_p, col_r, col_d, col_e, col_del = st.columns([3.0, 2.2, 3.0, 0.7, 0.7])
+                col_p, col_r, col_d, col_e, col_del = st.columns(AUTOCORRECT_COLS)
                 with col_p:
                     p = st.text_input(
                         "Original Pattern",
                         value=rule.get("pattern", ""),
                         key=f"ac_{category}_p_{idx}",
+                        label_visibility="collapsed",
                     )
                 with col_r:
                     r = st.text_input(
                         "Replacement",
                         value=rule.get("replacement", ""),
                         key=f"ac_{category}_r_{idx}",
+                        label_visibility="collapsed",
                     )
                 with col_d:
                     d = st.text_input(
                         "Description",
                         value=rule.get("description", ""),
                         key=f"ac_{category}_d_{idx}",
+                        label_visibility="collapsed",
                     )
                 with col_e:
                     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
@@ -292,7 +314,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str) -> N
         _save_presets(rules)
         return
 
-    col_hdr_code, col_hdr_lbl, col_hdr_tpl, col_hdr_act = st.columns([1.1, 2.2, 3.2, 0.6])
+    col_hdr_code, col_hdr_lbl, col_hdr_tpl, col_hdr_act = st.columns(PRESET_COLS)
     with col_hdr_code:
         st.markdown("**Code**")
     with col_hdr_lbl:
@@ -312,7 +334,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str) -> N
             pkey = p.get("pattern_key", "")
             tpl = patterns.get(pkey, "")
 
-            c1, c2, c3, c4 = st.columns([1.1, 2.2, 3.2, 0.6])
+            c1, c2, c3, c4 = st.columns(PRESET_COLS)
             with c1:
                 ncode = st.text_input("Code", value=code, key=f"{kind}_pre_code_{idx}", label_visibility="collapsed").strip()
             with c2:
@@ -472,7 +494,7 @@ def _host_editor(rules: dict) -> None:
     st.markdown(f"**🖥️ Hosts Type Presets (ESXi)** &nbsp;&nbsp;&nbsp;`{len(host_presets)} presets`")
     st.caption("Manage the ESXi host naming pattern and associated physical host presets.")
 
-    col_hdr_code, col_hdr_lbl, col_hdr_tpl, col_hdr_act = st.columns([1.1, 2.2, 3.2, 0.6])
+    col_hdr_code, col_hdr_lbl, col_hdr_tpl, col_hdr_act = st.columns(PRESET_COLS)
     with col_hdr_code:
         st.markdown("**Code**")
     with col_hdr_lbl:
@@ -492,7 +514,7 @@ def _host_editor(rules: dict) -> None:
         pk = preset.get("pattern_key", "")
         tpl = patterns.get(pk, "")
 
-        c1, c2, c3, c4 = st.columns([1.1, 2.2, 3.2, 0.6])
+        c1, c2, c3, c4 = st.columns(PRESET_COLS)
         with c1:
             if code == "ESXi":
                 st.text_input("Code", value=code, key=f"host_{idx}_code", disabled=True)
@@ -535,16 +557,13 @@ def _host_editor(rules: dict) -> None:
         return
 
     st.markdown("**➕ Add New Preset**")
-    ca1, ca2, ca3, ca4 = st.columns([1.1, 2.2, 3.2, 0.6])
+    ca1, ca2, ca3 = st.columns(PRESET_COLS[:3])
     with ca1:
         new_code = st.text_input("New Code", value="", placeholder="e.g. HYPV", key="host_new_code", label_visibility="collapsed").strip()
     with ca2:
         new_lbl = st.text_input("New Label", value="", placeholder="e.g. Hyper-V Host", key="host_new_lbl", label_visibility="collapsed").strip()
     with ca3:
         new_tpl = st.text_input("New Pattern Template", value="", placeholder="<site_prefix>hyp<seq>.<domain>", key="host_new_tpl", label_visibility="collapsed").strip()
-    with ca4:
-        st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
-        add_clicked = st.button("➕ Add New Preset", key="host_add_btn")
 
     col_save, col_reset = st.columns(2)
     with col_save:
@@ -556,31 +575,23 @@ def _host_editor(rules: dict) -> None:
         _reset_presets("host_vm", rules)
         return
 
-    if add_clicked:
+    if saved:
+        final_presets = list(updated)
+        final_patterns = {**patterns, **patterns_updates}
         if new_code and new_tpl:
             nkey = make_preset_key(new_code, "host_vm")
-            staged = st.session_state.get("_host_added_presets", [])
-            staged = [s for s in staged if str(s.get("code", "")).lower() != new_code.lower()]
-            staged.append({
+            while nkey in final_patterns and nkey not in [p["pattern_key"] for p in final_presets]:
+                nkey = f"{nkey}_x"
+            final_patterns[nkey] = new_tpl
+            final_presets.append({
                 "code": new_code,
                 "label": new_lbl or new_code,
                 "pattern_key": nkey,
                 "description": "",
             })
-            st.session_state["_host_added_presets"] = staged
-            patterns[nkey] = new_tpl
         elif new_code and not new_tpl:
             st.error("⚠️ Provide a Pattern Template to add a new preset.")
-
-    if saved:
-        final_presets = list(updated)
-        final_patterns = {**patterns, **patterns_updates}
-        for s in st.session_state.get("_host_added_presets", []):
-            if s["pattern_key"] not in final_patterns:
-                final_patterns[s["pattern_key"]] = s["pattern_key"]
-            final_presets.append(s)
-        if "_host_added_presets" in st.session_state:
-            del st.session_state["_host_added_presets"]
+            return
         rules["naming_patterns"] = final_patterns
         rules["host_vm_presets"] = final_presets + vm_presets
         _save_presets(rules)
@@ -596,7 +607,7 @@ def _vm_editor(rules: dict) -> None:
     st.markdown(f"**🖱️ Virtual Machine Presets** &nbsp;&nbsp;&nbsp;`{len(vm_presets)} presets`")
     st.caption("Manage the virtual machine role options and their shared pattern template.")
 
-    col_hdr_code, col_hdr_lbl, col_hdr_tpl, col_hdr_act = st.columns([1.1, 2.2, 3.2, 0.6])
+    col_hdr_code, col_hdr_lbl, col_hdr_tpl, col_hdr_act = st.columns(PRESET_COLS)
     with col_hdr_code:
         st.markdown("**Code**")
     with col_hdr_lbl:
@@ -610,7 +621,7 @@ def _vm_editor(rules: dict) -> None:
     stale_del = st.session_state.pop("_del_vm_role_idx", None)
 
     for idx, p in enumerate(vm_presets):
-        c1, c2, c3, c4 = st.columns([1.1, 2.2, 3.2, 0.6])
+        c1, c2, c3, c4 = st.columns(PRESET_COLS)
         with c1:
             ncode = st.text_input("Code", value=p.get("code", ""), key=f"vm_code_{idx}", label_visibility="collapsed").strip()
         with c2:
@@ -643,16 +654,13 @@ def _vm_editor(rules: dict) -> None:
         return
 
     st.markdown("**➕ Add New Preset**")
-    nc1, nc2, nc3, nc4 = st.columns([1.1, 2.2, 3.2, 0.6])
+    nc1, nc2, nc3 = st.columns(PRESET_COLS[:3])
     with nc1:
         new_code = st.text_input("New Code", value="", key="vm_new_code", placeholder="e.g. cvi", label_visibility="collapsed").strip()
     with nc2:
         new_label = st.text_input("New Label", value="", key="vm_new_lbl", placeholder="e.g. Core Virtualization (cvi)", label_visibility="collapsed").strip()
     with nc3:
         new_tpl = st.text_input("New Pattern Template", value="", key="vm_new_tpl", placeholder="<country><site><role><seq>", label_visibility="collapsed").strip()
-    with nc4:
-        st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
-        add_clicked = st.button("➕ Add New Preset", key="vm_add_btn")
 
     c_save, c_reset = st.columns(2)
     with c_save:
@@ -664,28 +672,19 @@ def _vm_editor(rules: dict) -> None:
         _reset_presets("host_vm", rules)
         return
 
-    if add_clicked:
+    if saved:
+        final = list(updated)
         if new_code:
             if new_tpl:
                 patterns["vm_host"] = new_tpl
-            staged = st.session_state.get("_vm_added_presets", [])
-            staged = [s for s in staged if str(s.get("code", "")).lower() != new_code.lower()]
-            staged.append({
+            final.append({
                 "code": new_code.lower(),
                 "label": new_label or new_code,
                 "pattern_key": "vm_host",
                 "description": "",
             })
-            st.session_state["_vm_added_presets"] = staged
-        else:
-            st.warning("⚠️ Please enter a role code.")
-
-    if saved:
-        final = list(updated)
-        for s in st.session_state.get("_vm_added_presets", []):
-            final.append(s)
-        if "_vm_added_presets" in st.session_state:
-            del st.session_state["_vm_added_presets"]
+        elif not updated and not new_code:
+            st.warning("⚠️ At least one preset must remain.")
         patterns["vm_host"] = tpl or "<country><site><role><seq>"
         rules["naming_patterns"] = patterns
         rules["host_vm_presets"] = host_presets + final
@@ -820,7 +819,7 @@ def render_standards_tab(active_model):
             var_names = list(variables_now.keys())
 
             if variables_now:
-                c_nh_nm, c_nh_lb, c_nh_ph, c_nh_df, c_nh_opt, c_nh_up, c_nh_dn, c_nh_del = st.columns([1.5, 2.0, 2.0, 1.2, 0.8, 0.4, 0.4, 0.4])
+                c_nh_nm, c_nh_lb, c_nh_ph, c_nh_df, c_nh_opt, c_nh_up, c_nh_dn, c_nh_del = st.columns(VARIABLE_COLS)
                 with c_nh_nm:
                     st.markdown("**Name**")
                 with c_nh_lb:
@@ -843,7 +842,7 @@ def render_standards_tab(active_model):
                 for idx, name in enumerate(var_names):
                     meta = variables_now.get(name) if isinstance(variables_now.get(name), dict) else {}
                     # 8 fixed columns: Name, Label, Placeholder, Auto-Fill, Optional, ⬆️, ⬇️, 🗑️
-                    c_nm, c_lb, c_ph, c_df, c_opt, c_up, c_dn, c_del = st.columns([1.5, 2.0, 2.0, 1.2, 0.8, 0.4, 0.4, 0.4])
+                    c_nm, c_lb, c_ph, c_df, c_opt, c_up, c_dn, c_del = st.columns(VARIABLE_COLS)
                     with c_nm:
                         var_key = st.text_input("Name", value=name, key=f"var_key_{name}", label_visibility="collapsed").strip()
                         var_key = _normalize_var_name(var_key)
