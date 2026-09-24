@@ -400,108 +400,49 @@ def render_standards_tab(active_model):
         with st.expander("📝 Edit Naming Patterns", expanded=False):
             st.info("💡 Modify the naming patterns below. Changes are saved when you click 'Save Changes'. Use the **Pattern Variables Reference** tab to see all available variables.")
             with st.form("naming_standards_form"):
-                with st.expander("Network & Security Devices", expanded=False):
-                    st.caption("Define hostname and interface description patterns for switches, firewalls, routers, APs, SD-WAN appliances, and virtual appliances.")
+                with st.expander("🔌 Interface Description Patterns (Network & Security)", expanded=False):
+                    st.caption("Define interface description patterns for switches, firewalls, and related network devices. Device hostname patterns are managed via Device Type Presets.")
                     row1a, row1b = st.columns(2)
                     with row1a:
-                        branch_switch = st.text_input(
-                            "Switch Hostname Pattern (SW / SWI)",
-                            value=current_rules.get("branch_switch", ""),
-                            key="form_switch",
-                            autocomplete="off"
-                        )
-                    with row1b:
                         switch_uplink_desc = st.text_input(
                             "Switch Uplink Description",
                             value=current_rules.get("switch_uplink_desc", ""),
                             key="form_uplink",
                             autocomplete="off"
                         )
-    
-                    row2a, row2b = st.columns(2)
-                    with row2a:
-                        branch_stack = st.text_input(
-                            "Virtual Chassis / Stack Pattern (VS)",
-                            value=current_rules.get("branch_stack", ""),
-                            key="form_stack",
-                            autocomplete="off"
-                        )
-                    with row2b:
+                    with row1b:
                         switch_lag_member = st.text_input(
                             "LAG Member Description",
                             value=current_rules.get("switch_lag_member", ""),
                             key="form_lag",
                             autocomplete="off"
                         )
-    
-                    row3a, row3b = st.columns(2)
-                    with row3a:
-                        branch_ap = st.text_input(
-                            "Wireless AP Pattern (WAP)",
-                            value=current_rules.get("branch_ap", ""),
-                            key="form_ap",
-                            autocomplete="off"
-                        )
-                    with row3b:
+
+                    row2a, row2b = st.columns(2)
+                    with row2a:
                         switch_port_channel = st.text_input(
                             "Port-Channel Description",
                             value=current_rules.get("switch_port_channel", ""),
                             key="form_po",
                             autocomplete="off"
                         )
-    
-                    row4a, row4b = st.columns(2)
-                    with row4a:
-                        branch_firewall = st.text_input(
-                            "Firewall Pattern (FW)",
-                            value=current_rules.get("branch_firewall", current_rules.get("branch_security", "")),
-                            key="form_fw",
-                            autocomplete="off"
-                        )
-                    with row4b:
+                    with row2b:
                         switch_access_desc = st.text_input(
                             "Access Port Description",
                             value=current_rules.get("switch_access_desc", ""),
                             key="form_access",
                             autocomplete="off"
                         )
-    
-                    row5a, row5b = st.columns(2)
-                    with row5a:
-                        branch_ion = st.text_input(
-                            "SD-WAN / Prisma Pattern (ION)",
-                            value=current_rules.get("branch_ion", ""),
-                            key="form_ion",
-                            autocomplete="off"
-                        )
-                    with row5b:
+
+                    row3a, row3b = st.columns(2)
+                    with row3a:
                         firewall_interface = st.text_input(
                             "Firewall Interface Description",
                             value=current_rules.get("firewall_interface", ""),
                             key="form_fw_int",
                             autocomplete="off"
                         )
-    
-                    row6a, row6b = st.columns(2)
-                    with row6a:
-                        branch_router = st.text_input(
-                            "Router Pattern (RTR)",
-                            value=current_rules.get("branch_router", ""),
-                            key="form_rtr",
-                            autocomplete="off"
-                        )
-                    with row6b:
-                        st.markdown("")
-    
-                    row7a, row7b = st.columns(2)
-                    with row7a:
-                        branch_va = st.text_input(
-                            "Virtual Appliance Pattern (VA)",
-                            value=current_rules.get("branch_va", ""),
-                            key="form_va",
-                            autocomplete="off"
-                        )
-                    with row7b:
+                    with row3b:
                         st.markdown("")
     
                 with st.expander("Hypervisors & Virtual Machines", expanded=False):
@@ -607,13 +548,13 @@ def render_standards_tab(active_model):
                         for ccp in existing_customs:
                             st.markdown(f"- **{ccp.get('key')}** (`{ccp.get('pattern')}`) — {ccp.get('label')}")
 
-                col_save, col_add, col_reset = st.columns([1.5, 1.5, 1])
+                col_save, col_add, col_reset = st.columns([2, 2, 2])
                 with col_save:
-                    submitted = st.form_submit_button("💾 Save Changes", type="primary")
+                    submitted = st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
                 with col_add:
-                    add_custom = st.form_submit_button("➕ Add to Standards")
+                    add_custom = st.form_submit_button("➕ Add Custom Pattern", use_container_width=True)
                 with col_reset:
-                    reset = st.form_submit_button("🔄 Reset to Defaults")
+                    reset = st.form_submit_button("🔄 Reset to Defaults", use_container_width=True)
 
                 if submitted:
                     # Preserve any user-defined pattern_variables added via Edit Mode
@@ -621,14 +562,6 @@ def render_standards_tab(active_model):
                     session_variables = rules_session.get("pattern_variables", {}) if isinstance(rules_session, dict) else {}
     
                     new_rules = {
-                        "branch_switch": branch_switch,
-                        "branch_stack": branch_stack,
-                        "branch_ap": branch_ap,
-                        "branch_firewall": branch_firewall,
-                        "branch_ion": branch_ion,
-                        "branch_router": branch_router,
-                        "branch_va": branch_va,
-                        "branch_security": branch_firewall,
                         "switch_uplink_desc": switch_uplink_desc,
                         "switch_lag_member": switch_lag_member,
                         "switch_port_channel": switch_port_channel,
