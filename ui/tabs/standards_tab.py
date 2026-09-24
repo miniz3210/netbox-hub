@@ -413,124 +413,6 @@ def render_standards_tab(active_model):
     
     # Tab 1: Editable Form Interface
     with tab_edit:
-        with st.expander("🎛️ Infrastructure Naming Patterns & Presets", expanded=False):
-            st.info("💡 Configure naming patterns and the dynamic presets powering the Naming tab's radio selectors. Changes are saved when you click 'Save Changes' / 'Save Presets', or reset per category with 'Reset to Defaults'. Use the **Pattern Variables Reference** tab to see all available variables.")
-            with st.form("naming_standards_form"):
-                with st.expander("NetBox Hardware YAML Schema", expanded=False):
-                    netbox_server_yaml = st.text_area(
-                        "NetBox Server YAML Guidelines",
-                        value=current_rules.get("netbox_server_yaml", ""),
-                        height=100,
-                        key="form_yaml",
-                    )
-    
-                with st.expander("✨ AI Assistant: Generate Custom Naming Pattern", expanded=False):
-                    st.caption("Describe a naming convention in plain text and let AI build a template for you. Verify the Label / Key / Template below, then click **➕ Add to Standards**.")
-                    ai_desc = st.text_input(
-                        "Describe the naming convention",
-                        key="custom_ai_desc",
-                        placeholder="e.g. SAN storage naming: SAN + country + site + sequence",
-                    )
-                    if st.form_submit_button("🤖 Generate Pattern with AI", key="custom_ai_gen", use_container_width=True):
-                        if ai_desc.strip():
-                            with st.spinner(f"Generating pattern using {active_model}..."):
-                                try:
-                                    generated = generate_naming_pattern(ai_desc.strip(), active_model)
-                                    prefix = re.sub(r"[^A-Za-z0-9].*$", "", generated) or "CUSTOM"
-                                    st.session_state["custom_new_label"] = prefix.upper()
-                                    st.session_state["custom_new_key"] = prefix.lower() + "_pattern"
-                                    st.session_state["custom_new_tpl"] = generated
-                                    st.session_state["custom_ai_ready"] = True
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"❌ AI pattern generation failed: {e}")
-                        else:
-                            st.warning("⚠️ Please describe the naming convention first.")
-
-                col_new_l, col_new_k, col_new_t = st.columns([3, 3, 4])
-                with col_new_l:
-                    custom_new_label = st.text_input(
-                        "Custom Pattern Label", value=st.session_state.get("custom_new_label", ""),
-                        key="custom_new_label", placeholder="e.g. SAN Storage",
-                    )
-                with col_new_k:
-                    custom_new_key = st.text_input(
-                        "Custom Pattern Key", value=st.session_state.get("custom_new_key", ""),
-                        key="custom_new_key", placeholder="e.g. san_pattern",
-                    )
-                with col_new_t:
-                    custom_new_tpl = st.text_input(
-                        "Custom Pattern Template", value=st.session_state.get("custom_new_tpl", ""),
-                        key="custom_new_tpl", placeholder="e.g. SAN<Country><Site><Seq>",
-                    )
-                existing_customs = get_custom_patterns(current_rules)
-                if existing_customs:
-                    with st.expander("Existing Custom Patterns", expanded=False):
-                        for ccp in existing_customs:
-                            st.markdown(f"- **{ccp.get('key')}** (`{ccp.get('pattern')}`) — {ccp.get('label')}")
-
-                col_save, col_add, col_reset = st.columns([2, 2, 2])
-                with col_save:
-                    submitted = st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
-                with col_add:
-                    add_custom = st.form_submit_button("➕ Add Custom Pattern", use_container_width=True)
-                with col_reset:
-                    reset = st.form_submit_button("🔄 Reset to Defaults", use_container_width=True)
-
-                if submitted:
-                    # Preserve any user-defined pattern_variables added via Edit Mode
-                    rules_session = st.session_state.get("naming_rules", {})
-                    session_variables = rules_session.get("pattern_variables", {}) if isinstance(rules_session, dict) else {}
-    
-                    new_rules = {
-                        "netbox_server_yaml": netbox_server_yaml,
-                        "custom_patterns": get_custom_patterns(current_rules),
-                        "pattern_variables": session_variables,
-                    }
-                    try:
-                        # Save to file first
-                        save_naming_rules(new_rules, source="Manual Edit")
-                        # Update session state with new rules
-                        st.session_state["naming_rules"] = new_rules.copy()
-                        # Set flag for success message
-                        st.session_state["standards_saved"] = True
-                        # Force immediate rerun
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Failed to save: {str(e)}")
-    
-                if add_custom:
-                    if custom_new_key.strip() and custom_new_tpl.strip():
-                        try:
-                            existing_customs = list(get_custom_patterns(current_rules))
-                            existing_customs = [
-                                c for c in existing_customs if c["key"] != custom_new_key.strip()
-                            ]
-                            existing_customs.append({
-                                "label": custom_new_label.strip() or custom_new_key.strip(),
-                                "key": custom_new_key.strip(),
-                                "pattern": custom_new_tpl.strip(),
-                            })
-                            merged = {**current_rules, "custom_patterns": existing_customs}
-                            save_naming_rules(merged, source="Custom Pattern")
-                            st.session_state["naming_rules"] = merged
-                            st.session_state["custom_ai_ready"] = False
-                            st.session_state["standards_saved"] = True
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ Failed to add custom pattern: {str(e)}")
-                    else:
-                        st.warning("⚠️ Provide both a Pattern Key and a Pattern Template.")
-                
-                if reset:
-                    from config.naming_rules import DEFAULT_RULES
-                    save_naming_rules(DEFAULT_RULES, source="Reset to Defaults")
-                    st.session_state["naming_rules"] = DEFAULT_RULES.copy()
-                    # Set flag for success message
-                    st.session_state["standards_reset"] = True
-                    # Force immediate rerun
-                    st.rerun()
-
         with st.expander("🔧 Device Type Presets", expanded=False):
             _preset_type_editor("device", get_device_presets(current_rules), current_rules, prefix="branch")
 
@@ -545,6 +427,32 @@ def render_standards_tab(active_model):
 
         with st.expander("🛠️ Manage Syntax Auto-Correction Rules", expanded=False):
             _render_auto_correction_manager(active_model)
+
+        with st.expander("📋 NetBox Server & Hardware YAML Guidelines", expanded=False):
+            st.caption("Document and enforce the NetBox server hardware YAML schema used across your environment.")
+            with st.expander("NetBox Hardware YAML Schema", expanded=False):
+                st.text_area(
+                    "NetBox Server YAML Guidelines",
+                    value=current_rules.get("netbox_server_yaml", ""),
+                    height=100,
+                    key="form_yaml",
+                )
+            ai_desc = st.text_input(
+                "Describe the NetBox server hardware YAML spec",
+                key="custom_ai_desc",
+                placeholder="e.g. Generate server hardware YAML for a Dell R740 with dual 25G NICs and 4x 2.5in drive bays",
+            )
+            if st.button("🤖 Generate NetBox Server YAML Specs with AI", key="custom_ai_gen", use_container_width=True):
+                if ai_desc.strip():
+                    with st.spinner(f"Generating spec using {active_model}..."):
+                        try:
+                            generated = generate_naming_pattern(ai_desc.strip(), active_model)
+                            st.session_state["form_yaml"] = generated
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ AI spec generation failed: {e}")
+                else:
+                    st.warning("⚠️ Please describe the server hardware YAML spec first.")
 
         # Export full system prompt at the bottom of Edit Standards
         full_prompt_text = export_rules_as_prompt(current_rules)
