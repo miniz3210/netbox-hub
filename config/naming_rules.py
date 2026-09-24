@@ -122,6 +122,10 @@ HOST_VM_PRESETS = [
      "description": "Core / Virtualization VM"},
     {"code": "afs", "label": "App & File Services (afs)", "pattern_key": "vm_host",
      "description": "Application / File Services VM"},
+    {"code": "sani", "label": "Storage Infrastructure (sani)", "pattern_key": "vm_host",
+     "description": "Storage Infrastructure VM"},
+    {"code": "vlab", "label": "Virtual Lab / Test (vlab)", "pattern_key": "vm_host",
+     "description": "Virtual Lab / Test VM"},
 ]
 
 ESXI_NETWORK_PRESETS = [
@@ -598,34 +602,64 @@ def get_naming_patterns(rules: dict) -> dict:
     return merged
 
 
-def compute_delta(old: dict, new: dict) -> dict:
-    """Return the minimal set of changed fields between two rules dicts.
+def _delta_item_key(item) -> object:
+    """Return the stable identity key used to match items across two preset lists.
 
-    Only genuinely changed keys are included, keyed by field name with the previous and new
-    values. Structural sub-dicts (``naming_patterns`` / ``pattern_variables``) are
-    diffed key-by-key so unchanged preset categories never appear in history.
+    Falls back to the item's description, and finally to a positional sentinel so non-preset
+    lists are compared element-by-element.
+    """
+    if isinstance(item, dict):
+        for k in ("code", "pattern_key", "key"):
+            v = item.get(k)
+            if v not in (None, ""):
+                return ("__key__", str(v))
+        if item.get("description") not in (None, ""):
+            return ("__desc__", str(item["description"]))
+    return ("__pos__", item)
+
+
+def compute_delta(old: dict, new: dict) -> dict:
+    """Return a granular, path-based set of changes between two rules dicts.
+
+    Recursively traverses nested dicts and list items instead of collapsing them to an
+    ``"X item(s) -> X item(s)"`` summary. List entries are matched by their stable
+    ``code`` / ``pattern_key`` / ``key`` so reordered or renamed presets still diff
+    field-by-field. Every returned key is a ``Parent > Child > ...`` path whose value is
+    ``{"old": ..., "new": ...}``, suitable for display as ``Path / Field |
+    Previous Value | New Value``.
     """
     if not old:
-        return {k: {"old": None, "new": v} for k, v in (new or {}).items()}
+        result = {}
+        def _seed(v, path=""):
+            if isinstance(v, dict):
+                for k, x in v.items():
+                    _seed(x, f"{path} > {k}" if path else k)
+            elif isinstance(v, list):
+                for i, x in enumerate(v):
+                    _seed(x, f"{path}[{i}]" if path else f"[{i}]")
+            else:
+                result[path] = {"old": None, "new": v}
+        _seed(new or {}, "")
+        return result
 
-    def _patterns_of(d):
-        if isinstance(d, dict) and isinstance(d.get("naming_patterns"), dict):
-            return d["naming_patterns"]
-        return {k: v for k, v in (d or {}).items() if _is_str(v)}
-
-    old_pat = _patterns_of(old)
-    new_pat = _patterns_of(new)
     delta = {}
-    for k in list(old_pat.keys()) + list(new_pat.keys()):
-        if old_pat.get(k) != new_pat.get(k):
-            delta[k] = {"old": old_pat.get(k), "new": new_pat.get(k)}
 
-    for cat in (
-        "custom_patterns", "device_presets", "interface_presets",
-        "host_vm_presets", "esxi_network_presets",
-    ):
-        if old.get(cat) != new.get(cat):
-            delta[cat] = {"old": old.get(cat), "new": new.get(cat)}
+    def _walk(old_v, new_v, path):
+        if isinstance(old_v, dict) and isinstance(new_v, dict):
+            for k in list(dict.fromkeys(list(old_v.keys()) + list(new_v.keys()))):
+                child = f"{path} > {k}" if path else k
+                _walk(old_v.get(k), new_v.get(k), child)
+        elif isinstance(old_v, list) and isinstance(new_v, list):
+            old_map = {_delta_item_key(item): item for item in old_v}
+            new_map = {_delta_item_key(item): item for item in new_v}
+            for key in list(dict.fromkeys(list(old_map.keys()) + list(new_map.keys()))):
+                child = f"{path} > {key[1]}" if path else key[1]
+                _walk(old_map.get(key), new_map.get(key), child)
+        else:
+            if old_v != new_v:
+                delta[path] = {"old": old_v, "new": new_v}
+
+    _walk(old, new, "")
     return delta
 
 
