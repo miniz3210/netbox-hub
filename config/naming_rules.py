@@ -338,6 +338,28 @@ def get_esxi_network_presets(rules: dict) -> list:
     return _normalize_presets(raw, ESXI_NETWORK_PRESETS)
 
 
+DEFAULT_PRESET_DEFS = {
+    "device": DEVICE_PRESETS,
+    "interface": INTERFACE_PRESETS,
+    "host_vm": HOST_VM_PRESETS,
+    "esxi_network": ESXI_NETWORK_PRESETS,
+}
+
+DEFAULT_PRESET_KEY_FIELD = {
+    "device": "device_presets",
+    "interface": "interface_presets",
+    "host_vm": "host_vm_presets",
+    "esxi_network": "esxi_network_presets",
+}
+
+
+def default_presets_for(kind: str) -> list:
+    """Return the factory-default preset list for a preset *kind* (deep copy)."""
+    import copy
+    defaults = DEFAULT_PRESET_DEFS.get(kind, [])
+    return copy.deepcopy(list(defaults))
+
+
 def make_preset_key(code: str, prefix: str = "branch") -> str:
     """Generate a safe, collision-free pattern key from a preset code."""
     slug = re.sub(r"[^A-Za-z0-9]+", "_", code.strip()).strip("_").lower()
