@@ -416,51 +416,6 @@ def render_standards_tab(active_model):
         with st.expander("🎛️ Infrastructure Naming Patterns & Presets", expanded=False):
             st.info("💡 Configure naming patterns and the dynamic presets powering the Naming tab's radio selectors. Changes are saved when you click 'Save Changes' / 'Save Presets', or reset per category with 'Reset to Defaults'. Use the **Pattern Variables Reference** tab to see all available variables.")
             with st.form("naming_standards_form"):
-                with st.expander("🔌 Interface Description Patterns (Network & Security)", expanded=False):
-                    st.caption("Define interface description patterns for switches, firewalls, and related network devices. Device hostname patterns are managed via Device Type Presets.")
-                    row1a, row1b = st.columns(2)
-                    with row1a:
-                        switch_uplink_desc = st.text_input(
-                            "Switch Uplink Description",
-                            value=current_rules.get("switch_uplink_desc", ""),
-                            key="form_uplink",
-                            autocomplete="off"
-                        )
-                    with row1b:
-                        switch_lag_member = st.text_input(
-                            "LAG Member Description",
-                            value=current_rules.get("switch_lag_member", ""),
-                            key="form_lag",
-                            autocomplete="off"
-                        )
-
-                    row2a, row2b = st.columns(2)
-                    with row2a:
-                        switch_port_channel = st.text_input(
-                            "Port-Channel Description",
-                            value=current_rules.get("switch_port_channel", ""),
-                            key="form_po",
-                            autocomplete="off"
-                        )
-                    with row2b:
-                        switch_access_desc = st.text_input(
-                            "Access Port Description",
-                            value=current_rules.get("switch_access_desc", ""),
-                            key="form_access",
-                            autocomplete="off"
-                        )
-
-                    row3a, row3b = st.columns(2)
-                    with row3a:
-                        firewall_interface = st.text_input(
-                            "Firewall Interface Description",
-                            value=current_rules.get("firewall_interface", ""),
-                            key="form_fw_int",
-                            autocomplete="off"
-                        )
-                    with row3b:
-                        st.markdown("")
-    
                 with st.expander("NetBox Hardware YAML Schema", expanded=False):
                     netbox_server_yaml = st.text_area(
                         "NetBox Server YAML Guidelines",
@@ -528,11 +483,6 @@ def render_standards_tab(active_model):
                     session_variables = rules_session.get("pattern_variables", {}) if isinstance(rules_session, dict) else {}
     
                     new_rules = {
-                        "switch_uplink_desc": switch_uplink_desc,
-                        "switch_lag_member": switch_lag_member,
-                        "switch_port_channel": switch_port_channel,
-                        "switch_access_desc": switch_access_desc,
-                        "firewall_interface": firewall_interface,
                         "netbox_server_yaml": netbox_server_yaml,
                         "custom_patterns": get_custom_patterns(current_rules),
                         "pattern_variables": session_variables,
