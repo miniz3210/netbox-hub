@@ -463,11 +463,7 @@ def render_naming_tab(active_model):
 
 
 def _site_code_assistant_compact(naming_rules, prefix: str) -> str:
-    with st.expander(
-        "📍 Site Code Assistant",
-        expanded=False,
-        help="City/location site code lookup using exact_mappings (Original Pattern → Replacement format). Configured in Standards Tab > Naming Rules YAML (site_code_rules.exact_mappings).",
-    ):
+    with st.expander("📍 Site Code Assistant", expanded=False):
         loc = st.text_input(
             "City / Location", value="", placeholder="e.g. Sydney, New York",
             key=f"loc_compact_{prefix}",
