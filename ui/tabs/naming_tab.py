@@ -664,33 +664,6 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables, token_or
         ("vmk", "VMkernel", "esxi_vmkernel", "3. VMkernel Adapter (vmk)", True),
     ]
 
-    if _edit_toggle(key_map.get("uplink", "esxi_uplink")):
-        render_edit_mode_ui(
-            naming_patterns.get("esxi_uplink", ""), variables
-        )
-        st.stop()
-        return
-    if _edit_toggle(key_map.get("portgroup", "esxi_portgroup")):
-        render_multi_edit_mode_ui(
-            [
-                ("esxi_portgroup_name", naming_patterns.get("esxi_portgroup_name", "")),
-                ("esxi_portgroup", naming_patterns.get("esxi_portgroup", "")),
-            ],
-            variables,
-        )
-        st.stop()
-        return
-    if _edit_toggle(key_map.get("vmk", "esxi_vmkernel")):
-        render_multi_edit_mode_ui(
-            [
-                ("esxi_vmkernel_name", naming_patterns.get("esxi_vmkernel_name", "")),
-                ("esxi_vmkernel", naming_patterns.get("esxi_vmkernel", "")),
-            ],
-            variables,
-        )
-        st.stop()
-        return
-
     col1, col2, col3 = st.columns(3)
 
     for prefix, preset_code, default_key, title, has_name in sections:
@@ -705,7 +678,19 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables, token_or
         col = {"uplink": col1, "portgroup": col2, "vmk": col3}[prefix]
         with col:
             st.markdown("---")
-            st.markdown(f"#### {title} — {label_map.get(preset_code, title)}")
+            hdr = st.columns([5, 1])
+            with hdr[0]:
+                st.markdown(f"#### {title} — {label_map.get(preset_code, title)}")
+            with hdr[1]:
+                if _edit_toggle(pk):
+                    if has_name:
+                        render_multi_edit_mode_ui(
+                            [(name_pk, name_pat), (pk, pat)],
+                            variables,
+                        )
+                    else:
+                        render_edit_mode_ui(pk, pat, variables)
+                    st.stop()
             if has_name:
                 vals = render_esxi_network_inputs(
                     pat, variables, prefix, auto_correct,
@@ -714,7 +699,6 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables, token_or
                 )
             else:
                 vals = render_esxi_network_inputs(pat, variables, prefix, auto_correct)
-            st.markdown("##### ✨ Generated Name & Description")
             if not has_name:
                 gen = render_dynamic_pattern(pat, vals, variables)
                 st.code(gen, language="text")
