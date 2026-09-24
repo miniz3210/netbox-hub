@@ -57,6 +57,8 @@ if catalog is None:
 
 
 def _hardware_catalog_tab(catalog, active_model):
+    st.subheader("📦 Hardware Catalog Generator")
+    st.caption("Generate and export standardized NetBox hardware device types, module types, and rack elevation templates.")
     subtab = st.radio(
         "Hardware Catalog",
         ["Device Types", "Module Types", "Rack Types", "Elevation Images", "Batch Import"],
@@ -106,10 +108,10 @@ def _azure_tab(active_model):
 
 # Tab registry: (label, renderer, requires_catalog)
 TABS: List[Tuple[str, Callable, bool]] = [
-    ("📦 Hardware Catalog", _hardware_catalog_tab, True),
     ("🌐 IPAM", _ipam_tab, False),
     ("🏷️ Naming", _naming_tab, False),
     ("☁️ Azure VMs", _azure_tab, False),
+    ("📦 Hardware Catalog", _hardware_catalog_tab, True),
     ("📋 Standards", _standards_tab, False),
 ]
 
