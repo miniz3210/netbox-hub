@@ -593,20 +593,34 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables):
     naming_rules = st.session_state.get("naming_rules", load_naming_rules())
     presets = _host_vm_presets(naming_rules, naming_patterns)
 
-    esxi_pk = "esxi_host"
+    host_keys = [code for code, _label, key in presets if key != "vm_host"]
+    host_label_map = {code: label for code, label, _key in presets}
+    host_key_map = {code: key for code, _label, key in presets}
+    if not host_keys:
+        host_keys = ["ESXi"]
+        host_label_map = {"ESXi": "ESXi Host"}
+        host_key_map = {"ESXi": "esxi_host"}
     vm_pk = "vm_host"
     vm_keys = [code for code, _label, key in presets if key == "vm_host"]
     vm_label_map = {code: label for code, label, _key in presets}
 
     col_a, col_b = st.columns(2)
     with col_a:
-        st.markdown("#### ESXi Host Hostname")
-        pat = naming_patterns.get(esxi_pk, "")
-        if _edit_toggle(esxi_pk):
-            render_edit_mode_ui(esxi_pk, pat, variables)
+        st.markdown("#### Host Type")
+        host_type = st.radio(
+            "Host Type",
+            host_keys,
+            horizontal=True,
+            key="host_type_sel",
+            help="Select the host type to generate a hostname. Choices are configured in the Standards Tab (Hosts Type Presets).",
+        )
+        host_pk = host_key_map.get(host_type, "esxi_host")
+        pat = naming_patterns.get(host_pk, naming_patterns.get("esxi_host", ""))
+        if _edit_toggle(host_pk):
+            render_edit_mode_ui(host_pk, pat, variables)
             st.stop()
             return
-        values = render_token_widgets(pat, variables, "esx")
+        values = render_token_widgets(pat, variables, f"hst_{host_pk}")
         gen_raw = render_dynamic_pattern(pat, values, variables)
         gen_raw = re.sub(r"\s*\([^)]*\)", "", gen_raw).strip()
         gen_raw = re.sub(r"<[^>]+>", "", gen_raw)
@@ -616,11 +630,12 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables):
             gen = f"{apply_case(parts[0], case_mode)}.{parts[1].lower()}"
         else:
             gen = apply_case(gen_raw, case_mode)
-        st.caption("Generated ESXi Hostname:")
+        host_label = host_label_map.get(host_type, host_type)
+        st.caption(f"Generated {host_label} Hostname:")
         st.code(gen, language="text")
-        if st.button("AI Verify ESXi Host", key="ai_chk_esx"):
+        if st.button(f"AI Verify {host_label} Host", key="ai_chk_hst"):
             with st.spinner("Auditing..."):
-                st.info(verify_and_suggest_with_ai(gen, active_model, asset_type="ESXi Hypervisor Hostname", category_key="hypervisor", site_filter=values.get("site_prefix", "")))
+                st.info(verify_and_suggest_with_ai(gen, active_model, asset_type=f"{host_label} Hypervisor Hostname", category_key="hypervisor", site_filter=values.get("site_prefix", "")))
         display_reference_box("hypervisor", "NYCESX001.corp.internal\nLONESX001.corp.internal\nSYDESX01.corp.local", "Hypervisor", site_filter=values.get("site_prefix", ""))
     with col_b:
         st.markdown("#### Virtual Machine (VM) Hostname")
@@ -678,7 +693,7 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables, token_or
         col = {"uplink": col1, "portgroup": col2, "vmk": col3}[prefix]
         with col:
             st.markdown("---")
-            st.markdown(f"#### {title} — {label_map.get(preset_code, title)}")
+            st.markdown(f"#### {title}")
             if _edit_toggle(pk):
                 if has_name:
                     render_multi_edit_mode_ui(
