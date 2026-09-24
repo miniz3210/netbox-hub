@@ -29,7 +29,8 @@ from core.naming_dynamic_helper import (
 )
 from config.naming_rules import (
     load_naming_rules, get_naming_patterns, get_pattern_variables,
-    get_device_presets, get_interface_presets,
+    get_device_presets, get_interface_presets, get_host_vm_presets,
+    get_esxi_network_presets,
 )
 
 def build_naming_system_prompt(prompt: str) -> str:
@@ -562,74 +563,145 @@ def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, varia
             st.code(it, language=None)
 
 
-def _asset_class_2(case_mode, active_model, naming_patterns, variables):
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.markdown("#### ESXi Hypervisor Hostname")
-        pk = "esxi_host"
-        pat = naming_patterns.get(pk, "")
-        if _edit_toggle(pk):
-            render_edit_mode_ui(pk, pat, variables)
-            st.stop()
-            return
-        values = render_token_widgets(pat, variables, "esx")
-        gen_raw = render_dynamic_pattern(pat, values, variables)
-        gen_raw = re.sub(r"\s*\([^)]*\)", "", gen_raw).strip()
-        gen_raw = re.sub(r"<[^>]+>", "", gen_raw)
-        gen_raw = re.sub(r"\.+", ".", gen_raw).strip(".")
-        if "." in gen_raw:
-            parts = gen_raw.split(".", 1)
-            gen = f"{apply_case(parts[0], case_mode)}.{parts[1].lower()}"
-        else:
-            gen = apply_case(gen_raw, case_mode)
-        st.caption("Generated ESXi Hostname:")
-        st.code(gen, language="text")
-        if st.button("AI Verify ESXi Host", key="ai_chk_esx"):
-            with st.spinner("Auditing..."):
-                st.info(verify_and_suggest_with_ai(gen, active_model, asset_type="ESXi Hypervisor Hostname", category_key="hypervisor", site_filter=values.get("site_prefix", "")))
-        display_reference_box("hypervisor", "NYCESX001.corp.internal\nLONESX001.corp.internal\nSYDESX01.corp.local", "Hypervisor", site_filter=values.get("site_prefix", ""))
+def _host_vm_presets(rules, naming_patterns):
+    """Host/VM preset (code, label, pattern_key) tuples loaded from YAML."""
+    presets = get_host_vm_presets(rules)
+    return [(p["code"], p["label"], p["pattern_key"])
+            for p in presets if p["pattern_key"] in naming_patterns]
 
-    with col_b:
-        st.markdown("#### Virtual Machine (VM) Hostname")
-        pk = "vm_host"
-        pat = naming_patterns.get(pk, "")
-        if _edit_toggle(pk):
-            render_edit_mode_ui(pk, pat, variables)
-            st.stop()
-            return
-        values = render_token_widgets(pat, variables, "vm")
-        gen_raw = render_dynamic_pattern(pat, values, variables)
-        gen_raw = re.sub(r"\s*\([^)]*\)", "", gen_raw).strip()
-        gen_raw = re.sub(r"\s+or\s+.*", "", gen_raw).strip()
-        gen_raw = re.sub(r"<[^>]+>", "", gen_raw)
-        gen = apply_case(gen_raw, case_mode)
-        st.caption("Generated VM Hostname:")
-        st.code(gen, language="text")
-        if st.button("AI Verify VM Hostname", key="ai_chk_vm"):
-            with st.spinner("Auditing..."):
-                st.info(verify_and_suggest_with_ai(gen, active_model, asset_type="Virtual Machine (VM) Hostname", category_key="vm", site_filter=values.get("Site", "")))
-        display_reference_box("vm", "USNYCAPP01     (NYC Application Server 01)\nUKLONDB01\nAUSYDFS01", "Virtual Machine", site_filter=values.get("Site", ""))
+
+def _esxi_network_presets_fn(rules, naming_patterns):
+    """ESXi network preset (code, label, pattern_key) tuples loaded from YAML."""
+    presets = get_esxi_network_presets(rules)
+    return [(p["code"], p["label"], p["pattern_key"])
+            for p in presets if p["pattern_key"] in naming_patterns]
+
+
+def _asset_class_2(case_mode, active_model, naming_patterns, variables):
+    naming_rules = st.session_state.get("naming_rules", load_naming_rules())
+    presets = _host_vm_presets(naming_rules, naming_patterns)
+    codes = [code for code, _label, _key in presets]
+    label_map = {code: label for code, label, _key in presets}
+    key_map = {code: key for code, _label, key in presets}
+
+    preset_type = st.radio(
+        "Host / VM Type",
+        codes,
+        horizontal=True,
+        key="host_vm_preset_sel",
+        help="Select the host or VM type. Choices are configured in the Standards Tab (Hosts & Virtual Machines Presets).",
+    )
+    pk = key_map.get(preset_type, "esxi_host")
+
+    if preset_type == "ESXi":
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.markdown(f"#### {label_map.get(preset_type, 'ESXi Hypervisor')} Hostname")
+            pat = naming_patterns.get(pk, "")
+            if _edit_toggle(pk):
+                render_edit_mode_ui(pk, pat, variables)
+                st.stop()
+                return
+            values = render_token_widgets(pat, variables, "esx")
+            gen_raw = render_dynamic_pattern(pat, values, variables)
+            gen_raw = re.sub(r"\s*\([^)]*\)", "", gen_raw).strip()
+            gen_raw = re.sub(r"<[^>]+>", "", gen_raw)
+            gen_raw = re.sub(r"\.+", ".", gen_raw).strip(".")
+            if "." in gen_raw:
+                parts = gen_raw.split(".", 1)
+                gen = f"{apply_case(parts[0], case_mode)}.{parts[1].lower()}"
+            else:
+                gen = apply_case(gen_raw, case_mode)
+            st.caption("Generated ESXi Hostname:")
+            st.code(gen, language="text")
+            if st.button("AI Verify ESXi Host", key="ai_chk_esx"):
+                with st.spinner("Auditing..."):
+                    st.info(verify_and_suggest_with_ai(gen, active_model, asset_type="ESXi Hypervisor Hostname", category_key="hypervisor", site_filter=values.get("site_prefix", "")))
+            display_reference_box("hypervisor", "NYCESX001.corp.internal\nLONESX001.corp.internal\nSYDESX01.corp.local", "Hypervisor", site_filter=values.get("site_prefix", ""))
+        with col_b:
+            st.markdown("#### Virtual Machine (VM) Hostname")
+            vm_pk = "vm_host"
+            vm_pat = naming_patterns.get(vm_pk, "")
+            if _edit_toggle(vm_pk):
+                render_edit_mode_ui(vm_pk, vm_pat, variables)
+                st.stop()
+                return
+            values = render_token_widgets(vm_pat, variables, "vm")
+            gen_raw = render_dynamic_pattern(vm_pat, values, variables)
+            gen_raw = re.sub(r"\s*\([^)]*\)", "", gen_raw).strip()
+            gen_raw = re.sub(r"\s+or\s+.*", "", gen_raw).strip()
+            gen_raw = re.sub(r"<[^>]+>", "", gen_raw)
+            gen = apply_case(gen_raw, case_mode)
+            st.caption("Generated VM Hostname:")
+            st.code(gen, language="text")
+            if st.button("AI Verify VM Hostname", key="ai_chk_vm"):
+                with st.spinner("Auditing..."):
+                    st.info(verify_and_suggest_with_ai(gen, active_model, asset_type="Virtual Machine (VM) Hostname", category_key="vm", site_filter=values.get("Site", "")))
+            display_reference_box("vm", "USNYCAPP01     (NYC Application Server 01)\nUKLONDB01\nAUSYDFS01", "Virtual Machine", site_filter=values.get("Site", ""))
+    else:
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.markdown(f"#### {label_map.get(preset_type, 'VM')} Hostname")
+            pat = naming_patterns.get(pk, "")
+            if _edit_toggle(pk):
+                render_edit_mode_ui(pk, pat, variables)
+                st.stop()
+                return
+            values = render_token_widgets(pat, variables, f"hostvm_{pk}")
+            gen_raw = render_dynamic_pattern(pat, values, variables)
+            gen_raw = re.sub(r"\s*\([^)]*\)", "", gen_raw).strip()
+            gen_raw = re.sub(r"\s+or\s+.*", "", gen_raw).strip()
+            gen_raw = re.sub(r"<[^>]+>", "", gen_raw)
+            gen = apply_case(gen_raw, case_mode)
+            st.caption(f"Generated {label_map.get(preset_type, 'VM')} Hostname:")
+            st.code(gen, language="text")
+            if st.button("AI Verify VM Hostname", key=f"ai_chk_vm_{pk}"):
+                with st.spinner("Auditing..."):
+                    st.info(verify_and_suggest_with_ai(gen, active_model, asset_type=f"VM ({label_map.get(preset_type, 'VM')})", category_key="vm", site_filter=values.get("Site", "")))
+            display_reference_box("vm", "USNYCAPP01\nUKLONDB01\nAUSYDFS01", "Virtual Machine", site_filter=values.get("Site", ""))
+        with col_b:
+            st.empty()
 
 
 def _asset_class_3(case_mode, active_model, naming_patterns, variables, token_order_map=None):
     token_order_map = token_order_map or {}
     auto_correct = st.session_state.get("esxi_auto_corr", True)
-    col_a, col_b, col_c = st.columns(3)
-    with col_a:
-        st.markdown("#### 1. Physical Uplink (PCIeX/PortX)")
-        pk = "esxi_uplink"
-        pat = naming_patterns.get(pk, "")
-        if _edit_toggle(pk):
-            render_edit_mode_ui(pk, pat, variables)
-            st.stop()
-            return
-        vals = render_esxi_network_inputs(pat, variables, "uplink", auto_correct)
-        gen = render_dynamic_pattern(pat, vals, variables)
-        st.caption("Generated Physical Uplink Description:")
-        st.code(gen, language="text")
-    with col_b:
-        st.markdown("#### 2. Port Group Teaming (Network)")
-        pk = "esxi_portgroup"
+    naming_rules = st.session_state.get("naming_rules", load_naming_rules())
+    presets = _esxi_network_presets_fn(naming_rules, naming_patterns)
+    codes = [code for code, _label, _key in presets]
+    label_map = {code: label for code, label, _key in presets}
+    default_keys = {
+        "Uplink": "esxi_uplink",
+        "PortGroup": "esxi_portgroup",
+        "VMkernel": "esxi_vmkernel",
+    }
+    key_map = {code: key for code, _label, key in presets}
+
+    preset_type = st.radio(
+        "ESXi Network Description Type",
+        codes,
+        horizontal=True,
+        key="esxi_network_preset_sel",
+        help="Select the ESXi network description type. Choices are configured in the Standards Tab (ESXi Network Description Presets).",
+    )
+    st.markdown("---")
+
+    if preset_type == "Uplink":
+        with st.container():
+            st.markdown(f"#### 1. Physical Uplink (PCIeX/PortX) — {label_map.get('Uplink', 'Physical Uplink')}")
+            pk = key_map.get("Uplink", "esxi_uplink")
+            pat = naming_patterns.get(pk, "")
+            if _edit_toggle(pk):
+                render_edit_mode_ui(pk, pat, variables)
+                st.stop()
+                return
+            vals = render_esxi_network_inputs(pat, variables, "uplink", auto_correct)
+            gen = render_dynamic_pattern(pat, vals, variables)
+            st.caption("Generated Physical Uplink Description:")
+            st.code(gen, language="text")
+    elif preset_type == "PortGroup":
+        st.markdown(f"#### 2. Port Group Teaming (Network) — {label_map.get('PortGroup', 'Port Group')}")
+        pk = key_map.get("PortGroup", "esxi_portgroup")
         pat = naming_patterns.get(pk, "")
         name_pk = "esxi_portgroup_name"
         name_pat = naming_patterns.get(name_pk, "")
@@ -648,9 +720,9 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables, token_or
         st.code(gen_prefix, language="text")
         st.caption("Generated Port Group Description:")
         st.code(gen_desc, language="text")
-    with col_c:
-        st.markdown("#### 3. VMkernel Adapter (vmk)")
-        pk = "esxi_vmkernel"
+    else:
+        st.markdown(f"#### 3. VMkernel Adapter (vmk) — {label_map.get('VMkernel', 'VMkernel')}")
+        pk = key_map.get("VMkernel", "esxi_vmkernel")
         pat = naming_patterns.get(pk, "")
         name_pk = "esxi_vmkernel_name"
         name_pat = naming_patterns.get(name_pk, "")

@@ -5,7 +5,8 @@ from config.naming_rules import (
     load_naming_rules, save_naming_rules, export_rules_as_prompt,
     load_history, restore_from_history, clear_history, add_to_history,
     get_pattern_variables, get_naming_patterns, get_custom_patterns,
-    get_device_presets, get_interface_presets, make_preset_key,
+    get_device_presets, get_interface_presets, get_host_vm_presets,
+    get_esxi_network_presets, make_preset_key,
 )
 from core.naming_engine import generate_naming_pattern, generate_autocorrect_rule
 from utils.formatters import (
@@ -251,13 +252,18 @@ def _save_presets(rules: dict) -> None:
 
 
 def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str) -> None:
-    """CRUD editor for one preset type (device/interface).
+    """CRUD editor for one preset type (device/interface/host_vm/esxi_network).
 
     Reads the structured preset list, lets the user edit code / label / pattern template
     inline, delete (with a minimum-of-one guard) or add new presets, then persists
     everything back to ``data/naming_rules.yaml`` via a single Save button.
     """
     patterns = dict(rules.get("naming_patterns") or {})
+    key_field = "device_presets" if kind == "device" else (
+        "interface_presets" if kind == "interface" else (
+            "host_vm_presets" if kind == "host_vm" else "esxi_network_presets"
+        )
+    )
     updated = []
     pending_delete = None
     patterns_updates = {}
@@ -335,17 +341,14 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str) -> N
             st.error("⚠️ At least one preset is required.")
             return
         rules["naming_patterns"] = final_patterns
-        if kind == "device":
-            rules["device_presets"] = final_presets
-        else:
-            rules["interface_presets"] = final_presets
+        rules[key_field] = final_presets
         _save_presets(rules)
 
 
 def _render_preset_manager(current_rules) -> None:
-    """Full CRUD for Device Type and Interface Type presets (Standards Tab)."""
+    """Full CRUD for Device Type, Interface Type, Host/VM, and ESXi Network presets."""
     st.markdown("---")
-    st.markdown("##### 🧩 Device Type & Interface Type Presets")
+    st.markdown("##### 🎛️ Naming Presets Management")
     st.caption(
         "Manage the horizontal radio choices used in the Naming tab. Edit code, label, or "
         "pattern template inline, delete a preset, or add a new one (e.g. SAN / OOB / CONSOLE). "
@@ -354,12 +357,20 @@ def _render_preset_manager(current_rules) -> None:
 
     device_presets = get_device_presets(current_rules)
     interface_presets = get_interface_presets(current_rules)
+    host_vm_presets = get_host_vm_presets(current_rules)
+    esxi_network_presets = get_esxi_network_presets(current_rules)
 
     with st.expander("🔧 Device Type Presets", expanded=False):
         _preset_type_editor("device", device_presets, current_rules, prefix="branch")
 
     with st.expander("🖧 Interface Type Presets", expanded=False):
         _preset_type_editor("interface", interface_presets, current_rules, prefix="iface")
+
+    with st.expander("🖥️ Hosts & Virtual Machines Presets", expanded=False):
+        _preset_type_editor("host_vm", host_vm_presets, current_rules, prefix="hostvm")
+
+    with st.expander("☁️ ESXi Network Description Presets", expanded=False):
+        _preset_type_editor("esxi_network", esxi_network_presets, current_rules, prefix="esxinet")
 
 
 
@@ -445,56 +456,6 @@ def render_standards_tab(active_model):
                     with row3b:
                         st.markdown("")
     
-                with st.expander("Hypervisors & Virtual Machines", expanded=False):
-                    st.caption("Define hostname patterns for ESXi hypervisors and VMs, plus ESXi networking interface descriptions (uplinks, port groups, VMkernel).")
-                    col5, col6 = st.columns(2)
-    
-                    with col5:
-                        esxi_host = st.text_area(
-                            "ESXi Hypervisor Pattern",
-                            value=current_rules.get("esxi_host", ""),
-                            height=80,
-                            key="form_esxi"
-                        )
-                        vm_host = st.text_area(
-                            "Virtual Machine Pattern",
-                            value=current_rules.get("vm_host", ""),
-                            height=80,
-                            key="form_vm"
-                        )
-    
-                    with col6:
-                        esxi_uplink = st.text_input(
-                            "ESXi Physical Uplink",
-                            value=current_rules.get("esxi_uplink", ""),
-                            key="form_esxi_uplink",
-                            autocomplete="off"
-                        )
-                        esxi_portgroup_name = st.text_input(
-                            "ESXi Port Group Name",
-                            value=current_rules.get("esxi_portgroup_name", ""),
-                            key="form_esxi_pg_name",
-                            autocomplete="off"
-                        )
-                        esxi_portgroup = st.text_input(
-                            "ESXi Port Group Description",
-                            value=current_rules.get("esxi_portgroup", ""),
-                            key="form_esxi_pg",
-                            autocomplete="off"
-                        )
-                        esxi_vmkernel_name = st.text_input(
-                            "ESXi VMkernel Name",
-                            value=current_rules.get("esxi_vmkernel_name", ""),
-                            key="form_esxi_vmk_name",
-                            autocomplete="off"
-                        )
-                        esxi_vmkernel = st.text_input(
-                            "ESXi VMkernel Description",
-                            value=current_rules.get("esxi_vmkernel", ""),
-                            key="form_esxi_vmk",
-                            autocomplete="off"
-                        )
-    
                 with st.expander("NetBox Hardware YAML Schema", expanded=False):
                     netbox_server_yaml = st.text_area(
                         "NetBox Server YAML Guidelines",
@@ -567,13 +528,6 @@ def render_standards_tab(active_model):
                         "switch_port_channel": switch_port_channel,
                         "switch_access_desc": switch_access_desc,
                         "firewall_interface": firewall_interface,
-                        "esxi_host": esxi_host,
-                        "vm_host": vm_host,
-                        "esxi_uplink": esxi_uplink,
-                        "esxi_portgroup_name": esxi_portgroup_name,
-                        "esxi_portgroup": esxi_portgroup,
-                        "esxi_vmkernel_name": esxi_vmkernel_name,
-                        "esxi_vmkernel": esxi_vmkernel,
                         "netbox_server_yaml": netbox_server_yaml,
                         "custom_patterns": get_custom_patterns(current_rules),
                         "pattern_variables": session_variables,
@@ -625,7 +579,7 @@ def render_standards_tab(active_model):
         with st.expander("🛠️ Manage Syntax Auto-Correction Rules", expanded=False):
             _render_auto_correction_manager(active_model)
 
-        with st.expander("⚙️ Device Type & Interface Type Presets", expanded=False):
+        with st.expander("🎛️ Naming Presets Management", expanded=False):
             _render_preset_manager(current_rules)
 
         # Export full system prompt at the bottom of Edit Standards
