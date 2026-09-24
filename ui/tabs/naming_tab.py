@@ -357,7 +357,6 @@ def _edit_toggle(pattern_key):
         "Edit Mode",
         value=default_val,
         key=widget_key,
-        help="Turn ON to edit the raw pattern template and add new variables.",
     )
     st.session_state[flag_key] = bool(toggled)
     return bool(toggled)
@@ -506,7 +505,7 @@ def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, varia
     with col_a:
         st.subheader("Universal Device Hostname Generator", help="Generate standardized device hostnames using preset-driven patterns. Device type and interface presets are configured in the Standards Tab > Device Type Presets / Interface Type Presets.")
         auto_code = global_site
-        dev_type = st.radio("Device Type", dev_codes, horizontal=True, key="dev_prefix_sel", help="Select the device class to generate a standardized hostname. Choices are configured in the Standards Tab (Device Type Presets).")
+        dev_type = st.radio("Device Type", dev_codes, horizontal=True, key="dev_prefix_sel", label_visibility="collapsed", help="Select the device class to generate a standardized hostname. Choices are configured in the Standards Tab (Device Type Presets).")
         pk = _dev_pattern_key(dev_type, dev_presets)
         edit_on = _edit_toggle(pk)
         pat = naming_patterns.get(pk, "")
@@ -539,6 +538,7 @@ def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, varia
             intf_codes,
             horizontal=True,
             key="p_cat_sel",
+            label_visibility="collapsed",
             help="Select the interface class to format. Choices are configured in the Standards Tab (Interface Type Presets).",
         )
         ipk = _interface_key(intf_type, intf_presets)
@@ -629,6 +629,7 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables, global_s
             host_keys,
             horizontal=True,
             key="host_type_sel",
+            label_visibility="collapsed",
             help="Select the host type to generate a hostname. Choices are configured in the Standards Tab (Hosts Type Presets).",
         )
         host_pk = host_key_map.get(host_type, "esxi_host")
@@ -661,6 +662,7 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables, global_s
             vm_keys,
             horizontal=True,
             key="host_vm_vm_role",
+            label_visibility="collapsed",
             help="Select the VM role/type. Choices are configured in the Standards Tab (Hosts & Virtual Machines Presets).",
         )
         vm_pat = naming_patterns.get(vm_pk, "")
