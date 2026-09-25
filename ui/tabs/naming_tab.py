@@ -505,7 +505,9 @@ def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, varia
     with col_a:
         st.subheader("Universal Device Hostname Generator", help="Generate standardized device hostnames using preset-driven patterns. Device type and interface presets are configured in the Standards Tab > Device Type Presets / Interface Type Presets.")
         auto_code = global_site
-        dev_type = st.radio("Device Type", dev_codes, horizontal=True, key="dev_prefix_sel", label_visibility="collapsed", help="Select the device class to generate a standardized hostname. Choices are configured in the Standards Tab (Device Type Presets).", format_func=lambda c: f"{c} - {dev_label_map.get(c, c)}")
+        dev_type = st.radio("Device Type", dev_codes, horizontal=True, key="dev_prefix_sel", label_visibility="collapsed", help="Select the device class to generate a standardized hostname. Choices are configured in the Standards Tab (Device Type Presets).", format_func=lambda c: c)
+        if dev_type:
+            st.caption(f"ℹ️ **{dev_type}**: {dev_label_map.get(dev_type, '')}")
         pk = _dev_pattern_key(dev_type, dev_presets)
         edit_on = _edit_toggle(pk)
         pat = naming_patterns.get(pk, "")
@@ -540,8 +542,10 @@ def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, varia
             key="p_cat_sel",
             label_visibility="collapsed",
             help="Select the interface class to format. Choices are configured in the Standards Tab (Interface Type Presets).",
-            format_func=lambda c: intf_label_map.get(c, c),
+            format_func=lambda c: c,
         )
+        if intf_type:
+            st.caption(f"ℹ️ **{intf_type}**: {intf_label_map.get(intf_type, '')}")
         ipk = _interface_key(intf_type, intf_presets)
         edit_on = _edit_toggle(ipk)
         pat = naming_patterns.get(ipk, "")
@@ -632,8 +636,10 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables, global_s
             key="host_type_sel",
             label_visibility="collapsed",
             help="Select the host type to generate a hostname. Choices are configured in the Standards Tab (Hosts Type Presets).",
-            format_func=lambda c: f"{c} - {host_label_map.get(c, c)}",
+            format_func=lambda c: c,
         )
+        if host_type:
+            st.caption(f"ℹ️ **{host_type}**: {host_label_map.get(host_type, '')}")
         host_pk = host_key_map.get(host_type, "esxi_host")
         pat = naming_patterns.get(host_pk, naming_patterns.get("esxi_host", ""))
         if _edit_toggle(host_pk):
@@ -666,8 +672,10 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables, global_s
             key="host_vm_vm_role",
             label_visibility="collapsed",
             help="Select the VM role/type. Choices are configured in the Standards Tab (Hosts & Virtual Machines Presets).",
-            format_func=lambda c: f"{c} - {vm_label_map.get(c, c)}",
+            format_func=lambda c: c,
         )
+        if vm_type:
+            st.caption(f"ℹ️ **{vm_type}**: {vm_label_map.get(vm_type, '')}")
         vm_pat = naming_patterns.get(vm_pk, "")
         if _edit_toggle(vm_pk):
             render_edit_mode_ui(vm_pk, vm_pat, variables)
