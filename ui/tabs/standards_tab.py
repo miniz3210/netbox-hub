@@ -435,15 +435,13 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str) -> N
     code_ph = "e.g. DSwitch" if is_esxi else "e.g. SAN"
     lbl_ph = "e.g. Distributed Switch Uplink" if is_esxi else "e.g. SAN Storage (SAN)"
     tpl_ph = "e.g. <vmnic> - <vds_name> (<status>)" if is_esxi else "e.g. SAN<country><site><seq>"
-    ca1, ca2, ca3, ca4 = st.columns([1.1, 1.8, 2.6, 2.6])
+    ca1, ca2, ca3 = st.columns([1.5, 2.5, 4.5])
     with ca1:
         new_code = st.text_input("Code", value="", placeholder=code_ph, key=f"{kind}_new_code", label_visibility="collapsed").strip()
     with ca2:
         new_lbl = st.text_input("Display Label", value="", placeholder=lbl_ph, key=f"{kind}_new_lbl", label_visibility="collapsed").strip()
     with ca3:
         new_tpl = st.text_input("Pattern Template", value="", placeholder=tpl_ph, key=f"{kind}_new_tpl", label_visibility="collapsed").strip()
-    with ca4:
-        new_desc = st.text_input("Description (Optional)", value="", placeholder="Describe this preset", key=f"{kind}_new_desc", label_visibility="collapsed").strip()
 
     col_save, col_reset = st.columns(2)
     with col_save:
@@ -474,7 +472,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str) -> N
                 "code": new_code,
                 "label": new_lbl or new_code,
                 "pattern_key": nkey,
-                "description": new_desc,
+                "description": "",
             })
         elif new_code and not new_tpl:
             st.error("⚠️ Provide a Pattern Template to add a new preset.")
