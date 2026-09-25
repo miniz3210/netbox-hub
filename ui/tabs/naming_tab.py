@@ -807,7 +807,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
     edit_mode = st.toggle("Edit Mode", value=False, key="esxi_net_edit_mode")
 
     sel_preset = preset_map.get(selected_code, presets[0]) if presets else {}
-    curr_pattern = sel_preset.get("pattern_template") or sel_preset.get("pattern") or ""
+    curr_pattern = sel_preset.get("pattern") or sel_preset.get("pattern_template") or ""
     if not curr_pattern:
         sc = str(selected_code).lower()
         if "uplink" in sc:
@@ -815,7 +815,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         elif "portgroup" in sc or "group" in sc:
             curr_pattern = "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)"
         else:
-            curr_pattern = "<purpose> Network (<v_switch>)"
+            curr_pattern = "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)"
 
     if edit_mode:
         pattern = st.text_input("Pattern Template", value=curr_pattern, key=f"esxi_net_pattern_{selected_code}")
