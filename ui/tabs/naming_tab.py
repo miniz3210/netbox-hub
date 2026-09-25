@@ -878,7 +878,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
     elif casing == "lowercase":
         out = out.lower()
 
-    st.text_input("Generated ESXi Description:", value=out, key="esxi_generated_desc")
+    st.session_state["esxi_generated_desc"] = out
+    st.text_input("Generated ESXi Description:", value=out)
 
     if st.button("AI Verify ESXi Description", key="esxi_ai_verify_btn"):
         st.info("Verified against ESXi naming standards.")
