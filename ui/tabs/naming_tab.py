@@ -826,11 +826,23 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
     fields = {}
 
+    # Resolve default values from naming_rules variables
+    var_defaults = {
+        v.get("code"): v.get("default_value", "")
+        for v in naming_rules.get("variables", [])
+        if isinstance(v, dict)
+    }
+
     def field_input(key, label, placeholder, widget="text", **kw):
         if widget == "select":
             fields[key] = st.selectbox(label, kw.get("options", []), key=kw.get("widget_key"))
         else:
-            fields[key] = st.text_input(label, placeholder=placeholder, key=kw.get("widget_key"))
+            fields[key] = st.text_input(
+                label,
+                value=var_defaults.get(key, ""),
+                placeholder=placeholder,
+                key=kw.get("widget_key"),
+            )
 
     if "uplink" in code_lower:
         col1, col2 = st.columns(2)
@@ -859,22 +871,23 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             field_input("active_vmnics", "Active vmnics", "e.g. vmnic0", widget_key="esxi_vmk_active")
             field_input("standby_vmnics", "Standby vmnics (Optional)", "e.g. vmnic1", widget_key="esxi_vmk_standby")
 
-    # Resolve default values from naming_rules variables
-    var_defaults = {
-        v.get("code"): v.get("default_value", "")
-        for v in naming_rules.get("variables", [])
-        if isinstance(v, dict)
-    }
-
     # Auto-correction functions
+    import re
+
     def correct_vmnic(val: str) -> str:
         s = (val or var_defaults.get("vmnic", "")).strip()
+        m = re.match(r"^(?:vmnic|vmn|vm)\s*(\d+.*)$", s, re.IGNORECASE)
+        if m:
+            return f"vmnic{m.group(1)}"
         if s.lower().startswith("vmnic"):
             return "vmnic" + s[5:]
         return s
 
     def correct_vswitch(val: str) -> str:
         s = (val or var_defaults.get("v_switch", "")).strip()
+        m = re.match(r"^(?:vswitch|vswith|vs)\s*(\d+.*)$", s, re.IGNORECASE)
+        if m:
+            return f"vSwitch{m.group(1)}"
         if s.lower().startswith("vswitch"):
             return "vSwitch" + s[7:]
         return s
@@ -897,7 +910,14 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
     out = out.replace("<purpose>", str(val_purpose).strip())
     out = out.replace("<status>", str(val_status).strip())
     out = out.replace("<active_vmnics>", str(val_active).strip())
-    out = out.replace("<standby_vmnics>", str(val_standby).strip())
+
+    if str(val_standby).strip():
+        out = out.replace("<standby_vmnics>", str(val_standby).strip())
+    else:
+        # Dynamically remove empty standby placeholder and delimiter
+        out = re.sub(r"\s*/\s*<standby_vmnics>\s*Standby", "", out, flags=re.IGNORECASE)
+        out = re.sub(r"\s*/\s*Standby", "", out, flags=re.IGNORECASE)
+        out = out.replace("<standby_vmnics>", "").strip()
     if fields.get("port_group") is not None:
         out = out.replace("<port_group>", str(fields.get("port_group")).strip())
 
