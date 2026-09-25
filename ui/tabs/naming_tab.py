@@ -457,7 +457,7 @@ def render_naming_tab(active_model):
     elif "Hosts & Virtual Machines" in naming_cat:
         _asset_class_2(case_mode, active_model, naming_patterns, variables, global_site)
     else:
-        _asset_class_3(naming_rules, case_mode)
+        _asset_class_3(naming_rules, case_mode, active_model)
 
 
 def _site_code_assistant_compact(naming_rules, prefix: str) -> str:
@@ -694,7 +694,7 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables, global_s
         display_reference_box("vm", "USNYCAPP01     (NYC Application Server 01)\nUKLONDB01\nAUSYDFS01", "Virtual Machine", site_filter=values.get("site", ""))
 
 
-def _asset_class_3(naming_rules: dict, casing: str, auto_correct: bool = True):
+def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto_correct: bool = True):
     st.subheader("ESXi Network Description Formatter", help="Format standardized ESXi physical uplinks, port groups, and VMkernel adapter descriptions.")
 
     with st.expander("📸 Screenshot Guidelines (Virtual Switches Topology)", expanded=False):
@@ -715,9 +715,24 @@ def _asset_class_3(naming_rules: dict, casing: str, auto_correct: bool = True):
 
     st.markdown("##### 📤 Automated Data Entry via Screenshot")
     
+    if "pasted_images" not in st.session_state:
+        st.session_state["pasted_images"] = []
+
     st.components.v1.html(
         """
+        <div id="cb-status">Clipboard ready — press Ctrl+V anywhere to capture screenshots.</div>
         <script>
+        const statusEl = document.getElementById('cb-status');
+        const setTextArea = (value) => {
+            const textarea = document.querySelector('textarea[aria-label="Clipboard Paste Buffer"]');
+            if (!textarea) return false;
+            const setter = Object.getOwnPropertyDescriptor(
+                window.HTMLTextAreaElement.prototype, 'value'
+            ).set;
+            setter.call(textarea, value);
+            textarea.dispatchEvent(new Event('input', { bubbles: true }));
+            return true;
+        };
         const captureClipboardImage = (pasteEvent) => {
             const items = (pasteEvent.clipboardData || window.clipboardData || {}).items;
             if (!items) return;
@@ -727,12 +742,15 @@ def _asset_class_3(naming_rules: dict, casing: str, auto_correct: bool = True):
                     if (!blob) continue;
                     const reader = new FileReader();
                     reader.onload = (e) => {
-                        const a = document.createElement('a');
-                        a.href = e.target.result;
-                        a.download = 'esxi_topology_paste_' + Date.now() + '.png';
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
+                        const dataUrl = e.target.result;
+                        const key = 'nb_pasted_stack';
+                        let stack = [];
+                        try { stack = JSON.parse(localStorage.getItem(key) || '[]'); } catch (_) {}
+                        stack.push(dataUrl);
+                        localStorage.setItem(key, JSON.stringify(stack));
+                        if (statusEl) statusEl.textContent =
+                            'Captured ' + stack.length + ' pasted image(s) — click “Import Pasted Image” to merge.';
+                        setTextArea(JSON.stringify(stack));
                     };
                     reader.readAsDataURL(blob);
                     break;
@@ -742,9 +760,51 @@ def _asset_class_3(naming_rules: dict, casing: str, auto_correct: bool = True):
         document.addEventListener('paste', captureClipboardImage);
         </script>
         """,
-        height=0,
+        height=60,
     )
-    st.markdown("✅ **Clipboard paste enabled:** Press `Ctrl+V` anywhere on this page to save the pasted screenshot as a file, then upload it in the box below (multiple files allowed).")
+
+    if st.button("📥 Import Pasted Image(s) from Clipboard", key="btn_import_paste", type="secondary"):
+        import json as _json
+        _raw = st.session_state.get("clipboard_paste_buffer") or ""
+        try:
+            _decoded = _json.loads(_raw) if _raw.strip() else []
+            _new = [
+                d for d in _decoded
+                if isinstance(d, str) and d.startswith("data:image")
+            ]
+        except Exception:
+            _new = []
+        _existing = {
+            getattr(d, "_data_url", None)
+            for d in st.session_state.get("pasted_images", [])
+        }
+        imported = 0
+        for i, data_url in enumerate(_new):
+            if data_url in _existing:
+                continue
+            try:
+                from core.data_url_io import data_url_to_uploadedfile
+                fobj = data_url_to_uploadedfile(data_url, name=f"clipboard_{i}.png")
+                fobj._data_url = data_url
+                st.session_state["pasted_images"].append(fobj)
+                imported += 1
+            except Exception:
+                pass
+        st.session_state["clipboard_paste_buffer"] = ""
+        if imported:
+            st.success(f"Merged {imported} pasted image(s). Click Analyze below.")
+            st.session_state["_paste_version"] = st.session_state.get("_paste_version", 0) + 1
+        else:
+            st.info("No new clipboard images detected. Press Ctrl+V with an image copied, then retry.")
+
+    st.text_area(
+        "Clipboard Paste Buffer",
+        key="clipboard_paste_buffer",
+        height=64,
+        label_visibility="collapsed",
+        placeholder="Pastet area — clipboard images are staged here automatically on Ctrl+V.",
+    )
+    st.markdown("✅ **Clipboard paste enabled:** Press `Ctrl+V` anywhere on this page, then click **Import Pasted Image(s) from Clipboard** to merge pasted screenshots with uploaded files.")
 
     uploaded_imgs = st.file_uploader(
         "Upload Topology Screenshots (Multiple allowed / Drag & Drop files)",
@@ -754,17 +814,20 @@ def _asset_class_3(naming_rules: dict, casing: str, auto_correct: bool = True):
         help="Upload screenshots of the Virtual Switches topology screen.",
     )
 
+    if st.session_state.get("pasted_images"):
+        uploaded_imgs = list(uploaded_imgs or []) + list(st.session_state["pasted_images"])
+
     if uploaded_imgs:
         with st.expander(f"🔍 Preview Uploaded Screenshots ({len(uploaded_imgs)} file(s))", expanded=False):
             cols = st.columns(min(len(uploaded_imgs), 3))
             for idx, img in enumerate(uploaded_imgs):
-                cols[idx % 3].image(img, caption=img.name, use_container_width=True)
+                cols[idx % 3].image(img, caption=img.name, width="stretch")
 
         if st.button("🚀 Analyze Topology & Auto-Populate", key="btn_analyze_esxi_img", type="primary"):
             with st.spinner("Analyzing topology with AI Vision..."):
                 try:
                     from core.ai_assistant import analyze_esxi_topology_screenshot
-                    results = analyze_esxi_topology_screenshot(uploaded_imgs, naming_rules)
+                    results = analyze_esxi_topology_screenshot(uploaded_imgs, naming_rules, active_model)
                     st.session_state["esxi_parsed_descriptions"] = results
                     st.success("Successfully analyzed topology and generated NetBox descriptions!")
                 except Exception as e:
@@ -774,7 +837,7 @@ def _asset_class_3(naming_rules: dict, casing: str, auto_correct: bool = True):
         st.markdown("###### 📋 Generated NetBox Interface Descriptions")
         st.dataframe(
             st.session_state["esxi_parsed_descriptions"],
-            use_container_width=True,
+            width="stretch",
             hide_index=True
         )
 

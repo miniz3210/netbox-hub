@@ -11,7 +11,7 @@ import json
 import logging
 import requests
 
-from config.settings import OPENROUTER_BASE_URL, OPENROUTER_API_KEY, AVAILABLE_MODELS
+from config.settings import OPENROUTER_BASE_URL, OPENROUTER_API_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -22,30 +22,40 @@ images combined, the following items per virtual switch:
 
 1. Physical Uplinks (vmnic adapters) — include the adapter name (e.g. vmnic0), the \
 vSwitch it is attached to, the link speed (e.g. 10 Gbps / 1 Gbps) if visible, and \
-infer an Active/Standby teaming status (higher/dual-speed adapters are Active; clearly \
-redundant slower or backup links are Standby).
+the link purpose / service.
 2. Port Groups — include the port group name and the vSwitch it belongs to, plus which \
 physical uplinks are the Active and Standby teaming members if shown.
 3. VMkernel adapters — include the vmk name (e.g. vmk0), the IP address / subnet if \
 visible, the enabled service (Management, vMotion, vSAN, iSCSI, FT, etc.) and the \
 vSwitch / port group it binds to.
 
-Return ONLY a JSON array. Each element is an object with exactly these keys:
-{"type": "Uplink"|"PortGroup"|"VMkernel", "name": "...", "vswitch": "...", \
-"detail": "speed / IP / service / members", "description": "the final NetBox interface \
-description string"}
+Apply the NetBox standard naming rules below strictly:
 
-For "description", produce a clean, standards-aligned NetBox description, e.g.:
-- Uplink: "vmnic0 - vSwitch0 10 Gbps (Active)"
-- PortGroup: "VM Network [vmnic0 Active / vmnic1 Standby]"
-- VMkernel: "Management Network - vSwitch0 (vmk0, 192.168.1.1/24, vMotion)"
+- Physical Uplink:
+  `<vmnicX> - <vSwitch> <Purpose> Active Uplink`
+  or
+  `<vmnicX> - <vSwitch> <Purpose> Standby Uplink`
+- Port Group:
+  `<vSwitch> (<vmnicX> Active / <vmnicY> Standby)`
+- VMkernel:
+  `<Purpose> Network (<vSwitch>)`
+
+Determine whether a link is "Active" or "Standby" by detecting its speed: 10 Gbps links \
+are Active, 1 Gbps (or otherwise slower/redundant) links are Standby.
+
+Return ONLY a raw JSON array (no markdown fences). Each element is an object with exactly \
+these keys:
+{"Interface": "...", "Type": "Uplink"|"PortGroup"|"VMkernel", \
+"Description": "the final NetBox interface description string", "IP Address": "..."}
+
+Populate "IP Address" only for VMkernel adapters where visible, otherwise "".
 
 Do not invent values that are not visible in the screenshots. Use an empty string "" for \
-any field you cannot determine. Do NOT wrap the array in markdown fences — output raw JSON.\
+any field you cannot determine.\
 """
 
 
-def _build_vision_payload(images: list, naming_rules: dict) -> dict:
+def _build_vision_payload(images: list, naming_rules: dict, model: str) -> dict:
     context = ""
     if naming_rules:
         try:
@@ -78,7 +88,7 @@ def _build_vision_payload(images: list, naming_rules: dict) -> dict:
         )
 
     return {
-        "model": AVAILABLE_MODELS[0] if AVAILABLE_MODELS else "google/gemini-2.0-flash",
+        "model": model,
         "messages": [
             {"role": "system", "content": _VISION_SYSTEM_PROMPT},
             {"role": "user", "content": content},
@@ -87,12 +97,32 @@ def _build_vision_payload(images: list, naming_rules: dict) -> dict:
     }
 
 
-def analyze_esxi_topology_screenshot(images, naming_rules: dict) -> list:
+def _resolve_active_model(model: str = "") -> str:
+    """Resolve the active AI Assistant model from an explicit value, session state or the
+    first configured preset, so the vision call never hardcodes a vendor model."""
+    if model:
+        return model
+    try:
+        import streamlit as st
+        for key in ("active_model", "approved_model"):
+            val = st.session_state.get(key)
+            if val:
+                return val
+    except Exception:
+        pass
+    from config.settings import AVAILABLE_MODELS
+    if AVAILABLE_MODELS:
+        return AVAILABLE_MODELS[0]
+    return "google/gemini-2.0-flash"
+
+
+def analyze_esxi_topology_screenshot(images, naming_rules: dict, active_model: str = "") -> list:
     """Run AI Vision over the provided screenshot file objects and return dataframe rows.
 
-    ``images`` may be a single upload or a list of ``UploadedFile`` objects. Returns a
-    list of dicts suitable for ``st.dataframe``:
-    ``{"Type", "Name", "vSwitch", "Details", "NetBox Description"}``.
+    ``images`` may be a single upload or a list of ``UploadedFile`` objects. ``active_model``
+    optionally names the configured AI model; when omitted it is resolved from session state or the
+    first configured preset. Returns a list of dicts suitable for ``st.dataframe``:
+    ``{"Interface", "Type", "Description", "IP Address"}``.
     """
     if images is None:
         return []
@@ -102,12 +132,13 @@ def analyze_esxi_topology_screenshot(images, naming_rules: dict) -> list:
     if not images:
         return []
 
+    model = _resolve_active_model(active_model)
     endpoint = f"{OPENROUTER_BASE_URL}/chat/completions"
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
     }
-    payload = _build_vision_payload(images, naming_rules)
+    payload = _build_vision_payload(images, naming_rules, model)
 
     try:
         resp = requests.post(endpoint, headers=headers, json=payload, timeout=120)
@@ -164,7 +195,16 @@ def _parse_content(content: str) -> list:
 
 
 def _row(item: dict) -> dict:
-    itype = str(item.get("type") or "").strip() or "Uplink"
+    itype = str(item.get("type") or item.get("Type") or "").strip() or "Uplink"
+    if "Interface" in item or "IP Address" in item:
+        return {
+            "Interface": str(item.get("Interface") or item.get("name") or "").strip(),
+            "Type": itype,
+            "Description": str(
+                item.get("Description") or item.get("description") or ""
+            ).strip(),
+            "IP Address": str(item.get("IP Address") or item.get("detail") or "").strip(),
+        }
     return {
         "Type": itype,
         "Name": str(item.get("name") or "").strip(),
