@@ -14,9 +14,9 @@
   "firewall_interface": "<role_zone>_<vlan_id>",
   "esxi_host": "<site_prefix><role_esx><seq>.<domain>",
   "vm_host": "<country><site><role><seq>",
-  "esxi_uplink": "<vmnic> - <v_switch> <purpose> <status>123<status2>",
+  "esxi_uplink": "<vmnic> - <v_switch> <purpose> <status>",
   "esxi_portgroup_name": "PG-<pg_network>",
-  "esxi_portgroup": "<port_group> [<active_vmnics> Active / <standby_vmnics> Standby]",
+  "esxi_portgroup": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)\n",
   "esxi_vmkernel_name": "<vmk>",
   "esxi_vmkernel": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
   "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
@@ -27,7 +27,7 @@
   "esxinet_host": "<site_prefix><role_esx><seq>.<domain>",
   "esxinet_uplink": "<vmnic> - <v_switch> <purpose> <status>",
   "esxinet_portgroup_name": "PG-<pg_network>",
-  "esxinet_portgroup": "<port_group> [<active_vmnics> Active / <standby_vmnics> Standby]",
+  "esxinet_portgroup": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
   "esxinet_vmkernel_name": "<vmk>",
   "esxinet_vmkernel": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
   "esxi_vswitch": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
@@ -143,19 +143,19 @@
   "esxi_network_presets": [
     {
       "code": "Uplink",
-      "label": "Physical Uplink",
+      "label": "PCIeX/PortX",
       "pattern_key": "esxi_uplink",
       "description": "vmnic Uplink Interface"
     },
     {
       "code": "PortGroup",
-      "label": "Port Group",
+      "label": "PG-VM Network",
       "pattern_key": "esxi_portgroup",
       "description": "Standard / Distributed Port Group"
     },
     {
       "code": "VMkernel",
-      "label": "VMkernel",
+      "label": "vmk",
       "pattern_key": "esxi_vmkernel",
       "description": "VMkernel Management / vMotion / Storage"
     }
@@ -176,9 +176,9 @@
     "firewall_interface": "<role_zone>_<vlan_id>",
     "esxi_host": "<site_prefix><role_esx><seq>.<domain>",
     "vm_host": "<country><site><role><seq>",
-    "esxi_uplink": "<vmnic> - <v_switch> <purpose> <status>123<status2>",
+    "esxi_uplink": "<vmnic> - <v_switch> <purpose> <status>",
     "esxi_portgroup_name": "PG-<pg_network>",
-    "esxi_portgroup": "<port_group> [<active_vmnics> Active / <standby_vmnics> Standby]",
+    "esxi_portgroup": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)\n",
     "esxi_vmkernel_name": "<vmk>",
     "esxi_vmkernel": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
     "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
@@ -189,7 +189,7 @@
     "esxinet_host": "<site_prefix><role_esx><seq>.<domain>",
     "esxinet_uplink": "<vmnic> - <v_switch> <purpose> <status>",
     "esxinet_portgroup_name": "PG-<pg_network>",
-    "esxinet_portgroup": "<port_group> [<active_vmnics> Active / <standby_vmnics> Standby]",
+    "esxinet_portgroup": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
     "esxinet_vmkernel_name": "<vmk>",
     "esxinet_vmkernel": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
     "esxi_vswitch": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)"
@@ -348,7 +348,7 @@
     "standby_vmnics": {
       "label": "Standby vmnics (Optional)",
       "placeholder": "e.g. vmnic2",
-      "optional": false
+      "optional": true
     },
     "vmk": {
       "label": "vmk Name",
@@ -401,6 +401,28 @@
     "esxi_vmkernel": [
       "vmk",
       "purpose",
+      "v_switch",
+      "active_vmnics",
+      "standby_vmnics"
+    ],
+    "esxi_uplink": [
+      "vmnic",
+      "v_switch",
+      "purpose",
+      "status"
+    ],
+    "esxinet_uplink": [
+      "vmnic",
+      "v_switch",
+      "purpose",
+      "status"
+    ],
+    "esxi_portgroup": [
+      "v_switch",
+      "active_vmnics",
+      "standby_vmnics"
+    ],
+    "esxinet_portgroup": [
       "v_switch",
       "active_vmnics",
       "standby_vmnics"
