@@ -910,7 +910,7 @@ def render_standards_tab(active_model):
                                 reordered = {k: variables_now[k] for k in var_names}
                                 _persist_variables(current_rules, reordered)
                         else:
-                            st.button(" ", key=f"spacer_up_{idx}", disabled=True)
+                            st.markdown("<div style='display:inline-block; width:38px; height:38px; visibility:hidden;'></div>", unsafe_allow_html=True)
                     with c_dn:
                         if idx < total_vars - 1:
                             st.button("⬇️", key=f"var_dn_{idx}", help=f"Move <{name}> down")
@@ -919,7 +919,7 @@ def render_standards_tab(active_model):
                                 reordered = {k: variables_now[k] for k in var_names}
                                 _persist_variables(current_rules, reordered)
                         else:
-                            st.button(" ", key=f"spacer_dn_{idx}", disabled=True)
+                            st.markdown("<div style='display:inline-block; width:38px; height:38px; visibility:hidden;'></div>", unsafe_allow_html=True)
                     with c_del:
                         st.button("🗑️", key=f"var_del_{name}", help=f"Remove <{name}>")
 
