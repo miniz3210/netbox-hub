@@ -806,11 +806,19 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
     edit_mode = st.toggle("Edit Mode", value=False, key="esxi_net_edit_mode")
 
-    sel_preset = preset_map.get(selected_code, presets[0])
-    curr_pattern = sel_preset.get("pattern", "")
+    sel_preset = preset_map.get(selected_code, presets[0]) if presets else {}
+    curr_pattern = sel_preset.get("pattern_template") or sel_preset.get("pattern") or ""
+    if not curr_pattern:
+        sc = str(selected_code).lower()
+        if "uplink" in sc:
+            curr_pattern = "<vmnic> - <v_switch> <purpose> <status>"
+        elif "portgroup" in sc or "group" in sc:
+            curr_pattern = "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)"
+        else:
+            curr_pattern = "<purpose> Network (<v_switch>)"
 
     if edit_mode:
-        pattern = st.text_input("Pattern Template", value=curr_pattern, key="esxi_net_pattern_input")
+        pattern = st.text_input("Pattern Template", value=curr_pattern, key=f"esxi_net_pattern_{selected_code}")
     else:
         pattern = curr_pattern
 

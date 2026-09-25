@@ -174,7 +174,7 @@ def analyze_esxi_topology_screenshot(images, naming_rules: dict, active_model: s
     content = choices[0].get("message", {}).get("content") or ""
 
     parsed = _parse_content(content)
-    return [_row(r) for r in parsed]
+    return [r for r in (_row(x) for x in parsed) if r is not None]
 
 
 def _parse_content(content: str) -> list:
@@ -213,12 +213,22 @@ def _parse_content(content: str) -> list:
 def _row(item: dict) -> dict:
     itype = str(item.get("type") or item.get("Type") or "").strip() or "Uplink"
     if "Interface" in item or "IP Address" in item:
+        iface = str(item.get("Interface") or item.get("name") or "").strip()
+        desc = str(
+            item.get("Description") or item.get("description") or ""
+        ).strip()
+        if iface in ["None", "none", "", "null"]:
+            return None
+        if desc.endswith("None Uplink"):
+            return None
+        if itype == "PortGroup" and not iface.startswith("PG-"):
+            iface = f"PG-{iface}"
+        if itype == "Uplink" and iface == "":
+            return None
         return {
-            "Interface": str(item.get("Interface") or item.get("name") or "").strip(),
+            "Interface": iface,
             "Type": itype,
-            "Description": str(
-                item.get("Description") or item.get("description") or ""
-            ).strip(),
+            "Description": desc,
             "IP Address": str(item.get("IP Address") or item.get("detail") or "").strip(),
         }
     return {
