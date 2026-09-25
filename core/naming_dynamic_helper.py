@@ -109,20 +109,19 @@ def render_token_widgets(
     prefix: str,
     defaults: Optional[Dict[str, str]] = None,
     extra_inputs: Optional[Dict[str, Tuple[str, str, str]]] = None,
+    custom_order: Optional[List[str]] = None,
 ) -> Dict[str, str]:
-    """Render Streamlit inputs for every token in ``pattern``.
-
-    Returns a dict mapping token → current widget value (or empty string).
-
-    ``defaults`` maps a token to an initial value (used to auto-fill widgets).
-
-    ``extra_inputs`` is a dict ``{token: (label, placeholder, default)}`` for
-    tokens that are not mentioned in the pattern but should still get a widget
-    (e.g. optional ones like ``Status``, ``vmk``).
-    """
+    """Render Streamlit inputs for every token in ``pattern``, sorted by custom_order if provided."""
     defaults = defaults or {}
     values: Dict[str, str] = {}
     tokens = extract_tokens(pattern)
+    if custom_order:
+        ordered_tokens = [t for t in custom_order if t in tokens]
+        for t in tokens:
+            if t not in ordered_tokens:
+                ordered_tokens.append(t)
+        tokens = ordered_tokens
+
     for token in tokens:
         label = token_label(variables, token)
         ph = token_placeholder(variables, token)
@@ -223,11 +222,7 @@ def render_esxi_network_inputs(pattern: str, variables: Dict, prefix: str, auto_
 
 
 def render_edit_mode_ui(pattern_key: str, pattern_value: str, variables: Dict):
-    """In-place Edit Mode: raw pattern textarea + add-new-field expander.
-
-    On save, flushes to ``st.session_state["naming_rules"]`` and to the JSON
-    file, then triggers a rerun.
-    """
+    """In-place Edit Mode: raw pattern textarea + Field Order Configuration."""
     edit_key = f"edit_mode_{pattern_key}"
     pending_key = f"_edit_pending_{pattern_key}"
     initial = st.session_state.pop(pending_key, pattern_value or "")
@@ -239,6 +234,45 @@ def render_edit_mode_ui(pattern_key: str, pattern_value: str, variables: Dict):
         key=f"edit_text_{pattern_key}",
         help="Edit the pattern using <Token> placeholders. Manage variables in the Standards tab > Pattern Variables Reference.",
     )
+
+    # ── Field Order Configuration ────────────────────────────────────────────
+    order_key = f"field_order_{pattern_key}"
+    current_tokens = extract_tokens(edited)
+
+    rules = st.session_state.get("naming_rules", {})
+    saved_token_order = (rules.get("token_order") or {}).get(pattern_key, [])
+
+    custom_order = st.session_state.get(order_key)
+    if custom_order is None:
+        custom_order = [t for t in saved_token_order if t in current_tokens]
+        for t in current_tokens:
+            if t not in custom_order:
+                custom_order.append(t)
+        st.session_state[order_key] = list(custom_order)
+    else:
+        custom_order = [t for t in custom_order if t in current_tokens]
+        for t in current_tokens:
+            if t not in custom_order:
+                custom_order.append(t)
+        st.session_state[order_key] = list(custom_order)
+
+    if custom_order:
+        with st.expander("🎛️ Field Order Configuration", expanded=False):
+            st.caption("Reorder the input fields. The saved order is used when rendering the generator.")
+            for i in range(len(custom_order)):
+                col_lbl, col_up, col_dn = st.columns([4, 1, 1])
+                with col_lbl:
+                    st.markdown(f"`{i + 1}.` {token_label(variables, custom_order[i])}")
+                with col_up:
+                    if i > 0 and st.button("⬆️", key=f"{order_key}_up_{i}", help="Move up"):
+                        custom_order[i - 1], custom_order[i] = custom_order[i], custom_order[i - 1]
+                        st.session_state[order_key] = list(custom_order)
+                        st.rerun()
+                with col_dn:
+                    if i < len(custom_order) - 1 and st.button("⬇️", key=f"{order_key}_dn_{i}", help="Move down"):
+                        custom_order[i], custom_order[i + 1] = custom_order[i + 1], custom_order[i]
+                        st.session_state[order_key] = list(custom_order)
+                        st.rerun()
 
     if st.button("💾 Save to Standards", key=f"nw_save_{pattern_key}", type="primary"):
         rules = st.session_state.get("naming_rules", {})
@@ -254,23 +288,35 @@ def render_edit_mode_ui(pattern_key: str, pattern_value: str, variables: Dict):
         for p_item in rules.get("esxi_network_presets", []):
             if p_item.get("pattern_key") in (pattern_key, alt_key) or p_item.get("code", "").lower() in pattern_key.lower():
                 patterns[p_item.get("pattern_key")] = edited
+                p_item["pattern"] = edited
+                p_item["pattern_template"] = edited
 
         for preset_field in ["device_presets", "interface_presets", "host_vm_presets"]:
             for p_item in rules.get(preset_field, []):
                 if p_item.get("pattern_key") == pattern_key:
                     patterns[pattern_key] = edited
 
+        token_order_map = rules.get("token_order", {})
+        if not isinstance(token_order_map, dict):
+            token_order_map = {}
+        token_order_map[pattern_key] = list(custom_order)
+        if alt_key:
+            token_order_map[alt_key] = list(custom_order)
+        rules["token_order"] = token_order_map
+
         rules["naming_patterns"] = patterns
         if "pattern_variables" not in rules or not rules["pattern_variables"]:
             rules["pattern_variables"] = variables
         st.session_state["naming_rules"] = rules
+        st.session_state.pop(order_key, None)
         save_naming_rules(rules, source=f"Edit Mode: {pattern_key}")
-        # Reset Edit Mode by flipping the semantic flag and bumping the version counter.
-        # The widget key is versioned in _edit_toggle, so a fresh key is used on rerun
-        # and the toggle redraws as OFF without mutating an already-instantiated key.
+
         st.session_state[edit_key] = False
         st.session_state[f"edit_toggle_ver_{pattern_key}"] = (
             st.session_state.get(f"edit_toggle_ver_{pattern_key}", 0) + 1
+        )
+        st.session_state[f"edit_toggle_ver_esxi_{pattern_key}"] = (
+            st.session_state.get(f"edit_toggle_ver_esxi_{pattern_key}", 0) + 1
         )
         st.session_state.pop(pending_key, None)
         st.rerun()

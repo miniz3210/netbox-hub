@@ -518,7 +518,8 @@ def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, varia
         defaults = {}
         if auto_code:
             defaults["site"] = auto_code
-        values = render_token_widgets(pat, variables, f"dev_{pk}", defaults)
+        order = (naming_rules.get("token_order") or {}).get(pk)
+        values = render_token_widgets(pat, variables, f"dev_{pk}", defaults, custom_order=order)
         interpolated = render_dynamic_pattern(pat, values, variables)
         final = apply_case(interpolated, case_mode)
         st.caption("Generated Device Hostname:")
@@ -571,7 +572,8 @@ def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, varia
             vals = {"vlan_id": vlan_id or "<vlan_id>", "vlan_name": vlan_disp, "device": dev_end or "<device>", "port": port_end or "<port>"}
             gen = render_dynamic_pattern(pat, vals, variables)
         else:
-            vals = render_token_widgets(pat, variables, f"intf_{ipk}")
+            order = (naming_rules.get("token_order") or {}).get(ipk)
+            vals = render_token_widgets(pat, variables, f"intf_{ipk}", custom_order=order)
             if st.session_state.get("esxi_auto_corr", True):
                 for port_token in ("local_port", "remote_port"):
                     if port_token in vals and vals.get(port_token):
@@ -645,7 +647,8 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables, global_s
             render_edit_mode_ui(host_pk, pat, variables)
             st.stop()
             return
-        values = render_token_widgets(pat, variables, f"hst_{host_pk}", defaults=hst_defaults)
+        order = (naming_rules.get("token_order") or {}).get(host_pk)
+        values = render_token_widgets(pat, variables, f"hst_{host_pk}", defaults=hst_defaults, custom_order=order)
         gen_raw = render_dynamic_pattern(pat, values, variables)
         gen_raw = re.sub(r"\s*\([^)]*\)", "", gen_raw).strip()
         gen_raw = re.sub(r"<[^>]+>", "", gen_raw)
@@ -680,7 +683,8 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables, global_s
             render_edit_mode_ui(vm_pk, vm_pat, variables)
             st.stop()
             return
-        values = render_token_widgets(vm_pat, variables, "vm", defaults=vm_defaults)
+        order = (naming_rules.get("token_order") or {}).get(vm_pk)
+        values = render_token_widgets(vm_pat, variables, "vm", defaults=vm_defaults, custom_order=order)
         gen_raw = render_dynamic_pattern(vm_pat, values, variables)
         gen_raw = re.sub(r"\s*\([^)]*\)", "", gen_raw).strip()
         gen_raw = re.sub(r"\s+or\s+.*", "", gen_raw).strip()
@@ -804,14 +808,10 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         label = preset_map.get(selected_code, {}).get("label", "")
         st.caption(f"ℹ️ **{selected_code}**: {label}")
 
-    ver = st.session_state.get(f"edit_toggle_ver_esxi_{selected_code}", 0)
-    edit_mode = st.toggle("Edit Mode", value=False, key=f"esxi_net_edit_mode_{selected_code}_{ver}")
-
     sel_preset = preset_map.get(selected_code, presets[0]) if presets else {}
     patterns = naming_rules.get("naming_patterns", {})
-    pkey = sel_preset.get("pattern_key", "")
-    
-    # Read from naming_patterns first, then preset object, then fallback
+    pkey = sel_preset.get("pattern_key", f"esxinet_{str(selected_code).lower()}")
+
     curr_pattern = (
         patterns.get(pkey)
         or patterns.get(f"esxinet_{str(selected_code).lower()}")
@@ -825,157 +825,29 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         if "uplink" in sc:
             curr_pattern = "<vmnic> - <v_switch> <purpose> <status>"
         elif "portgroup" in sc or "group" in sc:
-            curr_pattern = "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)"
+            curr_pattern = "<port_group> [<active_vmnics> Active / <standby_vmnics> Standby]"
         else:
             curr_pattern = "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)"
 
-    if edit_mode:
-        from config.naming_rules import save_naming_rules
-        edited_pattern = st.text_area(
-            "Pattern Template",
-            value=curr_pattern,
-            height=120,
-            key=f"esxi_net_pattern_{selected_code}",
-            help="Edit the pattern using <Token> placeholders. Manage variables in the Standards tab > Pattern Variables Reference."
-        )
-        if st.button("💾 Save to Standards", key=f"btn_save_standards_{selected_code}", type="primary"):
-            # Update both preset item and naming_patterns
-            for p in naming_rules.get("esxi_network_presets", []):
-                if p.get("code") == selected_code:
-                    p["pattern_template"] = edited_pattern
-                    p["pattern"] = edited_pattern
-                    target_pk = p.get("pattern_key", f"esxinet_{str(selected_code).lower()}")
-                    patterns[target_pk] = edited_pattern
-                    patterns[f"esxi_{str(selected_code).lower()}"] = edited_pattern
-                    naming_rules[f"esxi_{str(selected_code).lower()}"] = edited_pattern
-                    break
-            naming_rules["naming_patterns"] = patterns
-            st.session_state["naming_rules"] = naming_rules
-            save_naming_rules(naming_rules, source=f"ESXi Edit Mode: {selected_code}")
-            st.toast(f"✅ {selected_code} pattern saved to Standards!", icon="💾")
-            st.session_state[f"edit_toggle_ver_esxi_{selected_code}"] = ver + 1
-            st.rerun()
+    variables = get_pattern_variables(naming_rules)
+
+    if _edit_toggle(pkey):
+        render_edit_mode_ui(pkey, curr_pattern, variables)
         st.stop()
         return
-    else:
-        pattern = curr_pattern
 
-    code_lower = selected_code.lower()
+    order = (naming_rules.get("token_order") or {}).get(pkey)
+    # Dynamically render widgets for ALL tokens in template (handles new tokens automatically)
+    values = render_token_widgets(curr_pattern, variables, f"esxi_{selected_code}", custom_order=order)
 
-    fields = {}
+    # Apply VMware naming auto-corrections if enabled
+    if st.session_state.get("esxi_auto_corr", True):
+        from utils.formatters import apply_auto_corrections
+        for t, v in list(values.items()):
+            if v and t in ("vmnic", "v_switch", "port_group", "active_vmnics", "standby_vmnics"):
+                values[t] = apply_auto_corrections(v, "vmware")
 
-    # Resolve default values correctly from pattern_variables
-    pat_vars = naming_rules.get("pattern_variables", {})
-    var_defaults = {
-        k: (v.get("default", "") if isinstance(v, dict) else "")
-        for k, v in pat_vars.items()
-    }
-
-    def field_input(key, label, placeholder, widget="text", **kw):
-        # Dynamically scope keys to the selected preset to bypass Streamlit session state locks
-        w_key = f"{kw.get('widget_key')}_{selected_code}"
-        default_val = var_defaults.get(key, "") or var_defaults.get(f"pg_{key}", "")
-        if widget == "select":
-            fields[key] = st.selectbox(label, kw.get("options", []), key=w_key)
-        else:
-            fields[key] = st.text_input(
-                label,
-                value=default_val,
-                placeholder=placeholder,
-                key=w_key,
-            )
-
-    if "uplink" in code_lower:
-        col1, col2 = st.columns(2)
-        with col1:
-            field_input("vmnic", "vmnic Name", "e.g. vmnic0, vmnic1", widget_key="esxi_vmnic")
-            field_input("v_switch", "vSwitch Name", "e.g. vSwitch0", widget_key="esxi_vswitch")
-        with col2:
-            field_input("purpose", "Purpose / Service", "e.g. Management, vMotion, Storage", widget_key="esxi_purpose")
-            field_input("status", "Status", "", widget="select", options=["Active Uplink", "Standby Uplink"], widget_key="esxi_status")
-
-    elif "portgroup" in code_lower or "group" in code_lower:
-        col1, col2 = st.columns(2)
-        with col1:
-            field_input("port_group", "Port Group Name", "e.g. Management Network, VM Network", widget_key="esxi_pg_name")
-            field_input("v_switch", "vSwitch Name", "e.g. vSwitch0", widget_key="esxi_pg_vswitch")
-        with col2:
-            field_input("active_vmnics", "Active vmnics", "e.g. vmnic0, vmnic4", widget_key="esxi_pg_active")
-            field_input("standby_vmnics", "Standby vmnics (Optional)", "e.g. vmnic1, vmnic5", widget_key="esxi_pg_standby")
-
-    else:
-        col1, col2 = st.columns(2)
-        with col1:
-            field_input("purpose", "Purpose / Service", "e.g. Management, vMotion, iSCSI01", widget_key="esxi_vmk_purpose")
-            field_input("v_switch", "vSwitch Name", "e.g. vSwitch0", widget_key="esxi_vmk_vswitch")
-        with col2:
-            field_input("active_vmnics", "Active vmnics", "e.g. vmnic0", widget_key="esxi_vmk_active")
-            field_input("standby_vmnics", "Standby vmnics (Optional)", "e.g. vmnic1", widget_key="esxi_vmk_standby")
-
-    # Auto-correction functions
-    import re
-
-    def correct_vmnic(val: str) -> str:
-        s = (val or "").strip()
-        if not s: return ""
-        m = re.match(r"^(?:vmnic|vmn|vm)\s*(\d*)$", s, re.IGNORECASE)
-        if m: return f"vmnic{m.group(1)}"
-        if s.lower().startswith("vmnic"): return "vmnic" + s[5:]
-        return s
-
-    def correct_vswitch(val: str) -> str:
-        s = (val or "").strip()
-        if not s: return ""
-        # Strictly extract ONLY trailing digits to avoid catching typo letters
-        m = re.match(r"^(?:vswitch|vswith|vsiwtch|vsw|vs)\s*(\d*)$", s, re.IGNORECASE)
-        if m: return f"vSwitch{m.group(1)}"
-        if s.lower().startswith("vswitch"): return "vSwitch" + s[7:]
-        return s
-
-    raw_vswitch = fields.get("v_switch") or fields.get("port_group") or ""
-    val_vswitch = correct_vswitch(raw_vswitch)
-    val_vmnic = correct_vmnic(fields.get("vmnic"))
-    val_purpose = fields.get("purpose") or var_defaults.get("purpose", "")
-
-    # Status formatting
-    raw_status = fields.get("status") or "Active Uplink"
-    val_status = "Standby Uplink" if "standby" in str(raw_status).lower() else "Active Uplink"
-
-    val_active = fields.get("active_vmnics") or ""
-    raw_standby = str(fields.get("standby_vmnics") or "").strip()
-    val_standby = raw_standby if raw_standby and raw_standby.lower() != "vmnic" else ""
-
-    # Clean template substitution
-    out = pattern
-    out = out.replace("<vmnic>", str(val_vmnic).strip())
-    out = out.replace("<v_switch>", str(val_vswitch).strip())
-    out = out.replace("<port_group>", str(val_vswitch).strip())
-    out = out.replace("<purpose>", str(val_purpose).strip())
-    out = out.replace("<status>", str(val_status).strip())
-    out = out.replace("<active_vmnics>", str(val_active).strip())
-
-    if val_standby:
-        out = out.replace("<standby_vmnics>", val_standby)
-    else:
-        out = re.sub(r"\s*/\s*<standby_vmnics>\s*Standby", "", out, flags=re.IGNORECASE)
-        out = re.sub(r"\s*/\s*Standby", "", out, flags=re.IGNORECASE)
-        out = re.sub(r"\s*/\s*<standby_vmnics>", "", out, flags=re.IGNORECASE)
-        out = re.sub(r"\s*/\s*\)", ")", out)
-        out = re.sub(r"\s*/\s*\]", "]", out)
-        out = out.replace("<standby_vmnics>", "").strip()
-
-    # Advanced Orphan Cleanup
-    if not val_purpose:
-        out = re.sub(r"\bNetwork\b", "", out, flags=re.IGNORECASE)
-    if not val_active:
-        out = re.sub(r"\bActive\b", "", out, flags=re.IGNORECASE)
-        out = re.sub(r"\(\s*/", "(", out)
-
-    out = re.sub(r"\(\s*\)", "", out)
-    out = re.sub(r"\[\s*\]", "", out)
-    out = re.sub(r"^\s*-\s*", "", out)
-    out = re.sub(r"\s*-\s*$", "", out)
-    out = re.sub(r"\s{2,}", " ", out).strip()
+    out = render_dynamic_pattern(curr_pattern, values, variables)
 
     st.session_state["esxi_generated_desc"] = out
     st.text_input("Generated ESXi Description:", value=out)
