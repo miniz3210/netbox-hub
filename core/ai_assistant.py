@@ -31,6 +31,16 @@ vSwitch / port group it binds to.
 
 Apply the NetBox standard naming rules below strictly:
 
+1. Identify each `vSwitch` in the topology.
+2. Group and order the output per vSwitch as follows:
+   1. Physical Uplinks (`vmnicX`)
+   2. Port Groups
+   3. VMkernel adapters (`vmkX`)
+3. Port Group names must follow the standard format, prefixed exactly as `PG-<Name>` (e.g. `PG-Management Network`, `PG-VM Network`).
+4. Always pair each uplink with its respective vSwitch before listing that vSwitch's Port Groups and VMkernel adapters.
+
+Naming rules per type:
+
 - Physical Uplink:
   `<vmnicX> - <vSwitch> <Purpose> Active Uplink`
   or
@@ -39,6 +49,12 @@ Apply the NetBox standard naming rules below strictly:
   `<vSwitch> (<vmnicX> Active / <vmnicY> Standby)`
 - VMkernel:
   `<Purpose> Network (<vSwitch>)`
+
+Internal / Isolated vSwitches (vSwitches with NO physical network adapters, e.g. \
+"PR Spain Fuenmayor VLab"):
+- Uplink: `None`
+- Port Group description: `<vSwitch> (Internal Only / No Uplink)`
+- Do NOT output empty parentheses like `( / )`.
 
 Determine whether a link is "Active" or "Standby" by detecting its speed: 10 Gbps links \
 are Active, 1 Gbps (or otherwise slower/redundant) links are Standby.

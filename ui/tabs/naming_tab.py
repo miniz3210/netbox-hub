@@ -715,52 +715,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
     st.markdown("##### 📤 Automated Data Entry via Screenshot")
     
-    if "pasted_images" not in st.session_state:
-        st.session_state["pasted_images"] = []
-
-    if st.button("📥 Import Pasted Image(s) from Clipboard", key="btn_import_paste", type="secondary"):
-        import json as _json
-        _raw = st.session_state.get("clipboard_paste_buffer") or ""
-        try:
-            _decoded = _json.loads(_raw) if _raw.strip() else []
-            _new = [
-                d for d in _decoded
-                if isinstance(d, str) and d.startswith("data:image")
-            ]
-        except Exception:
-            _new = []
-        _existing = {
-            getattr(d, "_data_url", None)
-            for d in st.session_state.get("pasted_images", [])
-        }
-        imported = 0
-        for i, data_url in enumerate(_new):
-            if data_url in _existing:
-                continue
-            try:
-                from core.data_url_io import data_url_to_uploadedfile
-                fobj = data_url_to_uploadedfile(data_url, name=f"clipboard_{i}.png")
-                fobj._data_url = data_url
-                st.session_state["pasted_images"].append(fobj)
-                imported += 1
-            except Exception:
-                pass
-        st.session_state["clipboard_paste_buffer"] = ""
-        if imported:
-            st.success(f"Merged {imported} pasted image(s). Click Analyze below.")
-            st.session_state["_paste_version"] = st.session_state.get("_paste_version", 0) + 1
-        else:
-            st.info("No new clipboard images detected. Press Ctrl+V with an image copied, then retry.")
-
-    st.text_area(
-        "Clipboard Paste Buffer",
-        key="clipboard_paste_buffer",
-        height=64,
-        label_visibility="collapsed",
-        placeholder="Pastet area — clipboard images are staged here automatically on Ctrl+V.",
-    )
-    st.markdown("✅ **Clipboard paste enabled:** Press `Ctrl+V` anywhere on this page, then click **Import Pasted Image(s) from Clipboard** to merge pasted screenshots with uploaded files.")
-
     uploaded_imgs = st.file_uploader(
         "Upload Topology Screenshots (Multiple allowed / Drag & Drop files)",
         type=["png", "jpg", "jpeg"],
@@ -768,9 +722,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         key="esxi_topology_uploader",
         help="Upload screenshots of the Virtual Switches topology screen.",
     )
-
-    if st.session_state.get("pasted_images"):
-        uploaded_imgs = list(uploaded_imgs or []) + list(st.session_state["pasted_images"])
 
     if uploaded_imgs:
         with st.expander(f"🔍 Preview Uploaded Screenshots ({len(uploaded_imgs)} file(s))", expanded=False):
@@ -797,18 +748,36 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         )
 
         st.markdown("###### 📋 Quick Copy for NetBox (Batch Text)")
-        formatted_lines = []
-        for row in st.session_state["esxi_parsed_descriptions"]:
-            if isinstance(row, dict):
+        rows = st.session_state["esxi_parsed_descriptions"]
+        type_order = {"Uplink": 0, "PortGroup": 1, "VMkernel": 2}
+        groups = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            vs = (row.get("vSwitch") or row.get("vswitch") or row.get("VSwitch") or "").strip()
+            groups.setdefault(vs, []).append(row)
+
+        blocks = []
+        for vs in sorted(groups):
+            items = sorted(
+                groups[vs],
+                key=lambda r: (
+                    type_order.get(r.get("Type", ""), 3),
+                    str(r.get("Interface", "")),
+                ),
+            )
+            vs_lines = [f"=== {vs} ==="]
+            for row in items:
                 iface = row.get("Interface", "")
                 desc = row.get("Description", "")
                 ip = row.get("IP Address", "")
                 if ip and ip.strip():
-                    formatted_lines.append(f"{iface}:\n{desc} (IP: {ip})\n")
+                    vs_lines.append(f"{iface}:\n{desc} (IP: {ip})\n")
                 else:
-                    formatted_lines.append(f"{iface}:\n{desc}\n")
+                    vs_lines.append(f"{iface}:\n{desc}\n")
+            blocks.append("\n".join(vs_lines))
 
-        bulk_text = "\n".join(formatted_lines).strip()
+        bulk_text = "\n\n".join(blocks).strip()
         st.code(bulk_text, language="text")
 
     presets = naming_rules.get("esxi_network_presets", [])
