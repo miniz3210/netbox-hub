@@ -480,6 +480,24 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str) -> N
         if not final_presets:
             st.error("⚠️ At least one preset is required.")
             return
+        # Synchronize esxi_network patterns to preset items and alias keys
+        if kind == "esxi_network":
+            for p_item in final_presets:
+                pk = p_item.get("pattern_key", "")
+                val = final_patterns.get(pk, "")
+                if val:
+                    p_item["pattern"] = val
+                    p_item["pattern_template"] = val
+            for pkey, val in list(final_patterns.items()):
+                if pkey.startswith("esxinet_"):
+                    legacy_key = pkey.replace("esxinet_", "esxi_")
+                    final_patterns[legacy_key] = val
+                    rules[legacy_key] = val
+                elif pkey.startswith("esxi_"):
+                    alt_key = pkey.replace("esxi_", "esxinet_")
+                    final_patterns[alt_key] = val
+                    rules[alt_key] = val
+
         rules["naming_patterns"] = final_patterns
         rules[key_field] = final_presets
         _save_presets(rules)

@@ -807,8 +807,18 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
     edit_mode = st.toggle("Edit Mode", value=False, key="esxi_net_edit_mode")
 
     sel_preset = preset_map.get(selected_code, presets[0]) if presets else {}
-    # Prioritize pattern_template so changes from the Standards tab take precedence
-    curr_pattern = sel_preset.get("pattern_template") or sel_preset.get("pattern") or ""
+    patterns = naming_rules.get("naming_patterns", {})
+    pkey = sel_preset.get("pattern_key", "")
+    
+    # Read from naming_patterns first, then preset object, then fallback
+    curr_pattern = (
+        patterns.get(pkey)
+        or patterns.get(f"esxinet_{str(selected_code).lower()}")
+        or patterns.get(f"esxi_{str(selected_code).lower()}")
+        or sel_preset.get("pattern_template")
+        or sel_preset.get("pattern")
+        or ""
+    )
     if not curr_pattern:
         sc = str(selected_code).lower()
         if "uplink" in sc:
@@ -828,11 +838,17 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             help="Edit the pattern using <Token> placeholders. Manage variables in the Standards tab > Pattern Variables Reference."
         )
         if st.button("💾 Save to Standards", key=f"btn_save_standards_{selected_code}", type="primary"):
+            # Update both preset item and naming_patterns
             for p in naming_rules.get("esxi_network_presets", []):
                 if p.get("code") == selected_code:
                     p["pattern_template"] = edited_pattern
                     p["pattern"] = edited_pattern
+                    target_pk = p.get("pattern_key", f"esxinet_{str(selected_code).lower()}")
+                    patterns[target_pk] = edited_pattern
+                    patterns[f"esxi_{str(selected_code).lower()}"] = edited_pattern
+                    naming_rules[f"esxi_{str(selected_code).lower()}"] = edited_pattern
                     break
+            naming_rules["naming_patterns"] = patterns
             st.session_state["naming_rules"] = naming_rules
             save_naming_rules(naming_rules, source=f"ESXi Edit Mode: {selected_code}")
             st.toast(f"✅ {selected_code} pattern saved to Standards!", icon="💾")
@@ -846,11 +862,11 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
     fields = {}
 
-    # Resolve default values from naming_rules variables
+    # Resolve default values correctly from pattern_variables
+    pat_vars = naming_rules.get("pattern_variables", {})
     var_defaults = {
-        v.get("code"): v.get("default_value", "")
-        for v in naming_rules.get("variables", [])
-        if isinstance(v, dict)
+        k: (v.get("default", "") if isinstance(v, dict) else "")
+        for k, v in pat_vars.items()
     }
 
     def field_input(key, label, placeholder, widget="text", **kw):
