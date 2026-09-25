@@ -237,6 +237,7 @@
     "local_po_id": {
       "label": "Local Port-Channel ID",
       "placeholder": "LAG1",
+      "default": "LAG",
       "optional": false
     },
     "vlan_name": {
@@ -372,5 +373,21 @@
       "bristol": "BRI",
       "age": "AGE"
     }
+  },
+  "token_order": {
+    "esxi_vmkernel_name": [
+      "vmk",
+      "purpose",
+      "v_switch",
+      "active_vmnics",
+      "standby_vmnics"
+    ],
+    "esxi_vmkernel": [
+      "vmk",
+      "purpose",
+      "v_switch",
+      "active_vmnics",
+      "standby_vmnics"
+    ]
   }
 }
