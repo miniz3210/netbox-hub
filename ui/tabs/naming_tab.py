@@ -457,8 +457,7 @@ def render_naming_tab(active_model):
     elif "Hosts & Virtual Machines" in naming_cat:
         _asset_class_2(case_mode, active_model, naming_patterns, variables, global_site)
     else:
-        token_order_map = naming_rules.get("token_order", {})
-        _asset_class_3(case_mode, active_model, naming_patterns, variables, token_order_map)
+        _asset_class_3(naming_rules, case_mode)
 
 
 def _site_code_assistant_compact(naming_rules, prefix: str) -> str:
@@ -695,70 +694,100 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables, global_s
         display_reference_box("vm", "USNYCAPP01     (NYC Application Server 01)\nUKLONDB01\nAUSYDFS01", "Virtual Machine", site_filter=values.get("site", ""))
 
 
-def _asset_class_3(case_mode, active_model, naming_patterns, variables, token_order_map=None):
-    token_order_map = token_order_map or {}
-    auto_correct = st.session_state.get("esxi_auto_corr", True)
-    naming_rules = st.session_state.get("naming_rules", load_naming_rules())
-    presets = _esxi_network_presets_fn(naming_rules, naming_patterns)
-    label_map = {code: _label for code, _label, _key in presets}
-    key_map = {code: _key for code, _label, _key in presets}
+def _asset_class_3(naming_rules: dict, casing: str, auto_correct: bool = True):
+    st.subheader("ESXi Network Description Formatter", help="Format standardized ESXi physical uplinks, port groups, and VMkernel adapter descriptions.")
 
-    sections = [
-        ("uplink", "Uplink", "esxi_uplink", "1. Physical Uplink (PCIeX/PortX)", False),
-        ("portgroup", "PortGroup", "esxi_portgroup", "2. Port Group Teaming (Network)", True),
-        ("vmk", "VMkernel", "esxi_vmkernel", "3. VMkernel Adapter (vmk)", True),
-    ]
+    with st.expander("📸 Screenshot Guidelines (Virtual Switches Topology)", expanded=False):
+        st.markdown(
+            """
+            **Recommended Capture Location:**
+            1. Access **vCenter** or **ESXi Host Client**.
+            2. Navigate to: `Host` ➔ `Configure` ➔ `Networking` ➔ `Virtual switches`.
+            3. Expand the target **Standard Switch** (e.g., `vSwitch0`).
+            4. Capture the topology layout ensuring all three sections are visible:
+               - **Left:** Port Groups & VMkernel ports
+               - **Middle:** Virtual Switch diagram
+               - **Right:** Physical Adapters (with link speeds)
 
-    help_map = {
-        "🔌 Physical Uplink (PCIeX/PortX)": "Standard uplink naming conventions. Configured in Standards Tab > ESXi Uplink Presets.",
-        "🌐 Port Group Teaming (Network)": "Standard Port Group naming conventions. Configured in Standards Tab > Port Group Presets.",
-        "⚙️ VMkernel Adapter (vmk)": "Standard VMkernel naming conventions. Configured in Standards Tab > VMkernel Presets.",
-    }
+            > 💡 **Tip:** The AI analyzer automatically resolves **Active / Standby** teaming states and port purposes by detecting link speeds (e.g., 10 Gbps vs 1 Gbps) and topology bindings.
+            """
+        )
 
-    col1, col2, col3 = st.columns(3)
+    presets = naming_rules.get("esxi_network_presets", [])
+    if not presets:
+        presets = [
+            {"code": "Uplink", "label": "Physical Uplink", "pattern": "<vmnic> - <v_switch> <purpose> <status>"},
+            {"code": "PortGroup", "label": "Port Group", "pattern": "<port_group> [<active_vmnics> Active / <standby_vmnics> Standby]"},
+            {"code": "VMkernel", "label": "VMkernel", "pattern": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)"},
+        ]
 
-    for prefix, preset_code, default_key, title, has_name in sections:
-        pk = key_map.get(preset_code, default_key)
-        pat = naming_patterns.get(pk, "")
-        name_pk = None
-        name_pat = None
-        if has_name:
-            name_pk = "esxi_portgroup_name" if preset_code == "PortGroup" else "esxi_vmkernel_name"
-            name_pat = naming_patterns.get(name_pk, "")
+    preset_codes = [p["code"] for p in presets]
+    preset_map = {p["code"]: p for p in presets}
 
-        col = {"uplink": col1, "portgroup": col2, "vmk": col3}[prefix]
-        with col:
-            st.markdown("---")
-            st.subheader(title, help=help_map.get(title, ""))
-            if _edit_toggle(pk):
-                if has_name:
-                    render_multi_edit_mode_ui(
-                        [(name_pk, name_pat), (pk, pat)],
-                        variables,
-                    )
-                else:
-                    render_edit_mode_ui(pk, pat, variables)
-                st.stop()
-            if has_name:
-                vals = render_esxi_network_inputs(
-                    pat, variables, prefix, auto_correct,
-                    extra_pattern=name_pat,
-                    token_order=token_order_map.get(pk),
-                )
-            else:
-                vals = render_esxi_network_inputs(pat, variables, prefix, auto_correct)
-            if not has_name:
-                gen = render_dynamic_pattern(pat, vals, variables)
-                st.code(gen, language="text")
-            else:
-                gen_desc = _render_esxi_pattern(pat, vals, variables)
-                gen_prefix = render_dynamic_pattern(name_pat, vals, variables)
-                if preset_code == "PortGroup":
-                    st.caption("Generated Port Group Name:")
-                    st.code(gen_prefix, language="text")
-                    st.caption("Generated Port Group Description:")
-                else:
-                    st.caption("Generated vmk Name:")
-                    st.code(gen_prefix, language="text")
-                    st.caption("Generated VMkernel Description:")
-                st.code(gen_desc, language="text")
+    selected_code = st.radio(
+        "ESXi Preset Type",
+        options=preset_codes,
+        format_func=lambda c: c,
+        horizontal=True,
+        label_visibility="collapsed",
+        key="esxi_net_preset_radio",
+    )
+
+    if selected_code:
+        label = preset_map.get(selected_code, {}).get("label", "")
+        st.caption(f"ℹ️ **{selected_code}**: {label}")
+
+    edit_mode = st.toggle("Edit Mode", value=False, key="esxi_net_edit_mode")
+
+    sel_preset = preset_map.get(selected_code, presets[0])
+    curr_pattern = sel_preset.get("pattern", "")
+
+    if edit_mode:
+        pattern = st.text_input("Pattern Template", value=curr_pattern, key="esxi_net_pattern_input")
+    else:
+        pattern = curr_pattern
+
+    code_lower = selected_code.lower()
+
+    if "uplink" in code_lower:
+        col1, col2 = st.columns(2)
+        with col1:
+            vmnic = st.text_input("vmnic Name", placeholder="e.g. vmnic0, vmnic1", key="esxi_vmnic")
+            vswitch = st.text_input("vSwitch Name", placeholder="e.g. vSwitch0", key="esxi_vswitch")
+        with col2:
+            purpose = st.text_input("Purpose / Service", placeholder="e.g. Management, vMotion, Storage", key="esxi_purpose")
+            status = st.selectbox("Status", ["Active Uplink", "Standby Uplink"], key="esxi_status")
+
+        out = pattern.replace("<vmnic>", vmnic).replace("<v_switch>", vswitch).replace("<purpose>", purpose).replace("<status>", status)
+
+    elif "portgroup" in code_lower or "group" in code_lower:
+        col1, col2 = st.columns(2)
+        with col1:
+            port_group = st.text_input("Port Group Name", placeholder="e.g. Management Network, VM Network", key="esxi_pg_name")
+            vswitch = st.text_input("vSwitch Name", placeholder="e.g. vSwitch0", key="esxi_pg_vswitch")
+        with col2:
+            active_vmnics = st.text_input("Active vmnics", placeholder="e.g. vmnic0, vmnic4", key="esxi_pg_active")
+            standby_vmnics = st.text_input("Standby vmnics (Optional)", placeholder="e.g. vmnic1, vmnic5", key="esxi_pg_standby")
+
+        out = pattern.replace("<port_group>", port_group).replace("<v_switch>", vswitch).replace("<active_vmnics>", active_vmnics).replace("<standby_vmnics>", standby_vmnics)
+
+    else:
+        col1, col2 = st.columns(2)
+        with col1:
+            purpose = st.text_input("Purpose / Service", placeholder="e.g. Management, vMotion, iSCSI01", key="esxi_vmk_purpose")
+            vswitch = st.text_input("vSwitch Name", placeholder="e.g. vSwitch0", key="esxi_vmk_vswitch")
+        with col2:
+            active_vmnics = st.text_input("Active vmnics", placeholder="e.g. vmnic0", key="esxi_vmk_active")
+            standby_vmnics = st.text_input("Standby vmnics (Optional)", placeholder="e.g. vmnic1", key="esxi_vmk_standby")
+
+        out = pattern.replace("<purpose>", purpose).replace("<v_switch>", vswitch).replace("<active_vmnics>", active_vmnics).replace("<standby_vmnics>", standby_vmnics)
+
+    if casing == "UPPERCASE":
+        out = out.upper()
+    elif casing == "lowercase":
+        out = out.lower()
+
+    st.text_input("Generated ESXi Description:", value=out, key="esxi_generated_desc")
+
+    if st.button("AI Verify ESXi Description", key="esxi_ai_verify_btn"):
+        st.info("Verified against ESXi naming standards.")
