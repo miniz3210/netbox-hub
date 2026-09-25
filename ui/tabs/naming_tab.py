@@ -859,24 +859,47 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             field_input("active_vmnics", "Active vmnics", "e.g. vmnic0", widget_key="esxi_vmk_active")
             field_input("standby_vmnics", "Standby vmnics (Optional)", "e.g. vmnic1", widget_key="esxi_vmk_standby")
 
-    replacements = {
-        "<vmnic>": fields.get("vmnic"),
-        "<v_switch>": fields.get("v_switch"),
-        "<purpose>": fields.get("purpose"),
-        "<status>": fields.get("status"),
-        "<active_vmnics>": fields.get("active_vmnics"),
-        "<standby_vmnics>": fields.get("standby_vmnics"),
-        "<port_group>": fields.get("port_group"),
+    # Resolve default values from naming_rules variables
+    var_defaults = {
+        v.get("code"): v.get("default_value", "")
+        for v in naming_rules.get("variables", [])
+        if isinstance(v, dict)
     }
-    out = pattern
-    for ph, val in replacements.items():
-        if val is not None:
-            out = out.replace(ph, str(val).strip())
 
-    if casing == "UPPERCASE":
-        out = out.upper()
-    elif casing == "lowercase":
-        out = out.lower()
+    # Auto-correction functions
+    def correct_vmnic(val: str) -> str:
+        s = (val or var_defaults.get("vmnic", "")).strip()
+        if s.lower().startswith("vmnic"):
+            return "vmnic" + s[5:]
+        return s
+
+    def correct_vswitch(val: str) -> str:
+        s = (val or var_defaults.get("v_switch", "")).strip()
+        if s.lower().startswith("vswitch"):
+            return "vSwitch" + s[7:]
+        return s
+
+    val_vmnic = correct_vmnic(fields.get("vmnic"))
+    val_vswitch = correct_vswitch(fields.get("v_switch"))
+    val_purpose = fields.get("purpose") or var_defaults.get("purpose", "")
+
+    # Status formatting
+    raw_status = fields.get("status") or "Active Uplink"
+    val_status = "Standby Uplink" if "standby" in str(raw_status).lower() else "Active Uplink"
+
+    val_active = fields.get("active_vmnics") or var_defaults.get("active_vmnics", "")
+    val_standby = fields.get("standby_vmnics") or var_defaults.get("standby_vmnics", "")
+
+    # Clean template substitution without brute-force uppercase
+    out = pattern
+    out = out.replace("<vmnic>", str(val_vmnic).strip())
+    out = out.replace("<v_switch>", str(val_vswitch).strip())
+    out = out.replace("<purpose>", str(val_purpose).strip())
+    out = out.replace("<status>", str(val_status).strip())
+    out = out.replace("<active_vmnics>", str(val_active).strip())
+    out = out.replace("<standby_vmnics>", str(val_standby).strip())
+    if fields.get("port_group") is not None:
+        out = out.replace("<port_group>", str(fields.get("port_group")).strip())
 
     st.session_state["esxi_generated_desc"] = out
     st.text_input("Generated ESXi Description:", value=out)
