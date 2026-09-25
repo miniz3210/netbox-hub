@@ -807,7 +807,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
     edit_mode = st.toggle("Edit Mode", value=False, key="esxi_net_edit_mode")
 
     sel_preset = preset_map.get(selected_code, presets[0]) if presets else {}
-    curr_pattern = sel_preset.get("pattern") or sel_preset.get("pattern_template") or ""
+    # Prioritize pattern_template so changes from the Standards tab take precedence
+    curr_pattern = sel_preset.get("pattern_template") or sel_preset.get("pattern") or ""
     if not curr_pattern:
         sc = str(selected_code).lower()
         if "uplink" in sc:
@@ -818,7 +819,27 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             curr_pattern = "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)"
 
     if edit_mode:
-        pattern = st.text_input("Pattern Template", value=curr_pattern, key=f"esxi_net_pattern_{selected_code}")
+        from config.naming_rules import save_naming_rules
+        edited_pattern = st.text_area(
+            "Pattern Template",
+            value=curr_pattern,
+            height=120,
+            key=f"esxi_net_pattern_{selected_code}",
+            help="Edit the pattern using <Token> placeholders. Manage variables in the Standards tab > Pattern Variables Reference."
+        )
+        if st.button("💾 Save to Standards", key=f"btn_save_standards_{selected_code}", type="primary"):
+            for p in naming_rules.get("esxi_network_presets", []):
+                if p.get("code") == selected_code:
+                    p["pattern_template"] = edited_pattern
+                    p["pattern"] = edited_pattern
+                    break
+            st.session_state["naming_rules"] = naming_rules
+            save_naming_rules(naming_rules, source=f"ESXi Edit Mode: {selected_code}")
+            st.toast(f"✅ {selected_code} pattern saved to Standards!", icon="💾")
+            st.session_state["esxi_net_edit_mode"] = False
+            st.rerun()
+        st.stop()
+        return
     else:
         pattern = curr_pattern
 
