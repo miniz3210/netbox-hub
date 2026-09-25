@@ -834,14 +834,18 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
     }
 
     def field_input(key, label, placeholder, widget="text", **kw):
+        w_key = kw.get("widget_key")
+        default_val = var_defaults.get(key, "") or var_defaults.get(f"pg_{key}", "")
         if widget == "select":
-            fields[key] = st.selectbox(label, kw.get("options", []), key=kw.get("widget_key"))
+            fields[key] = st.selectbox(label, kw.get("options", []), key=w_key)
         else:
+            if w_key and w_key not in st.session_state and default_val:
+                st.session_state[w_key] = default_val
             fields[key] = st.text_input(
                 label,
-                value=var_defaults.get(key, ""),
+                value=st.session_state.get(w_key, default_val),
                 placeholder=placeholder,
-                key=kw.get("widget_key"),
+                key=w_key,
             )
 
     if "uplink" in code_lower:
@@ -892,34 +896,35 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             return "vSwitch" + s[7:]
         return s
 
+    raw_vswitch = fields.get("v_switch") or fields.get("port_group") or ""
+    val_vswitch = correct_vswitch(raw_vswitch)
     val_vmnic = correct_vmnic(fields.get("vmnic"))
-    val_vswitch = correct_vswitch(fields.get("v_switch"))
     val_purpose = fields.get("purpose") or var_defaults.get("purpose", "")
 
     # Status formatting
     raw_status = fields.get("status") or "Active Uplink"
     val_status = "Standby Uplink" if "standby" in str(raw_status).lower() else "Active Uplink"
 
-    val_active = fields.get("active_vmnics") or var_defaults.get("active_vmnics", "")
-    val_standby = fields.get("standby_vmnics") or var_defaults.get("standby_vmnics", "")
+    val_active = fields.get("active_vmnics") or ""
+    raw_standby = str(fields.get("standby_vmnics") or "").strip()
+    val_standby = raw_standby if raw_standby and raw_standby.lower() != "vmnic" else ""
 
-    # Clean template substitution without brute-force uppercase
+    # Clean template substitution
     out = pattern
     out = out.replace("<vmnic>", str(val_vmnic).strip())
     out = out.replace("<v_switch>", str(val_vswitch).strip())
+    out = out.replace("<port_group>", str(val_vswitch).strip())
     out = out.replace("<purpose>", str(val_purpose).strip())
     out = out.replace("<status>", str(val_status).strip())
     out = out.replace("<active_vmnics>", str(val_active).strip())
 
-    if str(val_standby).strip():
-        out = out.replace("<standby_vmnics>", str(val_standby).strip())
+    if val_standby:
+        out = out.replace("<standby_vmnics>", val_standby)
     else:
-        # Dynamically remove empty standby placeholder and delimiter
         out = re.sub(r"\s*/\s*<standby_vmnics>\s*Standby", "", out, flags=re.IGNORECASE)
         out = re.sub(r"\s*/\s*Standby", "", out, flags=re.IGNORECASE)
+        out = re.sub(r"\s*/\s*\)", ")", out)
         out = out.replace("<standby_vmnics>", "").strip()
-    if fields.get("port_group") is not None:
-        out = out.replace("<port_group>", str(fields.get("port_group")).strip())
 
     st.session_state["esxi_generated_desc"] = out
     st.text_input("Generated ESXi Description:", value=out)
