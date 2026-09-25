@@ -431,13 +431,17 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str) -> N
         st.warning("⚠️ At least one preset must remain. Delete a different entry first.")
 
     st.markdown("**➕ Add New Preset**")
+    is_esxi = kind == "esxi_network"
+    code_ph = "e.g. DSwitch" if is_esxi else "e.g. SAN"
+    lbl_ph = "e.g. Distributed Switch Uplink" if is_esxi else "e.g. SAN Storage (SAN)"
+    tpl_ph = "e.g. <vmnic> - <vds_name> (<status>)" if is_esxi else "e.g. SAN<country><site><seq>"
     ca1, ca2, ca3, ca4 = st.columns([1.1, 1.8, 2.6, 2.6])
     with ca1:
-        new_code = st.text_input("Code", value="", placeholder="e.g. SAN", key=f"{kind}_new_code", label_visibility="collapsed").strip()
+        new_code = st.text_input("Code", value="", placeholder=code_ph, key=f"{kind}_new_code", label_visibility="collapsed").strip()
     with ca2:
-        new_lbl = st.text_input("Display Label", value="", placeholder="e.g. SAN Storage (SAN)", key=f"{kind}_new_lbl", label_visibility="collapsed").strip()
+        new_lbl = st.text_input("Display Label", value="", placeholder=lbl_ph, key=f"{kind}_new_lbl", label_visibility="collapsed").strip()
     with ca3:
-        new_tpl = st.text_input("Pattern Template", value="", placeholder="e.g. SAN<country><site><seq>", key=f"{kind}_new_tpl", label_visibility="collapsed").strip()
+        new_tpl = st.text_input("Pattern Template", value="", placeholder=tpl_ph, key=f"{kind}_new_tpl", label_visibility="collapsed").strip()
     with ca4:
         new_desc = st.text_input("Description (Optional)", value="", placeholder="Describe this preset", key=f"{kind}_new_desc", label_visibility="collapsed").strip()
 
