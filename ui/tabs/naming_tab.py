@@ -839,7 +839,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         if widget == "select":
             fields[key] = st.selectbox(label, kw.get("options", []), key=w_key)
         else:
-            if w_key and w_key not in st.session_state and default_val:
+            current_val = st.session_state.get(w_key)
+            if not current_val and default_val:
                 st.session_state[w_key] = default_val
             fields[key] = st.text_input(
                 label,
@@ -879,21 +880,21 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
     import re
 
     def correct_vmnic(val: str) -> str:
-        s = (val or var_defaults.get("vmnic", "")).strip()
-        m = re.match(r"^(?:vmnic|vmn|vm)\s*(\d+.*)$", s, re.IGNORECASE)
+        s = (val or "").strip()
+        if not s:
+            return ""
+        m = re.match(r"^(?:vmnic|vmn|vm)\s*(\d*.*)$", s, re.IGNORECASE)
         if m:
             return f"vmnic{m.group(1)}"
-        if s.lower().startswith("vmnic"):
-            return "vmnic" + s[5:]
         return s
 
     def correct_vswitch(val: str) -> str:
-        s = (val or var_defaults.get("v_switch", "")).strip()
-        m = re.match(r"^(?:vswitch|vswith|vs)\s*(\d+.*)$", s, re.IGNORECASE)
+        s = (val or "").strip()
+        if not s:
+            return ""
+        m = re.match(r"^(?:vswitch|vswith|vs)\s*(\d*.*)$", s, re.IGNORECASE)
         if m:
             return f"vSwitch{m.group(1)}"
-        if s.lower().startswith("vswitch"):
-            return "vSwitch" + s[7:]
         return s
 
     raw_vswitch = fields.get("v_switch") or fields.get("port_group") or ""
@@ -923,8 +924,14 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
     else:
         out = re.sub(r"\s*/\s*<standby_vmnics>\s*Standby", "", out, flags=re.IGNORECASE)
         out = re.sub(r"\s*/\s*Standby", "", out, flags=re.IGNORECASE)
+        out = re.sub(r"\s*/\s*<standby_vmnics>", "", out, flags=re.IGNORECASE)
         out = re.sub(r"\s*/\s*\)", ")", out)
+        out = re.sub(r"\s*/\s*\]", "]", out)
         out = out.replace("<standby_vmnics>", "").strip()
+
+    # Clean orphaned delimiters if earlier tokens are empty
+    out = re.sub(r"^\s*-\s*", "", out)
+    out = re.sub(r"\s{2,}", " ", out).strip()
 
     st.session_state["esxi_generated_desc"] = out
     st.text_input("Generated ESXi Description:", value=out)
