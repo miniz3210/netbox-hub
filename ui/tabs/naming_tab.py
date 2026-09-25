@@ -824,38 +824,54 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
     code_lower = selected_code.lower()
 
+    fields = {}
+
+    def field_input(key, label, placeholder, widget="text", **kw):
+        if widget == "select":
+            fields[key] = st.selectbox(label, kw.get("options", []), key=kw.get("widget_key"))
+        else:
+            fields[key] = st.text_input(label, placeholder=placeholder, key=kw.get("widget_key"))
+
     if "uplink" in code_lower:
         col1, col2 = st.columns(2)
         with col1:
-            vmnic = st.text_input("vmnic Name", placeholder="e.g. vmnic0, vmnic1", key="esxi_vmnic")
-            vswitch = st.text_input("vSwitch Name", placeholder="e.g. vSwitch0", key="esxi_vswitch")
+            field_input("vmnic", "vmnic Name", "e.g. vmnic0, vmnic1", widget_key="esxi_vmnic")
+            field_input("v_switch", "vSwitch Name", "e.g. vSwitch0", widget_key="esxi_vswitch")
         with col2:
-            purpose = st.text_input("Purpose / Service", placeholder="e.g. Management, vMotion, Storage", key="esxi_purpose")
-            status = st.selectbox("Status", ["Active Uplink", "Standby Uplink"], key="esxi_status")
-
-        out = pattern.replace("<vmnic>", vmnic).replace("<v_switch>", vswitch).replace("<purpose>", purpose).replace("<status>", status)
+            field_input("purpose", "Purpose / Service", "e.g. Management, vMotion, Storage", widget_key="esxi_purpose")
+            field_input("status", "Status", "", widget="select", options=["Active Uplink", "Standby Uplink"], widget_key="esxi_status")
 
     elif "portgroup" in code_lower or "group" in code_lower:
         col1, col2 = st.columns(2)
         with col1:
-            port_group = st.text_input("Port Group Name", placeholder="e.g. Management Network, VM Network", key="esxi_pg_name")
-            vswitch = st.text_input("vSwitch Name", placeholder="e.g. vSwitch0", key="esxi_pg_vswitch")
+            field_input("port_group", "Port Group Name", "e.g. Management Network, VM Network", widget_key="esxi_pg_name")
+            field_input("v_switch", "vSwitch Name", "e.g. vSwitch0", widget_key="esxi_pg_vswitch")
         with col2:
-            active_vmnics = st.text_input("Active vmnics", placeholder="e.g. vmnic0, vmnic4", key="esxi_pg_active")
-            standby_vmnics = st.text_input("Standby vmnics (Optional)", placeholder="e.g. vmnic1, vmnic5", key="esxi_pg_standby")
-
-        out = pattern.replace("<port_group>", port_group).replace("<v_switch>", vswitch).replace("<active_vmnics>", active_vmnics).replace("<standby_vmnics>", standby_vmnics)
+            field_input("active_vmnics", "Active vmnics", "e.g. vmnic0, vmnic4", widget_key="esxi_pg_active")
+            field_input("standby_vmnics", "Standby vmnics (Optional)", "e.g. vmnic1, vmnic5", widget_key="esxi_pg_standby")
 
     else:
         col1, col2 = st.columns(2)
         with col1:
-            purpose = st.text_input("Purpose / Service", placeholder="e.g. Management, vMotion, iSCSI01", key="esxi_vmk_purpose")
-            vswitch = st.text_input("vSwitch Name", placeholder="e.g. vSwitch0", key="esxi_vmk_vswitch")
+            field_input("purpose", "Purpose / Service", "e.g. Management, vMotion, iSCSI01", widget_key="esxi_vmk_purpose")
+            field_input("v_switch", "vSwitch Name", "e.g. vSwitch0", widget_key="esxi_vmk_vswitch")
         with col2:
-            active_vmnics = st.text_input("Active vmnics", placeholder="e.g. vmnic0", key="esxi_vmk_active")
-            standby_vmnics = st.text_input("Standby vmnics (Optional)", placeholder="e.g. vmnic1", key="esxi_vmk_standby")
+            field_input("active_vmnics", "Active vmnics", "e.g. vmnic0", widget_key="esxi_vmk_active")
+            field_input("standby_vmnics", "Standby vmnics (Optional)", "e.g. vmnic1", widget_key="esxi_vmk_standby")
 
-        out = pattern.replace("<purpose>", purpose).replace("<v_switch>", vswitch).replace("<active_vmnics>", active_vmnics).replace("<standby_vmnics>", standby_vmnics)
+    replacements = {
+        "<vmnic>": fields.get("vmnic"),
+        "<v_switch>": fields.get("v_switch"),
+        "<purpose>": fields.get("purpose"),
+        "<status>": fields.get("status"),
+        "<active_vmnics>": fields.get("active_vmnics"),
+        "<standby_vmnics>": fields.get("standby_vmnics"),
+        "<port_group>": fields.get("port_group"),
+    }
+    out = pattern
+    for ph, val in replacements.items():
+        if val is not None:
+            out = out.replace(ph, str(val).strip())
 
     if casing == "UPPERCASE":
         out = out.upper()

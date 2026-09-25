@@ -36,7 +36,7 @@ Apply the NetBox standard naming rules below strictly:
    1. Physical Uplinks (`vmnicX`)
    2. Port Groups
    3. VMkernel adapters (`vmkX`)
-3. Port Group names must follow the standard format, prefixed exactly as `PG-<Name>` (e.g. `PG-Management Network`, `PG-VM Network`).
+3. Port Group names must follow the standard format configured in the naming rule presets below (e.g. a `PG-` prefix when the configured pattern requires it).
 4. Always pair each uplink with its respective vSwitch before listing that vSwitch's Port Groups and VMkernel adapters.
 
 Naming rules per type:
@@ -73,6 +73,7 @@ any field you cannot determine.\
 
 def _build_vision_payload(images: list, naming_rules: dict, model: str) -> dict:
     context = ""
+    preset_rules = ""
     if naming_rules:
         try:
             presets = naming_rules.get("esxi_network_presets") or []
@@ -83,8 +84,19 @@ def _build_vision_payload(images: list, naming_rules: dict, model: str) -> dict:
                     pat = p.get("pattern", "") or ""
                     lines.append(f"{code}: {pat}")
                 context = "Configured ESXi description patterns to honor:\n" + "\n".join(lines)
+            preset_rules = "\n".join([
+                f"- Type: {p.get('label', p.get('code'))} | Pattern: '{p.get('pattern_template') or p.get('pattern', '')}'"
+                for p in presets if isinstance(p, dict)
+            ])
         except Exception as e:  # pragma: no cover - defensive
             logger.warning("Could not build naming context: %s", e)
+
+    dynamic_rules = (
+        "\n\nConfigured naming rule presets (govern prefixes, templates and formatting "
+        "strictly; never invent prefixes beyond these):\n" + preset_rules
+    ) if preset_rules else ""
+
+    system_prompt = _VISION_SYSTEM_PROMPT + dynamic_rules
 
     user_text = (
         "Analyze the ESXi virtual switch topology screenshots below and extract the "
@@ -106,7 +118,7 @@ def _build_vision_payload(images: list, naming_rules: dict, model: str) -> dict:
     return {
         "model": model,
         "messages": [
-            {"role": "system", "content": _VISION_SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": content},
         ],
         "temperature": 0.0,
@@ -221,8 +233,6 @@ def _row(item: dict) -> dict:
             return None
         if desc.endswith("None Uplink"):
             return None
-        if itype == "PortGroup" and not iface.startswith("PG-"):
-            iface = f"PG-{iface}"
         if itype == "Uplink" and iface == "":
             return None
         return {
