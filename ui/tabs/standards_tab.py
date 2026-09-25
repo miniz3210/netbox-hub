@@ -18,7 +18,7 @@ from utils.formatters import (
 )
 
 # Shared column width ratios enforced across preset table headers and all data rows.
-PRESET_COLS = [1.2, 2.2, 4.5, 0.6]
+PRESET_COLS = [1.4, 2.2, 4.2, 0.8]
 # Manage Pattern Variables columns: Name, Label, Placeholder, Auto-Fill, Optional, Up, Down, Delete.
 VARIABLE_COLS = [1.5, 2.5, 2.5, 1.5, 0.9, 0.45, 0.45, 0.45]
 # Auto-Correction rule columns: Original Pattern, Replacement, Description, Action.
@@ -788,20 +788,9 @@ def render_standards_tab(active_model):
     st.markdown(
         """
         <style>
-        /* Target any button containing the ghost identifier or disabled empty/blank button */
-        button[kind="secondary"]:disabled,
-        div:has(> button:disabled) button {
-            opacity: 0 !important;
-            visibility: hidden !important;
-            border: none !important;
-            background: transparent !important;
-            box-shadow: none !important;
-            pointer-events: none !important;
-        }
-        /* Ensure active buttons (⬆️, ⬇️, 🗑️) remain visible and styled */
-        button:not(:disabled) {
-            opacity: 1 !important;
-            visibility: visible !important;
+        /* Only hide specifically marked ghost buttons without breaking active buttons */
+        button[data-testid="baseButton-secondary"]:disabled:empty {
+            display: none !important;
         }
         </style>
         """,

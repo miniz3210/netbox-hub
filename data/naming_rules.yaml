@@ -16,7 +16,7 @@
   "vm_host": "<country><site><role><seq>",
   "esxi_uplink": "<vmnic> - <v_switch> <purpose> <status>",
   "esxi_portgroup_name": "PG-<pg_network>",
-  "esxi_portgroup": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)\n",
+  "esxi_portgroup": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
   "esxi_vmkernel_name": "<vmk>",
   "esxi_vmkernel": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
   "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
@@ -31,6 +31,8 @@
   "esxinet_vmkernel_name": "<vmk>",
   "esxinet_vmkernel": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
   "esxi_vswitch": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
+  "esxinet_pgname": "PG-<pg_network>",
+  "esxi_pgname": "PG-<pg_network>",
   "custom_patterns": [],
   "device_presets": [
     {
@@ -149,7 +151,7 @@
     },
     {
       "code": "PortGroup",
-      "label": "PG-VM Network",
+      "label": "VM Network",
       "pattern_key": "esxi_portgroup",
       "description": "Standard / Distributed Port Group"
     },
@@ -178,7 +180,7 @@
     "vm_host": "<country><site><role><seq>",
     "esxi_uplink": "<vmnic> - <v_switch> <purpose> <status>",
     "esxi_portgroup_name": "PG-<pg_network>",
-    "esxi_portgroup": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)\n",
+    "esxi_portgroup": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
     "esxi_vmkernel_name": "<vmk>",
     "esxi_vmkernel": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
     "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
@@ -192,7 +194,9 @@
     "esxinet_portgroup": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
     "esxinet_vmkernel_name": "<vmk>",
     "esxinet_vmkernel": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
-    "esxi_vswitch": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)"
+    "esxi_vswitch": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
+    "esxinet_pgname": "PG-<pg_network>",
+    "esxi_pgname": "PG-<pg_network>"
   },
   "pattern_variables": {
     "country": {
@@ -426,6 +430,12 @@
       "v_switch",
       "active_vmnics",
       "standby_vmnics"
+    ],
+    "esxinet_pgname": [
+      "pg_network"
+    ],
+    "esxi_pgname": [
+      "pg_network"
     ]
   }
 }
