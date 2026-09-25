@@ -218,13 +218,11 @@
     },
     "local_device": {
       "label": "Local Device Hostname",
-      "placeholder": "e.g. SWUSNYC01-0",
-      "optional": false
+      "placeholder": "e.g. SWUSNYC01-0"
     },
     "local_port": {
       "label": "Local Port",
-      "placeholder": "e.g. Gi1/0/48, Te1/0/1",
-      "optional": false
+      "placeholder": "e.g. Gi1/0/48, Te1/0/1"
     },
     "remote_device": {
       "label": "Remote Device Hostname",
@@ -289,8 +287,7 @@
     },
     "vm_site": {
       "label": "Site Prefix / Country & Site",
-      "placeholder": "e.g. age, usnyc, uklon",
-      "optional": false
+      "placeholder": "e.g. age, usnyc, uklon"
     },
     "vmnic": {
       "label": "vmnic Name",

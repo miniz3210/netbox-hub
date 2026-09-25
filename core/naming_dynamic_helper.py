@@ -201,12 +201,8 @@ def render_esxi_network_inputs(pattern: str, variables: Dict, prefix: str, auto_
                                         help="Enter the uplink status").strip()
             continue
 
-        value = ""
-        is_optional = _meta.get("optional")
-        if is_optional:
-            value = st.text_input(label, value=default_val or "", placeholder=ph, key=wk).strip()
-        else:
-            value = st.text_input(label, value=default_val or "", placeholder=ph, key=wk).strip()
+        current_val = st.session_state.get(wk, default_val or "")
+        value = st.text_input(label, value=current_val, placeholder=ph, key=wk).strip()
 
         if value:
             if token == "Purpose":
@@ -245,15 +241,28 @@ def render_edit_mode_ui(pattern_key: str, pattern_value: str, variables: Dict):
     )
 
     if st.button("💾 Save to Standards", key=f"nw_save_{pattern_key}", type="primary"):
-        rules = st.session_state.get("naming_rules")
-        patterns = rules.get("naming_patterns")
-        if patterns is not None:
-            patterns[pattern_key] = edited
-            rules[pattern_key] = edited
-        all_used = set()
-        for p in (patterns or {}).values():
-            all_used.update(extract_tokens(p))
-        rules["pattern_variables"] = {k: v for k, v in variables.items() if k in all_used}
+        rules = st.session_state.get("naming_rules", {})
+        patterns = rules.get("naming_patterns", {})
+        patterns[pattern_key] = edited
+        rules[pattern_key] = edited
+
+        # Bidirectional sync for ESXi network keys (esxi_ vs esxinet_)
+        alt_key = pattern_key.replace("esxi_", "esxinet_") if pattern_key.startswith("esxi_") else pattern_key.replace("esxinet_", "esxi_")
+        patterns[alt_key] = edited
+        rules[alt_key] = edited
+
+        for p_item in rules.get("esxi_network_presets", []):
+            if p_item.get("pattern_key") in (pattern_key, alt_key) or p_item.get("code", "").lower() in pattern_key.lower():
+                patterns[p_item.get("pattern_key")] = edited
+
+        for preset_field in ["device_presets", "interface_presets", "host_vm_presets"]:
+            for p_item in rules.get(preset_field, []):
+                if p_item.get("pattern_key") == pattern_key:
+                    patterns[pattern_key] = edited
+
+        rules["naming_patterns"] = patterns
+        if "pattern_variables" not in rules or not rules["pattern_variables"]:
+            rules["pattern_variables"] = variables
         st.session_state["naming_rules"] = rules
         save_naming_rules(rules, source=f"Edit Mode: {pattern_key}")
         # Reset Edit Mode by flipping the semantic flag and bumping the version counter.
@@ -336,25 +345,25 @@ def render_multi_edit_mode_ui(pattern_pairs: List[Tuple[str, str]], variables: D
                     st.rerun()
 
     if st.button("💾 Save to Standards", key=f"nw_save_{joiner}", type="primary"):
-        rules = st.session_state.get("naming_rules")
-        patterns = rules.get("naming_patterns")
-        if patterns is None:
-            patterns = {}
-            rules["naming_patterns"] = patterns
+        rules = st.session_state.get("naming_rules", {})
+        patterns = rules.get("naming_patterns", {})
         for key, val in edited_vals.items():
             patterns[key] = val
             rules[key] = val
-        all_used = set()
-        for p in (patterns or {}).values():
-            all_used.update(extract_tokens(p))
-        rules["pattern_variables"] = {k: v for k, v in variables.items() if k in all_used}
-        # Persist the chosen token order per pattern key.
-        token_order_map = rules.get("token_order")
+            alt_key = key.replace("esxi_", "esxinet_") if key.startswith("esxi_") else key.replace("esxinet_", "esxi_")
+            patterns[alt_key] = val
+            rules[alt_key] = val
+            for p_item in rules.get("esxi_network_presets", []):
+                if p_item.get("pattern_key") in (key, alt_key) or p_item.get("code", "").lower() in key.lower():
+                    patterns[p_item.get("pattern_key")] = val
+
+        token_order_map = rules.get("token_order", {})
         if not isinstance(token_order_map, dict):
             token_order_map = {}
         for key, _ in pattern_pairs:
             token_order_map[key] = list(custom_order)
         rules["token_order"] = token_order_map
+        rules["naming_patterns"] = patterns
         st.session_state["naming_rules"] = rules
         st.session_state.pop(order_key, None)
         save_naming_rules(rules, source=f"Edit Mode: {joiner}")
