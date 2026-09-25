@@ -804,7 +804,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         label = preset_map.get(selected_code, {}).get("label", "")
         st.caption(f"ℹ️ **{selected_code}**: {label}")
 
-    edit_mode = st.toggle("Edit Mode", value=False, key="esxi_net_edit_mode")
+    ver = st.session_state.get(f"edit_toggle_ver_esxi_{selected_code}", 0)
+    edit_mode = st.toggle("Edit Mode", value=False, key=f"esxi_net_edit_mode_{selected_code}_{ver}")
 
     sel_preset = preset_map.get(selected_code, presets[0]) if presets else {}
     patterns = naming_rules.get("naming_patterns", {})
@@ -852,6 +853,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             st.session_state["naming_rules"] = naming_rules
             save_naming_rules(naming_rules, source=f"ESXi Edit Mode: {selected_code}")
             st.toast(f"✅ {selected_code} pattern saved to Standards!", icon="💾")
+            st.session_state[f"edit_toggle_ver_esxi_{selected_code}"] = ver + 1
             st.rerun()
         st.stop()
         return

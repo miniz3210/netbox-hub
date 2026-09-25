@@ -14,7 +14,7 @@
   "firewall_interface": "<role_zone>_<vlan_id>",
   "esxi_host": "<site_prefix><role_esx><seq>.<domain>",
   "vm_host": "<country><site><role><seq>",
-  "esxi_uplink": "<vmnic> - <v_switch> <purpose> <status>",
+  "esxi_uplink": "<vmnic> - <v_switch> <purpose> <status>123<status2>",
   "esxi_portgroup_name": "PG-<pg_network>",
   "esxi_portgroup": "<port_group> [<active_vmnics> Active / <standby_vmnics> Standby]",
   "esxi_vmkernel_name": "<vmk>",
@@ -24,6 +24,13 @@
   "host_vm_proxmox": "<site_prefix><role_esx><seq>.<domain>",
   "host_vm_proxmox_x": "<site_prefix><role_esx><seq>.<domain>",
   "esxinet_vswitch": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
+  "esxinet_host": "<site_prefix><role_esx><seq>.<domain>",
+  "esxinet_uplink": "<vmnic> - <v_switch> <purpose> <status>",
+  "esxinet_portgroup_name": "PG-<pg_network>",
+  "esxinet_portgroup": "<port_group> [<active_vmnics> Active / <standby_vmnics> Standby]",
+  "esxinet_vmkernel_name": "<vmk>",
+  "esxinet_vmkernel": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
+  "esxi_vswitch": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
   "custom_patterns": [],
   "device_presets": [
     {
@@ -169,7 +176,7 @@
     "firewall_interface": "<role_zone>_<vlan_id>",
     "esxi_host": "<site_prefix><role_esx><seq>.<domain>",
     "vm_host": "<country><site><role><seq>",
-    "esxi_uplink": "<vmnic> - <v_switch> <purpose> <status>",
+    "esxi_uplink": "<vmnic> - <v_switch> <purpose> <status>123<status2>",
     "esxi_portgroup_name": "PG-<pg_network>",
     "esxi_portgroup": "<port_group> [<active_vmnics> Active / <standby_vmnics> Standby]",
     "esxi_vmkernel_name": "<vmk>",
@@ -178,7 +185,14 @@
     "iface_switch_zone": "<switch_zone>_<port>",
     "host_vm_proxmox": "<site_prefix><role_esx><seq>.<domain>",
     "host_vm_proxmox_x": "<site_prefix><role_esx><seq>.<domain>",
-    "esxinet_vswitch": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)"
+    "esxinet_vswitch": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
+    "esxinet_host": "<site_prefix><role_esx><seq>.<domain>",
+    "esxinet_uplink": "<vmnic> - <v_switch> <purpose> <status>",
+    "esxinet_portgroup_name": "PG-<pg_network>",
+    "esxinet_portgroup": "<port_group> [<active_vmnics> Active / <standby_vmnics> Standby]",
+    "esxinet_vmkernel_name": "<vmk>",
+    "esxinet_vmkernel": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
+    "esxi_vswitch": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)"
   },
   "pattern_variables": {
     "country": {
@@ -218,11 +232,13 @@
     },
     "local_device": {
       "label": "Local Device Hostname",
-      "placeholder": "e.g. SWUSNYC01-0"
+      "placeholder": "e.g. SWUSNYC01-0",
+      "optional": false
     },
     "local_port": {
       "label": "Local Port",
-      "placeholder": "e.g. Gi1/0/48, Te1/0/1"
+      "placeholder": "e.g. Gi1/0/48, Te1/0/1",
+      "optional": false
     },
     "remote_device": {
       "label": "Remote Device Hostname",
@@ -287,12 +303,13 @@
     },
     "vm_site": {
       "label": "Site Prefix / Country & Site",
-      "placeholder": "e.g. age, usnyc, uklon"
+      "placeholder": "e.g. age, usnyc, uklon",
+      "optional": false
     },
     "vmnic": {
       "label": "vmnic Name",
       "placeholder": "vmnic",
-      "default": "vmnic0",
+      "default": "vmnic",
       "optional": false
     },
     "v_switch": {
