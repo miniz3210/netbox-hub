@@ -714,23 +714,69 @@ def _asset_class_3(naming_rules: dict, casing: str, auto_correct: bool = True):
         )
 
     st.markdown("##### 📤 Automated Data Entry via Screenshot")
-    img_col1, img_col2 = st.columns([2, 1])
-    with img_col1:
-        uploaded_img = st.file_uploader(
-            "Upload Topology Screenshot (or paste file)",
-            type=["png", "jpg", "jpeg"],
-            key="esxi_topology_uploader",
-            help="Upload a screenshot of the Virtual Switches topology screen.",
-        )
-    with img_col2:
-        st.caption("📋 **Clipboard Paste Support**")
-        st.caption("You can drag & drop directly into the box, or save your clipboard capture (Win+Shift+S) and browse.")
+    
+    st.components.v1.html(
+        """
+        <script>
+        const captureClipboardImage = (pasteEvent) => {
+            const items = (pasteEvent.clipboardData || window.clipboardData || {}).items;
+            if (!items) return;
+            for (const item of items) {
+                if (item.type && item.type.indexOf('image') === 0) {
+                    const blob = item.getAsFile();
+                    if (!blob) continue;
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const a = document.createElement('a');
+                        a.href = e.target.result;
+                        a.download = 'esxi_topology_paste_' + Date.now() + '.png';
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                    };
+                    reader.readAsDataURL(blob);
+                    break;
+                }
+            }
+        };
+        document.addEventListener('paste', captureClipboardImage);
+        </script>
+        """,
+        height=0,
+    )
+    st.markdown("✅ **Clipboard paste enabled:** Press `Ctrl+V` anywhere on this page to save the pasted screenshot as a file, then upload it in the box below (multiple files allowed).")
 
-    if uploaded_img is not None:
-        with st.expander("🔍 Preview Uploaded Screenshot", expanded=False):
-            st.image(uploaded_img, use_container_width=True)
+    uploaded_imgs = st.file_uploader(
+        "Upload Topology Screenshots (Multiple allowed / Drag & Drop files)",
+        type=["png", "jpg", "jpeg"],
+        accept_multiple_files=True,
+        key="esxi_topology_uploader",
+        help="Upload screenshots of the Virtual Switches topology screen.",
+    )
+
+    if uploaded_imgs:
+        with st.expander(f"🔍 Preview Uploaded Screenshots ({len(uploaded_imgs)} file(s))", expanded=False):
+            cols = st.columns(min(len(uploaded_imgs), 3))
+            for idx, img in enumerate(uploaded_imgs):
+                cols[idx % 3].image(img, caption=img.name, use_container_width=True)
+
         if st.button("🚀 Analyze Topology & Auto-Populate", key="btn_analyze_esxi_img", type="primary"):
-            st.info("Parsing topology with AI Vision... (Extracting vmnics, vSwitches, Port Groups, and VMkernels)")
+            with st.spinner("Analyzing topology with AI Vision..."):
+                try:
+                    from core.ai_assistant import analyze_esxi_topology_screenshot
+                    results = analyze_esxi_topology_screenshot(uploaded_imgs, naming_rules)
+                    st.session_state["esxi_parsed_descriptions"] = results
+                    st.success("Successfully analyzed topology and generated NetBox descriptions!")
+                except Exception as e:
+                    st.error(f"Vision analysis failed: {str(e)}")
+
+    if "esxi_parsed_descriptions" in st.session_state and st.session_state["esxi_parsed_descriptions"]:
+        st.markdown("###### 📋 Generated NetBox Interface Descriptions")
+        st.dataframe(
+            st.session_state["esxi_parsed_descriptions"],
+            use_container_width=True,
+            hide_index=True
+        )
 
     presets = naming_rules.get("esxi_network_presets", [])
     if not presets:

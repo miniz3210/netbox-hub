@@ -151,12 +151,6 @@
       "label": "VMkernel",
       "pattern_key": "esxi_vmkernel",
       "description": "VMkernel Management / vMotion / Storage"
-    },
-    {
-      "code": "vSwitch",
-      "label": "vSwitch",
-      "pattern_key": "esxinet_vswitch",
-      "description": "testing"
     }
   ],
   "naming_patterns": {
