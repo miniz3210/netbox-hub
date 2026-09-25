@@ -437,9 +437,9 @@ def render_naming_tab(active_model):
         naming_cat = st.radio(
             "Select Asset Class",
             [
-                "1. Network & Security Devices (Switches, APs, Firewalls, Routers)",
-                "2. Hosts & Virtual Machines (ESXi & VMs)",
-                "3. ESXi Network Descriptions (vmnic, PortGroup, VMkernel)",
+                "🔧 Network & Security Devices (Switches, APs, Firewalls, Routers)",
+                "🖥️ Hosts & Virtual Machines (ESXi & VMs)",
+                "☁️ ESXi Network Descriptions (vmnic, PortGroup, VMkernel)",
             ],
             horizontal=True,
             help="Select the asset class to generate standardized infrastructure names. Each class loads its preset-driven form. Configured in the Standards Tab > Device Type Presets / Interface Type Presets / ESXi Network Description Presets.",
@@ -505,7 +505,7 @@ def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, varia
     with col_a:
         st.subheader("Universal Device Hostname Generator", help="Generate standardized device hostnames using preset-driven patterns. Device type and interface presets are configured in the Standards Tab > Device Type Presets / Interface Type Presets.")
         auto_code = global_site
-        dev_type = st.radio("Device Type", dev_codes, horizontal=True, key="dev_prefix_sel", label_visibility="collapsed", help="Select the device class to generate a standardized hostname. Choices are configured in the Standards Tab (Device Type Presets).")
+        dev_type = st.radio("Device Type", dev_codes, horizontal=True, key="dev_prefix_sel", label_visibility="collapsed", help="Select the device class to generate a standardized hostname. Choices are configured in the Standards Tab (Device Type Presets).", format_func=lambda c: f"{c} - {dev_label_map.get(c, c)}")
         pk = _dev_pattern_key(dev_type, dev_presets)
         edit_on = _edit_toggle(pk)
         pat = naming_patterns.get(pk, "")
@@ -540,6 +540,7 @@ def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, varia
             key="p_cat_sel",
             label_visibility="collapsed",
             help="Select the interface class to format. Choices are configured in the Standards Tab (Interface Type Presets).",
+            format_func=lambda c: intf_label_map.get(c, c),
         )
         ipk = _interface_key(intf_type, intf_presets)
         edit_on = _edit_toggle(ipk)
@@ -631,6 +632,7 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables, global_s
             key="host_type_sel",
             label_visibility="collapsed",
             help="Select the host type to generate a hostname. Choices are configured in the Standards Tab (Hosts Type Presets).",
+            format_func=lambda c: f"{c} - {host_label_map.get(c, c)}",
         )
         host_pk = host_key_map.get(host_type, "esxi_host")
         pat = naming_patterns.get(host_pk, naming_patterns.get("esxi_host", ""))
@@ -664,6 +666,7 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables, global_s
             key="host_vm_vm_role",
             label_visibility="collapsed",
             help="Select the VM role/type. Choices are configured in the Standards Tab (Hosts & Virtual Machines Presets).",
+            format_func=lambda c: f"{c} - {vm_label_map.get(c, c)}",
         )
         vm_pat = naming_patterns.get(vm_pk, "")
         if _edit_toggle(vm_pk):
@@ -699,9 +702,9 @@ def _asset_class_3(case_mode, active_model, naming_patterns, variables, token_or
     ]
 
     help_map = {
-        "1. Physical Uplink (PCIeX/PortX)": "Standard uplink naming conventions. Configured in Standards Tab > ESXi Uplink Presets.",
-        "2. Port Group Teaming (Network)": "Standard Port Group naming conventions. Configured in Standards Tab > Port Group Presets.",
-        "3. VMkernel Adapter (vmk)": "Standard VMkernel naming conventions. Configured in Standards Tab > VMkernel Presets.",
+        "🔌 Physical Uplink (PCIeX/PortX)": "Standard uplink naming conventions. Configured in Standards Tab > ESXi Uplink Presets.",
+        "🌐 Port Group Teaming (Network)": "Standard Port Group naming conventions. Configured in Standards Tab > Port Group Presets.",
+        "⚙️ VMkernel Adapter (vmk)": "Standard VMkernel naming conventions. Configured in Standards Tab > VMkernel Presets.",
     }
 
     col1, col2, col3 = st.columns(3)
