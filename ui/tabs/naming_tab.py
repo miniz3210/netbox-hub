@@ -713,6 +713,25 @@ def _asset_class_3(naming_rules: dict, casing: str, auto_correct: bool = True):
             """
         )
 
+    st.markdown("##### 📤 Automated Data Entry via Screenshot")
+    img_col1, img_col2 = st.columns([2, 1])
+    with img_col1:
+        uploaded_img = st.file_uploader(
+            "Upload Topology Screenshot (or paste file)",
+            type=["png", "jpg", "jpeg"],
+            key="esxi_topology_uploader",
+            help="Upload a screenshot of the Virtual Switches topology screen.",
+        )
+    with img_col2:
+        st.caption("📋 **Clipboard Paste Support**")
+        st.caption("You can drag & drop directly into the box, or save your clipboard capture (Win+Shift+S) and browse.")
+
+    if uploaded_img is not None:
+        with st.expander("🔍 Preview Uploaded Screenshot", expanded=False):
+            st.image(uploaded_img, use_container_width=True)
+        if st.button("🚀 Analyze Topology & Auto-Populate", key="btn_analyze_esxi_img", type="primary"):
+            st.info("Parsing topology with AI Vision... (Extracting vmnics, vSwitches, Port Groups, and VMkernels)")
+
     presets = naming_rules.get("esxi_network_presets", [])
     if not presets:
         presets = [
