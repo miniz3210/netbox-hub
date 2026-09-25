@@ -295,7 +295,7 @@
     "vmnic": {
       "label": "vmnic Name",
       "placeholder": "vmnic",
-      "default": "vmnic",
+      "default": "vmnic0",
       "optional": false
     },
     "v_switch": {
