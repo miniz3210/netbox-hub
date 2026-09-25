@@ -597,7 +597,7 @@ def _host_editor(rules: dict) -> None:
                     else:
                         st.warning("⚠️ At least one preset must remain.")
             else:
-                st.button(" ", key=f"spacer_host_{idx}", disabled=True)
+                st.button("", key=f"ghost_host_{idx}", disabled=True)
 
         if stale_del == idx:
             continue
@@ -775,6 +775,29 @@ def render_standards_tab(active_model):
     if st.session_state.pop("site_code_saved", False):
         st.success("✅ Site code mapping rules saved & applied!")
 
+    st.markdown(
+        """
+        <style>
+        /* Target any button containing the ghost identifier or disabled empty/blank button */
+        button[kind="secondary"]:disabled,
+        div:has(> button:disabled) button {
+            opacity: 0 !important;
+            visibility: hidden !important;
+            border: none !important;
+            background: transparent !important;
+            box-shadow: none !important;
+            pointer-events: none !important;
+        }
+        /* Ensure active buttons (⬆️, ⬇️, 🗑️) remain visible and styled */
+        button:not(:disabled) {
+            opacity: 1 !important;
+            visibility: visible !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     current_rules = load_naming_rules()
     st.session_state["naming_rules"] = current_rules
     
@@ -910,7 +933,7 @@ def render_standards_tab(active_model):
                                 reordered = {k: variables_now[k] for k in var_names}
                                 _persist_variables(current_rules, reordered)
                         else:
-                            st.button(" ", key=f"spacer_up_{idx}", disabled=True)
+                            st.button("", key=f"ghost_up_{idx}", disabled=True)
                     with c_dn:
                         if idx < total_vars - 1:
                             st.button("⬇️", key=f"var_dn_{idx}", help=f"Move <{name}> down")
@@ -919,7 +942,7 @@ def render_standards_tab(active_model):
                                 reordered = {k: variables_now[k] for k in var_names}
                                 _persist_variables(current_rules, reordered)
                         else:
-                            st.button(" ", key=f"spacer_dn_{idx}", disabled=True)
+                            st.button("", key=f"ghost_dn_{idx}", disabled=True)
                     with c_del:
                         st.button("🗑️", key=f"var_del_{name}", help=f"Remove <{name}>")
 
