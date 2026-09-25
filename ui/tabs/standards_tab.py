@@ -21,8 +21,8 @@ from utils.formatters import (
 PRESET_COLS = [1.2, 2.2, 4.5, 0.6]
 # Manage Pattern Variables columns: Name, Label, Placeholder, Auto-Fill, Optional, Up, Down, Delete.
 VARIABLE_COLS = [1.5, 2.5, 2.5, 1.5, 0.9, 0.45, 0.45, 0.45]
-# Auto-Correction rule columns: Original Pattern, Replacement, Description, On, Action.
-AUTOCORRECT_COLS = [3.0, 2.2, 3.0, 0.7, 0.7]
+# Auto-Correction rule columns: Original Pattern, Replacement, Description, Action.
+AUTOCORRECT_COLS = [3.2, 2.3, 3.8, 0.7]
 
 def _normalize_var_name(raw: str) -> str:
     return re.sub(r"[^a-z0-9_]", "", raw.strip().lower().replace(" ", "_"))
@@ -116,18 +116,15 @@ def _render_auto_correction_manager(active_model: str) -> None:
         with st.expander(category_title, expanded=False):
             st.caption(
                 "Each row is a regex pattern → replacement pair. Edit inline or use "
-                "the AI generator below to create new rules. The **On** checkbox "
-                "enables/disables a rule without deleting it."
+                "the AI generator below to create new rules."
             )
-            ch_p, ch_r, ch_d, ch_e, ch_del = st.columns(AUTOCORRECT_COLS, vertical_alignment="center")
+            ch_p, ch_r, ch_d, ch_del = st.columns(AUTOCORRECT_COLS, vertical_alignment="center")
             with ch_p:
                 st.markdown("**Original Pattern**")
             with ch_r:
                 st.markdown("**Replacement**")
             with ch_d:
                 st.markdown("**Description**")
-            with ch_e:
-                st.markdown("<div style='text-align: center; font-weight: 600;'>On</div>", unsafe_allow_html=True)
             with ch_del:
                 pass
 
@@ -135,7 +132,7 @@ def _render_auto_correction_manager(active_model: str) -> None:
             updated = []
             pending_delete = None
             for idx, rule in enumerate(items):
-                col_p, col_r, col_d, col_e, col_del = st.columns(AUTOCORRECT_COLS, vertical_alignment="center")
+                col_p, col_r, col_d, col_del = st.columns(AUTOCORRECT_COLS, vertical_alignment="center")
                 with col_p:
                     p = st.text_input(
                         "Original Pattern",
@@ -157,13 +154,6 @@ def _render_auto_correction_manager(active_model: str) -> None:
                         key=f"ac_{category}_d_{idx}",
                         label_visibility="collapsed",
                     )
-                with col_e:
-                    enabled = st.checkbox(
-                        "On",
-                        value=bool(rule.get("enabled", True)),
-                        key=f"ac_{category}_e_{idx}",
-                        label_visibility="collapsed",
-                    )
                 with col_del:
                     if _render_centered_del_btn(f"ac_{category}_del_{idx}", "Delete this rule"):
                         pending_delete = idx
@@ -175,7 +165,7 @@ def _render_auto_correction_manager(active_model: str) -> None:
                         "pattern": p,
                         "replacement": r,
                         "description": d,
-                        "enabled": bool(enabled),
+                        "enabled": True,
                     })
 
             with st.expander(f"✨ AI Assistant: Generate Rule for {category.replace('_', ' ').title()}", expanded=False):
