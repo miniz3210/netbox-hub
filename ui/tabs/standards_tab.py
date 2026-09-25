@@ -129,7 +129,7 @@ def _render_auto_correction_manager(active_model: str) -> None:
             with ch_e:
                 st.markdown("<div style='text-align: center; font-weight: 600;'>On</div>", unsafe_allow_html=True)
             with ch_del:
-                st.markdown("<div style='text-align: center; font-weight: 600;'>Action</div>", unsafe_allow_html=True)
+                pass
 
             items = list(rules[category])
             updated = []
@@ -274,7 +274,7 @@ def _render_site_code_mapping_manager() -> None:
         with m_col_r:
             st.markdown("**Replacement (Site Code)**")
         with m_col_del:
-            st.markdown("<div style='text-align: center; font-weight: 600;'>Action</div>", unsafe_allow_html=True)
+            pass
 
         items = list(exact.items())
         updated = {}
@@ -395,7 +395,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str) -> N
     with col_hdr_tpl:
         st.markdown("**Pattern Template**")
     with col_hdr_act:
-        st.markdown("<div style='text-align: center; font-weight: 600;'>Action</div>", unsafe_allow_html=True)
+        pass
 
     updated = []
     patterns_updates = {}
@@ -563,7 +563,7 @@ def _host_editor(rules: dict) -> None:
     with col_hdr_tpl:
         st.markdown("**Pattern Template**")
     with col_hdr_act:
-        st.markdown("<div style='text-align: center; font-weight: 600;'>Action</div>", unsafe_allow_html=True)
+        pass
 
     updated = []
     patterns_updates = {}
@@ -677,7 +677,7 @@ def _vm_editor(rules: dict) -> None:
     with col_hdr_tpl:
         st.markdown("**Pattern Template**")
     with col_hdr_act:
-        st.markdown("<div style='text-align: center; font-weight: 600;'>Action</div>", unsafe_allow_html=True)
+        pass
 
     updated = []
     stale_del = st.session_state.pop("_del_vm_role_idx", None)
@@ -903,11 +903,11 @@ def render_standards_tab(active_model):
                 with c_nh_opt:
                     st.markdown("**Optional**")
                 with c_nh_up:
-                    st.markdown("<div style='text-align: center; font-weight: 600;'>⬆️</div>", unsafe_allow_html=True)
+                    pass
                 with c_nh_dn:
-                    st.markdown("<div style='text-align: center; font-weight: 600;'>⬇️</div>", unsafe_allow_html=True)
+                    pass
                 with c_nh_del:
-                    st.markdown("<div style='text-align: center; font-weight: 600;'>🗑️</div>", unsafe_allow_html=True)
+                    pass
 
                 edited_vars = {}
                 total_vars = len(var_names)
