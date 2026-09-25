@@ -448,13 +448,13 @@ def render_naming_tab(active_model):
         case_mode = _render_casing_selector()
 
     global_site = ""
-    if "1. Network" in naming_cat or "2. Hosts" in naming_cat:
+    if "Network & Security" in naming_cat or "Hosts & Virtual Machines" in naming_cat:
         global_site = _site_code_assistant_compact(naming_rules, "global")
     st.markdown("---")
 
-    if "1. Network" in naming_cat:
+    if "Network & Security" in naming_cat:
         _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, variables, global_site)
-    elif "2. Hosts" in naming_cat:
+    elif "Hosts & Virtual Machines" in naming_cat:
         _asset_class_2(case_mode, active_model, naming_patterns, variables, global_site)
     else:
         token_order_map = naming_rules.get("token_order", {})
