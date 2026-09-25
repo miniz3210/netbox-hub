@@ -718,51 +718,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
     if "pasted_images" not in st.session_state:
         st.session_state["pasted_images"] = []
 
-    st.components.v1.html(
-        """
-        <div id="cb-status">Clipboard ready — press Ctrl+V anywhere to capture screenshots.</div>
-        <script>
-        const statusEl = document.getElementById('cb-status');
-        const setTextArea = (value) => {
-            const textarea = document.querySelector('textarea[aria-label="Clipboard Paste Buffer"]');
-            if (!textarea) return false;
-            const setter = Object.getOwnPropertyDescriptor(
-                window.HTMLTextAreaElement.prototype, 'value'
-            ).set;
-            setter.call(textarea, value);
-            textarea.dispatchEvent(new Event('input', { bubbles: true }));
-            return true;
-        };
-        const captureClipboardImage = (pasteEvent) => {
-            const items = (pasteEvent.clipboardData || window.clipboardData || {}).items;
-            if (!items) return;
-            for (const item of items) {
-                if (item.type && item.type.indexOf('image') === 0) {
-                    const blob = item.getAsFile();
-                    if (!blob) continue;
-                    const reader = new FileReader();
-                    reader.onload = (e) => {
-                        const dataUrl = e.target.result;
-                        const key = 'nb_pasted_stack';
-                        let stack = [];
-                        try { stack = JSON.parse(localStorage.getItem(key) || '[]'); } catch (_) {}
-                        stack.push(dataUrl);
-                        localStorage.setItem(key, JSON.stringify(stack));
-                        if (statusEl) statusEl.textContent =
-                            'Captured ' + stack.length + ' pasted image(s) — click “Import Pasted Image” to merge.';
-                        setTextArea(JSON.stringify(stack));
-                    };
-                    reader.readAsDataURL(blob);
-                    break;
-                }
-            }
-        };
-        document.addEventListener('paste', captureClipboardImage);
-        </script>
-        """,
-        height=60,
-    )
-
     if st.button("📥 Import Pasted Image(s) from Clipboard", key="btn_import_paste", type="secondary"):
         import json as _json
         _raw = st.session_state.get("clipboard_paste_buffer") or ""
@@ -840,6 +795,21 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             width="stretch",
             hide_index=True
         )
+
+        st.markdown("###### 📋 Quick Copy for NetBox (Batch Text)")
+        formatted_lines = []
+        for row in st.session_state["esxi_parsed_descriptions"]:
+            if isinstance(row, dict):
+                iface = row.get("Interface", "")
+                desc = row.get("Description", "")
+                ip = row.get("IP Address", "")
+                if ip and ip.strip():
+                    formatted_lines.append(f"{iface}:\n{desc} (IP: {ip})\n")
+                else:
+                    formatted_lines.append(f"{iface}:\n{desc}\n")
+
+        bulk_text = "\n".join(formatted_lines).strip()
+        st.code(bulk_text, language="text")
 
     presets = naming_rules.get("esxi_network_presets", [])
     if not presets:
