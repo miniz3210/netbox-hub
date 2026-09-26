@@ -724,6 +724,11 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         st.markdown("---")
         st.markdown("**📸 Automated Data Entry via Screenshot**")
         col_up1, col_up2 = st.columns([1, 1])
+
+        # Ensure session storage for clipboard images exists
+        if "pasted_clipboard_imgs" not in st.session_state:
+            st.session_state["pasted_clipboard_imgs"] = []
+
         with col_up1:
             uploaded_imgs = st.file_uploader(
                 "Upload Topology Screenshots (Drag & Drop)",
@@ -732,6 +737,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 key="esxi_topology_uploader",
                 help="Upload screenshots of the Virtual Switches topology to extract Uplinks and PortGroups.",
             )
+
         with col_up2:
             st.markdown("**📋 Or Paste from Clipboard (Ctrl+V)**")
             pasted_data = st.text_input(
@@ -775,31 +781,51 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 width=0,
             )
 
-        # Merge uploaded files and clipboard image
-        if not uploaded_imgs:
-            uploaded_imgs = []
-        else:
-            uploaded_imgs = list(uploaded_imgs)
-
+        # Process newly pasted image and auto-clear input box
         if pasted_data and pasted_data.startswith("data:image"):
             import base64, io
             try:
                 header, encoded = pasted_data.split(",", 1)
                 img_bytes = base64.b64decode(encoded)
                 pasted_file = io.BytesIO(img_bytes)
-                pasted_file.name = "clipboard_screenshot.png"
+                idx = len(st.session_state["pasted_clipboard_imgs"]) + 1
+                pasted_file.name = f"clipboard_screenshot_{idx}.png"
                 pasted_file.type = "image/png"
                 pasted_file.size = len(img_bytes)
-                uploaded_imgs.append(pasted_file)
-                st.success("✅ Screenshot captured from clipboard!")
+                st.session_state["pasted_clipboard_imgs"].append(pasted_file)
+                st.session_state["esxi_clipboard_paste_input"] = ""
+                st.rerun()
             except Exception as e:
                 st.warning(f"Failed to process pasted image: {e}")
 
-    if uploaded_imgs:
-        with st.expander(f"🔍 Preview Uploaded Screenshots ({len(uploaded_imgs)} file(s))", expanded=False):
-            cols = st.columns(min(len(uploaded_imgs), 3))
-            for idx, img in enumerate(uploaded_imgs):
-                cols[idx % 3].image(img, caption=img.name, width="stretch")
+        # Combine uploaded files and clipboard images
+        combined_imgs = []
+        if uploaded_imgs:
+            combined_imgs.extend(list(uploaded_imgs))
+        if st.session_state.get("pasted_clipboard_imgs"):
+            combined_imgs.extend(st.session_state["pasted_clipboard_imgs"])
+        uploaded_imgs = combined_imgs
+
+        # UI controls to remove specific pasted screenshots individually
+        if st.session_state.get("pasted_clipboard_imgs"):
+            st.markdown("##### 📋 Clipboard Screenshots")
+            cols_pasted = st.columns(min(len(st.session_state["pasted_clipboard_imgs"]), 4))
+            remove_idx = None
+            for p_idx, p_img in enumerate(st.session_state["pasted_clipboard_imgs"]):
+                with cols_pasted[p_idx % len(cols_pasted)]:
+                    st.caption(f"Screenshot #{p_idx + 1}")
+                    st.image(p_img, use_container_width=True)
+                    if st.button("✖ Remove", key=f"del_pasted_img_{p_idx}"):
+                        remove_idx = p_idx
+            if remove_idx is not None:
+                st.session_state["pasted_clipboard_imgs"].pop(remove_idx)
+                st.rerun()
+
+        if uploaded_imgs:
+            with st.expander(f"🔍 Preview Uploaded Screenshots ({len(uploaded_imgs)} file(s))", expanded=False):
+                cols = st.columns(min(len(uploaded_imgs), 3))
+                for idx, img in enumerate(uploaded_imgs):
+                    cols[idx % 3].image(img, caption=img.name, width="stretch")
 
         if st.button("🚀 Analyze Topology & Auto-Populate", key="btn_analyze_esxi_img", type="primary"):
             with st.spinner("Analyzing topology with AI Vision..."):
