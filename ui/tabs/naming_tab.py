@@ -719,6 +719,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                - **Right:** Physical Adapters (with link speeds)
 
             > 💡 **Tip:** The AI analyzer automatically resolves **Active / Standby** teaming states and port purposes by detecting link speeds (e.g., 10 Gbps vs 1 Gbps) and topology bindings.
+
+            > ⚠️ **Manual Verification Required:** ESXi topology views do not explicitly display Active vs. Standby status. Please verify in ESXi: click **EDIT** beside the vSwitch ➜ go to **Teaming and failover** ➜ check **Failover order** (Active vs Standby adapters) before committing to NetBox.
             """
         )
         st.markdown("---")
@@ -892,7 +894,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     vs_lines.append(f"{iface}:\n{desc}\n")
             blocks.append("\n".join(vs_lines))
 
-        bulk_text = "\n\n".join(blocks).strip()
+        bulk_text = "# NOTE: Verify Active/Standby via ESXi: vSwitch -> EDIT -> Teaming and failover -> Failover order.\n" + "\n\n".join(blocks).strip()
         st.code(bulk_text, language="text")
 
     presets = naming_rules.get("esxi_network_presets", [])
