@@ -803,21 +803,21 @@ def render_standards_tab(active_model):
     tab_edit, tab_vars, tab_history = st.tabs(["📝 Edit Standards", "📘 Pattern Variables Reference", "📜 Change History"])
     
     with tab_edit:
-        with st.expander("🔧 Network & Security Devices", expanded=False):
+        with st.expander("🔧 Network & Security Devices", expanded=True):
             with st.expander("🔧 Device Type Presets", expanded=False):
                 _preset_type_editor("device", get_device_presets(current_rules), current_rules, prefix="branch")
 
             with st.expander("🔌 Interface Type Presets", expanded=False):
                 _preset_type_editor("interface", get_interface_presets(current_rules), current_rules, prefix="iface")
 
-        with st.expander("🖥️ Hosts & Virtual Machines", expanded=False):
+        with st.expander("🖥️ Hosts & Virtual Machines", expanded=True):
             with st.expander("🖥️ Hosts Type Presets", expanded=False):
                 _host_editor(current_rules)
 
             with st.expander("🖱️ Virtual Machine Presets", expanded=False):
                 _vm_editor(current_rules)
 
-        with st.expander("☁️ ESXi Network Description Presets", expanded=False):
+        with st.expander("☁️ ESXi Network Description Presets", expanded=True):
             _preset_type_editor("esxi_network", get_esxi_network_presets(current_rules), current_rules, prefix="esxinet")
 
         with st.expander("🛠️ Manage Syntax Auto-Correction Rules", expanded=False):
