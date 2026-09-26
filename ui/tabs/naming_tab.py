@@ -725,11 +725,13 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         st.markdown("**📸 Automated Data Entry via Screenshot**")
         col_up1, col_up2 = st.columns([1, 1])
 
-        # Ensure session storage for clipboard images and dynamic paste counter exists
+        # Ensure session storage for clipboard images, dynamic paste counter, and ignored uploads
         if "pasted_clipboard_imgs" not in st.session_state:
             st.session_state["pasted_clipboard_imgs"] = []
         if "esxi_paste_counter" not in st.session_state:
             st.session_state["esxi_paste_counter"] = 0
+        if "ignored_upload_names" not in st.session_state:
+            st.session_state["ignored_upload_names"] = set()
 
         with col_up1:
             uploaded_imgs = st.file_uploader(
@@ -810,30 +812,35 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             except Exception as e:
                 st.warning(f"Failed to process pasted image: {e}")
 
-        # Combine uploaded files and clipboard images
+        # Combine valid uploaded files (excluding removed ones) and clipboard images
         combined_imgs = []
         if uploaded_imgs:
-            combined_imgs.extend(list(uploaded_imgs))
+            valid_uploads = [
+                f for f in uploaded_imgs
+                if getattr(f, "name", "") not in st.session_state["ignored_upload_names"]
+            ]
+            combined_imgs.extend(valid_uploads)
         if st.session_state.get("pasted_clipboard_imgs"):
             combined_imgs.extend(st.session_state["pasted_clipboard_imgs"])
         uploaded_imgs = combined_imgs
 
-        # Unified Preview Area (Single place for preview & removal)
+        # Unified Preview Area (Consistent preview & removal for ALL images)
         if uploaded_imgs:
             with st.expander(f"🔍 Preview Uploaded Screenshots ({len(uploaded_imgs)} file(s))", expanded=True):
                 preview_cols = st.columns(min(len(uploaded_imgs), 4))
-                remove_clip_idx = None
+                remove_action = None
                 for img_idx, img_item in enumerate(uploaded_imgs):
                     with preview_cols[img_idx % len(preview_cols)]:
-                        st.caption(f"Screenshot #{img_idx + 1}")
+                        img_title = getattr(img_item, "name", f"Screenshot #{img_idx + 1}")
+                        st.caption(f"#{img_idx + 1}: {img_title}")
                         st.image(img_item, use_container_width=True)
-                        # Check if this item is a clipboard-pasted image to allow individual removal
-                        if img_item in st.session_state.get("pasted_clipboard_imgs", []):
-                            c_idx = st.session_state["pasted_clipboard_imgs"].index(img_item)
-                            if st.button("✖ Remove", key=f"unified_remove_clip_{c_idx}"):
-                                remove_clip_idx = c_idx
-                if remove_clip_idx is not None:
-                    st.session_state["pasted_clipboard_imgs"].pop(remove_clip_idx)
+                        if st.button("✖ Remove", key=f"unified_remove_btn_{img_idx}"):
+                            remove_action = img_item
+                if remove_action is not None:
+                    if remove_action in st.session_state.get("pasted_clipboard_imgs", []):
+                        st.session_state["pasted_clipboard_imgs"].remove(remove_action)
+                    else:
+                        st.session_state["ignored_upload_names"].add(getattr(remove_action, "name", ""))
                     st.rerun()
 
         if st.button("🚀 Analyze Topology & Auto-Populate", key="btn_analyze_esxi_img", type="primary"):
