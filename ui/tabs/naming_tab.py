@@ -725,9 +725,11 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         st.markdown("**📸 Automated Data Entry via Screenshot**")
         col_up1, col_up2 = st.columns([1, 1])
 
-        # Ensure session storage for clipboard images exists
+        # Ensure session storage for clipboard images and dynamic paste counter exists
         if "pasted_clipboard_imgs" not in st.session_state:
             st.session_state["pasted_clipboard_imgs"] = []
+        if "esxi_paste_counter" not in st.session_state:
+            st.session_state["esxi_paste_counter"] = 0
 
         with col_up1:
             uploaded_imgs = st.file_uploader(
@@ -740,69 +742,71 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
         with col_up2:
             st.markdown("**📋 Or Paste from Clipboard (Ctrl+V)**")
+            paste_box_key = f"esxi_paste_input_{st.session_state['esxi_paste_counter']}"
             pasted_data = st.text_input(
                 "Paste Area",
                 placeholder="Click here and press Ctrl+V",
-                key="esxi_clipboard_paste_input",
+                key=paste_box_key,
                 label_visibility="collapsed",
                 help="Focus this box and press Ctrl+V.",
             )
-            # Client-side JavaScript bridge to capture binary clipboard images (Greenshot / Snipping Tool)
+            # Client-side JavaScript bridge to capture binary clipboard images and simulate Enter
             import streamlit.components.v1 as _components
             _components.html(
-                """
+                f"""
                 <script>
                 const parentDoc = window.parent.document;
                 const pasteInput = parentDoc.querySelector('input[aria-label="Paste Area"]');
-                if (pasteInput && !pasteInput.dataset.pasteBound) {
+                if (pasteInput && !pasteInput.dataset.pasteBound) {{
                     pasteInput.dataset.pasteBound = "true";
-                    pasteInput.addEventListener('paste', function(e) {
+                    pasteInput.addEventListener('paste', function(e) {{
                         const items = (e.clipboardData || window.clipboardData).items;
-                        for (let i = 0; i < items.length; i++) {
-                            if (items[i].type.indexOf('image') !== -1) {
+                        for (let i = 0; i < items.length; i++) {{
+                            if (items[i].type.indexOf('image') !== -1) {{
                                 const blob = items[i].getAsFile();
                                 const reader = new FileReader();
-                                reader.onload = function(event) {
+                                reader.onload = function(event) {{
                                     const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
                                     nativeInputValueSetter.call(pasteInput, event.target.result);
-                                    pasteInput.dispatchEvent(new Event('input', { bubbles: true }));
-                                    pasteInput.dispatchEvent(new Event('change', { bubbles: true }));
-                                    setTimeout(function() { nativeInputValueSetter.call(pasteInput, ''); pasteInput.dispatchEvent(new Event('input', { bubbles: true })); }, 100);
-                                };
+                                    pasteInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                                    pasteInput.dispatchEvent(new KeyboardEvent('keydown', {{
+                                        bubbles: true,
+                                        cancelable: true,
+                                        key: 'Enter',
+                                        code: 'Enter',
+                                        keyCode: 13,
+                                        which: 13
+                                    }}));
+                                    pasteInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                                }};
                                 reader.readAsDataURL(blob);
                                 e.preventDefault();
                                 break;
-                            }
-                        }
-                    });
-                }
+                            }}
+                        }}
+                    }});
+                }}
                 </script>
                 """,
                 height=0,
                 width=0,
             )
 
-        # Process newly pasted image safely without illegal session state mutation
+        # Process newly pasted image and cleanly auto-clear via counter increment
         if pasted_data and pasted_data.startswith("data:image"):
             import base64, io
             try:
                 header, encoded = pasted_data.split(",", 1)
                 img_bytes = base64.b64decode(encoded)
-                # Check for duplicate consecutive paste
-                is_duplicate = False
-                if st.session_state["pasted_clipboard_imgs"]:
-                    last_img = st.session_state["pasted_clipboard_imgs"][-1]
-                    if getattr(last_img, "getvalue", None) and last_img.getvalue() == img_bytes:
-                        is_duplicate = True
-
-                if not is_duplicate:
-                    pasted_file = io.BytesIO(img_bytes)
-                    idx = len(st.session_state["pasted_clipboard_imgs"]) + 1
-                    pasted_file.name = f"clipboard_screenshot_{idx}.png"
-                    pasted_file.type = "image/png"
-                    pasted_file.size = len(img_bytes)
-                    st.session_state["pasted_clipboard_imgs"].append(pasted_file)
-                    st.rerun()
+                pasted_file = io.BytesIO(img_bytes)
+                idx = len(st.session_state["pasted_clipboard_imgs"]) + 1
+                pasted_file.name = f"clipboard_screenshot_{idx}.png"
+                pasted_file.type = "image/png"
+                pasted_file.size = len(img_bytes)
+                st.session_state["pasted_clipboard_imgs"].append(pasted_file)
+                # Increment counter to remount an empty input box on rerun
+                st.session_state["esxi_paste_counter"] += 1
+                st.rerun()
             except Exception as e:
                 st.warning(f"Failed to process pasted image: {e}")
 
