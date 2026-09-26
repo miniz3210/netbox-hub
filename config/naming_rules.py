@@ -560,11 +560,19 @@ def make_preset_key(code: str, prefix: str = "branch") -> str:
 
 
 def load_naming_rules() -> Dict[str, str]:
+    import streamlit as st
+    if hasattr(st, "session_state") and "_cached_naming_rules" in st.session_state:
+        cached = st.session_state["_cached_naming_rules"]
+        if isinstance(cached, dict) and cached:
+            return cached
+
     _migrate_and_persist()
     rules = _load_rules_dict_from_file()
-    if not rules:
-        return _normalize_rules(DEFAULT_NAMING_PATTERNS.copy())
-    return _normalize_rules(rules)
+    normalized = _normalize_rules(rules if rules else DEFAULT_NAMING_PATTERNS.copy())
+
+    if hasattr(st, "session_state"):
+        st.session_state["_cached_naming_rules"] = normalized
+    return normalized
 
 
 def get_pattern_variables(rules: dict) -> dict:
@@ -684,6 +692,10 @@ def save_naming_rules(rules: Dict[str, str], source: str = "Manual Edit"):
         json.dump(stored, f, indent=2, ensure_ascii=False)
         f.flush()
         os.fsync(f.fileno())
+
+    import streamlit as st
+    if hasattr(st, "session_state"):
+        st.session_state["_cached_naming_rules"] = stored
 
 DEFAULT_RULES = _normalize_rules(DEFAULT_NAMING_PATTERNS.copy())
 

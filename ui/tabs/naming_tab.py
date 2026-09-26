@@ -218,9 +218,14 @@ def render_compact_toolbar(active_model):
                 import logging
                 logging.getLogger(__name__).warning(f"Failed to restore backup on tab load: {e}")
     
-    total_recs = get_total_record_count()
-    device_count = len(get_records_by_category("device")) + len(get_records_by_category("hypervisor"))
-    vm_count = len(get_records_by_category("vm"))
+    @st.cache_data(ttl=30, show_spinner=False)
+    def _fetch_cached_toolbar_stats():
+        tot = get_total_record_count()
+        dev = len(get_records_by_category("device")) + len(get_records_by_category("hypervisor"))
+        vms = len(get_records_by_category("vm"))
+        return tot, dev, vms
+
+    total_recs, device_count, vm_count = _fetch_cached_toolbar_stats()
     
     status_tag = f"🟢 ({device_count} Devices, {vm_count} VMs in DB)" if total_recs > 0 else "⚪ (Default Examples)"
     tick_devices = " ✅" if device_count > 0 else ""
