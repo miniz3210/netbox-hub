@@ -723,13 +723,44 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         )
         st.markdown("---")
         st.markdown("**📸 Automated Data Entry via Screenshot**")
-        uploaded_imgs = st.file_uploader(
-            "Upload Topology Screenshots (Multiple allowed / Drag & Drop files)",
-            type=["png", "jpg", "jpeg"],
-            accept_multiple_files=True,
-            key="esxi_topology_uploader",
-            help="Upload screenshots of the Virtual Switches topology screen.",
-        )
+        col_up1, col_up2 = st.columns([1, 1])
+        with col_up1:
+            uploaded_imgs = st.file_uploader(
+                "Upload Topology Screenshots (Drag & Drop)",
+                type=["png", "jpg", "jpeg"],
+                accept_multiple_files=True,
+                key="esxi_topology_uploader",
+                help="Upload screenshots of the Virtual Switches topology to extract Uplinks and PortGroups.",
+            )
+        with col_up2:
+            st.markdown("**📋 Or Paste from Clipboard (Ctrl+V)**")
+            pasted_data = st.text_input(
+                "Paste Area",
+                placeholder="Click here and press Ctrl+V with Greenshot/Screenshot copied...",
+                key="esxi_clipboard_paste_input",
+                label_visibility="collapsed",
+                help="Focus this box and press Ctrl+V. Compatible with Greenshot, Snagit, and Windows snip.",
+            )
+
+        # Merge uploaded files and clipboard image
+        if not uploaded_imgs:
+            uploaded_imgs = []
+        else:
+            uploaded_imgs = list(uploaded_imgs)
+
+        if pasted_data and pasted_data.startswith("data:image"):
+            import base64, io
+            try:
+                header, encoded = pasted_data.split(",", 1)
+                img_bytes = base64.b64decode(encoded)
+                pasted_file = io.BytesIO(img_bytes)
+                pasted_file.name = "clipboard_screenshot.png"
+                pasted_file.type = "image/png"
+                pasted_file.size = len(img_bytes)
+                uploaded_imgs.append(pasted_file)
+                st.success("✅ Screenshot captured from clipboard!")
+            except Exception as e:
+                st.warning(f"Failed to process pasted image: {e}")
 
     if uploaded_imgs:
         with st.expander(f"🔍 Preview Uploaded Screenshots ({len(uploaded_imgs)} file(s))", expanded=False):
