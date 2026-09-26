@@ -757,7 +757,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                                 const blob = items[i].getAsFile();
                                 const reader = new FileReader();
                                 reader.onload = function(event) {
-                                    pasteInput.value = event.target.result;
+                                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                                    nativeInputValueSetter.call(pasteInput, event.target.result);
                                     pasteInput.dispatchEvent(new Event('input', { bubbles: true }));
                                     pasteInput.dispatchEvent(new Event('change', { bubbles: true }));
                                 };
