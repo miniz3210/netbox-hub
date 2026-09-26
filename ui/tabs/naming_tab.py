@@ -736,10 +736,42 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             st.markdown("**📋 Or Paste from Clipboard (Ctrl+V)**")
             pasted_data = st.text_input(
                 "Paste Area",
-                placeholder="Click here and press Ctrl+V with Greenshot/Screenshot copied...",
+                placeholder="Click here and press Ctrl+V",
                 key="esxi_clipboard_paste_input",
                 label_visibility="collapsed",
-                help="Focus this box and press Ctrl+V. Compatible with Greenshot, Snagit, and Windows snip.",
+                help="Focus this box and press Ctrl+V.",
+            )
+            # Client-side JavaScript bridge to capture binary clipboard images (Greenshot / Snipping Tool)
+            import streamlit.components.v1 as _components
+            _components.html(
+                """
+                <script>
+                const parentDoc = window.parent.document;
+                const pasteInput = parentDoc.querySelector('input[aria-label="Paste Area"]');
+                if (pasteInput && !pasteInput.dataset.pasteBound) {
+                    pasteInput.dataset.pasteBound = "true";
+                    pasteInput.addEventListener('paste', function(e) {
+                        const items = (e.clipboardData || window.clipboardData).items;
+                        for (let i = 0; i < items.length; i++) {
+                            if (items[i].type.indexOf('image') !== -1) {
+                                const blob = items[i].getAsFile();
+                                const reader = new FileReader();
+                                reader.onload = function(event) {
+                                    pasteInput.value = event.target.result;
+                                    pasteInput.dispatchEvent(new Event('input', { bubbles: true }));
+                                    pasteInput.dispatchEvent(new Event('change', { bubbles: true }));
+                                };
+                                reader.readAsDataURL(blob);
+                                e.preventDefault();
+                                break;
+                            }
+                        }
+                    });
+                }
+                </script>
+                """,
+                height=0,
+                width=0,
             )
 
         # Merge uploaded files and clipboard image
