@@ -718,9 +718,9 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                - **Middle:** Virtual Switch diagram
                - **Right:** Physical Adapters (with link speeds)
 
-            > 💡 **Tip:** The AI analyzer automatically resolves **Active / Standby** teaming states and port purposes by detecting link speeds (e.g., 10 Gbps vs 1 Gbps) and topology bindings.
+> 💡 **Pro-Tip (Complete Data Discovery)**: In addition to **Virtual switches** topology, also upload/paste screenshots of **Networking ➜ Physical adapters** (click `>>` to expand adapters like `vmnic1`~`vmnic6`). This provides exact **MAC addresses**, **PCI slot mappings (PCIeX/PortX)**, and **CDP/LLDP Switch Ports (Cable Connections)** with zero manual guesswork!
 
-            > ⚠️ **Manual Verification Required:** ESXi topology views do not explicitly display Active vs. Standby status. Please verify in ESXi: click **EDIT** beside the vSwitch ➜ go to **Teaming and failover** ➜ check **Failover order** (Active vs Standby adapters) before committing to NetBox.
+> ⚠️ **Manual Verification Required:** ESXi topology views do not explicitly display Active vs. Standby status. Please verify in ESXi: click **EDIT** beside the vSwitch ➜ go to **Teaming and failover** ➜ check **Failover order** (Active vs Standby adapters) before committing to NetBox.
             """
         )
         st.markdown("---")
@@ -738,11 +738,11 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         with col_up1:
             uploader_key = f"esxi_file_uploader_{st.session_state['esxi_upload_counter']}"
             raw_uploaded = st.file_uploader(
-                "Upload Topology Screenshots (Drag & Drop)",
+                "Upload Screenshots (Drag & Drop)",
                 type=["png", "jpg", "jpeg"],
                 accept_multiple_files=True,
                 key=uploader_key,
-                help="Upload screenshots of the Virtual Switches topology to extract Uplinks and PortGroups.",
+                help="Upload Virtual Switches topology and/or Physical Adapters (expanded '>>' for MAC & CDP).",
             )
             # Ingest uploaded files immediately and reset uploader widget so it stays clean
             if raw_uploaded:
