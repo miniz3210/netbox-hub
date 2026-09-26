@@ -836,12 +836,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     st.session_state["pasted_clipboard_imgs"].pop(remove_clip_idx)
                     st.rerun()
 
-        if uploaded_imgs:
-            with st.expander(f"🔍 Preview Uploaded Screenshots ({len(uploaded_imgs)} file(s))", expanded=False):
-                cols = st.columns(min(len(uploaded_imgs), 3))
-                for idx, img in enumerate(uploaded_imgs):
-                    cols[idx % 3].image(img, caption=img.name, width="stretch")
-
         if st.button("🚀 Analyze Topology & Auto-Populate", key="btn_analyze_esxi_img", type="primary"):
             with st.spinner("Analyzing topology with AI Vision..."):
                 try:
