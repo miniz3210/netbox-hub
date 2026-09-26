@@ -716,16 +716,15 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             > 💡 **Tip:** The AI analyzer automatically resolves **Active / Standby** teaming states and port purposes by detecting link speeds (e.g., 10 Gbps vs 1 Gbps) and topology bindings.
             """
         )
-
-    st.markdown("##### 📤 Automated Data Entry via Screenshot")
-    
-    uploaded_imgs = st.file_uploader(
-        "Upload Topology Screenshots (Multiple allowed / Drag & Drop files)",
-        type=["png", "jpg", "jpeg"],
-        accept_multiple_files=True,
-        key="esxi_topology_uploader",
-        help="Upload screenshots of the Virtual Switches topology screen.",
-    )
+        st.markdown("---")
+        st.markdown("**📸 Automated Data Entry via Screenshot**")
+        uploaded_imgs = st.file_uploader(
+            "Upload Topology Screenshots (Multiple allowed / Drag & Drop files)",
+            type=["png", "jpg", "jpeg"],
+            accept_multiple_files=True,
+            key="esxi_topology_uploader",
+            help="Upload screenshots of the Virtual Switches topology screen.",
+        )
 
     if uploaded_imgs:
         with st.expander(f"🔍 Preview Uploaded Screenshots ({len(uploaded_imgs)} file(s))", expanded=False):
