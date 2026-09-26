@@ -767,6 +767,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                                     nativeInputValueSetter.call(pasteInput, event.target.result);
                                     pasteInput.dispatchEvent(new Event('input', { bubbles: true }));
                                     pasteInput.dispatchEvent(new Event('change', { bubbles: true }));
+                                    setTimeout(function() { nativeInputValueSetter.call(pasteInput, ''); pasteInput.dispatchEvent(new Event('input', { bubbles: true })); }, 100);
                                 };
                                 reader.readAsDataURL(blob);
                                 e.preventDefault();
@@ -781,20 +782,27 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 width=0,
             )
 
-        # Process newly pasted image and auto-clear input box
+        # Process newly pasted image safely without illegal session state mutation
         if pasted_data and pasted_data.startswith("data:image"):
             import base64, io
             try:
                 header, encoded = pasted_data.split(",", 1)
                 img_bytes = base64.b64decode(encoded)
-                pasted_file = io.BytesIO(img_bytes)
-                idx = len(st.session_state["pasted_clipboard_imgs"]) + 1
-                pasted_file.name = f"clipboard_screenshot_{idx}.png"
-                pasted_file.type = "image/png"
-                pasted_file.size = len(img_bytes)
-                st.session_state["pasted_clipboard_imgs"].append(pasted_file)
-                st.session_state["esxi_clipboard_paste_input"] = ""
-                st.rerun()
+                # Check for duplicate consecutive paste
+                is_duplicate = False
+                if st.session_state["pasted_clipboard_imgs"]:
+                    last_img = st.session_state["pasted_clipboard_imgs"][-1]
+                    if getattr(last_img, "getvalue", None) and last_img.getvalue() == img_bytes:
+                        is_duplicate = True
+
+                if not is_duplicate:
+                    pasted_file = io.BytesIO(img_bytes)
+                    idx = len(st.session_state["pasted_clipboard_imgs"]) + 1
+                    pasted_file.name = f"clipboard_screenshot_{idx}.png"
+                    pasted_file.type = "image/png"
+                    pasted_file.size = len(img_bytes)
+                    st.session_state["pasted_clipboard_imgs"].append(pasted_file)
+                    st.rerun()
             except Exception as e:
                 st.warning(f"Failed to process pasted image: {e}")
 
