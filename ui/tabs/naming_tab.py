@@ -750,42 +750,43 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 label_visibility="collapsed",
                 help="Focus this box and press Ctrl+V.",
             )
-            # Client-side JavaScript bridge to capture binary clipboard images and simulate Enter
+            # Persistent delegated paste listener across remounts
             import streamlit.components.v1 as _components
             _components.html(
-                f"""
+                """
                 <script>
                 const parentDoc = window.parent.document;
-                const pasteInput = parentDoc.querySelector('input[aria-label="Paste Area"]');
-                if (pasteInput && !pasteInput.dataset.pasteBound) {{
-                    pasteInput.dataset.pasteBound = "true";
-                    pasteInput.addEventListener('paste', function(e) {{
+                if (!window.parent._esxiPasteDelegated) {
+                    window.parent._esxiPasteDelegated = true;
+                    parentDoc.addEventListener('paste', function(e) {
+                        const target = e.target;
+                        if (!target || target.getAttribute('aria-label') !== 'Paste Area') return;
                         const items = (e.clipboardData || window.clipboardData).items;
-                        for (let i = 0; i < items.length; i++) {{
-                            if (items[i].type.indexOf('image') !== -1) {{
+                        for (let i = 0; i < items.length; i++) {
+                            if (items[i].type.indexOf('image') !== -1) {
                                 const blob = items[i].getAsFile();
                                 const reader = new FileReader();
-                                reader.onload = function(event) {{
-                                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-                                    nativeInputValueSetter.call(pasteInput, event.target.result);
-                                    pasteInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                                    pasteInput.dispatchEvent(new KeyboardEvent('keydown', {{
+                                reader.onload = function(event) {
+                                    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                                    nativeSetter.call(target, event.target.result);
+                                    target.dispatchEvent(new Event('input', { bubbles: true }));
+                                    target.dispatchEvent(new KeyboardEvent('keydown', {
                                         bubbles: true,
                                         cancelable: true,
                                         key: 'Enter',
                                         code: 'Enter',
                                         keyCode: 13,
                                         which: 13
-                                    }}));
-                                    pasteInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                                }};
+                                    }));
+                                    target.dispatchEvent(new Event('change', { bubbles: true }));
+                                };
                                 reader.readAsDataURL(blob);
                                 e.preventDefault();
                                 break;
-                            }}
-                        }}
-                    }});
-                }}
+                            }
+                        }
+                    });
+                }
                 </script>
                 """,
                 height=0,
@@ -804,7 +805,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 pasted_file.type = "image/png"
                 pasted_file.size = len(img_bytes)
                 st.session_state["pasted_clipboard_imgs"].append(pasted_file)
-                # Increment counter to remount an empty input box on rerun
                 st.session_state["esxi_paste_counter"] += 1
                 st.rerun()
             except Exception as e:
@@ -818,20 +818,23 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             combined_imgs.extend(st.session_state["pasted_clipboard_imgs"])
         uploaded_imgs = combined_imgs
 
-        # UI controls to remove specific pasted screenshots individually
-        if st.session_state.get("pasted_clipboard_imgs"):
-            st.markdown("##### 📋 Clipboard Screenshots")
-            cols_pasted = st.columns(min(len(st.session_state["pasted_clipboard_imgs"]), 4))
-            remove_idx = None
-            for p_idx, p_img in enumerate(st.session_state["pasted_clipboard_imgs"]):
-                with cols_pasted[p_idx % len(cols_pasted)]:
-                    st.caption(f"Screenshot #{p_idx + 1}")
-                    st.image(p_img, use_container_width=True)
-                    if st.button("✖ Remove", key=f"del_pasted_img_{p_idx}"):
-                        remove_idx = p_idx
-            if remove_idx is not None:
-                st.session_state["pasted_clipboard_imgs"].pop(remove_idx)
-                st.rerun()
+        # Unified Preview Area (Single place for preview & removal)
+        if uploaded_imgs:
+            with st.expander(f"🔍 Preview Uploaded Screenshots ({len(uploaded_imgs)} file(s))", expanded=True):
+                preview_cols = st.columns(min(len(uploaded_imgs), 4))
+                remove_clip_idx = None
+                for img_idx, img_item in enumerate(uploaded_imgs):
+                    with preview_cols[img_idx % len(preview_cols)]:
+                        st.caption(f"Screenshot #{img_idx + 1}")
+                        st.image(img_item, use_container_width=True)
+                        # Check if this item is a clipboard-pasted image to allow individual removal
+                        if img_item in st.session_state.get("pasted_clipboard_imgs", []):
+                            c_idx = st.session_state["pasted_clipboard_imgs"].index(img_item)
+                            if st.button("✖ Remove", key=f"unified_remove_clip_{c_idx}"):
+                                remove_clip_idx = c_idx
+                if remove_clip_idx is not None:
+                    st.session_state["pasted_clipboard_imgs"].pop(remove_clip_idx)
+                    st.rerun()
 
         if uploaded_imgs:
             with st.expander(f"🔍 Preview Uploaded Screenshots ({len(uploaded_imgs)} file(s))", expanded=False):
