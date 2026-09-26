@@ -817,8 +817,8 @@ def render_standards_tab(active_model):
             with st.expander("🖱️ Virtual Machine Presets", expanded=False):
                 _vm_editor(current_rules)
 
-        with st.expander("☁️ ESXi Network Description Presets", expanded=True):
-            with st.expander("☁️ ESXi Interface Description Presets", expanded=True):
+        with st.expander("☁️ ESXi Virtualization & Networking", expanded=True):
+            with st.expander("☁️ ESXi Interface Description Presets", expanded=False):
                 _preset_type_editor("esxi_network", get_esxi_network_presets(current_rules), current_rules, prefix="esxinet")
 
         with st.expander("🛠️ Manage Syntax Auto-Correction Rules", expanded=False):
