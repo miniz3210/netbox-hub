@@ -404,7 +404,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
         )
 
         # Headers - balanced with compact, equalized Action column
-        h_code, h_label, h_pattern, h_act = st.columns([1.0, 2.0, 4.5, 1.1])
+        h_code, h_label, h_pattern, h_act = st.columns([0.9, 1.8, 2.8, 1.6])
         with h_code:
             st.markdown("**Code**")
         with h_label:
@@ -424,7 +424,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
                 pkey = p.get("pattern_key", "")
                 tpl = patterns.get(pkey, "")
 
-                c_code, c_label, c_pattern, c_actions = st.columns([1.0, 2.0, 4.5, 1.1])
+                c_code, c_label, c_pattern, c_actions = st.columns([0.9, 1.8, 2.8, 1.6])
                 with c_code:
                     ncode = st.text_input("Code", value=code, key=f"{kind}_pre_code_{idx}", label_visibility="collapsed").strip()
                 with c_label:
@@ -998,8 +998,7 @@ def render_standards_tab(active_model):
                 """
                 <style>
                 div[data-testid="column"]:last-child {
-                    min-width: 95px !important;
-                    max-width: 110px !important;
+                    min-width: 36px !important;
                     display: flex !important;
                     justify-content: flex-end !important;
                     align-items: center !important;
@@ -1019,7 +1018,7 @@ def render_standards_tab(active_model):
 
             if variables_now:
                 # Optimized column ratios: Name, Label, Placeholder, Auto-Fill, Optional, Up, Down, Delete(Action)
-                VARIABLE_COLS_OPTIMIZED = [1.2, 2.8, 3.2, 1.0, 0.8, 0.5, 0.5, 1.0]
+                VARIABLE_COLS_OPTIMIZED = [1.2, 3.5, 4.2, 1.0, 0.8, 0.5, 0.5, 0.5]
                 c_nh_nm, c_nh_lb, c_nh_ph, c_nh_df, c_nh_opt, c_nh_up, c_nh_dn, c_nh_del = st.columns(VARIABLE_COLS_OPTIMIZED, vertical_alignment="center")
                 with c_nh_nm:
                     st.markdown("**Name**")
