@@ -53,23 +53,42 @@ def interpolate_pattern(pattern: str, values: Dict[str, str]) -> str:
 def render_dynamic_pattern(pattern: str, values: Dict[str, str], variables: Dict) -> str:
     """Canonical render pipeline for a naming pattern.
 
-    Universally enforces optional-clause stripping before substitution:
-
-    1. Every token flagged ``optional`` in ``variables`` whose value is empty is
-       removed from the template together with its enclosing ``(...)`` / ``[...]``
-       clause and any adjacent delimiters (``/``, ``-``, ``_``, spaces).
-    2. Non-optional tokens are retained; blank ones render as ``<Token>``.
-    3. Non-empty values are substituted into the cleaned template.
-
-    All generator cards (Asset Classes 1-3) must go through this function rather
-    than calling ``interpolate_pattern`` directly, so the stripping logic is applied
-    uniformly across the entire application.
+    Universally enforces optional-clause stripping, dynamic token substitution,
+    and 100% zero-hardcode auto-correction across all current and future categories.
     """
     if not pattern:
         return ""
-    cleaned = remove_empty_optional_tokens(pattern, values, variables)
-    rendered = _substitute_values(cleaned, values)
-    return _normalize_delimiters(rendered)
+
+    from utils.formatters import load_auto_corrections, apply_auto_corrections
+    
+    # Check if auto-correction is globally enabled
+    auto_corr_enabled = st.session_state.get("auto_correct", True) or st.session_state.get("esxi_auto_corr", True)
+    
+    # Dynamically discover all active rule categories from YAML/cache (NO hardcoded category names)
+    all_rules = load_auto_corrections()
+    categories = list(all_rules.keys()) if isinstance(all_rules, dict) else []
+
+    # 1. Apply all active correction categories to every input token value
+    processed_values = dict(values)
+    if auto_corr_enabled and categories:
+        for k, v in list(processed_values.items()):
+            if v and isinstance(v, str):
+                cur_val = v
+                for cat in categories:
+                    cur_val = apply_auto_corrections(cur_val, cat)
+                processed_values[k] = cur_val
+
+    # 2. Strip empty optional clauses and substitute values
+    cleaned = remove_empty_optional_tokens(pattern, processed_values, variables)
+    rendered = _substitute_values(cleaned, processed_values)
+    final_output = _normalize_delimiters(rendered)
+
+    # 3. Apply all active correction categories to the entire rendered string
+    if auto_corr_enabled and categories:
+        for cat in categories:
+            final_output = apply_auto_corrections(final_output, cat)
+
+    return final_output
 
 
 def _substitute_values(pattern: str, values: Dict[str, str]) -> str:

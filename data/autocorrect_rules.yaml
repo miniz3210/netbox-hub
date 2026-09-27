@@ -85,3 +85,7 @@ auto_corrections:
     replacement: vmk\2
     description: Normalize VMkernel adapter casing (VMKX -> vmkX)
     enabled: true
+  - pattern: (?i)\bvm\s+network\b
+    replacement: VM Network
+    description: Sandardized form 'VM Network'
+    enabled: true

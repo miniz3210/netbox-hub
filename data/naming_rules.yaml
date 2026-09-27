@@ -33,8 +33,8 @@
   "esxi_vswitch": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
   "esxinet_pgname": "PG-<pg_network>",
   "esxi_pgname": "PG-<pg_network>",
-  "esxinet_pg_name": "<pg_network>",
-  "esxi_pg_name": "<pg_network>",
+  "esxinet_pg_name": "PG-<pg_network>",
+  "esxi_pg_name": "PG-<pg_network>",
   "custom_patterns": [],
   "device_presets": [
     {
@@ -205,8 +205,8 @@
     "esxi_vswitch": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
     "esxinet_pgname": "PG-<pg_network>",
     "esxi_pgname": "PG-<pg_network>",
-    "esxinet_pg_name": "<pg_network>",
-    "esxi_pg_name": "<pg_network>"
+    "esxinet_pg_name": "PG-<pg_network>",
+    "esxi_pg_name": "PG-<pg_network>"
   },
   "pattern_variables": {
     "country": {
@@ -445,6 +445,12 @@
       "pg_network"
     ],
     "esxi_pgname": [
+      "pg_network"
+    ],
+    "esxinet_pg_name": [
+      "pg_network"
+    ],
+    "esxi_pg_name": [
       "pg_network"
     ]
   }

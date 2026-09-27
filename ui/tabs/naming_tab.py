@@ -1003,13 +1003,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
     # Dynamically render widgets for ALL tokens in template (handles new tokens automatically)
     values = render_token_widgets(curr_pattern, variables, f"esxi_{selected_code}", custom_order=order)
 
-    # Apply VMware naming auto-corrections if enabled
-    if st.session_state.get("esxi_auto_corr", True):
-        from utils.formatters import apply_auto_corrections
-        for t, v in list(values.items()):
-            if v and t in ("vmnic", "v_switch", "port_group", "active_vmnics", "standby_vmnics"):
-                values[t] = apply_auto_corrections(v, "vmware")
-
+    # All dynamic values and templates are automatically normalized via zero-hardcode pipeline
     out = render_dynamic_pattern(curr_pattern, values, variables)
 
     st.session_state["esxi_generated_desc"] = out
