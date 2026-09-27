@@ -577,19 +577,25 @@ _SEP_CHAR = r"\-_/\.@"
 def _normalize_delimiters(text: str) -> str:
     """Template-faithful whitespace & delimiter collapse sweep (post-substitution).
 
+    Step A0: Drop orphan slashes left at the edges of a bracket pair when the
+    optional token they wrapped was omitted, e.g. ``( / )`` or ``( / Standby)``.
     Step A: Remove empty bracket pairs ``()`` ``[]`` (with preceding whitespace).
-    Step B: Collapse runs of spaces into a single space.
+    Step B: Collapse runs of consecutive whitespace into a single space.
     Step C: Remove whitespace before delimiters that bind tightly (``_``, ``.``, ``/``).
     Step D: Strip dangling leading/trailing delimiters and outer whitespace.
     Space-separated hyphens such as `` - `` in templates are intentionally preserved.
     """
     if not text:
         return text
+    # Step A0: drop orphan slashes at the edges of a bracket pair (consuming the
+    # whitespace around them) left behind by an omitted optional token.
+    text = re.sub(r"([(\[])\s*/\s*", r"\1", text)
+    text = re.sub(r"\s*/\s*([)\]])", r"\1", text)
     # Step A: remove empty bracket pairs (consume preceding whitespace).
     text = re.sub(r"\s*\(\s*\)", "", text)
     text = re.sub(r"\s*\[\s*\]", "", text)
     # Step B: collapse multiple spaces.
-    text = re.sub(r" {2,}", " ", text)
+    text =     re.sub(r"\s{2,}", " ", text)
     # Step C: no whitespace before tight-binding delimiters (underscore, dot, slash).
     text = re.sub(r"[ \t]+([_/.])", r"\1", text)
     # Collapse a repeated separator (with optional whitespace between them) to one.
@@ -597,5 +603,5 @@ def _normalize_delimiters(text: str) -> str:
     # Step D: trim separators / whitespace at the start and end.
     text = re.sub(rf"^[\s{_SEP_CHAR}]+", "", text)
     text = re.sub(rf"[\s{_SEP_CHAR}]+$", "", text)
-    text = re.sub(r" {2,}", " ", text)
+    text =     re.sub(r"\s{2,}", " ", text)
     return text
