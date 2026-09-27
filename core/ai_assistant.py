@@ -48,7 +48,7 @@ Naming rules per type:
 - Port Group:
   `<vSwitch> (<vmnicX> Active / <vmnicY> Standby)`
 - VMkernel:
-  `<Purpose> Network (<vSwitch>)`
+  `<Purpose> (<vSwitch>)`
 
 Internal / Isolated vSwitches (vSwitches with NO physical network adapters, e.g. \
 "PR Spain Fuenmayor VLab"):

@@ -928,12 +928,20 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 ip = row.get("IP Address", "")
                 row_type = row.get("Type", "")
 
-                if row_type == "Uplink":
+                if row_type == "VMkernel":
+                    # Extract service/purpose from row, stripping any trailing "Network" if present
+                    raw_svc = row.get("Service") or row.get("Purpose") or ""
+                    if not raw_svc and desc:
+                        # Fallback: extract purpose from existing desc
+                        raw_svc = desc.split("(")[0].strip()
+                    clean_svc = re.sub(r"(?i)\s+network$", "", raw_svc).strip()
+                    
+                    rendered = vmk_tpl.replace("<purpose>", clean_svc).replace("<service>", clean_svc).replace("<v_switch>", vs).replace("<vswitch>", vs)
+                    rendered = re.sub(r"<[^>]+>", "", rendered).strip()
+                elif row_type == "Uplink":
                     rendered = desc or uplink_tpl
                 elif row_type == "PortGroup":
                     rendered = desc or pg_tpl
-                elif row_type == "VMkernel":
-                    rendered = desc or vmk_tpl
                 else:
                     rendered = desc or ""
 
