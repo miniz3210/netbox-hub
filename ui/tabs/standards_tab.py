@@ -491,6 +491,12 @@ def _save_presets(rules: dict) -> None:
     save_naming_rules(rules, source="Presets Manager")
     st.session_state["naming_rules"] = rules.copy()
     st.session_state["presets_saved"] = True
+    st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
+    # Clear all preset widget input keys while safely preserving group selections and system flags
+    _clear_session_state_prefixes(
+        "device_pre_", "interface_pre_", "host_", "vm_", "esxi_network_pre_",
+        "vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_name_", "vlan_pre_pat_"
+    )
     st.rerun()
 
 
@@ -535,6 +541,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
         patterns_updates = {}
         positions = {}
 
+        nonce = st.session_state.get("standards_nonce", 0)
         if presets:
             for idx, p in enumerate(presets):
                 code = p.get("code", "")
@@ -544,11 +551,11 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
 
                 c_code, c_label, c_pattern, c_actions = st.columns(PRESET_COLS, vertical_alignment="center")
                 with c_code:
-                    ncode = st.text_input("Code", value=code, key=f"{kind}_pre_code_{idx}", label_visibility="collapsed").strip()
+                    ncode = st.text_input("Code", value=code, key=f"{kind}_pre_{nonce}_code_{idx}", label_visibility="collapsed").strip()
                 with c_label:
-                    nlbl = st.text_input("Label", value=label, key=f"{kind}_pre_lbl_{idx}", label_visibility="collapsed").strip()
+                    nlbl = st.text_input("Label", value=label, key=f"{kind}_pre_{nonce}_lbl_{idx}", label_visibility="collapsed").strip()
                 with c_pattern:
-                    ntpl = st.text_input("Pattern Template", value=tpl, key=f"{kind}_pre_tpl_{idx}", label_visibility="collapsed").strip()
+                    ntpl = st.text_input("Pattern Template", value=tpl, key=f"{kind}_pre_{nonce}_tpl_{idx}", label_visibility="collapsed").strip()
                 with c_actions:
                     col_up, col_down, col_del = st.columns(PRESET_ACTION_COLS)
                     with col_up:
@@ -770,6 +777,7 @@ def _host_editor(rules: dict) -> None:
         positions = {}
         stale_del = st.session_state.pop("_host_vm_del_idx", None)
 
+        nonce = st.session_state.get("standards_nonce", 0)
         for idx, preset in enumerate(host_presets):
             code = preset.get("code", "")
             label = preset.get("label", "")
@@ -779,16 +787,16 @@ def _host_editor(rules: dict) -> None:
             c_code, c_label, c_pattern, c_actions = st.columns(PRESET_COLS, vertical_alignment="center")
             with c_code:
                 if code == "ESXi":
-                    st.text_input("Code", value=code, key=f"host_{idx}_code", disabled=True, label_visibility="collapsed")
+                    st.text_input("Code", value=code, key=f"host_{nonce}_{idx}_code", disabled=True, label_visibility="collapsed")
                 else:
-                    ncode = st.text_input("Code", value=code, key=f"host_{idx}_code", label_visibility="collapsed").strip()
+                    ncode = st.text_input("Code", value=code, key=f"host_{nonce}_{idx}_code", label_visibility="collapsed").strip()
             with c_label:
                 if code == "ESXi":
-                    st.text_input("Label", value=label, key=f"host_{idx}_lbl", disabled=True, label_visibility="collapsed")
+                    st.text_input("Label", value=label, key=f"host_{nonce}_{idx}_lbl", disabled=True, label_visibility="collapsed")
                 else:
-                    nlbl = st.text_input("Label", value=label, key=f"host_{idx}_lbl", label_visibility="collapsed").strip()
+                    nlbl = st.text_input("Label", value=label, key=f"host_{nonce}_{idx}_lbl", label_visibility="collapsed").strip()
             with c_pattern:
-                ntpl = st.text_input("Pattern Template", value=tpl, key=f"host_{idx}_tpl", label_visibility="collapsed").strip()
+                ntpl = st.text_input("Pattern Template", value=tpl, key=f"host_{nonce}_{idx}_tpl", label_visibility="collapsed").strip()
             with c_actions:
                 col_up, col_down, col_del = st.columns(PRESET_ACTION_COLS)
                 with col_up:
@@ -923,14 +931,15 @@ def _vm_editor(rules: dict) -> None:
         positions = {}
         stale_del = st.session_state.pop("_del_vm_role_idx", None)
 
+        nonce = st.session_state.get("standards_nonce", 0)
         for idx, p in enumerate(vm_presets):
             c_code, c_label, c_pattern, c_actions = st.columns(PRESET_COLS, vertical_alignment="center")
             with c_code:
-                ncode = st.text_input("Code", value=p.get("code", ""), key=f"vm_code_{idx}", label_visibility="collapsed").strip()
+                ncode = st.text_input("Code", value=p.get("code", ""), key=f"vm_{nonce}_code_{idx}", label_visibility="collapsed").strip()
             with c_label:
-                nlbl = st.text_input("Label", value=p.get("label", ""), key=f"vm_lbl_{idx}", label_visibility="collapsed").strip()
+                nlbl = st.text_input("Label", value=p.get("label", ""), key=f"vm_{nonce}_lbl_{idx}", label_visibility="collapsed").strip()
             with c_pattern:
-                ntpl = st.text_input("Pattern Template", value=tpl, key=f"vm_tpl_{idx}", label_visibility="collapsed").strip()
+                ntpl = st.text_input("Pattern Template", value=tpl, key=f"vm_{nonce}_tpl_{idx}", label_visibility="collapsed").strip()
             with c_actions:
                 col_up, col_down, col_del = st.columns(PRESET_ACTION_COLS)
                 with col_up:
@@ -1118,6 +1127,7 @@ def _vlan_presets_editor(rules: dict) -> None:
             updated = []
             positions = {}
 
+            nonce = st.session_state.get("standards_nonce", 0)
             for idx, p in enumerate(items):
                 vid = p.get("vid", "")
                 role_name = p.get("role", "")
@@ -1126,13 +1136,13 @@ def _vlan_presets_editor(rules: dict) -> None:
 
                 c_vid, c_role, c_name, c_pat, c_actions = st.columns(PRESET_VLAN_COLS, vertical_alignment="center")
                 with c_vid:
-                    nvid = st.text_input("VID", value=str(vid) if vid not in (None, "") else "", key=f"vlan_pre_vid_{idx}", label_visibility="collapsed").strip()
+                    nvid = st.text_input("VID", value=str(vid) if vid not in (None, "") else "", key=f"vlan_pre_vid_{nonce}_{idx}", label_visibility="collapsed").strip()
                 with c_role:
-                    nrole = st.text_input("Role", value=str(role_name), key=f"vlan_pre_role_{idx}", label_visibility="collapsed").strip()
+                    nrole = st.text_input("Role", value=str(role_name), key=f"vlan_pre_role_{nonce}_{idx}", label_visibility="collapsed").strip()
                 with c_name:
-                    nname = st.text_input("VLAN Name", value=str(vlan_name), key=f"vlan_pre_name_{idx}", label_visibility="collapsed").strip()
+                    nname = st.text_input("VLAN Name", value=str(vlan_name), key=f"vlan_pre_name_{nonce}_{idx}", label_visibility="collapsed").strip()
                 with c_pat:
-                    ntpl = st.text_input("Pattern Template", value=str(tpl), key=f"vlan_pre_pat_{idx}", label_visibility="collapsed").strip()
+                    ntpl = st.text_input("Pattern Template", value=str(tpl), key=f"vlan_pre_pat_{nonce}_{idx}", label_visibility="collapsed").strip()
                 with c_actions:
                     col_up, col_down, col_del = st.columns(PRESET_ACTION_COLS)
                     with col_up:
