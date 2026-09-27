@@ -707,16 +707,16 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
     st.subheader("ESXi Network Description Formatter", help="Format standardized ESXi physical uplinks, port groups, and VMkernel adapter descriptions.")
 
     with st.expander("📸 Screenshot Guidelines (Virtual Switches Topology)", expanded=False):
-        st.markdown(
-            """
-            **Recommended Capture Location:**
-            1. **Access**: vCenter or ESXi Host Client.
-            2. **Navigate**: `Host` ➔ `Configure` ➔ `Networking` ➔ `Virtual switches`.
-            3. **Expand**: Open target switches (e.g., `vSwitch0`, `vSwitch01`, `vSwitch1`).
-            4. **Capture**: Ensure all three sections are visible:
-               - **Left**: Port Groups & VMkernel ports
-               - **Middle**: Virtual Switch diagram
-               - **Right**: Physical Adapters (with link speeds)
+        st.markdown("""
+**Recommended Capture Location:**
+
+1. **Access**: vCenter or ESXi Host Client.
+2. **Navigate**: `Host` ➔ `Configure` ➔ `Networking` ➔ `Virtual switches`.
+3. **Expand**: Open target switches (e.g., `vSwitch0`, `vSwitch01`, `vSwitch1`).
+4. **Capture**: Ensure all three sections are visible:
+   - **Left**: Port Groups & VMkernel ports
+   - **Middle**: Virtual Switch diagram
+   - **Right**: Physical Adapters (with link speeds)
 
 > 💡 **Pro-Tip (Complete Data Discovery)**: In addition to **Virtual switches** topology, also upload/paste screenshots of **Networking ➜ Physical adapters** (click `>>` to expand adapters like `vmnic1`~`vmnic6`). This provides exact **MAC addresses**, **PCI slot mappings (PCIeX/PortX)**, and **CDP/LLDP Switch Ports (Cable Connections)** with zero manual guesswork!
 
@@ -883,6 +883,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 continue
             vs = (row.get("vSwitch") or row.get("vswitch") or row.get("VSwitch") or "").strip()
             groups.setdefault(vs, []).append(row)
+
+        type_order = {"Uplink": 0, "PortGroup": 1, "VMkernel": 2}
 
         blocks = []
         for vs in sorted(groups):
