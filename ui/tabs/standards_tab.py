@@ -9,8 +9,9 @@ from config.naming_rules import (
     load_history, restore_from_history, clear_history, add_to_history,
     get_pattern_variables, get_naming_patterns, get_custom_patterns,
     get_device_presets, get_interface_presets, get_host_vm_presets,
-    get_esxi_network_presets, make_preset_key, default_presets_for,
-    DEFAULT_PRESET_KEY_FIELD, DEFAULT_NAMING_PATTERNS, DEFAULT_RULES,
+    get_esxi_network_presets, get_vlan_presets, make_preset_key,
+    default_presets_for, DEFAULT_PRESET_KEY_FIELD, DEFAULT_NAMING_PATTERNS,
+    DEFAULT_RULES, DEFAULT_VLAN_PRESETS,
 )
 from core.naming_engine import generate_naming_pattern, generate_autocorrect_rule
 from utils.formatters import (
@@ -23,6 +24,8 @@ from utils.formatters import (
 PRESET_COLS = [1.0, 2.2, 7.5, 1.4]
 # Action cell sub-columns: Up, Down, Delete (equal thirds, right-aligned).
 PRESET_ACTION_COLS = [1, 1, 1]
+# VLAN allocation preset columns: VID, Role, VLAN Name, Pattern Template, Action.
+PRESET_VLAN_COLS = [1.0, 2.2, 2.2, 4.0, 1.4]
 # Manage Pattern Variables columns: Name, Label, Placeholder, Auto-Fill, Optional, Up, Down, Delete.
 VARIABLE_COLS = [1.5, 2.5, 2.5, 1.5, 0.9, 0.45, 0.45, 0.45]
 # Auto-Correction rule columns: Original Pattern, Replacement, Description, Action.
@@ -1022,6 +1025,222 @@ def _vm_editor(rules: dict) -> None:
         _save_presets(rules)
 
 
+def _vlan_presets_editor(rules: dict) -> None:
+    vlan_presets = get_vlan_presets(rules)
+
+    with st.container(border=True):
+        col_t1, col_t2 = st.columns([3, 1])
+        with col_t1:
+            st.markdown("#### 🌐 VLAN ALLOCATION PRESETS")
+        with col_t2:
+            total_count = sum(len(items) for items in vlan_presets.values())
+            st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{total_count} presets</span></div>", unsafe_allow_html=True)
+        st.caption("Manage reusable VLAN allocation groups. Each row's Pattern Template resolves VLAN descriptions in the IPAM tab.")
+
+        _inject_preset_table_style()
+
+        preset_names = list(vlan_presets.keys())
+        selected_group = st.session_state.get("vlan_pre_selected_group", None)
+        if selected_group is None or selected_group not in preset_names:
+            selected_group = preset_names[0] if preset_names else None
+
+        is_custom = selected_group == "+ Create New Preset Group"
+
+        group_options = preset_names + ["+ Create New Preset Group"]
+        group_index = group_options.index(selected_group) if selected_group in group_options else 0
+
+        def _on_group_change():
+            st.session_state["vlan_pre_group_created"] = False
+        sel = st.selectbox(
+            "Preset Group",
+            options=group_options,
+            index=group_index,
+            key="vlan_pre_selected_group",
+            help="Select a preset group to configure, or create a new one.",
+            on_change=_on_group_change,
+        )
+
+        group_name = None
+        if not is_custom:
+            group_name = sel
+            items = list(vlan_presets.get(group_name, []))
+
+        _pending_del_key = "_vlan_pending_del"
+        _pending_swap_key = "_vlan_pending_swap"
+
+        new_group_name = None
+        if is_custom:
+            new_group_name = st.text_input(
+                "New Preset Group Name",
+                value="",
+                placeholder="e.g. Campus VLAN Preset",
+                key="vlan_pre_new_group",
+                label_visibility="visible",
+            )
+
+        if group_name is not None:
+            h_vid, h_role, h_name, h_pat, h_act = st.columns(PRESET_VLAN_COLS, vertical_alignment="center")
+            with h_vid:
+                st.markdown("**VID**")
+            with h_role:
+                st.markdown("**Role**")
+            with h_name:
+                st.markdown("**VLAN Name**")
+            with h_pat:
+                st.markdown("**Pattern Template**")
+            with h_act:
+                st.markdown("<span class='action-header'>**Action**</span>", unsafe_allow_html=True)
+
+            updated = []
+            positions = {}
+            stale_del = st.session_state.pop(_pending_del_key, None)
+            if stale_del is not None and 0 <= stale_del < len(items):
+                if len(items) <= 1:
+                    st.session_state["vlan_pre_min_one"] = True
+                else:
+                    items = [p for i, p in enumerate(items) if i != stale_del]
+                    rules["vlan_presets"] = dict(vlan_presets)
+                    rules["vlan_presets"][group_name] = items
+                    _save_presets(rules)
+                    return
+
+            for idx, p in enumerate(items):
+                vid = p.get("vid", "")
+                role_name = p.get("role", "")
+                vlan_name = p.get("vlan_name", "")
+                tpl = p.get("pattern_template", "")
+
+                c_vid, c_role, c_name, c_pat, c_actions = st.columns(PRESET_VLAN_COLS, vertical_alignment="center")
+                with c_vid:
+                    nvid = st.text_input("VID", value=str(vid) if vid not in (None, "") else "", key=f"vlan_pre_vid_{idx}", label_visibility="collapsed").strip()
+                with c_role:
+                    nrole = st.text_input("Role", value=str(role_name), key=f"vlan_pre_role_{idx}", label_visibility="collapsed").strip()
+                with c_name:
+                    nname = st.text_input("VLAN Name", value=str(vlan_name), key=f"vlan_pre_name_{idx}", label_visibility="collapsed").strip()
+                with c_pat:
+                    ntpl = st.text_input("Pattern Template", value=str(tpl), key=f"vlan_pre_pat_{idx}", label_visibility="collapsed").strip()
+                with c_actions:
+                    col_up, col_down, col_del = st.columns(PRESET_ACTION_COLS)
+                    with col_up:
+                        if idx > 0:
+                            if st.button("⬆️", key=f"vlan_pre_up_{idx}", help="Move up"):
+                                st.session_state[_pending_swap_key] = (idx, idx - 1)
+                                st.rerun()
+                        else:
+                            st.empty()
+                    with col_down:
+                        if idx < len(items) - 1:
+                            if st.button("⬇️", key=f"vlan_pre_down_{idx}", help="Move down"):
+                                st.session_state[_pending_swap_key] = (idx, idx + 1)
+                                st.rerun()
+                        else:
+                            st.empty()
+                    with col_del:
+                        if st.button("🗑️", key=f"vlan_pre_del_{idx}", help="Delete this entry"):
+                            if len(items) <= 1:
+                                st.session_state["vlan_pre_min_one"] = True
+                            else:
+                                st.session_state[_pending_del_key] = idx
+                            st.rerun()
+
+                if stale_del == idx:
+                    continue
+                try:
+                    nvid_int = int(nvid) if nvid else None
+                except (ValueError, TypeError):
+                    nvid_int = None
+                if nrole or nvid:
+                    updated.append({
+                        "vid": nvid_int,
+                        "role": nrole,
+                        "vlan_name": nname or nrole,
+                        "pattern_template": ntpl,
+                    })
+                positions[idx] = len(updated)
+
+            if st.session_state.pop("vlan_pre_min_one", False):
+                st.warning("⚠️ At least one VLAN entry must remain. Delete a different entry first.")
+
+            pending_swap = st.session_state.pop(_pending_swap_key, None)
+            if pending_swap is not None:
+                src, dst = pending_swap
+                src_pos = positions.get(src)
+                dst_pos = positions.get(dst)
+                if src_pos is not None and dst_pos is not None:
+                    updated[src_pos], updated[dst_pos] = updated[dst_pos], updated[src_pos]
+                rules["vlan_presets"] = dict(vlan_presets)
+                rules["vlan_presets"][group_name] = updated
+                _save_presets(rules)
+                return
+
+            ca_vid, ca_role, ca_name, ca_pat, ca_act = st.columns(PRESET_VLAN_COLS, vertical_alignment="center")
+            with ca_vid:
+                new_vid = st.text_input("VID", value="", placeholder="900", key="vlan_pre_new_vid", label_visibility="collapsed").strip()
+            with ca_role:
+                new_role = st.text_input("Role", value="", placeholder="IoT", key="vlan_pre_new_role", label_visibility="collapsed").strip()
+            with ca_name:
+                new_name = st.text_input("VLAN Name", value="", placeholder="IoT Devices", key="vlan_pre_new_name", label_visibility="collapsed").strip()
+            with ca_pat:
+                new_tpl = st.text_input("Pattern Template", value="", placeholder=" IoT Devices -- VLAN ", key="vlan_pre_new_pat", label_visibility="collapsed").strip()
+            with ca_act:
+                pass
+
+        col_save, col_reset = st.columns(2)
+        with col_save:
+            saved_presets = st.button("💾 Save Presets", key="vlan_pre_save", type="primary", width='stretch')
+        with col_reset:
+            reset_presets = st.button("🔄 Reset to Defaults", key="vlan_pre_reset", width='stretch')
+
+    if reset_presets:
+        _clear_session_state_prefixes("vlan_pre")
+        rules["vlan_presets"] = dict(DEFAULT_VLAN_PRESETS)
+        _save_presets(rules)
+        return
+
+    if saved_presets:
+        if is_custom:
+            if not new_group_name or not new_group_name.strip():
+                st.error("⚠️ Provide a name for the new preset group.")
+                return
+            group_key = new_group_name.strip()
+            try:
+                new_vid_int = int(new_vid) if new_vid else None
+            except (ValueError, TypeError):
+                new_vid_int = None
+            if new_role or new_vid:
+                vlan_presets[group_key] = [{
+                    "vid": new_vid_int,
+                    "role": new_role,
+                    "vlan_name": new_name or new_role,
+                    "pattern_template": new_tpl,
+                }]
+            else:
+                st.error("⚠️ Enter at least a Role or VID for the first entry.")
+                return
+        else:
+            if group_name is None:
+                return
+            if new_role or new_vid:
+                try:
+                    new_vid_int = int(new_vid) if new_vid else None
+                except (ValueError, TypeError):
+                    new_vid_int = None
+                updated.append({
+                    "vid": new_vid_int,
+                    "role": new_role,
+                    "vlan_name": new_name or new_role,
+                    "pattern_template": new_tpl,
+                })
+            if not updated:
+                st.error("⚠️ At least one VLAN entry is required.")
+                return
+            vlan_presets[group_name] = updated
+        rules["vlan_presets"] = vlan_presets
+        if is_custom:
+            st.session_state["vlan_pre_selected_group"] = new_group_name.strip() if new_group_name and new_group_name.strip() else st.session_state.get("vlan_pre_selected_group")
+        _save_presets(rules)
+
+
 def render_standards_tab(active_model):
     st.subheader("📖 Infrastructure Naming Standards Configuration")
     st.caption("Define and manage your organization's naming conventions. All patterns configured here are automatically applied in the Naming tab.")
@@ -1066,6 +1285,9 @@ def render_standards_tab(active_model):
     tab_edit, tab_vars, tab_history = st.tabs(["📝 Edit Standards", "📘 Pattern Variables Reference", "📜 Change History"])
     
     with tab_edit:
+        with st.expander("🌐 Subnet & VLAN Allocation Presets", expanded=True):
+            _vlan_presets_editor(current_rules)
+
         with st.expander("🔧 Network & Security Devices", expanded=True):
             _preset_type_editor("device", get_device_presets(current_rules), current_rules, prefix="branch",
                                 card_title="🔧 DEVICE TYPE PRESETS",

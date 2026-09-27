@@ -137,6 +137,25 @@ ESXI_NETWORK_PRESETS = [
      "description": "VMkernel Management / vMotion / Storage"},
 ]
 
+DEFAULT_VLAN_PRESETS = {
+    "Branch Office VLAN Preset": [
+        {"vid": 300, "role": "Corporate WiFi", "vlan_name": "Corporate WiFi", "pattern_template": " Corporate WiFi -- VLAN "},
+        {"vid": 100, "role": "Workstations", "vlan_name": "Workstations", "pattern_template": " Workstations -- VLAN "},
+        {"vid": 5, "role": "Management", "vlan_name": "Management", "pattern_template": " Management -- VLAN "},
+        {"vid": 700, "role": "Printers", "vlan_name": "Printers", "pattern_template": " Printers -- VLAN "},
+        {"vid": 800, "role": "Audio Visual", "vlan_name": "Audio Visual", "pattern_template": " Audio Visual -- VLAN "},
+        {"vid": 200, "role": "Guests", "vlan_name": "Guests", "pattern_template": " Guest WiFi -- VLAN "},
+        {"vid": 400, "role": "Mobiles", "vlan_name": "Mobiles", "pattern_template": " Mobi WiFi -- VLAN "}
+    ],
+    "Data Center VLAN Preset": [
+        {"vid": 10, "role": "Server Management", "vlan_name": "Server Management", "pattern_template": " Server Management -- VLAN "},
+        {"vid": 20, "role": "Production App", "vlan_name": "Production App", "pattern_template": " Production App -- VLAN "},
+        {"vid": 30, "role": "Database", "vlan_name": "Database", "pattern_template": " Database -- VLAN "},
+        {"vid": 40, "role": "DMZ", "vlan_name": "DMZ", "pattern_template": " DMZ -- VLAN "},
+        {"vid": 50, "role": "Storage / vSAN", "vlan_name": "Storage / vSAN", "pattern_template": " Storage / vSAN -- VLAN "}
+    ]
+}
+
 LEGACY_PATTERN_KEYS = list(DEFAULT_NAMING_PATTERNS.keys())
 
 # Canonical variable key consolidation: legacy/pre-normalization keys map onto their
@@ -390,6 +409,7 @@ def _normalize_rules(raw: dict) -> dict:
     merged["interface_presets"] = _normalize_presets(raw.get("interface_presets"), INTERFACE_PRESETS)
     merged["host_vm_presets"] = _normalize_presets(raw.get("host_vm_presets"), HOST_VM_PRESETS)
     merged["esxi_network_presets"] = _normalize_presets(raw.get("esxi_network_presets"), ESXI_NETWORK_PRESETS)
+    merged["vlan_presets"] = get_vlan_presets(raw)
 
     variables = raw.get("pattern_variables")
     if not isinstance(variables, dict):
@@ -472,6 +492,48 @@ def get_esxi_network_presets(rules: dict) -> list:
     """Return the ESXi network description presets list from a rules dict."""
     raw = rules.get("esxi_network_presets")
     return _normalize_presets(raw, ESXI_NETWORK_PRESETS)
+
+
+def _normalize_vlan_presets(raw_presets):
+    """Normalize a list of VLAN preset items (vid/role/vlan_name/pattern_template).
+
+    Returns a list of dicts with the four canonical keys, dropping malformed entries
+    that lack a usable id or role.
+    """
+    if not isinstance(raw_presets, list):
+        return list(DEFAULT_VLAN_PRESETS)
+    normalized = []
+    for p in raw_presets:
+        if not isinstance(p, dict):
+            continue
+        item = {
+            "vid": p.get("vid"),
+            "role": str(p.get("role", "")).strip(),
+            "vlan_name": str(p.get("vlan_name", "")).strip(),
+            "pattern_template": str(p.get("pattern_template", "")).strip(),
+        }
+        if item["vid"] not in (None, "") or item["role"]:
+            normalized.append(item)
+    return normalized
+
+
+def get_vlan_presets(rules: dict) -> dict:
+    """Return the VLAN allocation presets dict (defaults if missing or malformed).
+
+    Preset groups are stored under ``vlan_presets`` as a mapping of
+    ``group_name -> [ {vid, role, vlan_name, pattern_template}, ... ]``. Every group
+    is normalized through ``_normalize_vlan_presets`` so user edits stay clean.
+    """
+    import copy
+    raw = rules.get("vlan_presets")
+    if not isinstance(raw, dict) or not raw:
+        return copy.deepcopy(dict(DEFAULT_VLAN_PRESETS))
+    normalized = {}
+    for group_name, items in raw.items():
+        normalized[str(group_name)] = _normalize_vlan_presets(items)
+    if not normalized:
+        return copy.deepcopy(dict(DEFAULT_VLAN_PRESETS))
+    return normalized
 
 
 # ── Site Code Calculation Rules (data-driven from YAML, no hardcoded logic) ──

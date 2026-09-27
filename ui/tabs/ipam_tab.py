@@ -6,10 +6,8 @@ from typing import Dict, List
 import streamlit as st
 import pandas as pd
 import openpyxl
+from config.naming_rules import load_naming_rules, get_vlan_presets
 from core.ipam_engine import (
-    VLAN_PRESETS,
-    BRANCH_VLAN_PRESET,
-    DATACENTER_VLAN_PRESET,
     compute_chained_rows,
     slugify,
     evaluate_subnet_row,
@@ -170,14 +168,20 @@ def load_ipam_records_from_db(site_name: str) -> bool:
 
     st.session_state["ipam_site_found_in_db"] = True
 
-    # Determine if it's a Branch or DC to apply sorting
-    branch_vids = {p['vid'] for p in BRANCH_VLAN_PRESET}
-    dc_vids = {p['vid'] for p in DATACENTER_VLAN_PRESET}
+    rules = load_naming_rules()
+    dynamic_presets = get_vlan_presets(rules)
+    db_vids = {r.get('vlan_id') for r in records if r.get('vlan_id') is not None}
 
-    match_branch = sum(1 for r in records if r.get('vlan_id') in branch_vids)
-    match_dc = sum(1 for r in records if r.get('vlan_id') in dc_vids)
+    best_group = None
+    best_score = -1
+    for grp_name, grp_items in dynamic_presets.items():
+        preset_vids = {p['vid'] for p in grp_items if 'vid' in p}
+        score = len(db_vids.intersection(preset_vids))
+        if score > best_score:
+            best_score = score
+            best_group = grp_items
 
-    target_preset = BRANCH_VLAN_PRESET if match_branch >= match_dc else DATACENTER_VLAN_PRESET
+    target_preset = best_group or []
     order_map = {p['vid']: i for i, p in enumerate(target_preset)}
 
     # Sort records by order in preset, then by vlan_id (handle None values)
@@ -267,7 +271,9 @@ def on_preset_change():
         return
 
     st.session_state["ipam_loaded_site"] = None
-    template_list = VLAN_PRESETS.get(selected, [])
+    rules = load_naming_rules()
+    dynamic_presets = get_vlan_presets(rules)
+    template_list = dynamic_presets.get(selected, [])
     
     if "ipam_data_editor_live" in st.session_state:
         del st.session_state["ipam_data_editor_live"]
@@ -512,10 +518,13 @@ def render_ipam_tab(active_model: str):
         st.markdown("##### 📊 Subnet Allocation & Live Status (✏️ Click any cell to edit)")
     with c_preset_container:
         c_preset_inner, c_refresh, c_status = st.columns([1.0, 0.3, 0.3])
+        rules = load_naming_rules()
+        dynamic_presets = get_vlan_presets(rules)
+        preset_options = ["- Custom / Empty -", "🗄️ Load From DB (Existing Site)"] + list(dynamic_presets.keys())
         with c_preset_inner:
             st.selectbox(
                 "Load Standard Preset",
-                options=list(VLAN_PRESETS.keys()),
+                options=preset_options,
                 index=0,
                 key="ipam_preset_selector",
                 on_change=on_preset_change,
@@ -626,7 +635,10 @@ def render_ipam_tab(active_model: str):
                 sup_net = ipaddress.ip_network(supernet_in, strict=False)
                 sup_range = calculate_ip_range_str(sup_net)
                 cap_matrix = calculate_remaining_subnets(supernet_in, allocated_subnets)
-                cap_str = f"**Available:** `{cap_matrix['/24']}x /24` | `{cap_matrix['/25']}x /25` | `{cap_matrix['/26']}x /26` | `{cap_matrix['/27']}x /27`"
+                sup_prefix_len = sup_net.prefixlen
+                step_masks = [f"/{m}" for m in range(sup_prefix_len + 1, min(sup_prefix_len + 5, 31))]
+                cap_items = [f"`{cap_matrix.get(m, 0)}x {m}`" for m in step_masks]
+                cap_str = f"**Available:** {' | '.join(cap_items)}" if cap_items else "No subnets"
                 st.markdown(f"📍 **Site Subnet:** `{sup_range}`")
                 st.caption(cap_str)
             except ValueError:
