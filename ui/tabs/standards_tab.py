@@ -18,20 +18,18 @@ from utils.formatters import (
 )
 
 # Shared column width ratios enforced across preset table headers and all data rows.
-PRESET_COLS = [1.4, 2.2, 4.2, 0.8]
+PRESET_COLS = [1.5, 2.5, 4.5, 0.8]
 # Manage Pattern Variables columns: Name, Label, Placeholder, Auto-Fill, Optional, Up, Down, Delete.
 VARIABLE_COLS = [1.5, 2.5, 2.5, 1.5, 0.9, 0.45, 0.45, 0.45]
 # Auto-Correction rule columns: Original Pattern, Replacement, Description, Action.
-AUTOCORRECT_COLS = [3.2, 2.3, 3.8, 0.7]
+AUTOCORRECT_COLS = [3.0, 2.5, 3.5, 0.8]
 
 def _normalize_var_name(raw: str) -> str:
     return re.sub(r"[^a-z0-9_]", "", raw.strip().lower().replace(" ", "_"))
 
 def _render_centered_del_btn(key: str, help_text: str = "Delete this entry") -> bool:
-    """Helper to render a perfectly centered square delete icon button."""
-    _, c_btn, _ = st.columns([1, 2, 1])
-    with c_btn:
-        return st.button("🗑️", key=key, help=help_text)
+    """Helper to render a clean delete icon button."""
+    return st.button("🗑️", key=key, help=help_text, width='stretch')
 
 def _diff_rule_list(category: str, old_rules: list, new_rules: list) -> list:
     rows = []
@@ -363,7 +361,7 @@ def _save_presets(rules: dict) -> None:
     st.rerun()
 
 
-def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str) -> None:
+def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card_title: str, card_caption: str) -> None:
     patterns = dict(rules.get("naming_patterns") or {})
     key_field = "device_presets" if kind == "device" else (
         "interface_presets" if kind == "interface" else (
@@ -377,83 +375,93 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str) -> N
         _save_presets(rules)
         return
 
-    col_hdr_code, col_hdr_lbl, col_hdr_tpl, col_hdr_act = st.columns(PRESET_COLS, vertical_alignment="center")
-    with col_hdr_code:
-        st.markdown("**Code**")
-    with col_hdr_lbl:
-        st.markdown("**Label**")
-    with col_hdr_tpl:
-        st.markdown("**Pattern Template**")
-    with col_hdr_act:
-        pass
+    with st.container(border=True):
+        col_t1, col_t2 = st.columns([3, 1])
+        with col_t1:
+            st.markdown(f"#### {card_title}")
+        with col_t2:
+            st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(presets)} presets</span></div>", unsafe_allow_html=True)
+        st.caption(card_caption)
 
-    updated = []
-    patterns_updates = {}
+        col_hdr_code, col_hdr_lbl, col_hdr_tpl, col_hdr_act = st.columns(PRESET_COLS, vertical_alignment="center")
+        with col_hdr_code:
+            st.markdown("**Code**")
+        with col_hdr_lbl:
+            st.markdown("**Label**")
+        with col_hdr_tpl:
+            st.markdown("**Pattern Template**")
+        with col_hdr_act:
+            st.markdown("**Action**")
 
-    if presets:
-        for idx, p in enumerate(presets):
-            code = p.get("code", "")
-            label = p.get("label", "")
-            pkey = p.get("pattern_key", "")
-            tpl = patterns.get(pkey, "")
+        updated = []
+        patterns_updates = {}
 
-            c1, c2, c3, c4 = st.columns(PRESET_COLS, vertical_alignment="center")
-            with c1:
-                ncode = st.text_input("Code", value=code, key=f"{kind}_pre_code_{idx}", label_visibility="collapsed").strip()
-            with c2:
-                nlbl = st.text_input("Label", value=label, key=f"{kind}_pre_lbl_{idx}", label_visibility="collapsed").strip()
-            with c3:
-                ntpl = st.text_input("Pattern Template", value=tpl, key=f"{kind}_pre_tpl_{idx}", label_visibility="collapsed").strip()
-            with c4:
-                if _render_centered_del_btn(f"{kind}_pre_del_{idx}"):
-                    if len(presets) > 1:
-                        st.session_state[_pending_del_key] = idx
-                        st.rerun()
-                    else:
-                        st.session_state[f"{kind}_preset_min_one"] = True
+        if presets:
+            for idx, p in enumerate(presets):
+                code = p.get("code", "")
+                label = p.get("label", "")
+                pkey = p.get("pattern_key", "")
+                tpl = patterns.get(pkey, "")
 
-            if stale_del == idx:
-                continue
-            final_pkey = pkey or make_preset_key(ncode or label, prefix)
-            if ntpl:
-                patterns_updates[final_pkey] = ntpl
-            if ncode and final_pkey:
-                updated.append({
-                    "code": ncode,
-                    "label": nlbl or ncode,
-                    "pattern_key": final_pkey,
-                    "description": p.get("description", ""),
-                })
-    else:
-        st.info("No presets defined. Add one below.")
+                c1, c2, c3, c4 = st.columns(PRESET_COLS, vertical_alignment="center")
+                with c1:
+                    ncode = st.text_input("Code", value=code, key=f"{kind}_pre_code_{idx}", label_visibility="collapsed").strip()
+                with c2:
+                    nlbl = st.text_input("Label", value=label, key=f"{kind}_pre_lbl_{idx}", label_visibility="collapsed").strip()
+                with c3:
+                    ntpl = st.text_input("Pattern Template", value=tpl, key=f"{kind}_pre_tpl_{idx}", label_visibility="collapsed").strip()
+                with c4:
+                    if _render_centered_del_btn(f"{kind}_pre_del_{idx}"):
+                        if len(presets) > 1:
+                            st.session_state[_pending_del_key] = idx
+                            st.rerun()
+                        else:
+                            st.session_state[f"{kind}_preset_min_one"] = True
 
-    if st.session_state.pop(f"{kind}_preset_min_one", False):
-        st.warning("⚠️ At least one preset must remain. Delete a different entry first.")
+                if stale_del == idx:
+                    continue
+                final_pkey = pkey or make_preset_key(ncode or label, prefix)
+                if ntpl:
+                    patterns_updates[final_pkey] = ntpl
+                if ncode and final_pkey:
+                    updated.append({
+                        "code": ncode,
+                        "label": nlbl or ncode,
+                        "pattern_key": final_pkey,
+                        "description": p.get("description", ""),
+                    })
+        else:
+            st.info("No presets defined. Add one below.")
 
-    st.markdown("**➕ Add New Preset**")
-    is_esxi = kind == "esxi_network"
-    code_ph = "e.g. DSwitch" if is_esxi else "e.g. SAN"
-    lbl_ph = "e.g. Distributed Switch Uplink" if is_esxi else "e.g. SAN Storage (SAN)"
-    tpl_ph = "e.g. <vmnic> - <vds_name> (<status>)" if is_esxi else "e.g. SAN<country><site><seq>"
-    ca1, ca2, ca3 = st.columns([1.5, 2.5, 4.5])
-    with ca1:
-        new_code = st.text_input("Code", value="", placeholder=code_ph, key=f"{kind}_new_code", label_visibility="collapsed").strip()
-    with ca2:
-        new_lbl = st.text_input("Display Label", value="", placeholder=lbl_ph, key=f"{kind}_new_lbl", label_visibility="collapsed").strip()
-    with ca3:
-        new_tpl = st.text_input("Pattern Template", value="", placeholder=tpl_ph, key=f"{kind}_new_tpl", label_visibility="collapsed").strip()
+        if st.session_state.pop(f"{kind}_preset_min_one", False):
+            st.warning("⚠️ At least one preset must remain. Delete a different entry first.")
 
-    col_save, col_reset = st.columns(2)
-    with col_save:
-        saved_presets = st.button(
-            "💾 Save Presets", key=f"{kind}_preset_save", type="primary",
-            width='stretch',
-        )
-    with col_reset:
-        reset_presets = st.button(
-            "🔄 Reset to Defaults", key=f"{kind}_preset_reset",
-            width='stretch',
-        )
+        # Inline Add Row (Zero Action Button on right)
+        is_esxi = kind == "esxi_network"
+        code_ph = "e.g. DSwitch" if is_esxi else "e.g. SAN"
+        lbl_ph = "e.g. Distributed Switch Uplink" if is_esxi else "e.g. SAN Storage (SAN)"
+        tpl_ph = "e.g. <vmnic> - <vds_name> (<status>)" if is_esxi else "e.g. SAN<country><site><seq>"
+        ca1, ca2, ca3, ca4 = st.columns(PRESET_COLS, vertical_alignment="center")
+        with ca1:
+            new_code = st.text_input("Code", value="", placeholder=code_ph, key=f"{kind}_new_code", label_visibility="collapsed").strip()
+        with ca2:
+            new_lbl = st.text_input("Display Label", value="", placeholder=lbl_ph, key=f"{kind}_new_lbl", label_visibility="collapsed").strip()
+        with ca3:
+            new_tpl = st.text_input("Pattern Template", value="", placeholder=tpl_ph, key=f"{kind}_new_tpl", label_visibility="collapsed").strip()
+        with ca4:
+            pass
+
+        col_save, col_reset = st.columns(2)
+        with col_save:
+            saved_presets = st.button(
+                "💾 Save Presets", key=f"{kind}_preset_save", type="primary",
+                width='stretch',
+            )
+        with col_reset:
+            reset_presets = st.button(
+                "🔄 Reset to Defaults", key=f"{kind}_preset_reset",
+                width='stretch',
+            )
 
     if reset_presets:
         _reset_presets(kind, rules)
@@ -562,86 +570,92 @@ def _host_editor(rules: dict) -> None:
     vm_presets = [p for p in all_presets if p.get("pattern_key") == "vm_host"]
     patterns = dict(rules.get("naming_patterns") or {})
 
-    st.markdown(f"**🖥️ Hosts Type Presets** &nbsp;&nbsp;&nbsp;`{len(host_presets)} presets`")
-    st.caption("Manage physical host naming patterns and presets.")
+    with st.container(border=True):
+        col_t1, col_t2 = st.columns([3, 1])
+        with col_t1:
+            st.markdown("#### 💻 HOSTS TYPE PRESETS (ESXI)")
+        with col_t2:
+            st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(host_presets)} presets</span></div>", unsafe_allow_html=True)
+        st.caption("Manage physical hypervisor host naming patterns and presets.")
 
-    col_hdr_code, col_hdr_lbl, col_hdr_tpl, col_hdr_act = st.columns(PRESET_COLS, vertical_alignment="center")
-    with col_hdr_code:
-        st.markdown("**Code**")
-    with col_hdr_lbl:
-        st.markdown("**Label**")
-    with col_hdr_tpl:
-        st.markdown("**Pattern Template**")
-    with col_hdr_act:
-        pass
+        col_hdr_code, col_hdr_lbl, col_hdr_tpl, col_hdr_act = st.columns(PRESET_COLS, vertical_alignment="center")
+        with col_hdr_code:
+            st.markdown("**Code**")
+        with col_hdr_lbl:
+            st.markdown("**Label**")
+        with col_hdr_tpl:
+            st.markdown("**Pattern Template**")
+        with col_hdr_act:
+            st.markdown("**Action**")
 
-    updated = []
-    patterns_updates = {}
-    stale_del = st.session_state.pop("_host_vm_del_idx", None)
+        updated = []
+        patterns_updates = {}
+        stale_del = st.session_state.pop("_host_vm_del_idx", None)
 
-    for idx, preset in enumerate(host_presets):
-        code = preset.get("code", "")
-        label = preset.get("label", "")
-        pk = preset.get("pattern_key", "")
-        tpl = patterns.get(pk, "")
+        for idx, preset in enumerate(host_presets):
+            code = preset.get("code", "")
+            label = preset.get("label", "")
+            pk = preset.get("pattern_key", "")
+            tpl = patterns.get(pk, "")
 
-        c1, c2, c3, c4 = st.columns(PRESET_COLS, vertical_alignment="center")
-        with c1:
-            if code == "ESXi":
-                st.text_input("Code", value=code, key=f"host_{idx}_code", disabled=True)
-            else:
-                ncode = st.text_input("Code", value=code, key=f"host_{idx}_code", label_visibility="collapsed").strip()
-        with c2:
-            if code == "ESXi":
-                st.text_input("Label", value=label, key=f"host_{idx}_lbl", disabled=True)
-            else:
-                nlbl = st.text_input("Label", value=label, key=f"host_{idx}_lbl", label_visibility="collapsed").strip()
-        with c3:
-            ntpl = st.text_input("Pattern Template", value=tpl, key=f"host_{idx}_tpl", label_visibility="collapsed").strip()
-        with c4:
-            if code != "ESXi":
-                if _render_centered_del_btn(f"host_del_{idx}"):
-                    if len(host_presets) > 1:
-                        st.session_state["_host_vm_del_idx"] = idx
-                        st.rerun()
-                    else:
-                        st.warning("⚠️ At least one preset must remain.")
-            else:
-                st.button("", key=f"ghost_host_{idx}", disabled=True)
+            c1, c2, c3, c4 = st.columns(PRESET_COLS, vertical_alignment="center")
+            with c1:
+                if code == "ESXi":
+                    st.text_input("Code", value=code, key=f"host_{idx}_code", disabled=True, label_visibility="collapsed")
+                else:
+                    ncode = st.text_input("Code", value=code, key=f"host_{idx}_code", label_visibility="collapsed").strip()
+            with c2:
+                if code == "ESXi":
+                    st.text_input("Label", value=label, key=f"host_{idx}_lbl", disabled=True, label_visibility="collapsed")
+                else:
+                    nlbl = st.text_input("Label", value=label, key=f"host_{idx}_lbl", label_visibility="collapsed").strip()
+            with c3:
+                ntpl = st.text_input("Pattern Template", value=tpl, key=f"host_{idx}_tpl", label_visibility="collapsed").strip()
+            with c4:
+                if code != "ESXi":
+                    if _render_centered_del_btn(f"host_del_{idx}"):
+                        if len(host_presets) > 1:
+                            st.session_state["_host_vm_del_idx"] = idx
+                            st.rerun()
+                        else:
+                            st.warning("⚠️ At least one preset must remain.")
+                else:
+                    pass
 
-        if stale_del == idx:
-            continue
-        final_pk = pk or make_preset_key(code or label, "host_vm")
-        if ntpl:
-            patterns_updates[final_pk] = ntpl
-        if final_pk:
-            updated.append({
-                "code": code if code else "ESXi",
-                "label": label or code or "ESXi Host",
-                "pattern_key": final_pk,
-                "description": preset.get("description", ""),
-            })
+            if stale_del == idx:
+                continue
+            final_pk = pk or make_preset_key(code or label, "host_vm")
+            if ntpl:
+                patterns_updates[final_pk] = ntpl
+            if final_pk:
+                updated.append({
+                    "code": code if code else "ESXi",
+                    "label": label or code or "ESXi Host",
+                    "pattern_key": final_pk,
+                    "description": preset.get("description", ""),
+                })
 
-    if stale_del is not None:
-        rules["naming_patterns"] = {**patterns, **patterns_updates}
-        rules["host_vm_presets"] = updated + vm_presets
-        _save_presets(rules)
-        return
+        if stale_del is not None:
+            rules["naming_patterns"] = {**patterns, **patterns_updates}
+            rules["host_vm_presets"] = updated + vm_presets
+            _save_presets(rules)
+            return
 
-    st.markdown("**➕ Add New Preset**")
-    ca1, ca2, ca3 = st.columns(PRESET_COLS[:3])
-    with ca1:
-        new_code = st.text_input("New Code", value="", placeholder="e.g. HYPV", key="host_new_code", label_visibility="collapsed").strip()
-    with ca2:
-        new_lbl = st.text_input("New Label", value="", placeholder="e.g. Hyper-V Host", key="host_new_lbl", label_visibility="collapsed").strip()
-    with ca3:
-        new_tpl = st.text_input("New Pattern Template", value="", placeholder="<site_prefix>hyp<seq>.<domain>", key="host_new_tpl", label_visibility="collapsed").strip()
+        ca1, ca2, ca3, ca4 = st.columns(PRESET_COLS, vertical_alignment="center")
+        with ca1:
+            new_code = st.text_input("New Code", value="", placeholder="e.g. HYPV", key="host_new_code", label_visibility="collapsed").strip()
+        with ca2:
+            new_lbl = st.text_input("New Label", value="", placeholder="e.g. Hyper-V Host", key="host_new_lbl", label_visibility="collapsed").strip()
+        with ca3:
+            new_tpl = st.text_input("New Pattern Template", value="", placeholder="<site_prefix>hyp<seq>.<domain>", key="host_new_tpl", label_visibility="collapsed").strip()
+        with ca4:
+            pass
 
-    col_save, col_reset = st.columns(2)
-    with col_save:
-        saved = st.button("💾 Save Hosts Presets", key="host_preset_save", type="primary", width='stretch')
-    with col_reset:
-        reset = st.button("🔄 Reset to Defaults", key="host_preset_reset", width='stretch')
+        col_save, col_reset = st.columns(2)
+        with col_save:
+            saved = st.button("💾 Save Hosts Presets", key="host_preset_save", type="primary", width='stretch')
+        with col_reset:
+            reset = st.button("🔄 Reset to Defaults", key="host_preset_reset", width='stretch')
 
     if reset:
         _reset_presets("host_vm", rules)
@@ -676,68 +690,74 @@ def _vm_editor(rules: dict) -> None:
     patterns = dict(rules.get("naming_patterns") or {})
     tpl = patterns.get("vm_host", "")
 
-    st.markdown(f"**🖱️ Virtual Machine Presets** &nbsp;&nbsp;&nbsp;`{len(vm_presets)} presets`")
-    st.caption("Manage the virtual machine role options and their shared pattern template.")
+    with st.container(border=True):
+        col_t1, col_t2 = st.columns([3, 1])
+        with col_t1:
+            st.markdown("#### 🖱️ VIRTUAL MACHINE PRESETS")
+        with col_t2:
+            st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(vm_presets)} presets</span></div>", unsafe_allow_html=True)
+        st.caption("Manage virtual machine roles (cvi, afs, sani, vlab) and their shared hostname template.")
 
-    col_hdr_code, col_hdr_lbl, col_hdr_tpl, col_hdr_act = st.columns(PRESET_COLS, vertical_alignment="center")
-    with col_hdr_code:
-        st.markdown("**Code**")
-    with col_hdr_lbl:
-        st.markdown("**Label**")
-    with col_hdr_tpl:
-        st.markdown("**Pattern Template**")
-    with col_hdr_act:
-        pass
+        col_hdr_code, col_hdr_lbl, col_hdr_tpl, col_hdr_act = st.columns(PRESET_COLS, vertical_alignment="center")
+        with col_hdr_code:
+            st.markdown("**Code**")
+        with col_hdr_lbl:
+            st.markdown("**Label**")
+        with col_hdr_tpl:
+            st.markdown("**Pattern Template**")
+        with col_hdr_act:
+            st.markdown("**Action**")
 
-    updated = []
-    stale_del = st.session_state.pop("_del_vm_role_idx", None)
+        updated = []
+        stale_del = st.session_state.pop("_del_vm_role_idx", None)
 
-    for idx, p in enumerate(vm_presets):
-        c1, c2, c3, c4 = st.columns(PRESET_COLS, vertical_alignment="center")
-        with c1:
-            ncode = st.text_input("Code", value=p.get("code", ""), key=f"vm_code_{idx}", label_visibility="collapsed").strip()
-        with c2:
-            nlbl = st.text_input("Label", value=p.get("label", ""), key=f"vm_lbl_{idx}", label_visibility="collapsed").strip()
-        with c3:
-            ntpl = st.text_input("Pattern Template", value=tpl, key=f"vm_tpl_{idx}", label_visibility="collapsed").strip()
-        with c4:
-            if _render_centered_del_btn(f"vm_role_del_{idx}"):
-                if len(vm_presets) > 1:
-                    st.session_state["_del_vm_role_idx"] = idx
-                    st.rerun()
-                else:
-                    st.warning("⚠️ At least one role must remain.")
+        for idx, p in enumerate(vm_presets):
+            c1, c2, c3, c4 = st.columns(PRESET_COLS, vertical_alignment="center")
+            with c1:
+                ncode = st.text_input("Code", value=p.get("code", ""), key=f"vm_code_{idx}", label_visibility="collapsed").strip()
+            with c2:
+                nlbl = st.text_input("Label", value=p.get("label", ""), key=f"vm_lbl_{idx}", label_visibility="collapsed").strip()
+            with c3:
+                ntpl = st.text_input("Pattern Template", value=tpl, key=f"vm_tpl_{idx}", label_visibility="collapsed").strip()
+            with c4:
+                if _render_centered_del_btn(f"vm_role_del_{idx}"):
+                    if len(vm_presets) > 1:
+                        st.session_state["_del_vm_role_idx"] = idx
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ At least one role must remain.")
 
-        if stale_del == idx:
-            continue
-        tpl = ntpl or tpl or "<country><site><role><seq>"
-        p["code"] = ncode.lower() if ncode else p.get("code", "")
-        p["label"] = nlbl or ncode or p.get("label", "")
-        p["pattern_key"] = "vm_host"
-        p["description"] = ""
-        updated.append(dict(p))
+            if stale_del == idx:
+                continue
+            tpl = ntpl or tpl or "<country><site><role><seq>"
+            p["code"] = ncode.lower() if ncode else p.get("code", "")
+            p["label"] = nlbl or ncode or p.get("label", "")
+            p["pattern_key"] = "vm_host"
+            p["description"] = ""
+            updated.append(dict(p))
 
-    if stale_del is not None:
-        patterns["vm_host"] = tpl
-        rules["naming_patterns"] = patterns
-        rules["host_vm_presets"] = host_presets + updated
-        _save_presets(rules)
-        return
+        if stale_del is not None:
+            patterns["vm_host"] = tpl
+            rules["naming_patterns"] = patterns
+            rules["host_vm_presets"] = host_presets + updated
+            _save_presets(rules)
+            return
 
-    st.markdown("**➕ Add New Preset**")
-    nc1, nc2, nc3 = st.columns(PRESET_COLS[:3])
-    with nc1:
-        new_code = st.text_input("New Code", value="", key="vm_new_code", placeholder="e.g. cvi", label_visibility="collapsed").strip()
-    with nc2:
-        new_label = st.text_input("New Label", value="", key="vm_new_lbl", placeholder="e.g. Core Virtualization (cvi)", label_visibility="collapsed").strip()
-    with nc3:
-        new_tpl = st.text_input("New Pattern Template", value="", key="vm_new_tpl", placeholder="<country><site><role><seq>", label_visibility="collapsed").strip()
+        ca1, ca2, ca3, ca4 = st.columns(PRESET_COLS, vertical_alignment="center")
+        with ca1:
+            new_code = st.text_input("New Code", value="", key="vm_new_code", placeholder="e.g. cvi", label_visibility="collapsed").strip()
+        with ca2:
+            new_label = st.text_input("New Label", value="", key="vm_new_lbl", placeholder="e.g. Core Virtualization (cvi)", label_visibility="collapsed").strip()
+        with ca3:
+            new_tpl = st.text_input("New Pattern Template", value="", key="vm_new_tpl", placeholder="<country><site><role><seq>", label_visibility="collapsed").strip()
+        with ca4:
+            pass
 
-    c_save, c_reset = st.columns(2)
-    with c_save:
-        saved = st.button("💾 Save VM Presets", key="vm_save", type="primary", width='stretch')
-    with c_reset:
-        reset = st.button("🔄 Reset to Defaults", key="vm_reset", width='stretch')
+        c_save, c_reset = st.columns(2)
+        with c_save:
+            saved = st.button("💾 Save VM Presets", key="vm_save", type="primary", width='stretch')
+        with c_reset:
+            reset = st.button("🔄 Reset to Defaults", key="vm_reset", width='stretch')
 
     if reset:
         _reset_presets("host_vm", rules)
@@ -804,22 +824,23 @@ def render_standards_tab(active_model):
     
     with tab_edit:
         with st.expander("🔧 Network & Security Devices", expanded=True):
-            with st.expander("🔧 Device Type Presets", expanded=False):
-                _preset_type_editor("device", get_device_presets(current_rules), current_rules, prefix="branch")
-
-            with st.expander("🔌 Interface Type Presets", expanded=False):
-                _preset_type_editor("interface", get_interface_presets(current_rules), current_rules, prefix="iface")
+            _preset_type_editor("device", get_device_presets(current_rules), current_rules, prefix="branch",
+                                card_title="🔧 DEVICE TYPE PRESETS",
+                                card_caption="Manage device naming patterns and presets (SW, VS, FW, ION, WAP, RTR, VA).")
+            st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+            _preset_type_editor("interface", get_interface_presets(current_rules), current_rules, prefix="iface",
+                                card_title="🔌 INTERFACE TYPE PRESETS",
+                                card_caption="Manage interface description presets (Uplink, LAG, Po, Access, FW Zone).")
 
         with st.expander("🖥️ Hosts & Virtual Machines", expanded=True):
-            with st.expander("🖥️ Hosts Type Presets", expanded=False):
-                _host_editor(current_rules)
-
-            with st.expander("🖱️ Virtual Machine Presets", expanded=False):
-                _vm_editor(current_rules)
+            _host_editor(current_rules)
+            st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+            _vm_editor(current_rules)
 
         with st.expander("☁️ ESXi Virtualization & Networking", expanded=True):
-            with st.expander("☁️ ESXi Interface Description Presets", expanded=False):
-                _preset_type_editor("esxi_network", get_esxi_network_presets(current_rules), current_rules, prefix="esxinet")
+            _preset_type_editor("esxi_network", get_esxi_network_presets(current_rules), current_rules, prefix="esxinet",
+                                card_title="☁️ ESXI NETWORK DESCRIPTION PRESETS",
+                                card_caption="Manage ESXi interface descriptions (Uplink, PortGroup, VMkernel). Quick Copy dynamically renders from these templates.")
 
         with st.expander("🛠️ Manage Syntax Auto-Correction Rules", expanded=False):
             _render_auto_correction_manager(active_model)
