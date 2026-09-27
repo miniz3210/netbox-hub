@@ -928,6 +928,9 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 ip = row.get("IP Address", "")
                 row_type = row.get("Type", "")
 
+                # Safely resolve dynamic variables dictionary from naming_rules
+                pattern_vars = naming_rules.get("variables", {}) if isinstance(naming_rules, dict) else {}
+
                 # Construct universal token value map from row data
                 raw_svc = row.get("Service") or row.get("Purpose") or (desc.split("(")[0].strip() if "(" in desc else desc)
                 clean_svc = re.sub(r"(?i)\s+network$", "", str(raw_svc or "")).strip()
@@ -945,11 +948,11 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 }
 
                 if row_type == "VMkernel":
-                    rendered = render_dynamic_pattern(vmk_tpl, row_vals, variables)
+                    rendered = render_dynamic_pattern(vmk_tpl, row_vals, pattern_vars)
                 elif row_type == "PortGroup":
-                    rendered = render_dynamic_pattern(pg_tpl, row_vals, variables) if not desc else desc
+                    rendered = render_dynamic_pattern(pg_tpl, row_vals, pattern_vars) if not desc else desc
                 elif row_type == "Uplink":
-                    rendered = render_dynamic_pattern(uplink_tpl, row_vals, variables) if not desc else desc
+                    rendered = render_dynamic_pattern(uplink_tpl, row_vals, pattern_vars) if not desc else desc
                 else:
                     rendered = desc or ""
 
