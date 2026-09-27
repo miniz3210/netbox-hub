@@ -931,13 +931,23 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 # Safely resolve dynamic variables dictionary from naming_rules
                 pattern_vars = naming_rules.get("variables", {}) if isinstance(naming_rules, dict) else {}
 
-                # Construct universal token value map from row data
+                # Robust key discovery across varied table column naming
+                resolved_vs = (
+                    vs or
+                    row.get("vSwitch") or
+                    row.get("v_switch") or
+                    row.get("Switch") or
+                    row.get("vswitch") or
+                    ""
+                )
                 raw_svc = row.get("Service") or row.get("Purpose") or (desc.split("(")[0].strip() if "(" in desc else desc)
                 clean_svc = re.sub(r"(?i)\s+network$", "", str(raw_svc or "")).strip()
+
+                # Construct universal token value map from row data
                 row_vals = {
                     "vmnic": iface,
-                    "v_switch": vs,
-                    "vswitch": vs,
+                    "v_switch": resolved_vs,
+                    "vswitch": resolved_vs,
                     "purpose": clean_svc,
                     "service": clean_svc,
                     "status": row.get("Role") or row.get("Status") or "Active Uplink",
@@ -956,7 +966,12 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 else:
                     rendered = desc or ""
 
-                rendered = re.sub(r"\s+", " ", rendered).strip()
+                # Universal cleanup for batch copy: strip empty brackets containing leftover tokens
+                rendered = re.sub(r"\([^)]*<[^>]+>[^)]*\)", "", rendered)
+                rendered = re.sub(r"<[^>]+>", "", rendered)
+                rendered = re.sub(r"\(\s*[/_-]*\s*\)", "", rendered)
+                rendered = re.sub(r"\s*-\s*$", "", rendered)
+                rendered = re.sub(r"\s{2,}", " ", rendered).strip()
                 if ip and ip.strip():
                     if f"(IP: {ip})" not in rendered:
                         vs_lines.append(f"{iface}:\n{rendered} (IP: {ip})\n")
