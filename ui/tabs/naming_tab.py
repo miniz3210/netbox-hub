@@ -858,15 +858,21 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 st.error(f"Vision analysis failed: {str(e)}")
 
     if "esxi_parsed_descriptions" in st.session_state and st.session_state["esxi_parsed_descriptions"]:
-        st.markdown("###### 📋 Generated NetBox Interface Descriptions")
-        st.dataframe(
+        st.markdown("###### 📋 Generated NetBox Interface Descriptions (Editable)")
+        st.caption("Review and edit parsed topology directly below. Batch text updates reactively in real time.")
+
+        # Interactive data editor allowing direct adjustments before batch copying
+        edited_descriptions = st.data_editor(
             st.session_state["esxi_parsed_descriptions"],
             width="stretch",
-            hide_index=True
+            hide_index=True,
+            num_rows="dynamic",
+            key="esxi_vision_data_editor"
         )
+        st.session_state["esxi_parsed_descriptions"] = edited_descriptions
 
         st.markdown("###### 📋 Quick Copy for NetBox (Batch Text)")
-        rows = st.session_state["esxi_parsed_descriptions"]
+        rows = edited_descriptions
         
         # Get patterns from session state
         naming_rules = st.session_state.get("naming_rules", {})
