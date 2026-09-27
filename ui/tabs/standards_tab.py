@@ -421,12 +421,12 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
                             presets[idx], presets[idx + 1] = presets[idx + 1], presets[idx]
                             st.rerun()
                     with col_del:
-                    if _render_centered_del_btn(f"{kind}_pre_del_{idx}"):
-                        if len(presets) > 1:
-                            st.session_state[_pending_del_key] = idx
-                            st.rerun()
-                        else:
-                            st.session_state[f"{kind}_preset_min_one"] = True
+                        if _render_centered_del_btn(f"{kind}_pre_del_{idx}"):
+                            if len(presets) > 1:
+                                st.session_state[_pending_del_key] = idx
+                                st.rerun()
+                            else:
+                                st.session_state[f"{kind}_preset_min_one"] = True
 
                 if stale_del == idx:
                     continue
