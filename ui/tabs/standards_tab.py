@@ -905,11 +905,14 @@ def render_standards_tab(active_model):
         variables_now = get_pattern_variables(current_rules)
         patterns_now = get_naming_patterns(current_rules)
 
-        st.markdown("#### ✏️ Manage Pattern Variables")
-        st.caption("Add, edit, or remove variables. New variables default to **optional** (shown empty; omitted from output unless filled). Use `<Name>` in your naming patterns.")
-
-        with st.expander("🔧 Edit Existing Variables", expanded=True):
-            var_names = list(variables_now.keys())
+        var_names = list(variables_now.keys())
+        with st.container(border=True):
+            col_t1, col_t2 = st.columns([3, 1])
+            with col_t1:
+                st.markdown("#### 📘 PATTERN VARIABLES")
+            with col_t2:
+                st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(var_names)} variables</span></div>", unsafe_allow_html=True)
+            st.caption("Add, edit, or reorder template tokens. Optional variables are omitted when left empty.")
 
             if variables_now:
                 c_nh_nm, c_nh_lb, c_nh_ph, c_nh_df, c_nh_opt, c_nh_up, c_nh_dn, c_nh_del = st.columns(VARIABLE_COLS, vertical_alignment="center")
@@ -928,7 +931,7 @@ def render_standards_tab(active_model):
                 with c_nh_dn:
                     pass
                 with c_nh_del:
-                    pass
+                    st.markdown("**Action**")
 
                 edited_vars = {}
                 total_vars = len(var_names)
@@ -948,28 +951,25 @@ def render_standards_tab(active_model):
                         var_opt = st.checkbox("Optional", value=bool(meta.get("optional")), key=f"var_opt_{name}", label_visibility="collapsed")
                     with c_up:
                         if idx > 0:
-                            st.button("⬆️", key=f"var_up_{idx}", help=f"Move <{name}> up")
-                            if st.session_state.get(f"var_up_{idx}"):
+                            if st.button("⬆️", key=f"var_up_{idx}", help=f"Move <{name}> up"):
                                 var_names[idx - 1], var_names[idx] = var_names[idx], var_names[idx - 1]
                                 reordered = {k: variables_now[k] for k in var_names}
                                 _persist_variables(current_rules, reordered)
                         else:
-                            st.button("", key=f"ghost_up_{idx}", disabled=True)
+                            pass
                     with c_dn:
                         if idx < total_vars - 1:
-                            st.button("⬇️", key=f"var_dn_{idx}", help=f"Move <{name}> down")
-                            if st.session_state.get(f"var_dn_{idx}"):
+                            if st.button("⬇️", key=f"var_dn_{idx}", help=f"Move <{name}> down"):
                                 var_names[idx], var_names[idx + 1] = var_names[idx + 1], var_names[idx]
                                 reordered = {k: variables_now[k] for k in var_names}
                                 _persist_variables(current_rules, reordered)
                         else:
-                            st.button("", key=f"ghost_dn_{idx}", disabled=True)
+                            pass
                     with c_del:
-                        st.button("🗑️", key=f"var_del_{name}", help=f"Remove <{name}>")
+                        if _render_centered_del_btn(f"var_del_{name}", f"Remove <{name}>"):
+                            edited_vars[name] = None
+                            continue
 
-                    if st.session_state.get(f"var_del_{name}"):
-                        edited_vars[name] = None
-                        continue
                     var_key = var_key or name
                     entry = {
                         "label": var_lbl or var_key,
@@ -980,43 +980,44 @@ def render_standards_tab(active_model):
                     entry["optional"] = bool(var_opt)
                     edited_vars[var_key] = entry
 
-                if st.button("💾 Apply Variable Changes", key="var_apply"):
-                    final_vars = {k: v for k, v in edited_vars.items() if v is not None}
-                    _persist_variables(current_rules, final_vars)
-            else:
-                st.info("No variables defined yet. Add one below.")
-                if st.button("💾 Apply Variable Changes", key="var_apply_empty"):
-                    st.warning("Nothing to apply.")
+                # Inline Add Row
+                ca_nm, ca_lb, ca_ph, ca_df, ca_opt, ca_up, ca_dn, ca_del = st.columns(VARIABLE_COLS, vertical_alignment="center")
+                with ca_nm:
+                    new_name = st.text_input("Name", value="", placeholder="e.g. speed", key="var_new_name", label_visibility="collapsed").strip()
+                    new_name = _normalize_var_name(new_name)
+                with ca_lb:
+                    new_label = st.text_input("Label", value="", placeholder="e.g. Link Speed", key="var_new_label", label_visibility="collapsed").strip()
+                with ca_ph:
+                    new_ph = st.text_input("Placeholder", value="", placeholder="e.g. 10G", key="var_new_ph", label_visibility="collapsed").strip()
+                with ca_df:
+                    new_def = st.text_input("Auto-Fill", value="", placeholder="e.g. 10G", key="var_new_def", label_visibility="collapsed")
+                with ca_opt:
+                    new_optional = st.checkbox("Optional", value=True, key="var_new_optional", label_visibility="collapsed")
+                with ca_up:
+                    pass
+                with ca_dn:
+                    pass
+                with ca_del:
+                    pass
 
-        st.markdown("---")
-        st.markdown("#### ➕ Add New Variable")
-        with st.expander("➕ Add a New Variable", expanded=True):
-            new_name = st.text_input("Variable Name (e.g. Speed, Standby_vmnics)", value="", key="var_new_name").strip()
-            new_name = _normalize_var_name(new_name)
-            new_label = st.text_input("Display Label", value="", placeholder="e.g. Interface Speed", key="var_new_label").strip()
-            new_ph = st.text_input("Placeholder Example", value="", placeholder="e.g. 10G, 25G", key="var_new_ph").strip()
-            new_def = st.text_input("Default Auto-Fill (Optional)", value="", placeholder="e.g. vmnic0", key="var_new_def")
-            new_optional = st.checkbox(
-                "Optional (default empty unless user inputs)", value=True,
-                key="var_new_optional",
-            )
-            if st.button("➕ Add Variable", key="var_new_add", type="primary"):
-                if new_name:
-                    entry = {
-                        "label": new_label or new_name,
-                        "placeholder": new_ph or f"e.g. {new_name}",
-                    }
-                    if new_def:
-                        entry["default"] = new_def
-                    if new_optional:
-                        entry["optional"] = True
-                    else:
-                        entry["optional"] = False
-                    final_vars = dict(variables_now)
-                    final_vars[new_name] = entry
-                    _persist_variables(current_rules, final_vars)
-                else:
-                    st.warning("⚠️ Please enter a variable name.")
+                col_save_var, col_reset_var = st.columns(2)
+                with col_save_var:
+                    if st.button("💾 Save Variables", key="var_apply", type="primary", width='stretch'):
+                        final_vars = {k: v for k, v in edited_vars.items() if v is not None}
+                        if new_name:
+                            final_vars[new_name] = {
+                                "label": new_label or new_name,
+                                "placeholder": new_ph or f"e.g. {new_name}",
+                                "default": new_def,
+                                "optional": bool(new_optional),
+                            }
+                        _persist_variables(current_rules, final_vars)
+                with col_reset_var:
+                    if st.button("🔄 Reset to Defaults", key="var_reset", width='stretch'):
+                        from config.naming_rules import PATTERN_VARIABLES
+                        _persist_variables(current_rules, dict(PATTERN_VARIABLES))
+            else:
+                st.info("No variables defined yet.")
 
         with st.expander("🧩 Active Patterns", expanded=False):
             if patterns_now:

@@ -872,11 +872,31 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         naming_rules = st.session_state.get("naming_rules", {})
         patterns = naming_rules.get("naming_patterns", {})
         
-        # Template patterns from session state or defaults (using <Token> syntax)
-        uplink_pattern = patterns.get("esxi_uplink", "<vmnic> - <vswitch> <purpose> <role> Uplink")
-        pg_uplink_pattern = patterns.get("esxi_portgroup_with_uplink", "<vswitch> (<teaming>)")
-        pg_no_uplink_pattern = patterns.get("esxi_portgroup_no_uplink", "<vswitch> (Internal Only / No Uplink)")
-        vmk_pattern = patterns.get("esxi_vmkernel", "<service> (<vswitch>) (IP: <ip>)")
+        # Load user-configured patterns dynamically from Standards rules
+        esxi_presets = {p["code"]: p for p in naming_rules.get("esxi_network_presets", [])}
+        
+        uplink_tpl = (
+            patterns.get("esxinet_uplink")
+            or patterns.get("esxi_uplink")
+            or esxi_presets.get("Uplink", {}).get("pattern_template")
+            or esxi_presets.get("Uplink", {}).get("pattern")
+            or "<vmnic> - <v_switch> <purpose> <status>"
+        )
+        pg_tpl = (
+            patterns.get("esxinet_portgroup")
+            or patterns.get("esxi_portgroup")
+            or esxi_presets.get("PortGroup", {}).get("pattern_template")
+            or esxi_presets.get("PortGroup", {}).get("pattern")
+            or "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)"
+        )
+        vmk_tpl = (
+            patterns.get("esxinet_vmkernel")
+            or patterns.get("esxi_vmkernel")
+            or esxi_presets.get("VMkernel", {}).get("pattern_template")
+            or esxi_presets.get("VMkernel", {}).get("pattern")
+            or "<purpose> (<v_switch>)"
+        )
+
         groups = {}
         for row in rows:
             if not isinstance(row, dict):
@@ -900,51 +920,17 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 iface = row.get("Interface", "")
                 desc = row.get("Description", "")
                 ip = row.get("IP Address", "")
-                
-                # Use template patterns for rendering
                 row_type = row.get("Type", "")
+
                 if row_type == "Uplink":
-                    # Use uplink pattern template
-                    uplink_vals = {
-                        "vmnic": iface or "",
-                        "vswitch": vs or "",
-                        "purpose": row.get("Purpose", ""),
-                        "role": row.get("Role", "Active")
-                    }
-                    rendered = uplink_pattern
-                    for var, val in uplink_vals.items():
-                        rendered = rendered.replace(f"<{var}>", str(val) if val else "")
+                    rendered = desc or uplink_tpl
                 elif row_type == "PortGroup":
-                    # Check if port group has uplinks
-                    has_uplink = row.get("HasUplink", False)
-                    if has_uplink:
-                        pg_vals = {
-                            "vswitch": vs or "",
-                            "teaming": row.get("Teaming", "")
-                        }
-                        rendered = pg_uplink_pattern
-                        for var, val in pg_vals.items():
-                            rendered = rendered.replace(f"<{var}>", str(val) if val else "")
-                    else:
-                        pg_vals = {
-                            "vswitch": vs or ""
-                        }
-                        rendered = pg_no_uplink_pattern
-                        for var, val in pg_vals.items():
-                            rendered = rendered.replace(f"<{var}>", str(val) if val else "")
+                    rendered = desc or pg_tpl
                 elif row_type == "VMkernel":
-                    # Use VMkernel pattern template
-                    vmk_vals = {
-                        "service": row.get("Service", ""),
-                        "vswitch": vs or "",
-                        "ip": ip or ""
-                    }
-                    rendered = vmk_pattern
-                    for var, val in vmk_vals.items():
-                        rendered = rendered.replace(f"<{var}>", str(val) if val else "")
+                    rendered = desc or vmk_tpl
                 else:
                     rendered = desc or ""
-                
+
                 if ip and ip.strip():
                     vs_lines.append(f"{iface}:\n{rendered} (IP: {ip})\n")
                 else:
@@ -971,13 +957,15 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
     if not presets:
         presets = [
             {"code": "Uplink", "label": "Physical Uplink", "pattern": "<vmnic> - <v_switch> <purpose> <status>"},
-            {"code": "PortGroup", "label": "Port Group", "pattern": "<port_group> [<active_vmnics> Active / <standby_vmnics> Standby]"},
-            {"code": "VMkernel", "label": "VMkernel", "pattern": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)"},
+            {"code": "PortGroup", "label": "Port Group", "pattern": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)"},
+            {"code": "VMkernel", "label": "VMkernel", "pattern": "<purpose> (<v_switch>)"},
         ]
 
     preset_codes = [p["code"] for p in presets]
     preset_map = {p["code"]: p for p in presets}
 
+    st.markdown("---")
+    st.subheader("Interactive Single Item Generator")
     selected_code = st.radio(
         "ESXi Preset Type",
         options=preset_codes,
@@ -1003,14 +991,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         or sel_preset.get("pattern")
         or ""
     )
-    if not curr_pattern:
-        sc = str(selected_code).lower()
-        if "uplink" in sc:
-            curr_pattern = "<vmnic> - <v_switch> <purpose> <status>"
-        elif "portgroup" in sc or "group" in sc:
-            curr_pattern = "<port_group> [<active_vmnics> Active / <standby_vmnics> Standby]"
-        else:
-            curr_pattern = "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)"
 
     variables = get_pattern_variables(naming_rules)
 
@@ -1033,7 +1013,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
     out = render_dynamic_pattern(curr_pattern, values, variables)
 
     st.session_state["esxi_generated_desc"] = out
-    st.text_input("Generated ESXi Description:", value=out)
+    st.caption("Generated ESXi Description:")
+    st.code(out, language="text")
 
     if st.button("AI Verify ESXi Description", key="esxi_ai_verify_btn"):
         st.info("Verified against ESXi naming standards.")

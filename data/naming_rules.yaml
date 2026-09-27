@@ -33,6 +33,8 @@
   "esxi_vswitch": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
   "esxinet_pgname": "PG-<pg_network>",
   "esxi_pgname": "PG-<pg_network>",
+  "esxinet_pg_name": "<pg_network>",
+  "esxi_pg_name": "<pg_network>",
   "custom_patterns": [],
   "device_presets": [
     {
@@ -160,6 +162,12 @@
       "label": "vmk",
       "pattern_key": "esxi_vmkernel",
       "description": "VMkernel Management / vMotion / Storage"
+    },
+    {
+      "code": "PG_Name",
+      "label": "PG-VM Network",
+      "pattern_key": "esxinet_pg_name",
+      "description": ""
     }
   ],
   "naming_patterns": {
@@ -196,7 +204,9 @@
     "esxinet_vmkernel": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
     "esxi_vswitch": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
     "esxinet_pgname": "PG-<pg_network>",
-    "esxi_pgname": "PG-<pg_network>"
+    "esxi_pgname": "PG-<pg_network>",
+    "esxinet_pg_name": "<pg_network>",
+    "esxi_pg_name": "<pg_network>"
   },
   "pattern_variables": {
     "country": {
