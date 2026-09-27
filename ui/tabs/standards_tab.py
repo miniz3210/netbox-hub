@@ -36,6 +36,19 @@ def _render_centered_del_btn(key: str, help_text: str = "Delete this entry") -> 
     return st.button("🗑️", key=key, help=help_text, width='stretch')
 
 
+def _clear_session_state_prefixes(*prefixes: str) -> None:
+    """Drop every cached widget value whose key starts with one of *prefixes*.
+
+    Called from Reset handlers so that stale in-row values (text inputs, moved
+    indices, etc.) are wiped before the next render, guaranteeing the tables
+    rebuild from the freshly loaded defaults rather than the old session values.
+    """
+    for k in list(st.session_state.keys()):
+        sk = str(k)
+        if any(sk.startswith(p) for p in prefixes):
+            st.session_state.pop(k, None)
+
+
 def _inject_preset_table_style() -> None:
     """Inject the shared preset-table CSS.
 
@@ -159,7 +172,7 @@ def _render_auto_correction_manager(active_model: str) -> None:
     if st.session_state.pop("autocorrect_saved", False):
         st.success("✅ Auto-correction rules saved & applied!")
     if st.session_state.pop("autocorrect_reset", False):
-        st.success("✅ Auto-correction rules reset to factory defaults!")
+        st.success("✅ Auto-correction rules reset to defaults!")
 
     rules = load_auto_corrections()
     categories = list(rules.keys())
@@ -247,8 +260,9 @@ def _render_auto_correction_manager(active_model: str) -> None:
                         final[category] = updated
                         _persist_auto_corrections(final)
             with col_reset:
-                if st.button("🔄 Reset to Factory Defaults", key=f"ac_reset_factory_{category}", width='stretch'):
+                if st.button("🔄 Reset to Defaults", key=f"ac_reset_factory_{category}", width='stretch'):
                     reset_auto_corrections()
+                    _clear_session_state_prefixes(f"ac_{category}_")
                     st.session_state["autocorrect_reset"] = True
                     st.rerun()
 
@@ -353,23 +367,30 @@ def _render_site_code_mapping_manager() -> None:
             if key:
                 updated[key] = nr_.strip().upper()
 
-        s_col_add, s_col_addcode = st.columns([3.0, 2.2])
-        with s_col_add:
-            new_p = st.text_input("New City / Location", value="", key="sitecode_new_p",
-                                 placeholder="e.g. bristol")
-        with s_col_addcode:
-            new_code = st.text_input("New Site Code", value="", key="sitecode_new_code",
-                                    placeholder="e.g. BRI")
-
-        col_save, col_add = st.columns(2)
+        col_save, col_reset = st.columns([1.2, 1.0])
         with col_save:
             if st.button("💾 Save & Apply Changes", key="sitecode_save", type="primary", width='stretch'):
                 final = dict(rules)
                 final["site_code_rules"] = dict(sr)
                 final["site_code_rules"]["exact_mappings"] = updated
                 _persist_site_code_mappings(final)
+        with col_reset:
+            if st.button("🔄 Reset to Defaults", key="sitecode_reset", width='stretch'):
+                _reset_site_code_mappings()
+
+        col_city, col_code, col_add = st.columns([3.0, 2.2, 0.7], vertical_alignment="center")
+        with col_city:
+            new_p = st.text_input(
+                "New City / Location", value="", key="sitecode_new_p",
+                placeholder="e.g. bristol", label_visibility="collapsed",
+            )
+        with col_code:
+            new_code = st.text_input(
+                "New Site Code", value="", key="sitecode_new_code",
+                placeholder="e.g. BRI", label_visibility="collapsed",
+            )
         with col_add:
-            if st.button("➕ Add Mapping", key="sitecode_add", width='stretch'):
+            if st.button("➕ Add", key="sitecode_add", width='stretch', help="Add new mapping"):
                 if new_p.strip() and new_code.strip():
                     final = dict(rules)
                     final["site_code_rules"] = dict(sr)
@@ -392,6 +413,32 @@ def _persist_site_code_mappings(rules: dict) -> None:
     add_to_history(delta, source="Site Code Mapping Rules: Management UI")
     st.session_state["naming_rules"] = load_naming_rules()
     st.session_state["site_code_saved"] = True
+    st.rerun()
+
+
+def _reset_site_code_mappings() -> None:
+    """Restore factory-default Site Code mapping rules.
+
+    Clears every cached ``sitecode_*`` widget value, reloads the default
+    config from the factory settings, persists it to disk, then re-runs so the
+    manager rebuilds from the defaults.
+    """
+    from config.naming_rules import DEFAULT_SITE_CODE_RULES, compute_delta
+
+    old_rules = load_naming_rules()
+    new_rules = dict(old_rules)
+    new_rules["site_code_rules"] = dict(DEFAULT_SITE_CODE_RULES)
+    save_naming_rules(new_rules, source="Site Code Mapping Rules: Reset to Defaults")
+    delta = compute_delta(old_rules, new_rules)
+    if not delta:
+        delta = {"site_code_rules": {
+            "old": dict(old_rules.get("site_code_rules") or {}),
+            "new": dict(DEFAULT_SITE_CODE_RULES),
+        }}
+    add_to_history(delta, source="Site Code Mapping Rules: Reset to Defaults")
+    _clear_session_state_prefixes("sitecode_")
+    st.session_state["naming_rules"] = load_naming_rules()
+    st.session_state["site_code_reset"] = True
     st.rerun()
 
 
@@ -567,6 +614,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
             )
 
     if reset_presets:
+        _clear_session_state_prefixes(f"{kind}_")
         _reset_presets(kind, rules)
         return
 
@@ -794,6 +842,7 @@ def _host_editor(rules: dict) -> None:
             reset = st.button("🔄 Reset to Defaults", key="host_preset_reset", width='stretch')
 
     if reset:
+        _clear_session_state_prefixes("host_", "vm_")
         _reset_presets("host_vm", rules)
         return
 
@@ -931,6 +980,7 @@ def _vm_editor(rules: dict) -> None:
             reset = st.button("🔄 Reset to Defaults", key="vm_reset", width='stretch')
 
     if reset:
+        _clear_session_state_prefixes("host_", "vm_")
         _reset_presets("host_vm", rules)
         return
 
@@ -975,6 +1025,9 @@ def render_standards_tab(active_model):
 
     if st.session_state.pop("site_code_saved", False):
         st.success("✅ Site code mapping rules saved & applied!")
+
+    if st.session_state.pop("site_code_reset", False):
+        st.success("✅ Site code mapping rules reset to defaults!")
 
     st.markdown(
         """
@@ -1051,7 +1104,7 @@ def render_standards_tab(active_model):
                     st.session_state["naming_rules"] = rules.copy()
                     st.toast("Guidelines saved successfully!", icon="✅")
             with col_reset_yaml:
-                if st.button("🔄 Reset to Default", width='stretch'):
+                if st.button("🔄 Reset to Defaults", width='stretch'):
                     default_yaml = DEFAULT_RULES.get("netbox_server_yaml", DEFAULT_NAMING_PATTERNS.get("netbox_server_yaml", ""))
                     rules = load_naming_rules()
                     rules["netbox_server_yaml"] = default_yaml
