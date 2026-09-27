@@ -998,7 +998,11 @@ def render_standards_tab(active_model):
                 """
                 <style>
                 div[data-testid="column"]:last-child {
-                    min-width: 130px !important;
+                    min-width: 95px !important;
+                    max-width: 110px !important;
+                    display: flex !important;
+                    justify-content: flex-end !important;
+                    align-items: center !important;
                 }
                 div[data-testid="column"]:last-child button {
                     padding-left: 4px !important;
@@ -1015,7 +1019,7 @@ def render_standards_tab(active_model):
 
             if variables_now:
                 # Optimized column ratios: Name, Label, Placeholder, Auto-Fill, Optional, Up, Down, Delete(Action)
-                VARIABLE_COLS_OPTIMIZED = [1.5, 2.0, 2.0, 1.5, 0.8, 0.5, 0.5, 1.1]
+                VARIABLE_COLS_OPTIMIZED = [1.2, 2.8, 3.2, 1.0, 0.8, 0.5, 0.5, 1.0]
                 c_nh_nm, c_nh_lb, c_nh_ph, c_nh_df, c_nh_opt, c_nh_up, c_nh_dn, c_nh_del = st.columns(VARIABLE_COLS_OPTIMIZED, vertical_alignment="center")
                 with c_nh_nm:
                     st.markdown("**Name**")
