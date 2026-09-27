@@ -706,26 +706,102 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables, global_s
 def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto_correct: bool = True):
     st.subheader("ESXi Network Description Formatter", help="Format standardized ESXi physical uplinks, port groups, and VMkernel adapter descriptions.")
 
-    with st.expander("📸 Screenshot Guidelines (Virtual Switches Topology)", expanded=False):
-        st.markdown(
-            """
-            **Recommended Capture Location:**
-            1. Access **vCenter** or **ESXi Host Client**.
-            2. Navigate to: `Host` ➔ `Configure` ➔ `Networking` ➔ `Virtual switches`.
-            3. Expand the target **Standard Switch** (e.g., `vSwitch0`).
-            4. Capture the topology layout ensuring all three sections are visible:
-               - **Left:** Port Groups & VMkernel ports
-               - **Middle:** Virtual Switch diagram
-               - **Right:** Physical Adapters (with link speeds)
-
-> 💡 **Pro-Tip (Complete Data Discovery)**: In addition to **Virtual switches** topology, also upload/paste screenshots of **Networking ➜ Physical adapters** (click `>>` to expand adapters like `vmnic1`~`vmnic6`). This provides exact **MAC addresses**, **PCI slot mappings (PCIeX/PortX)**, and **CDP/LLDP Switch Ports (Cable Connections)** with zero manual guesswork!
-
-> ⚠️ **Manual Verification Required:** ESXi topology views do not explicitly display Active vs. Standby status. Please verify in ESXi: click **EDIT** beside the vSwitch ➜ go to **Teaming and failover** ➜ check **Failover order** (Active vs Standby adapters) before committing to NetBox.
-            """
-        )
-        st.markdown("---")
-        st.markdown("**📸 Automated Data Entry via Screenshot**")
-        col_up1, col_up2 = st.columns([1, 1])
+    # Naming Pattern Standards Section
+    with st.expander("⚙️ Naming Pattern Standards (Variables & Templates)", expanded=False):
+        st.caption("Configure the naming pattern templates and variables used for ESXi network descriptions.")
+        
+        # Load current patterns and variables
+        patterns = naming_rules.get("naming_patterns", {})
+        variables = naming_rules.get("pattern_variables", {})
+        
+        # Define the 5 ESXi network patterns with their descriptions
+        esxi_patterns = {
+            "UPLINK_PATTERN": {
+                "label": "Physical Uplink Pattern",
+                "pattern_key": "esxi_uplink",
+                "help": "Template for vmnic uplink descriptions",
+                "variables": ["vmnic", "vswitch", "purpose", "role"]
+            },
+            "UPLINK_HEADER_PATTERN": {
+                "label": "Physical Uplink Header Pattern", 
+                "pattern_key": "esxi_uplink_header",
+                "help": "Template for PCIe slot/vmnic display in headers",
+                "variables": ["pcie_slot", "vmnic"]
+            },
+            "PG_UPLINK_PATTERN": {
+                "label": "Port Group with Uplink Pattern",
+                "pattern_key": "esxi_portgroup_with_uplink", 
+                "help": "Template for port groups that have physical uplinks",
+                "variables": ["vswitch", "teaming"]
+            },
+            "PG_NO_UPLINK_PATTERN": {
+                "label": "Port Group without Uplink Pattern",
+                "pattern_key": "esxi_portgroup_no_uplink",
+                "help": "Template for port groups without physical uplinks (internal only)",
+                "variables": ["vswitch"]
+            },
+            "VMK_PATTERN": {
+                "label": "VMkernel Pattern",
+                "pattern_key": "esxi_vmkernel",
+                "help": "Template for VMkernel adapter descriptions", 
+                "variables": ["service", "vswitch", "ip"]
+            }
+        }
+        
+        # Display each pattern as an editable text field
+        for pattern_id, pattern_info in esxi_patterns.items():
+            pattern_key = pattern_info["pattern_key"]
+            current_pattern = patterns.get(pattern_key, "")
+            
+            # Set default patterns if not present
+            if not current_pattern:
+                if pattern_key == "esxi_uplink":
+                    current_pattern = "<vmnic> - <vswitch> <purpose> <role> Uplink"
+                elif pattern_key == "esxi_uplink_header":
+                    current_pattern = "<pcie_slot> (<vmnic>)"
+                elif pattern_key == "esxi_portgroup_with_uplink":
+                    current_pattern = "<vswitch> (<teaming>)"
+                elif pattern_key == "esxi_portgroup_no_uplink":
+                    current_pattern = "<vswitch> (Internal Only / No Uplink)"
+                elif pattern_key == "esxi_vmkernel":
+                    current_pattern = "<service> (<vswitch>) (IP: <ip>)"
+            
+            # Create the editable field
+            new_pattern = st.text_area(
+                label=pattern_info["label"],
+                value=current_pattern,
+                height=80,
+                help=f"{pattern_info['help']}. Available variables: {', '.join(['<' + var + '>' for var in pattern_info['variables']])}",
+                key=f"esxi_standard_{pattern_key}"
+            )
+            
+            # Save the pattern if changed
+            if new_pattern != current_pattern:
+                patterns[pattern_key] = new_pattern
+                naming_rules["naming_patterns"] = patterns
+                st.session_state["naming_rules"] = naming_rules
+                # Save to persistent storage
+                from config.naming_rules import save_naming_rules
+                save_naming_rules(naming_rules, source=f"ESXi Standards Update: {pattern_id}")
+                st.success(f"Updated {pattern_info['label']}")
+    
+    # Show available variables reference
+    with st.expander("📋 Available Variables Reference", expanded=False):
+        st.markdown("""
+        **Available Variables for ESXi Patterns:**
+        - `<vmnic>` - Physical NIC identifier (e.g., vmnic0, vmnic1)
+        - `<pcie_slot>` - PCIe slot location (e.g., PCIe1/Port1)
+        - `<vswitch>` - vSwitch name (e.g., vSwitch0, vSwitch1)
+        - `<purpose>` - Service purpose (e.g., Management, vMotion, iSCSI01)
+        - `<role>` - Uplink role (e.g., Active, Standby)
+        - `<teaming>` - Teaming policy (e.g., Load Balance, Failover)
+        - `<service>` - VMkernel service type (e.g., Management, vMotion)
+        - `<ip>` - IP address assigned to VMkernel
+        """)
+    
+    st.markdown("---")
+    st.markdown("**📸 Automated Data Entry via Screenshot**")
+    col_up1, col_up2 = st.columns([1, 1])
 
         # Initialize unified screenshot store and counters
         if "unified_screenshots" not in st.session_state:
@@ -866,7 +942,16 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
         st.markdown("###### 📋 Quick Copy for NetBox (Batch Text)")
         rows = st.session_state["esxi_parsed_descriptions"]
-        type_order = {"Uplink": 0, "PortGroup": 1, "VMkernel": 2}
+        
+        # Get patterns from session state
+        naming_rules = st.session_state.get("naming_rules", {})
+        patterns = naming_rules.get("naming_patterns", {})
+        
+        # Template patterns from session state or defaults (using <Token> syntax)
+        uplink_pattern = patterns.get("esxi_uplink", "<vmnic> - <vswitch> <purpose> <role> Uplink")
+        pg_uplink_pattern = patterns.get("esxi_portgroup_with_uplink", "<vswitch> (<teaming>)")
+        pg_no_uplink_pattern = patterns.get("esxi_portgroup_no_uplink", "<vswitch> (Internal Only / No Uplink)")
+        vmk_pattern = patterns.get("esxi_vmkernel", "<service> (<vswitch>) (IP: <ip>)")
         groups = {}
         for row in rows:
             if not isinstance(row, dict):
@@ -888,13 +973,71 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 iface = row.get("Interface", "")
                 desc = row.get("Description", "")
                 ip = row.get("IP Address", "")
-                if ip and ip.strip():
-                    vs_lines.append(f"{iface}:\n{desc} (IP: {ip})\n")
+                
+                # Use template patterns for rendering
+                row_type = row.get("Type", "")
+                if row_type == "Uplink":
+                    # Use uplink pattern template
+                    uplink_vals = {
+                        "vmnic": iface or "",
+                        "vswitch": vs or "",
+                        "purpose": row.get("Purpose", ""),
+                        "role": row.get("Role", "Active")
+                    }
+                    rendered = uplink_pattern
+                    for var, val in uplink_vals.items():
+                        rendered = rendered.replace(f"<{var}>", str(val) if val else "")
+                elif row_type == "PortGroup":
+                    # Check if port group has uplinks
+                    has_uplink = row.get("HasUplink", False)
+                    if has_uplink:
+                        pg_vals = {
+                            "vswitch": vs or "",
+                            "teaming": row.get("Teaming", "")
+                        }
+                        rendered = pg_uplink_pattern
+                        for var, val in pg_vals.items():
+                            rendered = rendered.replace(f"<{var}>", str(val) if val else "")
+                    else:
+                        pg_vals = {
+                            "vswitch": vs or ""
+                        }
+                        rendered = pg_no_uplink_pattern
+                        for var, val in pg_vals.items():
+                            rendered = rendered.replace(f"<{var}>", str(val) if val else "")
+                elif row_type == "VMkernel":
+                    # Use VMkernel pattern template
+                    vmk_vals = {
+                        "service": row.get("Service", ""),
+                        "vswitch": vs or "",
+                        "ip": ip or ""
+                    }
+                    rendered = vmk_pattern
+                    for var, val in vmk_vals.items():
+                        rendered = rendered.replace(f"<{var}>", str(val) if val else "")
                 else:
-                    vs_lines.append(f"{iface}:\n{desc}\n")
+                    rendered = desc or ""
+                
+                if ip and ip.strip():
+                    vs_lines.append(f"{iface}:\n{rendered} (IP: {ip})\n")
+                else:
+                    vs_lines.append(f"{iface}:\n{rendered}\n")
             blocks.append("\n".join(vs_lines))
 
-        bulk_text = "# NOTE: Verify Active/Standby via ESXi: vSwitch -> EDIT -> Teaming and failover -> Failover order.\n" + "\n\n".join(blocks).strip()
+        # Build clean output with proper double line breaks between sections
+        uplinks_section = "\n\n".join([b for b in blocks if "=== " in b and "Uplink" in b])
+        pg_section = "\n\n".join([b for b in blocks if "=== " in b and "PortGroup" in b])
+        vmk_section = "\n\n".join([b for b in blocks if "=== " in b and "VMkernel" in b])
+        
+        sections = []
+        if uplinks_section:
+            sections.append("=== Uplinks ===\n" + uplinks_section)
+        if pg_section:
+            sections.append("=== Port Groups ===\n" + pg_section)
+        if vmk_section:
+            sections.append("=== VMkernels ===\n" + vmk_section)
+        
+        bulk_text = "# NOTE: Verify Active/Standby via ESXi: vSwitch -> EDIT -> Teaming and failover -> Failover order.\n\n" + "\n\n".join(sections).strip()
         st.code(bulk_text, language="text")
 
     presets = naming_rules.get("esxi_network_presets", [])
