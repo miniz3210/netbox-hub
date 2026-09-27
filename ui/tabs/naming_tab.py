@@ -931,46 +931,46 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 # Safely resolve dynamic variables dictionary from naming_rules
                 pattern_vars = naming_rules.get("variables", {}) if isinstance(naming_rules, dict) else {}
 
-                # Robust key discovery across varied table column naming
+                # Robust switch extraction
                 resolved_vs = (
-                    vs or
-                    row.get("vSwitch") or
-                    row.get("v_switch") or
-                    row.get("Switch") or
-                    row.get("vswitch") or
-                    ""
+                    vs
+                    or str(row.get("vSwitch", "")).strip()
+                    or str(row.get("v_switch", "")).strip()
+                    or str(row.get("Switch", "")).strip()
+                    or str(row.get("vswitch", "")).strip()
                 )
-                raw_svc = row.get("Service") or row.get("Purpose") or (desc.split("(")[0].strip() if "(" in desc else desc)
-                clean_svc = re.sub(r"(?i)\s+network$", "", str(raw_svc or "")).strip()
 
-                # Construct universal token value map from row data
+                # Robust purpose extraction without trailing "network"
+                raw_purpose = str(row.get("Service") or row.get("Purpose") or (desc.split("(")[0] if "(" in desc else desc)).strip()
+                clean_svc = re.sub(r"(?i)\s+network$", "", raw_purpose).strip()
+
+                # Extract active and standby vmnics
+                act_nics = str(row.get("Active") or row.get("Active_vmnics") or "").strip()
+                stb_nics = str(row.get("Standby") or row.get("Standby_vmnics") or "").strip()
+
+                # Construct universal token value map identical to Interactive Single Item Generator
                 row_vals = {
-                    "vmnic": iface,
+                    "vmnic": str(iface).strip(),
                     "v_switch": resolved_vs,
                     "vswitch": resolved_vs,
                     "purpose": clean_svc,
                     "service": clean_svc,
-                    "status": row.get("Role") or row.get("Status") or "Active Uplink",
-                    "role": row.get("Role") or row.get("Status") or "Active",
-                    "active_vmnics": row.get("Active") or row.get("Active_vmnics") or "",
-                    "standby_vmnics": row.get("Standby") or row.get("Standby_vmnics") or "",
-                    "teaming": row.get("Teaming") or "",
+                    "status": str(row.get("Role") or row.get("Status") or "Active Uplink").strip(),
+                    "role": str(row.get("Role") or row.get("Status") or "Active").strip(),
+                    "active_vmnics": act_nics,
+                    "standby_vmnics": stb_nics,
+                    "teaming": str(row.get("Teaming") or "").strip(),
                 }
 
                 if row_type == "VMkernel":
                     rendered = render_dynamic_pattern(vmk_tpl, row_vals, pattern_vars)
                 elif row_type == "PortGroup":
-                    rendered = render_dynamic_pattern(pg_tpl, row_vals, pattern_vars) if not desc else desc
+                    rendered = render_dynamic_pattern(pg_tpl, row_vals, pattern_vars)
                 elif row_type == "Uplink":
-                    rendered = render_dynamic_pattern(uplink_tpl, row_vals, pattern_vars) if not desc else desc
+                    rendered = render_dynamic_pattern(uplink_tpl, row_vals, pattern_vars)
                 else:
                     rendered = desc or ""
 
-                # Universal cleanup for batch copy: strip empty brackets containing leftover tokens
-                rendered = re.sub(r"\([^)]*<[^>]+>[^)]*\)", "", rendered)
-                rendered = re.sub(r"<[^>]+>", "", rendered)
-                rendered = re.sub(r"\(\s*[/_-]*\s*\)", "", rendered)
-                rendered = re.sub(r"\s*-\s*$", "", rendered)
                 rendered = re.sub(r"\s{2,}", " ", rendered).strip()
                 if ip and ip.strip():
                     if f"(IP: {ip})" not in rendered:
