@@ -192,28 +192,28 @@
         "pattern_template": "Workstations -- VLAN"
       },
       {
-        "vid": 700,
-        "role": "Printers",
-        "vlan_name": "Printers",
-        "pattern_template": "Printers -- VLAN"
-      },
-      {
         "vid": 5,
         "role": "Management",
         "vlan_name": "Management",
         "pattern_template": "Management -- VLAN"
       },
       {
-        "vid": 800,
-        "role": "Audio Visual",
-        "vlan_name": "Audio Visual",
-        "pattern_template": "Audio Visual -- VLAN"
+        "vid": 700,
+        "role": "Printers",
+        "vlan_name": "Printers",
+        "pattern_template": "Printers -- VLAN"
       },
       {
         "vid": 200,
         "role": "Guests",
         "vlan_name": "Guests",
         "pattern_template": "Guest WiFi -- VLAN"
+      },
+      {
+        "vid": 800,
+        "role": "Audio Visual",
+        "vlan_name": "Audio Visual",
+        "pattern_template": "Audio Visual -- VLAN"
       },
       {
         "vid": 400,

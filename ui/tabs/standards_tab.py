@@ -1068,6 +1068,30 @@ def _vlan_presets_editor(rules: dict) -> None:
         _pending_del_key = "_vlan_pending_del"
         _pending_swap_key = "_vlan_pending_swap"
 
+        if group_name is not None:
+            stale_del = st.session_state.pop(_pending_del_key, None)
+            if stale_del is not None and 0 <= stale_del < len(items):
+                if len(items) <= 1:
+                    st.session_state["vlan_pre_min_one"] = True
+                else:
+                    items = [p for i, p in enumerate(items) if i != stale_del]
+                    rules["vlan_presets"] = dict(vlan_presets)
+                    rules["vlan_presets"][group_name] = items
+                    _clear_session_state_prefixes("vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_name_", "vlan_pre_pat_")
+                    _save_presets(rules)
+                    return
+
+            pending_swap = st.session_state.pop(_pending_swap_key, None)
+            if pending_swap is not None:
+                src, dst = pending_swap
+                if 0 <= src < len(items) and 0 <= dst < len(items):
+                    items[src], items[dst] = items[dst], items[src]
+                    rules["vlan_presets"] = dict(vlan_presets)
+                    rules["vlan_presets"][group_name] = items
+                    _clear_session_state_prefixes("vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_name_", "vlan_pre_pat_")
+                    _save_presets(rules)
+                    return
+
         new_group_name = None
         if is_custom:
             new_group_name = st.text_input(
@@ -1093,16 +1117,6 @@ def _vlan_presets_editor(rules: dict) -> None:
 
             updated = []
             positions = {}
-            stale_del = st.session_state.pop(_pending_del_key, None)
-            if stale_del is not None and 0 <= stale_del < len(items):
-                if len(items) <= 1:
-                    st.session_state["vlan_pre_min_one"] = True
-                else:
-                    items = [p for i, p in enumerate(items) if i != stale_del]
-                    rules["vlan_presets"] = dict(vlan_presets)
-                    rules["vlan_presets"][group_name] = items
-                    _save_presets(rules)
-                    return
 
             for idx, p in enumerate(items):
                 vid = p.get("vid", "")
@@ -1160,19 +1174,6 @@ def _vlan_presets_editor(rules: dict) -> None:
 
             if st.session_state.pop("vlan_pre_min_one", False):
                 st.warning("⚠️ At least one VLAN entry must remain. Delete a different entry first.")
-
-            pending_swap = st.session_state.pop(_pending_swap_key, None)
-            if pending_swap is not None:
-                src, dst = pending_swap
-                src_pos = positions.get(src)
-                dst_pos = positions.get(dst)
-                if src_pos is not None and dst_pos is not None and 0 <= src_pos < len(updated) and 0 <= dst_pos < len(updated):
-                    updated[src_pos], updated[dst_pos] = updated[dst_pos], updated[src_pos]
-                rules["vlan_presets"] = dict(vlan_presets)
-                rules["vlan_presets"][group_name] = updated
-                _clear_session_state_prefixes("vlan_pre_")
-                _save_presets(rules)
-                return
 
             ca_vid, ca_role, ca_name, ca_pat, ca_act = st.columns(PRESET_VLAN_COLS, vertical_alignment="center")
             with ca_vid:
