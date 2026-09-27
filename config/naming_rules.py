@@ -675,17 +675,20 @@ def get_naming_patterns(rules: dict) -> dict:
 def _delta_item_key(item) -> object:
     """Return the stable identity key used to match items across two preset lists.
 
-    Falls back to the item's description, and finally to a positional sentinel so non-preset
-    lists are compared element-by-element.
+    Falls back to the item's known fields, then to a JSON dump, and finally to a
+    positional sentinel so non-preset lists are compared element-by-element.
     """
     if isinstance(item, dict):
-        for k in ("code", "pattern_key", "key"):
+        for k in ("code", "pattern_key", "key", "vid", "role"):
             v = item.get(k)
             if v not in (None, ""):
                 return ("__key__", str(v))
-        if item.get("description") not in (None, ""):
-            return ("__desc__", str(item["description"]))
-    return ("__pos__", item)
+        try:
+            import json
+            return ("__json__", json.dumps(item, sort_keys=True))
+        except (TypeError, ValueError):
+            pass
+    return ("__pos__", str(item))
 
 
 def compute_delta(old: dict, new: dict) -> dict:
