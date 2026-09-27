@@ -228,22 +228,29 @@ def _render_auto_correction_manager(active_model: str) -> None:
                         "enabled": True,
                     })
 
-            # Primary save lives directly below the rules table, above the AI assistant.
-            if st.button("💾 Save & Apply Changes", key=f"ac_{category}_save", type="primary", width='stretch'):
-                failed = []
-                for rule in updated:
-                    pat = rule.get("pattern", "")
-                    repl = rule.get("replacement", "")
-                    ok, msg = validate_regex_replacement(pat, repl)
-                    if not ok:
-                        desc = rule.get("description", pat)
-                        failed.append(f"- `{desc}`: {msg}")
-                if failed:
-                    st.error("❌ Cannot save — invalid rule(s):\n" + "\n".join(failed))
-                else:
-                    final = dict(rules)
-                    final[category] = updated
-                    _persist_auto_corrections(final)
+            # Side-by-side Save & Reset buttons above AI Assistant (matching Preset style)
+            col_save, col_reset = st.columns([1.2, 1.0])
+            with col_save:
+                if st.button("💾 Save & Apply Changes", key=f"ac_{category}_save", type="primary", width='stretch'):
+                    failed = []
+                    for rule in updated:
+                        pat = rule.get("pattern", "")
+                        repl = rule.get("replacement", "")
+                        ok, msg = validate_regex_replacement(pat, repl)
+                        if not ok:
+                            desc = rule.get("description", pat)
+                            failed.append(f"- `{desc}`: {msg}")
+                    if failed:
+                        st.error("❌ Cannot save — invalid rule(s):\n" + "\n".join(failed))
+                    else:
+                        final = dict(rules)
+                        final[category] = updated
+                        _persist_auto_corrections(final)
+            with col_reset:
+                if st.button("🔄 Reset to Factory Defaults", key=f"ac_reset_factory_{category}", width='stretch'):
+                    reset_auto_corrections()
+                    st.session_state["autocorrect_reset"] = True
+                    st.rerun()
 
             with st.expander(f"✨ AI Assistant: Generate Rule for {category.replace('_', ' ').title()}", expanded=False):
                 ai_prompt = st.text_input(
@@ -266,20 +273,19 @@ def _render_auto_correction_manager(active_model: str) -> None:
                     else:
                         st.warning("⚠️ Please describe the correction first.")
 
-            col_add_p, col_add_r, col_add_d = st.columns([3.0, 2.2, 3.0])
+            # Inline Add Rule row aligned with table columns (Pattern, Replacement, Description, Add button in Delete column)
+            col_add_p, col_add_r, col_add_d, col_add_btn = st.columns(AUTOCORRECT_COLS, vertical_alignment="center")
             with col_add_p:
                 new_p = st.text_input("New Pattern", value="", key=f"ac_{category}_new_p",
-                                     placeholder=r"(?i)\b(vswitch)(\d+)\b")
+                                     placeholder=r"(?i)\b(vswitch)(\d+)\b", label_visibility="collapsed")
             with col_add_r:
                 new_r = st.text_input("New Replacement", value="", key=f"ac_{category}_new_r",
-                                     placeholder=r"vSwitch\2")
+                                     placeholder=r"vSwitch\2", label_visibility="collapsed")
             with col_add_d:
                 new_d = st.text_input("New Description", value="", key=f"ac_{category}_new_d",
-                                     placeholder="Describe the rule")
-
-            col_add, col_reset = st.columns(2)
-            with col_add:
-                if st.button("➕ Add Rule", key=f"ac_{category}_add", width='stretch'):
+                                     placeholder="Describe the rule", label_visibility="collapsed")
+            with col_add_btn:
+                if st.button("➕ Add", key=f"ac_{category}_add", width='stretch', help="Add new rule"):
                     if new_p.strip():
                         ok, msg = validate_regex_replacement(new_p, new_r)
                         if not ok:
@@ -295,11 +301,6 @@ def _render_auto_correction_manager(active_model: str) -> None:
                             _persist_auto_corrections(final)
                     else:
                         st.warning("⚠️ Enter a regex pattern to add.")
-            with col_reset:
-                if st.button("🔄 Reset to Factory Defaults", key=f"ac_reset_factory_{category}", width='stretch'):
-                    reset_auto_corrections()
-                    st.session_state["autocorrect_reset"] = True
-                    st.rerun()
 
     _render_site_code_mapping_manager()
 
