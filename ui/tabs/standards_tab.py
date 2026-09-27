@@ -411,6 +411,16 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
                 with c3:
                     ntpl = st.text_input("Pattern Template", value=tpl, key=f"{kind}_pre_tpl_{idx}", label_visibility="collapsed").strip()
                 with c4:
+                    col_up, col_down, col_del = st.columns(3)
+                    with col_up:
+                        if st.button("⬆️", key=f"{kind}_pre_up_{idx}", disabled=(idx == 0), help="Move up"):
+                            presets[idx - 1], presets[idx] = presets[idx], presets[idx - 1]
+                            st.rerun()
+                    with col_down:
+                        if st.button("⬇️", key=f"{kind}_pre_down_{idx}", disabled=(idx == len(presets) - 1), help="Move down"):
+                            presets[idx], presets[idx + 1] = presets[idx + 1], presets[idx]
+                            st.rerun()
+                    with col_del:
                     if _render_centered_del_btn(f"{kind}_pre_del_{idx}"):
                         if len(presets) > 1:
                             st.session_state[_pending_del_key] = idx

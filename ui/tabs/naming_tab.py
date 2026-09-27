@@ -1020,13 +1020,34 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 rendered = re.sub(r"\(\s*[/_-]*\s*\)", "", rendered)
                 rendered = re.sub(r"\s*-\s*$", "", rendered)
                 rendered = re.sub(r"\s{2,}", " ", rendered).strip()
+
+                # 5. Schema-Free Dynamic Interface Header Name Resolution
+                # Check for any dynamic name template (e.g. PG_Name, PortGroup_Name, <type>_Name)
+                header_iface = iface
+                name_tpl = None
+                for preset in esxi_presets:
+                    p_code = str(preset.get("code", "")).strip().lower()
+                    if p_code in [f"{row_type.lower()}_name", "pg_name" if row_type == "PortGroup" else ""]:
+                        name_tpl = preset.get("pattern", "")
+                        break
+
+                if name_tpl:
+                    name_vals = dict(row_vals)
+                    name_vals["pg_network"] = iface
+                    name_vals["network"] = iface
+                    name_vals["name"] = iface
+                    rendered_name = render_dynamic_pattern(name_tpl, name_vals, pattern_vars)
+                    rendered_name = re.sub(r"<[^>]+>", "", rendered_name).strip()
+                    if rendered_name:
+                        header_iface = rendered_name
+
                 if ip and ip.strip():
                     if f"(IP: {ip})" not in rendered:
-                        vs_lines.append(f"{iface}:\n{rendered} (IP: {ip})\n")
+                        vs_lines.append(f"{header_iface}:\n{rendered} (IP: {ip})\n")
                     else:
-                        vs_lines.append(f"{iface}:\n{rendered}\n")
+                        vs_lines.append(f"{header_iface}:\n{rendered}\n")
                 else:
-                    vs_lines.append(f"{iface}:\n{rendered}\n")
+                    vs_lines.append(f"{header_iface}:\n{rendered}\n")
             blocks.append("\n".join(vs_lines))
 
         # Build clean output with proper double line breaks between sections
