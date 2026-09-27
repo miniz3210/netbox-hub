@@ -383,15 +383,36 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
             st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(presets)} presets</span></div>", unsafe_allow_html=True)
         st.caption(card_caption)
 
-        col_hdr_code, col_hdr_lbl, col_hdr_tpl, col_hdr_act = st.columns(PRESET_COLS, vertical_alignment="center")
-        with col_hdr_code:
+        # Inject dynamic styling to guarantee Action buttons fit cleanly without squeezing
+        st.markdown(
+            """
+            <style>
+            div[data-testid="column"]:last-child {
+                min-width: 130px !important;
+            }
+            div[data-testid="column"]:last-child button {
+                padding-left: 4px !important;
+                padding-right: 4px !important;
+                min-width: 32px !important;
+            }
+            .action-header {
+                white-space: nowrap !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        # Headers - balanced for dynamic scaling with protected Action width
+        h_code, h_label, h_pattern, h_act = st.columns([1.0, 2.0, 4.0, 1.6])
+        with h_code:
             st.markdown("**Code**")
-        with col_hdr_lbl:
+        with h_label:
             st.markdown("**Label**")
-        with col_hdr_tpl:
+        with h_pattern:
             st.markdown("**Pattern Template**")
-        with col_hdr_act:
-            st.markdown("**Action**")
+        with h_act:
+            st.markdown("<span class='action-header'>**Action**</span>", unsafe_allow_html=True)
 
         updated = []
         patterns_updates = {}
@@ -403,23 +424,29 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
                 pkey = p.get("pattern_key", "")
                 tpl = patterns.get(pkey, "")
 
-                c1, c2, c3, c4 = st.columns(PRESET_COLS, vertical_alignment="center")
-                with c1:
+                c_code, c_label, c_pattern, c_actions = st.columns([1.0, 2.0, 4.0, 1.6])
+                with c_code:
                     ncode = st.text_input("Code", value=code, key=f"{kind}_pre_code_{idx}", label_visibility="collapsed").strip()
-                with c2:
+                with c_label:
                     nlbl = st.text_input("Label", value=label, key=f"{kind}_pre_lbl_{idx}", label_visibility="collapsed").strip()
-                with c3:
+                with c_pattern:
                     ntpl = st.text_input("Pattern Template", value=tpl, key=f"{kind}_pre_tpl_{idx}", label_visibility="collapsed").strip()
-                with c4:
-                    col_up, col_down, col_del = st.columns(3)
+                with c_actions:
+                    col_up, col_down, col_del = st.columns([1, 1, 1])
                     with col_up:
-                        if st.button("⬆️", key=f"{kind}_pre_up_{idx}", disabled=(idx == 0), help="Move up"):
-                            presets[idx - 1], presets[idx] = presets[idx], presets[idx - 1]
-                            st.rerun()
+                        if idx > 0:
+                            if st.button("⬆️", key=f"{kind}_pre_up_{idx}", help="Move up"):
+                                presets[idx], presets[idx - 1] = presets[idx - 1], presets[idx]
+                                st.rerun()
+                        else:
+                            st.empty()
                     with col_down:
-                        if st.button("⬇️", key=f"{kind}_pre_down_{idx}", disabled=(idx == len(presets) - 1), help="Move down"):
-                            presets[idx], presets[idx + 1] = presets[idx + 1], presets[idx]
-                            st.rerun()
+                        if idx < len(presets) - 1:
+                            if st.button("⬇️", key=f"{kind}_pre_down_{idx}", help="Move down"):
+                                presets[idx], presets[idx + 1] = presets[idx + 1], presets[idx]
+                                st.rerun()
+                        else:
+                            st.empty()
                     with col_del:
                         if _render_centered_del_btn(f"{kind}_pre_del_{idx}"):
                             if len(presets) > 1:
@@ -451,7 +478,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
         code_ph = "e.g. DSwitch" if is_esxi else "e.g. SAN"
         lbl_ph = "e.g. Distributed Switch Uplink" if is_esxi else "e.g. SAN Storage (SAN)"
         tpl_ph = "e.g. <vmnic> - <vds_name> (<status>)" if is_esxi else "e.g. SAN<country><site><seq>"
-        ca1, ca2, ca3, ca4 = st.columns(PRESET_COLS, vertical_alignment="center")
+        ca1, ca2, ca3, ca4 = st.columns([1.0, 2.0, 4.0, 1.6], vertical_alignment="center")
         with ca1:
             new_code = st.text_input("Code", value="", placeholder=code_ph, key=f"{kind}_new_code", label_visibility="collapsed").strip()
         with ca2:
@@ -588,15 +615,36 @@ def _host_editor(rules: dict) -> None:
             st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(host_presets)} presets</span></div>", unsafe_allow_html=True)
         st.caption("Manage physical hypervisor host naming patterns and presets.")
 
-        col_hdr_code, col_hdr_lbl, col_hdr_tpl, col_hdr_act = st.columns(PRESET_COLS, vertical_alignment="center")
-        with col_hdr_code:
+        # Inject dynamic styling to guarantee Action buttons fit cleanly without squeezing
+        st.markdown(
+            """
+            <style>
+            div[data-testid="column"]:last-child {
+                min-width: 130px !important;
+            }
+            div[data-testid="column"]:last-child button {
+                padding-left: 4px !important;
+                padding-right: 4px !important;
+                min-width: 32px !important;
+            }
+            .action-header {
+                white-space: nowrap !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        # Headers - balanced for dynamic scaling with protected Action width
+        h_code, h_label, h_pattern, h_act = st.columns([1.0, 2.0, 4.0, 1.6])
+        with h_code:
             st.markdown("**Code**")
-        with col_hdr_lbl:
+        with h_label:
             st.markdown("**Label**")
-        with col_hdr_tpl:
+        with h_pattern:
             st.markdown("**Pattern Template**")
-        with col_hdr_act:
-            st.markdown("**Action**")
+        with h_act:
+            st.markdown("<span class='action-header'>**Action**</span>", unsafe_allow_html=True)
 
         updated = []
         patterns_updates = {}
@@ -608,20 +656,20 @@ def _host_editor(rules: dict) -> None:
             pk = preset.get("pattern_key", "")
             tpl = patterns.get(pk, "")
 
-            c1, c2, c3, c4 = st.columns(PRESET_COLS, vertical_alignment="center")
-            with c1:
+            c_code, c_label, c_pattern, c_actions = st.columns([1.0, 2.0, 4.0, 1.6], vertical_alignment="center")
+            with c_code:
                 if code == "ESXi":
                     st.text_input("Code", value=code, key=f"host_{idx}_code", disabled=True, label_visibility="collapsed")
                 else:
                     ncode = st.text_input("Code", value=code, key=f"host_{idx}_code", label_visibility="collapsed").strip()
-            with c2:
+            with c_label:
                 if code == "ESXi":
                     st.text_input("Label", value=label, key=f"host_{idx}_lbl", disabled=True, label_visibility="collapsed")
                 else:
                     nlbl = st.text_input("Label", value=label, key=f"host_{idx}_lbl", label_visibility="collapsed").strip()
-            with c3:
+            with c_pattern:
                 ntpl = st.text_input("Pattern Template", value=tpl, key=f"host_{idx}_tpl", label_visibility="collapsed").strip()
-            with c4:
+            with c_actions:
                 if code != "ESXi":
                     if _render_centered_del_btn(f"host_del_{idx}"):
                         if len(host_presets) > 1:
@@ -651,7 +699,7 @@ def _host_editor(rules: dict) -> None:
             _save_presets(rules)
             return
 
-        ca1, ca2, ca3, ca4 = st.columns(PRESET_COLS, vertical_alignment="center")
+        ca1, ca2, ca3, ca4 = st.columns([1.0, 2.0, 4.0, 1.6], vertical_alignment="center")
         with ca1:
             new_code = st.text_input("New Code", value="", placeholder="e.g. HYPV", key="host_new_code", label_visibility="collapsed").strip()
         with ca2:
@@ -708,28 +756,49 @@ def _vm_editor(rules: dict) -> None:
             st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(vm_presets)} presets</span></div>", unsafe_allow_html=True)
         st.caption("Manage virtual machine roles (cvi, afs, sani, vlab) and their shared hostname template.")
 
-        col_hdr_code, col_hdr_lbl, col_hdr_tpl, col_hdr_act = st.columns(PRESET_COLS, vertical_alignment="center")
-        with col_hdr_code:
+        # Inject dynamic styling to guarantee Action buttons fit cleanly without squeezing
+        st.markdown(
+            """
+            <style>
+            div[data-testid="column"]:last-child {
+                min-width: 130px !important;
+            }
+            div[data-testid="column"]:last-child button {
+                padding-left: 4px !important;
+                padding-right: 4px !important;
+                min-width: 32px !important;
+            }
+            .action-header {
+                white-space: nowrap !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        # Headers - balanced for dynamic scaling with protected Action width
+        h_code, h_label, h_pattern, h_act = st.columns([1.0, 2.0, 4.0, 1.6])
+        with h_code:
             st.markdown("**Code**")
-        with col_hdr_lbl:
+        with h_label:
             st.markdown("**Label**")
-        with col_hdr_tpl:
+        with h_pattern:
             st.markdown("**Pattern Template**")
-        with col_hdr_act:
-            st.markdown("**Action**")
+        with h_act:
+            st.markdown("<span class='action-header'>**Action**</span>", unsafe_allow_html=True)
 
         updated = []
         stale_del = st.session_state.pop("_del_vm_role_idx", None)
 
         for idx, p in enumerate(vm_presets):
-            c1, c2, c3, c4 = st.columns(PRESET_COLS, vertical_alignment="center")
-            with c1:
+            c_code, c_label, c_pattern, c_actions = st.columns([1.0, 2.0, 4.0, 1.6], vertical_alignment="center")
+            with c_code:
                 ncode = st.text_input("Code", value=p.get("code", ""), key=f"vm_code_{idx}", label_visibility="collapsed").strip()
-            with c2:
+            with c_label:
                 nlbl = st.text_input("Label", value=p.get("label", ""), key=f"vm_lbl_{idx}", label_visibility="collapsed").strip()
-            with c3:
+            with c_pattern:
                 ntpl = st.text_input("Pattern Template", value=tpl, key=f"vm_tpl_{idx}", label_visibility="collapsed").strip()
-            with c4:
+            with c_actions:
                 if _render_centered_del_btn(f"vm_role_del_{idx}"):
                     if len(vm_presets) > 1:
                         st.session_state["_del_vm_role_idx"] = idx
@@ -753,7 +822,7 @@ def _vm_editor(rules: dict) -> None:
             _save_presets(rules)
             return
 
-        ca1, ca2, ca3, ca4 = st.columns(PRESET_COLS, vertical_alignment="center")
+        ca1, ca2, ca3, ca4 = st.columns([1.0, 2.0, 4.0, 1.6], vertical_alignment="center")
         with ca1:
             new_code = st.text_input("New Code", value="", key="vm_new_code", placeholder="e.g. cvi", label_visibility="collapsed").strip()
         with ca2:
@@ -924,8 +993,30 @@ def render_standards_tab(active_model):
                 st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(var_names)} variables</span></div>", unsafe_allow_html=True)
             st.caption("Add, edit, or reorder template tokens. Optional variables are omitted when left empty.")
 
+            # Inject dynamic styling to guarantee Action buttons fit cleanly without squeezing
+            st.markdown(
+                """
+                <style>
+                div[data-testid="column"]:last-child {
+                    min-width: 130px !important;
+                }
+                div[data-testid="column"]:last-child button {
+                    padding-left: 4px !important;
+                    padding-right: 4px !important;
+                    min-width: 32px !important;
+                }
+                .action-header {
+                    white-space: nowrap !important;
+                }
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
+
             if variables_now:
-                c_nh_nm, c_nh_lb, c_nh_ph, c_nh_df, c_nh_opt, c_nh_up, c_nh_dn, c_nh_del = st.columns(VARIABLE_COLS, vertical_alignment="center")
+                # Optimized column ratios: Name, Label, Placeholder, Auto-Fill, Optional, Up, Down, Delete(Action)
+                VARIABLE_COLS_OPTIMIZED = [1.5, 2.0, 2.0, 1.5, 0.8, 0.5, 0.5, 1.6]
+                c_nh_nm, c_nh_lb, c_nh_ph, c_nh_df, c_nh_opt, c_nh_up, c_nh_dn, c_nh_del = st.columns(VARIABLE_COLS_OPTIMIZED, vertical_alignment="center")
                 with c_nh_nm:
                     st.markdown("**Name**")
                 with c_nh_lb:
@@ -941,13 +1032,13 @@ def render_standards_tab(active_model):
                 with c_nh_dn:
                     pass
                 with c_nh_del:
-                    st.markdown("**Action**")
+                    st.markdown("<span class='action-header'>**Action**</span>", unsafe_allow_html=True)
 
                 edited_vars = {}
                 total_vars = len(var_names)
                 for idx, name in enumerate(var_names):
                     meta = variables_now.get(name) if isinstance(variables_now.get(name), dict) else {}
-                    c_nm, c_lb, c_ph, c_df, c_opt, c_up, c_dn, c_del = st.columns(VARIABLE_COLS, vertical_alignment="center")
+                    c_nm, c_lb, c_ph, c_df, c_opt, c_up, c_dn, c_del = st.columns(VARIABLE_COLS_OPTIMIZED, vertical_alignment="center")
                     with c_nm:
                         var_key = st.text_input("Name", value=name, key=f"var_key_{name}", label_visibility="collapsed").strip()
                         var_key = _normalize_var_name(var_key)
@@ -991,7 +1082,7 @@ def render_standards_tab(active_model):
                     edited_vars[var_key] = entry
 
                 # Inline Add Row
-                ca_nm, ca_lb, ca_ph, ca_df, ca_opt, ca_up, ca_dn, ca_del = st.columns(VARIABLE_COLS, vertical_alignment="center")
+                ca_nm, ca_lb, ca_ph, ca_df, ca_opt, ca_up, ca_dn, ca_del = st.columns(VARIABLE_COLS_OPTIMIZED, vertical_alignment="center")
                 with ca_nm:
                     new_name = st.text_input("Name", value="", placeholder="e.g. speed", key="var_new_name", label_visibility="collapsed").strip()
                     new_name = _normalize_var_name(new_name)
