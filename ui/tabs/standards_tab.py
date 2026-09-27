@@ -403,8 +403,8 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
             unsafe_allow_html=True,
         )
 
-        # Headers - balanced for dynamic scaling with protected Action width
-        h_code, h_label, h_pattern, h_act = st.columns([1.0, 2.0, 4.0, 1.6])
+        # Headers - balanced with compact, equalized Action column
+        h_code, h_label, h_pattern, h_act = st.columns([1.0, 2.0, 4.5, 1.1])
         with h_code:
             st.markdown("**Code**")
         with h_label:
@@ -424,7 +424,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
                 pkey = p.get("pattern_key", "")
                 tpl = patterns.get(pkey, "")
 
-                c_code, c_label, c_pattern, c_actions = st.columns([1.0, 2.0, 4.0, 1.6])
+                c_code, c_label, c_pattern, c_actions = st.columns([1.0, 2.0, 4.5, 1.1])
                 with c_code:
                     ncode = st.text_input("Code", value=code, key=f"{kind}_pre_code_{idx}", label_visibility="collapsed").strip()
                 with c_label:
@@ -448,7 +448,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
                         else:
                             st.empty()
                     with col_del:
-                        if _render_centered_del_btn(f"{kind}_pre_del_{idx}"):
+                        if st.button("🗑️", key=f"{kind}_pre_del_{idx}", help="Delete item"):
                             if len(presets) > 1:
                                 st.session_state[_pending_del_key] = idx
                                 st.rerun()
@@ -1015,7 +1015,7 @@ def render_standards_tab(active_model):
 
             if variables_now:
                 # Optimized column ratios: Name, Label, Placeholder, Auto-Fill, Optional, Up, Down, Delete(Action)
-                VARIABLE_COLS_OPTIMIZED = [1.5, 2.0, 2.0, 1.5, 0.8, 0.5, 0.5, 1.6]
+                VARIABLE_COLS_OPTIMIZED = [1.5, 2.0, 2.0, 1.5, 0.8, 0.5, 0.5, 1.1]
                 c_nh_nm, c_nh_lb, c_nh_ph, c_nh_df, c_nh_opt, c_nh_up, c_nh_dn, c_nh_del = st.columns(VARIABLE_COLS_OPTIMIZED, vertical_alignment="center")
                 with c_nh_nm:
                     st.markdown("**Name**")
@@ -1067,7 +1067,7 @@ def render_standards_tab(active_model):
                         else:
                             pass
                     with c_del:
-                        if _render_centered_del_btn(f"var_del_{name}", f"Remove <{name}>"):
+                        if st.button("🗑️", key=f"var_del_{name}", help=f"Remove <{name}>"):
                             edited_vars[name] = None
                             continue
 
