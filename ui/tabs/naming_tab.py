@@ -825,8 +825,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             st.session_state["unified_screenshots"].append(pasted_file)
             st.session_state["esxi_paste_counter"] += 1
             st.rerun()
-            except Exception as e:
-                st.warning(f"Failed to process pasted image: {e}")
+        except Exception as e:
+            st.warning(f"Failed to process pasted image: {e}")
 
         # Set unified list as uploaded_imgs for preview and analysis
         uploaded_imgs = st.session_state["unified_screenshots"]
