@@ -728,103 +728,103 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
     st.markdown("**📸 Automated Data Entry via Screenshot**")
     col_up1, col_up2 = st.columns([1, 1])
 
-        # Initialize unified screenshot store and counters
-        if "unified_screenshots" not in st.session_state:
-            st.session_state["unified_screenshots"] = []
-        if "esxi_upload_counter" not in st.session_state:
-            st.session_state["esxi_upload_counter"] = 0
-        if "esxi_paste_counter" not in st.session_state:
-            st.session_state["esxi_paste_counter"] = 0
+    # Initialize unified screenshot store and counters
+    if "unified_screenshots" not in st.session_state:
+        st.session_state["unified_screenshots"] = []
+    if "esxi_upload_counter" not in st.session_state:
+        st.session_state["esxi_upload_counter"] = 0
+    if "esxi_paste_counter" not in st.session_state:
+        st.session_state["esxi_paste_counter"] = 0
 
-        with col_up1:
-            uploader_key = f"esxi_file_uploader_{st.session_state['esxi_upload_counter']}"
-            raw_uploaded = st.file_uploader(
-                "Upload Screenshots (Drag & Drop)",
-                type=["png", "jpg", "jpeg"],
-                accept_multiple_files=True,
-                key=uploader_key,
-                help="Upload Virtual Switches topology and/or Physical Adapters (expanded '>>' for MAC & CDP).",
-            )
-            # Ingest uploaded files immediately and reset uploader widget so it stays clean
-            if raw_uploaded:
-                import io
-                for uf in raw_uploaded:
-                    file_bytes = uf.read()
-                    bio = io.BytesIO(file_bytes)
-                    bio.name = uf.name
-                    bio.type = uf.type
-                    bio.size = len(file_bytes)
-                    st.session_state["unified_screenshots"].append(bio)
-                st.session_state["esxi_upload_counter"] += 1
-                st.rerun()
+    with col_up1:
+        uploader_key = f"esxi_file_uploader_{st.session_state['esxi_upload_counter']}"
+        raw_uploaded = st.file_uploader(
+            "Upload Screenshots (Drag & Drop)",
+            type=["png", "jpg", "jpeg"],
+            accept_multiple_files=True,
+            key=uploader_key,
+            help="Upload Virtual Switches topology and/or Physical Adapters (expanded '>>' for MAC & CDP).",
+        )
+        # Ingest uploaded files immediately and reset uploader widget so it stays clean
+        if raw_uploaded:
+            import io
+            for uf in raw_uploaded:
+                file_bytes = uf.read()
+                bio = io.BytesIO(file_bytes)
+                bio.name = uf.name
+                bio.type = uf.type
+                bio.size = len(file_bytes)
+                st.session_state["unified_screenshots"].append(bio)
+            st.session_state["esxi_upload_counter"] += 1
+            st.rerun()
 
-        with col_up2:
-            st.markdown("**📋 Or Paste from Clipboard (Ctrl+V)**")
-            paste_box_key = f"esxi_paste_input_{st.session_state['esxi_paste_counter']}"
-            pasted_data = st.text_input(
-                "Paste Area",
-                placeholder="Click here and press Ctrl+V",
-                key=paste_box_key,
-                label_visibility="collapsed",
-                help="Focus this box and press Ctrl+V.",
-            )
-            # Persistent delegated paste listener across remounts
-            import streamlit.components.v1 as _components
-            _components.html(
-                """
-                <script>
-                const parentDoc = window.parent.document;
-                if (!window.parent._esxiPasteDelegated) {
-                    window.parent._esxiPasteDelegated = true;
-                    parentDoc.addEventListener('paste', function(e) {
-                        const target = e.target;
-                        if (!target || target.getAttribute('aria-label') !== 'Paste Area') return;
-                        const items = (e.clipboardData || window.clipboardData).items;
-                        for (let i = 0; i < items.length; i++) {
-                            if (items[i].type.indexOf('image') !== -1) {
-                                const blob = items[i].getAsFile();
-                                const reader = new FileReader();
-                                reader.onload = function(event) {
-                                    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-                                    nativeSetter.call(target, event.target.result);
-                                    target.dispatchEvent(new Event('input', { bubbles: true }));
-                                    target.dispatchEvent(new KeyboardEvent('keydown', {
-                                        bubbles: true,
-                                        cancelable: true,
-                                        key: 'Enter',
-                                        code: 'Enter',
-                                        keyCode: 13,
-                                        which: 13
-                                    }));
-                                    target.dispatchEvent(new Event('change', { bubbles: true }));
-                                };
-                                reader.readAsDataURL(blob);
-                                e.preventDefault();
-                                break;
-                            }
+    with col_up2:
+        st.markdown("**📋 Or Paste from Clipboard (Ctrl+V)**")
+        paste_box_key = f"esxi_paste_input_{st.session_state['esxi_paste_counter']}"
+        pasted_data = st.text_input(
+            "Paste Area",
+            placeholder="Click here and press Ctrl+V",
+            key=paste_box_key,
+            label_visibility="collapsed",
+            help="Focus this box and press Ctrl+V.",
+        )
+        # Persistent delegated paste listener across remounts
+        import streamlit.components.v1 as _components
+        _components.html(
+            """
+            <script>
+            const parentDoc = window.parent.document;
+            if (!window.parent._esxiPasteDelegated) {
+                window.parent._esxiPasteDelegated = true;
+                parentDoc.addEventListener('paste', function(e) {
+                    const target = e.target;
+                    if (!target || target.getAttribute('aria-label') !== 'Paste Area') return;
+                    const items = (e.clipboardData || window.clipboardData).items;
+                    for (let i = 0; i < items.length; i++) {
+                        if (items[i].type.indexOf('image') !== -1) {
+                            const blob = items[i].getAsFile();
+                            const reader = new FileReader();
+                            reader.onload = function(event) {
+                                const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                                nativeSetter.call(target, event.target.result);
+                                target.dispatchEvent(new Event('input', { bubbles: true }));
+                                target.dispatchEvent(new KeyboardEvent('keydown', {
+                                    bubbles: true,
+                                    cancelable: true,
+                                    key: 'Enter',
+                                    code: 'Enter',
+                                    keyCode: 13,
+                                    which: 13
+                                }));
+                                target.dispatchEvent(new Event('change', { bubbles: true }));
+                            };
+                            reader.readAsDataURL(blob);
+                            e.preventDefault();
+                            break;
                         }
-                    });
-                }
-                </script>
-                """,
-                height=0,
-                width=0,
-            )
+                    }
+                });
+            }
+            </script>
+            """,
+            height=0,
+            width=0,
+        )
 
-        # Process newly pasted image and cleanly auto-clear via counter increment
-        if pasted_data and pasted_data.startswith("data:image"):
-            import base64, io
-            try:
-                header, encoded = pasted_data.split(",", 1)
-                img_bytes = base64.b64decode(encoded)
-                pasted_file = io.BytesIO(img_bytes)
-                idx = len(st.session_state["unified_screenshots"]) + 1
-                pasted_file.name = f"clipboard_screenshot_{idx}.png"
-                pasted_file.type = "image/png"
-                pasted_file.size = len(img_bytes)
-                st.session_state["unified_screenshots"].append(pasted_file)
-                st.session_state["esxi_paste_counter"] += 1
-                st.rerun()
+    # Process newly pasted image and cleanly auto-clear via counter increment
+    if pasted_data and pasted_data.startswith("data:image"):
+        import base64, io
+        try:
+            header, encoded = pasted_data.split(",", 1)
+            img_bytes = base64.b64decode(encoded)
+            pasted_file = io.BytesIO(img_bytes)
+            idx = len(st.session_state["unified_screenshots"]) + 1
+            pasted_file.name = f"clipboard_screenshot_{idx}.png"
+            pasted_file.type = "image/png"
+            pasted_file.size = len(img_bytes)
+            st.session_state["unified_screenshots"].append(pasted_file)
+            st.session_state["esxi_paste_counter"] += 1
+            st.rerun()
             except Exception as e:
                 st.warning(f"Failed to process pasted image: {e}")
 
