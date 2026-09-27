@@ -20,13 +20,13 @@ from utils.formatters import (
 # Shared column width ratios enforced across preset table headers, all data rows,
 # and the inline "add" row so every preset table lines up identically.
 # Code, Label, Pattern Template, Action.
-PRESET_COLS = [1.0, 2.0, 4.0, 1.6]
+PRESET_COLS = [1.2, 2.5, 4.5, 1.8]
 # Action cell sub-columns: Up, Down, Delete (equal thirds, right-aligned).
 PRESET_ACTION_COLS = [1, 1, 1]
 # Manage Pattern Variables columns: Name, Label, Placeholder, Auto-Fill, Optional, Up, Down, Delete.
 VARIABLE_COLS = [1.5, 2.5, 2.5, 1.5, 0.9, 0.45, 0.45, 0.45]
 # Auto-Correction rule columns: Original Pattern, Replacement, Description, Action.
-AUTOCORRECT_COLS = [3.0, 2.5, 3.5, 0.8]
+AUTOCORRECT_COLS = [3.5, 3.0, 4.0, 1.0]
 
 def _normalize_var_name(raw: str) -> str:
     return re.sub(r"[^a-z0-9_]", "", raw.strip().lower().replace(" ", "_"))
@@ -100,6 +100,11 @@ def _inject_preset_table_style() -> None:
         }
         .action-header {
             white-space: nowrap !important;
+        }
+        div[data-testid="column"]:last-child {
+            display: flex !important;
+            justify-content: flex-end !important;
+            align-items: center !important;
         }
         </style>
         """,
@@ -334,7 +339,7 @@ def _render_site_code_mapping_manager() -> None:
         sr = get_site_code_rules(rules)
         exact = dict(sr.get("exact_mappings") or {})
 
-        m_col_p, m_col_r, m_col_del = st.columns([3.0, 2.2, 0.7], vertical_alignment="center")
+        m_col_p, m_col_r, m_col_del = st.columns([4.0, 3.5, 1.0], vertical_alignment="center")
         with m_col_p:
             st.markdown("**Original Pattern (City / Location)**")
         with m_col_r:
@@ -346,7 +351,7 @@ def _render_site_code_mapping_manager() -> None:
         updated = {}
         pending_delete = None
         for idx, (pat, code) in enumerate(items):
-            col_p, col_r, col_del = st.columns([3.0, 2.2, 0.7], vertical_alignment="center")
+            col_p, col_r, col_del = st.columns([4.0, 3.5, 1.0], vertical_alignment="center")
             with col_p:
                 np_ = st.text_input(
                     "Original Pattern", value=pat, key=f"sitecode_{idx}_p",
@@ -378,7 +383,7 @@ def _render_site_code_mapping_manager() -> None:
             if st.button("🔄 Reset to Defaults", key="sitecode_reset", width='stretch'):
                 _reset_site_code_mappings()
 
-        col_city, col_code, col_add = st.columns([3.0, 2.2, 0.7], vertical_alignment="center")
+        col_city, col_code, col_add = st.columns([4.0, 3.5, 1.0], vertical_alignment="center")
         with col_city:
             new_p = st.text_input(
                 "New City / Location", value="", key="sitecode_new_p",
@@ -425,15 +430,30 @@ def _reset_site_code_mappings() -> None:
     """
     from config.naming_rules import DEFAULT_SITE_CODE_RULES, compute_delta
 
+    FACTORY_SITE_CODE_MAPPINGS = {
+        "new york": "NYC", "london": "LON", "sydney": "SYD",
+        "singapore": "SIN", "tokyo": "TYO", "hong kong": "HKGSAR",
+        "amsterdam": "AMS", "frankfurt": "FRA", "paris": "PAR",
+        "chicago": "CHI", "los angeles": "LAX", "san francisco": "SFO",
+        "dallas": "DFW", "seattle": "SEA", "boston": "BOS",
+        "toronto": "YYZ", "bristol": "BRS", "age": "AGE",
+    }
+
+    factory_rules = DEFAULT_SITE_CODE_RULES
+    factory_mappings = factory_rules.get("exact_mappings")
+    if not isinstance(factory_mappings, dict) or not factory_mappings:
+        factory_rules = dict(DEFAULT_SITE_CODE_RULES)
+        factory_rules["exact_mappings"] = dict(FACTORY_SITE_CODE_MAPPINGS)
+
     old_rules = load_naming_rules()
     new_rules = dict(old_rules)
-    new_rules["site_code_rules"] = dict(DEFAULT_SITE_CODE_RULES)
+    new_rules["site_code_rules"] = dict(factory_rules)
     save_naming_rules(new_rules, source="Site Code Mapping Rules: Reset to Defaults")
     delta = compute_delta(old_rules, new_rules)
     if not delta:
         delta = {"site_code_rules": {
             "old": dict(old_rules.get("site_code_rules") or {}),
-            "new": dict(DEFAULT_SITE_CODE_RULES),
+            "new": dict(factory_rules),
         }}
     add_to_history(delta, source="Site Code Mapping Rules: Reset to Defaults")
     _clear_session_state_prefixes("sitecode_")
