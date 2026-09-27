@@ -35,6 +35,7 @@
   "esxi_pgname": "PG-<pg_network>",
   "esxinet_pg_name": "PG-<pg_network>",
   "esxi_pg_name": "PG-<pg_network>",
+  "host_vm_proxmox_x_x": "<site_prefix><role_esx><seq>.<domain>",
   "custom_patterns": [],
   "device_presets": [
     {
@@ -118,6 +119,12 @@
       "label": "ESXi Host",
       "pattern_key": "esxi_host",
       "description": "ESXi Hypervisor Host"
+    },
+    {
+      "code": "Proxmox",
+      "label": "Proxmox Host",
+      "pattern_key": "host_vm_proxmox_x_x",
+      "description": ""
     },
     {
       "code": "CVI",
@@ -206,7 +213,8 @@
     "esxinet_pgname": "PG-<pg_network>",
     "esxi_pgname": "PG-<pg_network>",
     "esxinet_pg_name": "PG-<pg_network>",
-    "esxi_pg_name": "PG-<pg_network>"
+    "esxi_pg_name": "PG-<pg_network>",
+    "host_vm_proxmox_x_x": "<site_prefix><role_esx><seq>.<domain>"
   },
   "pattern_variables": {
     "country": {

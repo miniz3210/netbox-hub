@@ -17,8 +17,12 @@ from utils.formatters import (
     load_auto_corrections, save_auto_corrections, reset_auto_corrections,
 )
 
-# Shared column width ratios enforced across preset table headers and all data rows.
-PRESET_COLS = [1.5, 2.5, 4.5, 0.8]
+# Shared column width ratios enforced across preset table headers, all data rows,
+# and the inline "add" row so every preset table lines up identically.
+# Code, Label, Pattern Template, Action.
+PRESET_COLS = [1.0, 2.0, 4.0, 1.6]
+# Action cell sub-columns: Up, Down, Delete (equal thirds, right-aligned).
+PRESET_ACTION_COLS = [1, 1, 1]
 # Manage Pattern Variables columns: Name, Label, Placeholder, Auto-Fill, Optional, Up, Down, Delete.
 VARIABLE_COLS = [1.5, 2.5, 2.5, 1.5, 0.9, 0.45, 0.45, 0.45]
 # Auto-Correction rule columns: Original Pattern, Replacement, Description, Action.
@@ -30,6 +34,64 @@ def _normalize_var_name(raw: str) -> str:
 def _render_centered_del_btn(key: str, help_text: str = "Delete this entry") -> bool:
     """Helper to render a clean delete icon button."""
     return st.button("🗑️", key=key, help=help_text, width='stretch')
+
+
+def _inject_preset_table_style() -> None:
+    """Inject the shared preset-table CSS.
+
+    The Action cell is the last column of every preset table, so its three icon
+    buttons (Up / Down / Delete) must render flush against the right margin with
+    equal widths and no awkward inner gap. Streamlit's default nested-column gap
+    and button padding are what previously broke that alignment, so both are
+    overridden here. Injected once per table; duplicate rules are harmless.
+    """
+    st.markdown(
+        """
+        <style>
+        /* Equalize the nested Up/Down/Delete sub-columns inside an Action cell:
+           collapse the default gap and strip the button padding so the three
+           icons share the cell width evenly and sit flush to the right margin. */
+        div[data-testid="column"] [data-testid="horizontalBlock"] {
+            gap: 0.25rem;
+        }
+        div[data-testid="column"] [data-testid="horizontalBlock"] button {
+            padding-left: 0.1rem !important;
+            padding-right: 0.1rem !important;
+            padding-top: 0.1rem !important;
+            padding-bottom: 0.1rem !important;
+            min-width: 0 !important;
+            width: 100% !important;
+        }
+        /* Defend the Action cell against the Pattern Variables stylesheet, which
+           force-flushes every trailing column on the page. A preset Action cell is
+           the trailing column that itself holds sub-columns, so it is reset back
+           to a plain block and its sub-columns are un-pinned. These selectors
+           out-specify the generic `:last-child` rules regardless of order. */
+        div[data-testid="column"]:last-child:has([data-testid="horizontalBlock"]) {
+            min-width: 0 !important;
+            display: block !important;
+            justify-content: normal !important;
+            align-items: normal !important;
+        }
+        div[data-testid="column"] [data-testid="column"]:last-child {
+            min-width: 0 !important;
+            display: block !important;
+            justify-content: normal !important;
+            align-items: normal !important;
+        }
+        div[data-testid="column"] [data-testid="column"]:last-child button {
+            padding-left: 0.1rem !important;
+            padding-right: 0.1rem !important;
+            min-width: 0 !important;
+            width: 100% !important;
+        }
+        .action-header {
+            white-space: nowrap !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 def _diff_rule_list(category: str, old_rules: list, new_rules: list) -> list:
     rows = []
@@ -166,6 +228,23 @@ def _render_auto_correction_manager(active_model: str) -> None:
                         "enabled": True,
                     })
 
+            # Primary save lives directly below the rules table, above the AI assistant.
+            if st.button("💾 Save & Apply Changes", key=f"ac_{category}_save", type="primary", width='stretch'):
+                failed = []
+                for rule in updated:
+                    pat = rule.get("pattern", "")
+                    repl = rule.get("replacement", "")
+                    ok, msg = validate_regex_replacement(pat, repl)
+                    if not ok:
+                        desc = rule.get("description", pat)
+                        failed.append(f"- `{desc}`: {msg}")
+                if failed:
+                    st.error("❌ Cannot save — invalid rule(s):\n" + "\n".join(failed))
+                else:
+                    final = dict(rules)
+                    final[category] = updated
+                    _persist_auto_corrections(final)
+
             with st.expander(f"✨ AI Assistant: Generate Rule for {category.replace('_', ' ').title()}", expanded=False):
                 ai_prompt = st.text_input(
                     "Describe rule in natural language:",
@@ -198,23 +277,7 @@ def _render_auto_correction_manager(active_model: str) -> None:
                 new_d = st.text_input("New Description", value="", key=f"ac_{category}_new_d",
                                      placeholder="Describe the rule")
 
-            col_save, col_add, col_reset = st.columns([2, 2, 2])
-            with col_save:
-                if st.button("💾 Save & Apply Changes", key=f"ac_{category}_save", type="primary", width='stretch'):
-                    failed = []
-                    for rule in updated:
-                        pat = rule.get("pattern", "")
-                        repl = rule.get("replacement", "")
-                        ok, msg = validate_regex_replacement(pat, repl)
-                        if not ok:
-                            desc = rule.get("description", pat)
-                            failed.append(f"- `{desc}`: {msg}")
-                    if failed:
-                        st.error("❌ Cannot save — invalid rule(s):\n" + "\n".join(failed))
-                    else:
-                        final = dict(rules)
-                        final[category] = updated
-                        _persist_auto_corrections(final)
+            col_add, col_reset = st.columns(2)
             with col_add:
                 if st.button("➕ Add Rule", key=f"ac_{category}_add", width='stretch'):
                     if new_p.strip():
@@ -374,6 +437,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
         rules[key_field] = [p for i, p in enumerate(presets) if i != stale_del]
         _save_presets(rules)
         return
+    _pending_swap_key = f"_pending_swap_{kind}"
 
     with st.container(border=True):
         col_t1, col_t2 = st.columns([3, 1])
@@ -384,27 +448,10 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
         st.caption(card_caption)
 
         # Inject dynamic styling to guarantee Action buttons fit cleanly without squeezing
-        st.markdown(
-            """
-            <style>
-            div[data-testid="column"]:last-child {
-                min-width: 130px !important;
-            }
-            div[data-testid="column"]:last-child button {
-                padding-left: 4px !important;
-                padding-right: 4px !important;
-                min-width: 32px !important;
-            }
-            .action-header {
-                white-space: nowrap !important;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
+        _inject_preset_table_style()
 
         # Headers - balanced with compact, equalized Action column
-        h_code, h_label, h_pattern, h_act = st.columns([0.9, 1.8, 2.8, 1.6])
+        h_code, h_label, h_pattern, h_act = st.columns(PRESET_COLS, vertical_alignment="center")
         with h_code:
             st.markdown("**Code**")
         with h_label:
@@ -416,6 +463,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
 
         updated = []
         patterns_updates = {}
+        positions = {}
 
         if presets:
             for idx, p in enumerate(presets):
@@ -424,7 +472,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
                 pkey = p.get("pattern_key", "")
                 tpl = patterns.get(pkey, "")
 
-                c_code, c_label, c_pattern, c_actions = st.columns([0.9, 1.8, 2.8, 1.6])
+                c_code, c_label, c_pattern, c_actions = st.columns(PRESET_COLS, vertical_alignment="center")
                 with c_code:
                     ncode = st.text_input("Code", value=code, key=f"{kind}_pre_code_{idx}", label_visibility="collapsed").strip()
                 with c_label:
@@ -432,18 +480,18 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
                 with c_pattern:
                     ntpl = st.text_input("Pattern Template", value=tpl, key=f"{kind}_pre_tpl_{idx}", label_visibility="collapsed").strip()
                 with c_actions:
-                    col_up, col_down, col_del = st.columns([1, 1, 1])
+                    col_up, col_down, col_del = st.columns(PRESET_ACTION_COLS)
                     with col_up:
                         if idx > 0:
                             if st.button("⬆️", key=f"{kind}_pre_up_{idx}", help="Move up"):
-                                presets[idx], presets[idx - 1] = presets[idx - 1], presets[idx]
+                                st.session_state[_pending_swap_key] = (idx, idx - 1)
                                 st.rerun()
                         else:
                             st.empty()
                     with col_down:
                         if idx < len(presets) - 1:
                             if st.button("⬇️", key=f"{kind}_pre_down_{idx}", help="Move down"):
-                                presets[idx], presets[idx + 1] = presets[idx + 1], presets[idx]
+                                st.session_state[_pending_swap_key] = (idx, idx + 1)
                                 st.rerun()
                         else:
                             st.empty()
@@ -461,6 +509,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
                 if ntpl:
                     patterns_updates[final_pkey] = ntpl
                 if ncode and final_pkey:
+                    positions[idx] = len(updated)
                     updated.append({
                         "code": ncode,
                         "label": nlbl or ncode,
@@ -470,6 +519,22 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
         else:
             st.info("No presets defined. Add one below.")
 
+        # A pending reorder is applied to the fully-edited list so inline edits
+        # made in the same interaction are preserved.
+        pending_swap = st.session_state.pop(_pending_swap_key, None)
+        if pending_swap is not None:
+            src, dst = pending_swap
+            src_pos = positions.get(src)
+            dst_pos = positions.get(dst)
+            if src_pos is not None and dst_pos is not None:
+                updated[src_pos], updated[dst_pos] = updated[dst_pos], updated[src_pos]
+            final_patterns = dict(patterns)
+            final_patterns.update(patterns_updates)
+            rules["naming_patterns"] = final_patterns
+            rules[key_field] = list(updated)
+            _save_presets(rules)
+            return
+
         if st.session_state.pop(f"{kind}_preset_min_one", False):
             st.warning("⚠️ At least one preset must remain. Delete a different entry first.")
 
@@ -478,7 +543,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
         code_ph = "e.g. DSwitch" if is_esxi else "e.g. SAN"
         lbl_ph = "e.g. Distributed Switch Uplink" if is_esxi else "e.g. SAN Storage (SAN)"
         tpl_ph = "e.g. <vmnic> - <vds_name> (<status>)" if is_esxi else "e.g. SAN<country><site><seq>"
-        ca1, ca2, ca3, ca4 = st.columns([1.0, 2.0, 4.0, 1.6], vertical_alignment="center")
+        ca1, ca2, ca3, ca4 = st.columns(PRESET_COLS, vertical_alignment="center")
         with ca1:
             new_code = st.text_input("Code", value="", placeholder=code_ph, key=f"{kind}_new_code", label_visibility="collapsed").strip()
         with ca2:
@@ -616,27 +681,10 @@ def _host_editor(rules: dict) -> None:
         st.caption("Manage physical hypervisor host naming patterns and presets.")
 
         # Inject dynamic styling to guarantee Action buttons fit cleanly without squeezing
-        st.markdown(
-            """
-            <style>
-            div[data-testid="column"]:last-child {
-                min-width: 130px !important;
-            }
-            div[data-testid="column"]:last-child button {
-                padding-left: 4px !important;
-                padding-right: 4px !important;
-                min-width: 32px !important;
-            }
-            .action-header {
-                white-space: nowrap !important;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
+        _inject_preset_table_style()
 
         # Headers - balanced for dynamic scaling with protected Action width
-        h_code, h_label, h_pattern, h_act = st.columns([1.0, 2.0, 4.0, 1.6])
+        h_code, h_label, h_pattern, h_act = st.columns(PRESET_COLS, vertical_alignment="center")
         with h_code:
             st.markdown("**Code**")
         with h_label:
@@ -648,6 +696,7 @@ def _host_editor(rules: dict) -> None:
 
         updated = []
         patterns_updates = {}
+        positions = {}
         stale_del = st.session_state.pop("_host_vm_del_idx", None)
 
         for idx, preset in enumerate(host_presets):
@@ -656,7 +705,7 @@ def _host_editor(rules: dict) -> None:
             pk = preset.get("pattern_key", "")
             tpl = patterns.get(pk, "")
 
-            c_code, c_label, c_pattern, c_actions = st.columns([1.0, 2.0, 4.0, 1.6], vertical_alignment="center")
+            c_code, c_label, c_pattern, c_actions = st.columns(PRESET_COLS, vertical_alignment="center")
             with c_code:
                 if code == "ESXi":
                     st.text_input("Code", value=code, key=f"host_{idx}_code", disabled=True, label_visibility="collapsed")
@@ -670,15 +719,30 @@ def _host_editor(rules: dict) -> None:
             with c_pattern:
                 ntpl = st.text_input("Pattern Template", value=tpl, key=f"host_{idx}_tpl", label_visibility="collapsed").strip()
             with c_actions:
-                if code != "ESXi":
-                    if _render_centered_del_btn(f"host_del_{idx}"):
+                col_up, col_down, col_del = st.columns(PRESET_ACTION_COLS)
+                with col_up:
+                    if idx > 0:
+                        if st.button("⬆️", key=f"host_up_{idx}", help=f"Move {code or label} up"):
+                            st.session_state["_host_vm_swap"] = (idx, idx - 1)
+                            st.rerun()
+                    else:
+                        st.empty()
+                with col_down:
+                    if idx < len(host_presets) - 1:
+                        if st.button("⬇️", key=f"host_down_{idx}", help=f"Move {code or label} down"):
+                            st.session_state["_host_vm_swap"] = (idx, idx + 1)
+                            st.rerun()
+                    else:
+                        st.empty()
+                with col_del:
+                    if code == "ESXi":
+                        st.empty()
+                    elif st.button("🗑️", key=f"host_del_{idx}", help="Delete item"):
                         if len(host_presets) > 1:
                             st.session_state["_host_vm_del_idx"] = idx
                             st.rerun()
                         else:
-                            st.warning("⚠️ At least one preset must remain.")
-                else:
-                    pass
+                            st.session_state["host_preset_min_one"] = True
 
             if stale_del == idx:
                 continue
@@ -686,6 +750,7 @@ def _host_editor(rules: dict) -> None:
             if ntpl:
                 patterns_updates[final_pk] = ntpl
             if final_pk:
+                positions[idx] = len(updated)
                 updated.append({
                     "code": code if code else "ESXi",
                     "label": label or code or "ESXi Host",
@@ -693,13 +758,25 @@ def _host_editor(rules: dict) -> None:
                     "description": preset.get("description", ""),
                 })
 
-        if stale_del is not None:
+        if st.session_state.pop("host_preset_min_one", False):
+            st.warning("⚠️ At least one preset must remain. Delete a different entry first.")
+
+        # A pending reorder is applied to the fully-edited list so inline edits
+        # made in the same interaction are preserved.
+        pending_swap = st.session_state.pop("_host_vm_swap", None)
+        if pending_swap is not None or stale_del is not None:
+            if pending_swap is not None:
+                src, dst = pending_swap
+                src_pos = positions.get(src)
+                dst_pos = positions.get(dst)
+                if src_pos is not None and dst_pos is not None:
+                    updated[src_pos], updated[dst_pos] = updated[dst_pos], updated[src_pos]
             rules["naming_patterns"] = {**patterns, **patterns_updates}
             rules["host_vm_presets"] = updated + vm_presets
             _save_presets(rules)
             return
 
-        ca1, ca2, ca3, ca4 = st.columns([1.0, 2.0, 4.0, 1.6], vertical_alignment="center")
+        ca1, ca2, ca3, ca4 = st.columns(PRESET_COLS, vertical_alignment="center")
         with ca1:
             new_code = st.text_input("New Code", value="", placeholder="e.g. HYPV", key="host_new_code", label_visibility="collapsed").strip()
         with ca2:
@@ -757,27 +834,10 @@ def _vm_editor(rules: dict) -> None:
         st.caption("Manage virtual machine roles (cvi, afs, sani, vlab) and their shared hostname template.")
 
         # Inject dynamic styling to guarantee Action buttons fit cleanly without squeezing
-        st.markdown(
-            """
-            <style>
-            div[data-testid="column"]:last-child {
-                min-width: 130px !important;
-            }
-            div[data-testid="column"]:last-child button {
-                padding-left: 4px !important;
-                padding-right: 4px !important;
-                min-width: 32px !important;
-            }
-            .action-header {
-                white-space: nowrap !important;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
+        _inject_preset_table_style()
 
         # Headers - balanced for dynamic scaling with protected Action width
-        h_code, h_label, h_pattern, h_act = st.columns([1.0, 2.0, 4.0, 1.6])
+        h_code, h_label, h_pattern, h_act = st.columns(PRESET_COLS, vertical_alignment="center")
         with h_code:
             st.markdown("**Code**")
         with h_label:
@@ -788,10 +848,11 @@ def _vm_editor(rules: dict) -> None:
             st.markdown("<span class='action-header'>**Action**</span>", unsafe_allow_html=True)
 
         updated = []
+        positions = {}
         stale_del = st.session_state.pop("_del_vm_role_idx", None)
 
         for idx, p in enumerate(vm_presets):
-            c_code, c_label, c_pattern, c_actions = st.columns([1.0, 2.0, 4.0, 1.6], vertical_alignment="center")
+            c_code, c_label, c_pattern, c_actions = st.columns(PRESET_COLS, vertical_alignment="center")
             with c_code:
                 ncode = st.text_input("Code", value=p.get("code", ""), key=f"vm_code_{idx}", label_visibility="collapsed").strip()
             with c_label:
@@ -799,12 +860,28 @@ def _vm_editor(rules: dict) -> None:
             with c_pattern:
                 ntpl = st.text_input("Pattern Template", value=tpl, key=f"vm_tpl_{idx}", label_visibility="collapsed").strip()
             with c_actions:
-                if _render_centered_del_btn(f"vm_role_del_{idx}"):
-                    if len(vm_presets) > 1:
-                        st.session_state["_del_vm_role_idx"] = idx
-                        st.rerun()
+                col_up, col_down, col_del = st.columns(PRESET_ACTION_COLS)
+                with col_up:
+                    if idx > 0:
+                        if st.button("⬆️", key=f"vm_role_up_{idx}", help=f"Move {p.get('code', '')} up"):
+                            st.session_state["_vm_role_swap"] = (idx, idx - 1)
+                            st.rerun()
                     else:
-                        st.warning("⚠️ At least one role must remain.")
+                        st.empty()
+                with col_down:
+                    if idx < len(vm_presets) - 1:
+                        if st.button("⬇️", key=f"vm_role_down_{idx}", help=f"Move {p.get('code', '')} down"):
+                            st.session_state["_vm_role_swap"] = (idx, idx + 1)
+                            st.rerun()
+                    else:
+                        st.empty()
+                with col_del:
+                    if st.button("🗑️", key=f"vm_role_del_{idx}", help="Delete item"):
+                        if len(vm_presets) > 1:
+                            st.session_state["_del_vm_role_idx"] = idx
+                            st.rerun()
+                        else:
+                            st.session_state["vm_preset_min_one"] = True
 
             if stale_del == idx:
                 continue
@@ -813,16 +890,30 @@ def _vm_editor(rules: dict) -> None:
             p["label"] = nlbl or ncode or p.get("label", "")
             p["pattern_key"] = "vm_host"
             p["description"] = ""
+            positions[idx] = len(updated)
             updated.append(dict(p))
 
-        if stale_del is not None:
+        if st.session_state.pop("vm_preset_min_one", False):
+            st.warning("⚠️ At least one role must remain. Delete a different entry first.")
+
+        # A pending reorder is applied to the fully-edited list so inline edits
+        # (including the shared pattern template) made in the same interaction
+        # are preserved.
+        pending_swap = st.session_state.pop("_vm_role_swap", None)
+        if pending_swap is not None or stale_del is not None:
+            if pending_swap is not None:
+                src, dst = pending_swap
+                src_pos = positions.get(src)
+                dst_pos = positions.get(dst)
+                if src_pos is not None and dst_pos is not None:
+                    updated[src_pos], updated[dst_pos] = updated[dst_pos], updated[src_pos]
             patterns["vm_host"] = tpl
             rules["naming_patterns"] = patterns
             rules["host_vm_presets"] = host_presets + updated
             _save_presets(rules)
             return
 
-        ca1, ca2, ca3, ca4 = st.columns([1.0, 2.0, 4.0, 1.6], vertical_alignment="center")
+        ca1, ca2, ca3, ca4 = st.columns(PRESET_COLS, vertical_alignment="center")
         with ca1:
             new_code = st.text_input("New Code", value="", key="vm_new_code", placeholder="e.g. cvi", label_visibility="collapsed").strip()
         with ca2:
