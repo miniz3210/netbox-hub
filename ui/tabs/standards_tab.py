@@ -20,7 +20,7 @@ from utils.formatters import (
 # Shared column width ratios enforced across preset table headers, all data rows,
 # and the inline "add" row so every preset table lines up identically.
 # Code, Label, Pattern Template, Action.
-PRESET_COLS = [1.2, 2.5, 4.5, 1.8]
+PRESET_COLS = [1.0, 2.2, 7.5, 1.4]
 # Action cell sub-columns: Up, Down, Delete (equal thirds, right-aligned).
 PRESET_ACTION_COLS = [1, 1, 1]
 # Manage Pattern Variables columns: Name, Label, Placeholder, Auto-Fill, Optional, Up, Down, Delete.
@@ -81,16 +81,15 @@ def _inject_preset_table_style() -> None:
            to a plain block and its sub-columns are un-pinned. These selectors
            out-specify the generic `:last-child` rules regardless of order. */
         div[data-testid="column"]:last-child:has([data-testid="horizontalBlock"]) {
-            min-width: 0 !important;
-            display: block !important;
-            justify-content: normal !important;
-            align-items: normal !important;
+            display: flex !important;
+            justify-content: flex-end !important;
+            align-items: center !important;
         }
-        div[data-testid="column"] [data-testid="column"]:last-child {
-            min-width: 0 !important;
-            display: block !important;
-            justify-content: normal !important;
-            align-items: normal !important;
+        div[data-testid="column"]:last-child [data-testid="horizontalBlock"] {
+            display: flex !important;
+            justify-content: flex-end !important;
+            width: 100% !important;
+            margin-left: auto !important;
         }
         div[data-testid="column"] [data-testid="column"]:last-child button {
             padding-left: 0.1rem !important;
