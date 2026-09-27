@@ -811,25 +811,25 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             width=0,
         )
 
-    # Process newly pasted image and cleanly auto-clear via counter increment
-    if pasted_data and pasted_data.startswith("data:image"):
-        import base64, io
-        try:
-            header, encoded = pasted_data.split(",", 1)
-            img_bytes = base64.b64decode(encoded)
-            pasted_file = io.BytesIO(img_bytes)
-            idx = len(st.session_state["unified_screenshots"]) + 1
-            pasted_file.name = f"clipboard_screenshot_{idx}.png"
-            pasted_file.type = "image/png"
-            pasted_file.size = len(img_bytes)
-            st.session_state["unified_screenshots"].append(pasted_file)
-            st.session_state["esxi_paste_counter"] += 1
-            st.rerun()
-        except Exception as e:
-            st.warning(f"Failed to process pasted image: {e}")
-
-        # Set unified list as uploaded_imgs for preview and analysis
+# Set unified list as uploaded_imgs for preview and analysis (unconditional init)
         uploaded_imgs = st.session_state["unified_screenshots"]
+
+        # Process newly pasted image and cleanly auto-clear via counter increment
+        if pasted_data and pasted_data.startswith("data:image"):
+            import base64, io
+            try:
+                header, encoded = pasted_data.split(",", 1)
+                img_bytes = base64.b64decode(encoded)
+                pasted_file = io.BytesIO(img_bytes)
+                idx = len(st.session_state["unified_screenshots"]) + 1
+                pasted_file.name = f"clipboard_screenshot_{idx}.png"
+                pasted_file.type = "image/png"
+                pasted_file.size = len(img_bytes)
+                st.session_state["unified_screenshots"].append(pasted_file)
+                st.session_state["esxi_paste_counter"] += 1
+                st.rerun()
+            except Exception as e:
+                st.warning(f"Failed to process pasted image: {e}")
 
     # Unified Preview Area (Consistent preview & removal for ALL images)
     if uploaded_imgs:
