@@ -831,31 +831,31 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         # Set unified list as uploaded_imgs for preview and analysis
         uploaded_imgs = st.session_state["unified_screenshots"]
 
-        # Unified Preview Area (Consistent preview & removal for ALL images)
-        if uploaded_imgs:
-            with st.expander(f"🔍 Preview Uploaded Screenshots ({len(uploaded_imgs)} file(s))", expanded=True):
-                preview_cols = st.columns(min(len(uploaded_imgs), 4))
-                remove_idx = None
-                for img_idx, img_item in enumerate(uploaded_imgs):
-                    with preview_cols[img_idx % len(preview_cols)]:
-                        img_title = getattr(img_item, "name", f"Screenshot #{img_idx + 1}")
-                        st.caption(f"#{img_idx + 1}: {img_title}")
-                        st.image(img_item, use_container_width=True)
-                        if st.button("✖ Remove", key=f"unified_remove_btn_{img_idx}"):
-                            remove_idx = img_idx
-                if remove_idx is not None:
-                    st.session_state["unified_screenshots"].pop(remove_idx)
-                    st.rerun()
+    # Unified Preview Area (Consistent preview & removal for ALL images)
+    if uploaded_imgs:
+        with st.expander(f"🔍 Preview Uploaded Screenshots ({len(uploaded_imgs)} file(s))", expanded=True):
+            preview_cols = st.columns(min(len(uploaded_imgs), 4))
+            remove_idx = None
+            for img_idx, img_item in enumerate(uploaded_imgs):
+                with preview_cols[img_idx % len(preview_cols)]:
+                    img_title = getattr(img_item, "name", f"Screenshot #{img_idx + 1}")
+                    st.caption(f"#{img_idx + 1}: {img_title}")
+                    st.image(img_item, use_container_width=True)
+                    if st.button("✖ Remove", key=f"unified_remove_btn_{img_idx}"):
+                        remove_idx = img_idx
+            if remove_idx is not None:
+                st.session_state["unified_screenshots"].pop(remove_idx)
+                st.rerun()
 
-        if st.button("🚀 Analyze Topology & Auto-Populate", key="btn_analyze_esxi_img", type="primary"):
-            with st.spinner("Analyzing topology with AI Vision..."):
-                try:
-                    from core.ai_assistant import analyze_esxi_topology_screenshot
-                    results = analyze_esxi_topology_screenshot(uploaded_imgs, naming_rules, active_model)
-                    st.session_state["esxi_parsed_descriptions"] = results
-                    st.success("Successfully analyzed topology and generated NetBox descriptions!")
-                except Exception as e:
-                    st.error(f"Vision analysis failed: {str(e)}")
+    if st.button("🚀 Analyze Topology & Auto-Populate", key="btn_analyze_esxi_img", type="primary"):
+        with st.spinner("Analyzing topology with AI Vision..."):
+            try:
+                from core.ai_assistant import analyze_esxi_topology_screenshot
+                results = analyze_esxi_topology_screenshot(uploaded_imgs, naming_rules, active_model)
+                st.session_state["esxi_parsed_descriptions"] = results
+                st.success("Successfully analyzed topology and generated NetBox descriptions!")
+            except Exception as e:
+                st.error(f"Vision analysis failed: {str(e)}")
 
     if "esxi_parsed_descriptions" in st.session_state and st.session_state["esxi_parsed_descriptions"]:
         st.markdown("###### 📋 Generated NetBox Interface Descriptions")
