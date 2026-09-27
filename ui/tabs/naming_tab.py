@@ -928,25 +928,37 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 ip = row.get("IP Address", "")
                 row_type = row.get("Type", "")
 
+                # Construct universal token value map from row data
+                raw_svc = row.get("Service") or row.get("Purpose") or (desc.split("(")[0].strip() if "(" in desc else desc)
+                clean_svc = re.sub(r"(?i)\s+network$", "", str(raw_svc or "")).strip()
+                row_vals = {
+                    "vmnic": iface,
+                    "v_switch": vs,
+                    "vswitch": vs,
+                    "purpose": clean_svc,
+                    "service": clean_svc,
+                    "status": row.get("Role") or row.get("Status") or "Active Uplink",
+                    "role": row.get("Role") or row.get("Status") or "Active",
+                    "active_vmnics": row.get("Active") or row.get("Active_vmnics") or "",
+                    "standby_vmnics": row.get("Standby") or row.get("Standby_vmnics") or "",
+                    "teaming": row.get("Teaming") or "",
+                }
+
                 if row_type == "VMkernel":
-                    # Extract service/purpose from row, stripping any trailing "Network" if present
-                    raw_svc = row.get("Service") or row.get("Purpose") or ""
-                    if not raw_svc and desc:
-                        # Fallback: extract purpose from existing desc
-                        raw_svc = desc.split("(")[0].strip()
-                    clean_svc = re.sub(r"(?i)\s+network$", "", raw_svc).strip()
-                    
-                    rendered = vmk_tpl.replace("<purpose>", clean_svc).replace("<service>", clean_svc).replace("<v_switch>", vs).replace("<vswitch>", vs)
-                    rendered = re.sub(r"<[^>]+>", "", rendered).strip()
-                elif row_type == "Uplink":
-                    rendered = desc or uplink_tpl
+                    rendered = render_dynamic_pattern(vmk_tpl, row_vals, variables)
                 elif row_type == "PortGroup":
-                    rendered = desc or pg_tpl
+                    rendered = render_dynamic_pattern(pg_tpl, row_vals, variables) if not desc else desc
+                elif row_type == "Uplink":
+                    rendered = render_dynamic_pattern(uplink_tpl, row_vals, variables) if not desc else desc
                 else:
                     rendered = desc or ""
 
+                rendered = re.sub(r"\s+", " ", rendered).strip()
                 if ip and ip.strip():
-                    vs_lines.append(f"{iface}:\n{rendered} (IP: {ip})\n")
+                    if f"(IP: {ip})" not in rendered:
+                        vs_lines.append(f"{iface}:\n{rendered} (IP: {ip})\n")
+                    else:
+                        vs_lines.append(f"{iface}:\n{rendered}\n")
                 else:
                     vs_lines.append(f"{iface}:\n{rendered}\n")
             blocks.append("\n".join(vs_lines))
