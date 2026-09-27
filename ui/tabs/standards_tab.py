@@ -1166,7 +1166,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                 src, dst = pending_swap
                 src_pos = positions.get(src)
                 dst_pos = positions.get(dst)
-                if src_pos is not None and dst_pos is not None:
+                if src_pos is not None and dst_pos is not None and 0 <= src_pos < len(updated) and 0 <= dst_pos < len(updated):
                     updated[src_pos], updated[dst_pos] = updated[dst_pos], updated[src_pos]
                 rules["vlan_presets"] = dict(vlan_presets)
                 rules["vlan_presets"][group_name] = updated
