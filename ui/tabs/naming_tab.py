@@ -948,20 +948,63 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 act_nics = str(row.get("Active") or row.get("Active_vmnics") or "").strip()
                 stb_nics = str(row.get("Standby") or row.get("Standby_vmnics") or "").strip()
 
-                # Construct universal token value map identical to Interactive Single Item Generator
-                row_vals = {
-                    "vmnic": str(iface).strip(),
-                    "v_switch": resolved_vs,
-                    "vswitch": resolved_vs,
-                    "purpose": clean_svc,
-                    "service": clean_svc,
-                    "status": str(row.get("Role") or row.get("Status") or "Active Uplink").strip(),
-                    "role": str(row.get("Role") or row.get("Status") or "Active").strip(),
-                    "active_vmnics": act_nics,
-                    "standby_vmnics": stb_nics,
-                    "teaming": str(row.get("Teaming") or "").strip(),
-                }
+                # 1. Base Universal Token Bag: dynamically ingest all row keys/values
+                row_vals = {}
+                for k, v in row.items():
+                    if v is not None and not str(v).lower() in ["nan", "none"]:
+                        norm_k = re.sub(r"[^a-zA-Z0-9]+", "_", str(k).strip().lower()).strip("_")
+                        row_vals[norm_k] = str(v).strip()
 
+                # 2. Canonical Aliases & Intelligent Derivations
+                # Switch normalization
+                resolved_vs = (
+                    row_vals.get("vswitch") or
+                    row_vals.get("v_switch") or
+                    row_vals.get("switch") or
+                    vs or ""
+                )
+                if not resolved_vs and desc:
+                    m_vs = re.search(r"\b(vSwitch\w*)\b", desc)
+                    if m_vs:
+                        resolved_vs = m_vs.group(1)
+                row_vals["vswitch"] = resolved_vs
+                row_vals["v_switch"] = resolved_vs
+
+                # Interface normalization
+                norm_iface = str(iface or row_vals.get("interface") or "").strip()
+                row_vals["vmnic"] = norm_iface
+                row_vals["interface"] = norm_iface
+
+                # Purpose / Service normalization (strip trailing "network")
+                raw_purpose = (
+                    row_vals.get("purpose") or
+                    row_vals.get("service") or
+                    ""
+                )
+                if not raw_purpose and desc:
+                    if row_type == "Uplink":
+                        parts = desc.split("-")
+                        if len(parts) >= 2:
+                            raw_purpose = re.sub(r"^(vSwitch\w*|Active Uplink|Standby Uplink)\s*", "", parts[-1].strip())
+                            raw_purpose = re.sub(r"(Active Uplink|Standby Uplink)$", "", raw_purpose).strip()
+                    else:
+                        raw_purpose = desc.split("(")[0].strip()
+                clean_purpose = re.sub(r"(?i)\s+network$", "", raw_purpose).strip()
+                row_vals["purpose"] = clean_purpose
+                row_vals["service"] = clean_purpose
+
+                # Uplink active/standby mapping
+                act_vmnics = row_vals.get("active") or row_vals.get("active_vmnics") or ""
+                stb_vmnics = row_vals.get("standby") or row_vals.get("standby_vmnics") or ""
+                row_vals["active_vmnics"] = act_vmnics
+                row_vals["standby_vmnics"] = stb_vmnics
+
+                # Status / Role
+                status_val = row_vals.get("role") or row_vals.get("status") or "Active Uplink"
+                row_vals["status"] = status_val
+                row_vals["role"] = status_val
+
+                # 3. Dynamic Pattern Resolution via Universal Engine
                 if row_type == "VMkernel":
                     rendered = render_dynamic_pattern(vmk_tpl, row_vals, pattern_vars)
                 elif row_type == "PortGroup":
@@ -971,6 +1014,11 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 else:
                     rendered = desc or ""
 
+                # 4. Clean formatting: eliminate leftover tokens and collapse spaces
+                rendered = re.sub(r"\([^)]*<[^>]+>[^)]*\)", "", rendered)
+                rendered = re.sub(r"<[^>]+>", "", rendered)
+                rendered = re.sub(r"\(\s*[/_-]*\s*\)", "", rendered)
+                rendered = re.sub(r"\s*-\s*$", "", rendered)
                 rendered = re.sub(r"\s{2,}", " ", rendered).strip()
                 if ip and ip.strip():
                     if f"(IP: {ip})" not in rendered:
