@@ -1170,6 +1170,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                     updated[src_pos], updated[dst_pos] = updated[dst_pos], updated[src_pos]
                 rules["vlan_presets"] = dict(vlan_presets)
                 rules["vlan_presets"][group_name] = updated
+                _clear_session_state_prefixes("vlan_pre_")
                 _save_presets(rules)
                 return
 
