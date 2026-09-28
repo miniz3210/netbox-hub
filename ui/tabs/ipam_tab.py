@@ -18,6 +18,7 @@ from core.ipam_engine import (
     lookup_role_description,
     resolve_pattern_template,
     resolve_vlan_description,
+    normalize_role_name,
     generate_netbox_site_csv,
     generate_netbox_vlan_group_csv,
     generate_netbox_vlans_csv,
@@ -604,8 +605,12 @@ def render_ipam_tab(active_model: str):
             # Role and VLAN ID edits must use the current site and row values.
             # Looking up by role alone can return a stale description from another
             # site (for example, "Auckland Management -- VLAN 5").
-            if "Role" in changes and "VLAN Name" not in changes:
-                changes["VLAN Name"] = changes["Role"]
+            if "Role" in changes:
+                # Auto-correct the role to its canonical casing, e.g. "guest" /
+                # "Guest" -> "Guests", "corp wifi" -> "Corporate WiFi".
+                changes["Role"] = normalize_role_name(changes["Role"])
+                if "VLAN Name" not in changes:
+                    changes["VLAN Name"] = changes["Role"]
             if (
                 not manual_desc
                 and ("Role" in changes or "VLAN ID" in changes)
@@ -617,10 +622,6 @@ def render_ipam_tab(active_model: str):
                 changes["VLAN Description"] = build_vlan_description(
                     site_name, next_role, next_vlan_id, next_vlan_name, active_vlan_presets, vlan_desc_mappings
                 )
-            # Apply Title Case formatting to Role only. The VLAN Description is a
-            # literal NetBox tag (e.g. "VIN_Corp") and must be preserved verbatim.
-            if "Role" in changes:
-                changes["Role"] = to_title_case_preserve_acronyms(changes["Role"])
             raw_rows[row_idx].update(changes)
 
     for new_r in editor_state.get("added_rows", []):
@@ -635,7 +636,7 @@ def render_ipam_tab(active_model: str):
             manual_flag = False
         raw_rows.append({
             "VLAN ID": new_vid,
-            "Role": to_title_case_preserve_acronyms(r_name),
+            "Role": normalize_role_name(r_name) or to_title_case_preserve_acronyms(r_name),
             "VLAN Name": new_r.get("VLAN Name", r_name),
             "VLAN Description": vlan_desc,
             "_vlan_desc_manual": manual_flag,

@@ -27,6 +27,44 @@ ROLE_TO_DESC_MAP = {
     "backup / recovery": "Backup",
 }
 
+# Canonical role-name aliases. Every key is compared case-insensitively
+# (after stripping) and resolves to the standard casing below, which is also
+# the canonical form used as a lookup key in ``vlan_description_mappings``.
+ROLE_ALIASES = {
+    "guest": "Guests",
+    "guests": "Guests",
+    "corp wifi": "Corporate WiFi",
+    "corporate wifi": "Corporate WiFi",
+    "corp_wifi": "Corporate WiFi",
+    "workstation": "Workstations",
+    "workstations": "Workstations",
+    "mobile": "Mobiles",
+    "mobiles": "Mobiles",
+    "printer": "Printers",
+    "printers": "Printers",
+    "mgmt": "Management",
+    "management": "Management",
+    "av": "Audio Visual",
+    "audiovisual": "Audio Visual",
+    "audio visual": "Audio Visual",
+}
+
+
+def normalize_role_name(role: str) -> str:
+    """Normalize a raw role string to its canonical, standard-cased form.
+
+    1. Strips leading/trailing whitespace.
+    2. Applies a case-insensitive alias mapping (e.g. "guest"/"guests" ->
+       "Guests", "corp wifi"/"corporate wifi" -> "Corporate WiFi").
+    3. Otherwise the stripped role is returned as-is.
+    """
+    role = str(role or "").strip()
+    if not role:
+        return ""
+
+    canonical = ROLE_ALIASES.get(role.lower(), role)
+    return canonical
+
 
 def resolve_vlan_description(vid, role: str, vlan_presets=None, vlan_desc_mappings=None) -> str:
     """Resolve the NetBox 'VLAN Description' tag for a (VID, Role) pair.
@@ -36,17 +74,19 @@ def resolve_vlan_description(vid, role: str, vlan_presets=None, vlan_desc_mappin
     dictionaries in this function.
 
     Resolution order:
-      1. Check ``vlan_desc_mappings`` (Role -> Description). If a
-         case-insensitive match exists and the mapped value is non-blank,
-         return it (e.g. "Guests" -> "VIN_Guest").
-      2. Fallback directly to the ``Role`` name itself (e.g. "CustomLab").
+      1. Normalize the role name (see ``normalize_role_name``), so aliases like
+         "guest"/"guests" become "Guests" and pick up their standard casing.
+      2. Check ``vlan_desc_mappings`` (Role -> Description) case-insensitively.
+         If a match exists and the mapped value is non-blank, return it
+         (e.g. "Guests" -> "VIN_Guest").
+      3. Fallback to the normalized ``Role`` name itself (e.g. "CustomLab").
          Returns "" only when no role is supplied.
 
     The ``vlan_presets`` argument is retained for backward compatibility but is
     no longer consulted for description resolution — that responsibility now lives
     entirely in ``vlan_desc_mappings``.
     """
-    norm_role = str(role or "").strip()
+    norm_role = normalize_role_name(role)
     norm_key = norm_role.lower()
 
     if isinstance(vlan_desc_mappings, dict):

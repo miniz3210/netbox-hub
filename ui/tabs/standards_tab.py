@@ -10,6 +10,7 @@ from config.naming_rules import (
     get_pattern_variables, get_naming_patterns, get_custom_patterns,
     get_device_presets, get_interface_presets, get_host_vm_presets,
     get_vlan_presets, get_vlan_description_mappings, make_preset_key,
+    get_esxi_network_presets,
     default_presets_for, DEFAULT_PRESET_KEY_FIELD, DEFAULT_NAMING_PATTERNS,
     DEFAULT_RULES, DEFAULT_VLAN_PRESETS, DEFAULT_VLAN_DESCRIPTION_MAPPINGS,
 )
@@ -1349,6 +1350,8 @@ def _vlan_presets_editor(rules: dict) -> None:
             st.session_state["vlan_pre_selected_group"] = new_group_name.strip() if new_group_name and new_group_name.strip() else st.session_state.get("vlan_pre_selected_group")
         _save_presets(rules)
 
+    _render_vlan_description_mappings_editor(rules)
+
 
 def render_standards_tab(active_model):
     st.subheader("📖 Infrastructure Naming Standards Configuration")
@@ -1396,8 +1399,6 @@ def render_standards_tab(active_model):
     with tab_edit:
         with st.expander("🌐 Subnet & VLAN Allocation Presets", expanded=True):
             _vlan_presets_editor(current_rules)
-
-        _render_vlan_description_mappings_editor(current_rules)
 
         with st.expander("🔧 Network & Security Devices", expanded=True):
             _preset_type_editor("device", get_device_presets(current_rules), current_rules, prefix="branch",
