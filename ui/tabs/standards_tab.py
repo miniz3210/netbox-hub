@@ -554,8 +554,8 @@ def _render_site_code_mapping_manager() -> None:
                     final["site_code_rules"] = dict(sr)
                     final["site_code_rules"]["exact_mappings"] = dict(updated)
                     final["site_code_rules"]["exact_mappings"][new_p.strip().lower()] = new_code.strip().upper()
-                    _persist_site_code_mappings(final)
                     st.session_state["site_code_mappings_modified"] = dict(final["site_code_rules"]["exact_mappings"])
+                    _persist_site_code_mappings(final)
                 else:
                     st.warning("⚠️ Enter both a city/location and a site code to add.")
 
@@ -1614,6 +1614,10 @@ def render_standards_tab(active_model):
         <style>
         /* Only hide specifically marked ghost buttons without breaking active buttons */
         button[data-testid="baseButton-secondary"]:disabled:empty {
+            display: none !important;
+        }
+        /* Hide Streamlit's "Press Enter to submit form" overlay text in text inputs */
+        div[data-testid="InputInstructions"] {
             display: none !important;
         }
         </style>
