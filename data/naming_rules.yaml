@@ -181,94 +181,66 @@
     }
   ],
   "vlan_presets": {
-    "Branch Office VLAN Preset": [
-      {
-        "vid": 300,
-        "role": "Corporate WiFi",
-        "vlan_name": "Corporate WiFi",
-        "name_pattern": "<role>",
-        "pattern_template": "<site> <role> -- VLAN <vid>"
-      },
-      {
-        "vid": 100,
-        "role": "Workstations",
-        "vlan_name": "Workstations",
-        "name_pattern": "<role>",
-        "pattern_template": "<site> <role> -- VLAN <vid>"
-      },
-      {
-        "vid": 5,
-        "role": "Management",
-        "vlan_name": "Management",
-        "name_pattern": "<role>",
-        "pattern_template": "<site> <role> -- VLAN <vid>"
-      },
-      {
-        "vid": 700,
-        "role": "Printers",
-        "vlan_name": "Printers",
-        "name_pattern": "<role>",
-        "pattern_template": "<site> <role> -- VLAN <vid>"
-      },
-      {
-        "vid": 800,
-        "role": "Audio Visual",
-        "vlan_name": "Audio Visual",
-        "name_pattern": "<role>",
-        "pattern_template": "<site> <role> -- VLAN <vid>"
-      },
-      {
-        "vid": 200,
-        "role": "Guests",
-        "vlan_name": "Guests",
-        "name_pattern": "<role>",
-        "pattern_template": "<site> <role> -- VLAN <vid>"
-      },
-      {
-        "vid": 400,
-        "role": "Mobiles",
-        "vlan_name": "Mobiles",
-        "name_pattern": "<role>",
-        "pattern_template": "<site> <role> -- VLAN <vid>"
-      }
-    ],
-    "Data Center VLAN Preset": [
-      {
-        "vid": 10,
-        "role": "Server Management",
-        "vlan_name": "Server Management",
-        "name_pattern": "<role>",
-        "pattern_template": "<site> <role> -- VLAN <vid>"
-      },
-      {
-        "vid": 20,
-        "role": "Production App",
-        "vlan_name": "Production App",
-        "name_pattern": "<role>",
-        "pattern_template": "<site> <role> -- VLAN <vid>"
-      },
-      {
-        "vid": 30,
-        "role": "Database",
-        "vlan_name": "Database",
-        "name_pattern": "<role>",
-        "pattern_template": "<site> <role> -- VLAN <vid>"
-      },
-      {
-        "vid": 40,
-        "role": "DMZ",
-        "vlan_name": "DMZ",
-        "name_pattern": "<role>",
-        "pattern_template": "<site> <role> -- VLAN <vid>"
-      },
-      {
-        "vid": 50,
-        "role": "Storage / vSAN",
-        "vlan_name": "Storage / vSAN",
-        "name_pattern": "<role>",
-        "pattern_template": "<site> <role> -- VLAN <vid>"
-      }
-    ]
+    "Branch Office VLAN Preset": {
+      "vlan_name_pattern": "<role> VLD",
+      "prefix_pattern": "<site> <role> -- VLAN <vid>",
+      "items": [
+        {
+          "vid": 300,
+          "role": "Corporate WiFi"
+        },
+        {
+          "vid": 100,
+          "role": "Workstations"
+        },
+        {
+          "vid": 5,
+          "role": "Management"
+        },
+        {
+          "vid": 700,
+          "role": "Printers"
+        },
+        {
+          "vid": 800,
+          "role": "Audio Visual"
+        },
+        {
+          "vid": 200,
+          "role": "Guests"
+        },
+        {
+          "vid": 400,
+          "role": "Mobiles"
+        }
+      ]
+    },
+    "Data Center VLAN Preset": {
+      "vlan_name_pattern": "<role>",
+      "prefix_pattern": "<site> <role> -- VLAN <vid>",
+      "items": [
+        {
+          "vid": 10,
+          "role": "Server Management"
+        },
+        {
+          "vid": 20,
+          "role": "Production App"
+        },
+        {
+          "vid": 30,
+          "role": "Database"
+        },
+        {
+          "vid": 40,
+          "role": "DMZ"
+        },
+        {
+          "vid": 50,
+          "role": "Storage / vSAN"
+        }
+      ]
+    }
   },
   "naming_patterns": {
     "branch_switch": "SW<country><state><site><zone><seq>-<stack_id>",

@@ -317,7 +317,7 @@ def on_preset_change():
                 "VLAN Description": desc,
                 "_group_vlan_name_pattern": group_vname_pattern,
                 "_group_prefix_pattern": group_prefix_pattern,
-                "_pattern_template": prefix_desc,
+                "_pattern_template": group_prefix_pattern,
                 "_name_pattern": group_vname_pattern,
                 "Subnet (CIDR)": ""
             })
