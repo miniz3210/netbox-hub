@@ -375,7 +375,7 @@ def _render_auto_correction_manager(active_model: str) -> None:
             # banner expired — let _check_and_render_banner have popped it
             pass
 
-        _render_site_code_mapping_manager(key_prefix="ac_scm")
+    _render_site_code_mapping_manager(key_prefix="ac_scm")
 
     st.markdown("---")
 
