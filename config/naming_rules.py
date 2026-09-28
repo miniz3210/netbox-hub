@@ -35,6 +35,7 @@ DEFAULT_NAMING_PATTERNS = {
     "switch_access_desc": "<vlan_name> - <device>_<port>",
     "firewall_interface": "<role_zone>_<vlan_id>",
     "esxi_host": "<site_prefix><role_esx><seq>.<domain>",
+    "host_vm_proxmox": "<site_prefix>pve<seq>.<domain>",
     "vm_host": "<country><site><role><seq>",
     "esxi_uplink": "<vmnic> - <v_switch> <purpose> <status>",
     "esxi_portgroup_name": "PG-<pg_network>",
@@ -116,9 +117,18 @@ INTERFACE_PRESETS = [
      "description": "Firewall security-zone interface description"},
 ]
 
-HOST_VM_PRESETS = [
+# Factory defaults for the "HOSTS TYPE PRESETS" card (physical hypervisor
+# hosts). Both standard hypervisors must always be present here so that
+# "Reset to Defaults" restores the full standard list instead of a single
+# entry.
+DEFAULT_HOST_TYPE_PRESETS = [
     {"code": "ESXi", "label": "ESXi Host", "pattern_key": "esxi_host",
      "description": "ESXi Hypervisor Host"},
+    {"code": "Proxmox", "label": "Proxmox Host", "pattern_key": "host_vm_proxmox",
+     "description": "Proxmox VE Hypervisor Host"},
+]
+
+DEFAULT_VM_PRESETS = [
     {"code": "cvi", "label": "Core Virtualization (cvi)", "pattern_key": "vm_host",
      "description": "Core / Virtualization VM"},
     {"code": "afs", "label": "App & File Services (afs)", "pattern_key": "vm_host",
@@ -128,6 +138,13 @@ HOST_VM_PRESETS = [
     {"code": "vlab", "label": "Virtual Lab / Test (vlab)", "pattern_key": "vm_host",
      "description": "Virtual Lab / Test VM"},
 ]
+
+# Canonical default value for the "host_vm_presets" rules key: host types
+# first, then the VM roles (see _host_editor / _vm_editor, which both read
+# and write this single list).
+DEFAULT_HOST_VM_PRESETS = DEFAULT_HOST_TYPE_PRESETS + DEFAULT_VM_PRESETS
+
+HOST_VM_PRESETS = DEFAULT_HOST_VM_PRESETS
 
 ESXI_NETWORK_PRESETS = [
     {"code": "Uplink", "label": "Physical Uplink", "pattern_key": "esxi_uplink",

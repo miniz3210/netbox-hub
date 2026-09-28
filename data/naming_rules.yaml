@@ -182,7 +182,7 @@
   ],
   "vlan_presets": {
     "Branch Office VLAN Preset": {
-      "vlan_name_pattern": "<role> VLD",
+      "vlan_name_pattern": "<role>",
       "prefix_pattern": "<site> <role> -- VLAN <vid>",
       "items": [
         {

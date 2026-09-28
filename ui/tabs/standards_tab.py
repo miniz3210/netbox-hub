@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import copy
 
 import streamlit as st
 from config.constants import RULES_FILE
@@ -12,6 +13,7 @@ from config.naming_rules import (
     get_vlan_presets, get_vlan_description_mappings, make_preset_key,
     get_esxi_network_presets,
     default_presets_for, DEFAULT_PRESET_KEY_FIELD, DEFAULT_NAMING_PATTERNS,
+    DEFAULT_HOST_TYPE_PRESETS, DEFAULT_VM_PRESETS,
     DEFAULT_RULES, DEFAULT_VLAN_PRESETS, DEFAULT_VLAN_DESCRIPTION_MAPPINGS,
     get_ipam_role_mappings, DEFAULT_IPAM_ROLE_MAPPINGS,
 )
@@ -1117,8 +1119,30 @@ def _host_editor(rules: dict) -> None:
                 add_preset = st.form_submit_button("➕ Add", width='stretch', help="Add new preset")
 
     if reset:
-        _clear_session_state_prefixes("host_", "vm_")
-        _reset_presets("host_vm", rules)
+        # Reset restores the canonical factory defaults for the host types
+        # into the exact key this editor reads from ("host_vm_presets"),
+        # persists them to disk immediately, and drops every cached host/preset
+        # widget value so the table rebuilds from the defaults. VM presets
+        # (pattern_key "vm_host") belong to the VM card and are preserved,
+        # falling back to the canonical VM defaults when none exist.
+        kept_vm = [copy.deepcopy(p) for p in vm_presets] or [
+            copy.deepcopy(p) for p in DEFAULT_VM_PRESETS
+        ]
+        rules["host_vm_presets"] = copy.deepcopy(DEFAULT_HOST_TYPE_PRESETS) + kept_vm
+        reset_patterns = dict(rules.get("naming_patterns") or {})
+        for preset in DEFAULT_HOST_TYPE_PRESETS:
+            pkey = preset.get("pattern_key", "")
+            if pkey in DEFAULT_NAMING_PATTERNS:
+                reset_patterns[pkey] = DEFAULT_NAMING_PATTERNS[pkey]
+        rules["naming_patterns"] = reset_patterns
+        save_naming_rules(rules, source="Hosts Type Presets: Reset to Defaults")
+        st.session_state["naming_rules"] = rules.copy()
+        st.session_state["presets_saved"] = True
+        st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
+        st.session_state.pop("host_preset_min_one", None)
+        st.session_state.pop("_host_vm_del_idx", None)
+        st.session_state.pop("_host_vm_swap", None)
+        _clear_session_state_prefixes("host_", "vm_", "preset_", "host_preset", "vm_preset")
         st.rerun()
         return
 
@@ -1267,8 +1291,21 @@ def _vm_editor(rules: dict) -> None:
                 add_role = st.form_submit_button("➕ Add", width='stretch', help="Add new VM role")
 
     if reset:
-        _clear_session_state_prefixes("host_", "vm_")
-        _reset_presets("host_vm", rules)
+        # Mirror of the HOSTS reset: only the VM presets are restored, the
+        # host-type presets owned by the HOSTS card are left untouched.
+        kept_hosts = [copy.deepcopy(p) for p in host_presets] or [
+            copy.deepcopy(p) for p in DEFAULT_HOST_TYPE_PRESETS
+        ]
+        rules["host_vm_presets"] = kept_hosts + copy.deepcopy(DEFAULT_VM_PRESETS)
+        vm_patterns = dict(rules.get("naming_patterns") or {})
+        if "vm_host" in DEFAULT_NAMING_PATTERNS:
+            vm_patterns["vm_host"] = DEFAULT_NAMING_PATTERNS["vm_host"]
+        rules["naming_patterns"] = vm_patterns
+        save_naming_rules(rules, source="VM Presets: Reset to Defaults")
+        st.session_state["naming_rules"] = rules.copy()
+        st.session_state["presets_saved"] = True
+        st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
+        _clear_session_state_prefixes("host_", "vm_", "preset_", "host_preset", "vm_preset")
         st.rerun()
         return
 
