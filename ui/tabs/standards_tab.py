@@ -1003,6 +1003,8 @@ def _host_editor(rules: dict) -> None:
         with col_t2:
             st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(host_presets)} presets</span></div>", unsafe_allow_html=True)
         st.caption("Manage physical hypervisor host naming patterns and presets.")
+        if st.session_state.pop("host_presets_saved", False):
+            st.success("✅ Hosts Type Presets saved & applied!")
 
         # Inject dynamic styling to guarantee Action buttons fit cleanly without squeezing
         _inject_preset_table_style()
@@ -1025,44 +1027,34 @@ def _host_editor(rules: dict) -> None:
 
         nonce = st.session_state.get("standards_nonce", 0)
         for idx, preset in enumerate(host_presets):
-            code = preset.get("code", "")
-            label = preset.get("label", "")
             pk = preset.get("pattern_key", "")
             tpl = patterns.get(pk, "")
 
             c_code, c_label, c_pattern, c_actions = st.columns(PRESET_COLS, vertical_alignment="center")
             with c_code:
-                if code == "ESXi":
-                    st.text_input("Code", value=code, key=f"host_{nonce}_{idx}_code", disabled=True, label_visibility="collapsed")
-                else:
-                    ncode = st.text_input("Code", value=code, key=f"host_{nonce}_{idx}_code", label_visibility="collapsed").strip()
+                ncode = st.text_input("Code", value=preset.get("code", "ESXi"), key=f"host_{nonce}_{idx}_code", label_visibility="collapsed").strip()
             with c_label:
-                if code == "ESXi":
-                    st.text_input("Label", value=label, key=f"host_{nonce}_{idx}_lbl", disabled=True, label_visibility="collapsed")
-                else:
-                    nlbl = st.text_input("Label", value=label, key=f"host_{nonce}_{idx}_lbl", label_visibility="collapsed").strip()
+                nlbl = st.text_input("Label", value=preset.get("label", "ESXi Host"), key=f"host_{nonce}_{idx}_lbl", label_visibility="collapsed").strip()
             with c_pattern:
                 ntpl = st.text_input("Pattern Template", value=tpl, key=f"host_{nonce}_{idx}_tpl", label_visibility="collapsed").strip()
             with c_actions:
                 col_up, col_down, col_del = st.columns(PRESET_ACTION_COLS)
                 with col_up:
                     if idx > 0:
-                        if st.button("⬆️", key=f"host_up_{idx}", help=f"Move {code or label} up"):
+                        if st.button("⬆️", key=f"host_up_{idx}", help=f"Move {ncode or nlbl} up"):
                             st.session_state["_host_vm_swap"] = (idx, idx - 1)
                             st.rerun()
                     else:
                         st.empty()
                 with col_down:
                     if idx < len(host_presets) - 1:
-                        if st.button("⬇️", key=f"host_down_{idx}", help=f"Move {code or label} down"):
+                        if st.button("⬇️", key=f"host_down_{idx}", help=f"Move {ncode or nlbl} down"):
                             st.session_state["_host_vm_swap"] = (idx, idx + 1)
                             st.rerun()
                     else:
                         st.empty()
                 with col_del:
-                    if code == "ESXi":
-                        st.empty()
-                    elif st.button("🗑️", key=f"host_del_{idx}", help="Delete item"):
+                    if st.button("🗑️", key=f"host_del_{idx}", help=f"Delete {ncode or nlbl}"):
                         if len(host_presets) > 1:
                             st.session_state["_host_vm_del_idx"] = idx
                             st.rerun()
@@ -1071,14 +1063,14 @@ def _host_editor(rules: dict) -> None:
 
             if stale_del == idx:
                 continue
-            final_pk = pk or make_preset_key(code or label, "host_vm")
+            final_pk = pk or make_preset_key(ncode or nlbl, "host_vm")
             if ntpl:
                 patterns_updates[final_pk] = ntpl
             if final_pk:
                 positions[idx] = len(updated)
                 updated.append({
-                    "code": code if code else "ESXi",
-                    "label": label or code or "ESXi Host",
+                    "code": ncode or "ESXi",
+                    "label": nlbl or ncode or "ESXi Host",
                     "pattern_key": final_pk,
                     "description": preset.get("description", ""),
                 })
@@ -1098,6 +1090,7 @@ def _host_editor(rules: dict) -> None:
                     updated[src_pos], updated[dst_pos] = updated[dst_pos], updated[src_pos]
             rules["naming_patterns"] = {**patterns, **patterns_updates}
             rules["host_vm_presets"] = updated + vm_presets
+            st.session_state["host_presets_saved"] = True
             _save_presets(rules)
             return
 
@@ -1166,6 +1159,7 @@ def _host_editor(rules: dict) -> None:
         _clear_session_state_prefixes("host_new_code", "host_new_lbl", "host_new_tpl")
         rules["naming_patterns"] = final_patterns
         rules["host_vm_presets"] = final_presets + vm_presets
+        st.session_state["host_presets_saved"] = True
         _save_presets(rules)
         return
 
@@ -1174,6 +1168,7 @@ def _host_editor(rules: dict) -> None:
         final_patterns = {**patterns, **patterns_updates}
         rules["naming_patterns"] = final_patterns
         rules["host_vm_presets"] = final_presets + vm_presets
+        st.session_state["host_presets_saved"] = True
         _save_presets(rules)
 
 
@@ -1191,6 +1186,8 @@ def _vm_editor(rules: dict) -> None:
         with col_t2:
             st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(vm_presets)} presets</span></div>", unsafe_allow_html=True)
         st.caption("Manage virtual machine roles (cvi, afs, sani, vlab) and their shared hostname template.")
+        if st.session_state.pop("vm_presets_saved", False):
+            st.success("✅ VM Role Presets saved & applied!")
 
         # Inject dynamic styling to guarantee Action buttons fit cleanly without squeezing
         _inject_preset_table_style()
@@ -1270,6 +1267,7 @@ def _vm_editor(rules: dict) -> None:
             patterns["vm_host"] = tpl
             rules["naming_patterns"] = patterns
             rules["host_vm_presets"] = host_presets + updated
+            st.session_state["vm_presets_saved"] = True
             _save_presets(rules)
             return
 
@@ -1323,6 +1321,7 @@ def _vm_editor(rules: dict) -> None:
         rules["naming_patterns"] = patterns
         rules["host_vm_presets"] = host_presets + final
         _clear_session_state_prefixes("vm_new_code", "vm_new_lbl", "vm_new_tpl")
+        st.session_state["vm_presets_saved"] = True
         _save_presets(rules)
         return
 
@@ -1333,6 +1332,7 @@ def _vm_editor(rules: dict) -> None:
         patterns["vm_host"] = tpl or "<country><site><role><seq>"
         rules["naming_patterns"] = patterns
         rules["host_vm_presets"] = host_presets + final
+        st.session_state["vm_presets_saved"] = True
         _save_presets(rules)
 
 
@@ -1441,6 +1441,8 @@ def _vlan_presets_editor(rules: dict) -> None:
             total_count = sum(len(g.get("items", [])) for g in vlan_presets.values())
             st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{total_count} presets</span></div>", unsafe_allow_html=True)
         st.caption("Manage reusable VLAN allocation groups. Each group has default patterns applied to all its items. VLAN Description tags are configured in the dedicated mappings expander below.")
+        if st.session_state.pop("vlan_presets_saved", False):
+            st.success("✅ VLAN Allocation Presets saved & applied!")
 
         _inject_preset_table_style()
 
@@ -1488,6 +1490,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                     rules["vlan_presets"] = dict(vlan_presets)
                     rules["vlan_presets"][group_name] = group
                     _clear_session_state_prefixes("vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_pat_")
+                    st.session_state["vlan_presets_saved"] = True
                     _save_presets(rules)
                     return
 
@@ -1500,6 +1503,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                     rules["vlan_presets"] = dict(vlan_presets)
                     rules["vlan_presets"][group_name] = group
                     _clear_session_state_prefixes("vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_pat_")
+                    st.session_state["vlan_presets_saved"] = True
                     _save_presets(rules)
                     return
 
@@ -1630,6 +1634,7 @@ def _vlan_presets_editor(rules: dict) -> None:
         import copy
         _clear_session_state_prefixes("vlan_pre")
         rules["vlan_presets"] = copy.deepcopy(dict(DEFAULT_VLAN_PRESETS))
+        st.session_state["vlan_presets_saved"] = True
         _save_presets(rules)
         return
 
@@ -1655,6 +1660,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                 rules["vlan_presets"] = vlan_presets
                 st.session_state["vlan_pre_selected_group"] = group_key
                 _clear_session_state_prefixes("vlan_pre_new_vid", "vlan_pre_new_role", "vlan_pre_new_group")
+                st.session_state["vlan_presets_saved"] = True
                 _save_presets(rules)
             else:
                 st.error("⚠️ Enter at least a Role or VID for the first entry.")
@@ -1671,10 +1677,11 @@ def _vlan_presets_editor(rules: dict) -> None:
             group["items"] = items_added
             group["vlan_name_pattern"] = gnpat
             group["prefix_pattern"] = gppat
-            rules["vlan_presets"] = dict(vlan_presets)
-            rules["vlan_presets"][group_name] = group
-            _clear_session_state_prefixes("vlan_pre_new_vid", "vlan_pre_new_role")
-            _save_presets(rules)
+                    rules["vlan_presets"] = dict(vlan_presets)
+                    rules["vlan_presets"][group_name] = group
+                    _clear_session_state_prefixes("vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_pat_")
+                    st.session_state["vlan_presets_saved"] = True
+                    _save_presets(rules)
         else:
             st.warning("⚠️ Enter at least a Role or VID to add.")
         return
@@ -1707,6 +1714,7 @@ def _vlan_presets_editor(rules: dict) -> None:
         rules["vlan_presets"] = vlan_presets
         if is_custom:
             st.session_state["vlan_pre_selected_group"] = new_group_name.strip() if new_group_name and new_group_name.strip() else st.session_state.get("vlan_pre_selected_group")
+        st.session_state["vlan_presets_saved"] = True
         _save_presets(rules)
 
     _render_vlan_description_mappings_editor(rules)
@@ -1719,10 +1727,6 @@ def render_standards_tab(active_model):
     if "variables_saved" in st.session_state and st.session_state["variables_saved"]:
         st.success("✅ Variables saved successfully!")
         st.session_state["variables_saved"] = False
-
-    if "presets_saved" in st.session_state and st.session_state["presets_saved"]:
-        st.success("✅ Presets saved successfully!")
-        st.session_state["presets_saved"] = False
 
     if "standards_saved" in st.session_state and st.session_state["standards_saved"]:
         st.success("✅ Naming standards saved successfully!")
