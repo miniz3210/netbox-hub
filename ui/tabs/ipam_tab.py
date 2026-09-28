@@ -550,12 +550,13 @@ def render_ipam_tab(active_model: str):
         c_preset_inner, c_refresh, c_status = st.columns([1.0, 0.3, 0.3])
         rules = load_naming_rules()
         dynamic_presets = get_vlan_presets(rules)
-        preset_options = ["- Custom / Empty -", "🗄️ Load From DB (Existing Site)"] + list(dynamic_presets.keys())
+        preset_options = ["🗄️ Load From DB (Existing Site)", "Custom / Empty Preset"] + [k for k in dynamic_presets.keys() if k != "Custom / Empty Preset"]
+        default_idx = preset_options.index("Custom / Empty Preset") if "Custom / Empty Preset" in preset_options else 0
         with c_preset_inner:
             st.selectbox(
                 "Load Standard Preset",
                 options=preset_options,
-                index=0,
+                index=default_idx,
                 key="ipam_preset_selector",
                 on_change=on_preset_change,
                 help="Quickly load pre-defined standard VLAN structures or start blank."
@@ -622,9 +623,9 @@ def render_ipam_tab(active_model: str):
                 # Auto-correct the role to its canonical casing, e.g. "guest" /
                 # "Guest" -> "Guests", "corp wifi" -> "Corporate WiFi".
                 changes["Role"] = normalize_role_name(changes["Role"], role_rules)
-                if "VLAN Name" not in changes:
+                name_pattern = raw_rows[row_idx].get("_name_pattern", "")
+                if name_pattern and "VLAN Name" not in changes:
                     # Recalculate VLAN Name from the pattern template dynamically
-                    name_pattern = raw_rows[row_idx].get("_name_pattern", "<role>")
                     site_display = format_branch_display(site_name)
                     changes["VLAN Name"] = resolve_vlan_name(
                         site_display,
@@ -632,6 +633,7 @@ def render_ipam_tab(active_model: str):
                         changes["Role"],
                         name_pattern
                     )
+            pattern_template = raw_rows[row_idx].get("_pattern_template", "")
             if (
                 not manual_desc
                 and ("Role" in changes or "VLAN ID" in changes)
@@ -643,28 +645,43 @@ def render_ipam_tab(active_model: str):
                 changes["VLAN Description"] = build_vlan_description(
                     site_name, next_role, next_vlan_id, next_vlan_name, active_vlan_presets, vlan_desc_mappings, role_rules
                 )
+            if pattern_template and ("Role" in changes or "VLAN ID" in changes):
+                if "Prefix Description" not in changes:
+                    site_display = format_branch_display(site_name)
+                    role_for_prefix = changes.get("Role", raw_rows[row_idx].get("Role", ""))
+                    vid_for_prefix = changes.get("VLAN ID", raw_rows[row_idx].get("VLAN ID"))
+                    name_for_prefix = changes.get("VLAN Name", raw_rows[row_idx].get("VLAN Name", role_for_prefix))
+                    changes["Prefix Description"] = resolve_pattern_template(
+                        pattern_template, site_display, vid_for_prefix, role_for_prefix, name_for_prefix
+                    )
             raw_rows[row_idx].update(changes)
 
     for new_r in editor_state.get("added_rows", []):
         r_name = new_r.get("Role", "")
         new_vid = new_r.get("VLAN ID", None)
         typed_desc = str(new_r.get("VLAN Description", "") or "").strip()
-        name_pattern = new_r.get("_name_pattern", "<role>") or "<role>"
+        typed_vlan_name = str(new_r.get("VLAN Name", "") or "").strip()
         site_display = format_branch_display(site_name)
-        if typed_desc:
-            vlan_desc = typed_desc
-            manual_flag = True
+        selected_preset_name = st.session_state.get("ipam_preset_selector", "")
+        if selected_preset_name and selected_preset_name != "🗄️ Load From DB (Existing Site)" and selected_preset_name in dynamic_presets:
+            group_vname_pat = dynamic_presets[selected_preset_name].get("vlan_name_pattern", "")
+            group_prefix_pat = dynamic_presets[selected_preset_name].get("prefix_pattern", "")
         else:
-            vlan_desc = resolve_vlan_description(new_vid, r_name, active_vlan_presets, vlan_desc_mappings, role_rules)
-            manual_flag = False
-        vlan_name = resolve_vlan_name(site_display, new_vid, r_name, name_pattern)
+            group_vname_pat = ""
+            group_prefix_pat = ""
+        name_pattern = new_r.get("_name_pattern", group_vname_pat) or group_vname_pat
+        prefix_template = new_r.get("_pattern_template", group_prefix_pat) or group_prefix_pat
+        if typed_vlan_name and not name_pattern:
+            vlan_name = typed_vlan_name
+        else:
+            vlan_name = resolve_vlan_name(site_display, new_vid, r_name, name_pattern)
         raw_rows.append({
             "VLAN ID": new_vid,
             "Role": normalize_role_name(r_name, role_rules) or to_title_case_preserve_acronyms(r_name),
             "VLAN Name": vlan_name,
-            "VLAN Description": vlan_desc,
-            "_vlan_desc_manual": manual_flag,
-            "_pattern_template": new_r.get("_pattern_template", ""),
+            "VLAN Description": typed_desc if typed_desc else resolve_vlan_description(new_vid, r_name, active_vlan_presets, vlan_desc_mappings, role_rules),
+            "_vlan_desc_manual": bool(typed_desc),
+            "_pattern_template": prefix_template,
             "_name_pattern": name_pattern,
             "Subnet (CIDR)": new_r.get("Subnet (CIDR)", "")
         })

@@ -296,8 +296,6 @@ def _render_auto_correction_manager(active_model: str) -> None:
                 if st.button("🔄 Reset to Defaults", key=f"ac_reset_factory_{category}", width='stretch'):
                     reset_auto_corrections()
                     _clear_session_state_prefixes(f"ac_{category}_")
-    st.session_state["card_saved_banner"] = {"section": "auto_correction", "msg": "✅ Syntax Auto-Correction Rules reset to defaults!"}
-    st.rerun()
 
             with st.expander(f"✨ AI Assistant: Generate Rule for {category.replace('_', ' ').title()}", expanded=False):
                 ai_prompt = st.text_input(
@@ -349,6 +347,9 @@ def _render_auto_correction_manager(active_model: str) -> None:
                             _persist_auto_corrections(final)
                     else:
                         st.warning("⚠️ Enter a regex pattern to add.")
+
+    st.session_state["card_saved_banner"] = {"section": "auto_correction", "msg": "✅ Syntax Auto-Correction Rules reset to defaults!"}
+    st.rerun()
 
     _render_site_code_mapping_manager()
 

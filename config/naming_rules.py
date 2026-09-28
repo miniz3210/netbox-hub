@@ -179,6 +179,11 @@ DEFAULT_VLAN_PRESETS = {
             {"vid": 40, "role": "DMZ"},
             {"vid": 50, "role": "Storage / vSAN"}
         ]
+    },
+    "Custom / Empty Preset": {
+        "vlan_name_pattern": "",
+        "prefix_pattern": "",
+        "items": []
     }
 }
 
@@ -580,7 +585,7 @@ def _normalize_vlan_group(group_data):
     """
     if isinstance(group_data, dict) and "items" in group_data:
         items = group_data.get("items", [])
-        vlan_name_pattern = str(group_data.get("vlan_name_pattern", "<role>")).strip() or "<role>"
+        vlan_name_pattern = str(group_data.get("vlan_name_pattern", "")).strip()
         prefix_pattern = str(group_data.get("prefix_pattern", "")).strip()
         if not isinstance(items, list):
             items = []
