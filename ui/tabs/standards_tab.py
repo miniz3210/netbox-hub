@@ -26,8 +26,8 @@ from utils.formatters import (
 PRESET_COLS = [1.0, 2.2, 7.5, 1.4]
 # Action cell sub-columns: Up, Down, Delete (equal thirds, right-aligned).
 PRESET_ACTION_COLS = [1, 1, 1]
-# VLAN allocation preset columns: VID, Role, VLAN Name, Pattern Template, Action.
-PRESET_VLAN_COLS = [0.9, 2.0, 2.0, 3.4, 1.4]
+# VLAN allocation preset columns: VID, Role, Action (group-level patterns shown above).
+PRESET_VLAN_COLS = [1.0, 4.0, 1.2]
 # Manage Pattern Variables columns: Name, Label, Placeholder, Auto-Fill, Optional, Up, Down, Delete.
 VARIABLE_COLS = [1.5, 2.5, 2.5, 1.5, 0.9, 0.45, 0.45, 0.45]
 # Auto-Correction rule columns: Original Pattern, Replacement, Description, Action.
@@ -700,8 +700,8 @@ def _save_presets(rules: dict) -> None:
     st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
     # Clear all preset widget input keys while safely preserving group selections and system flags
     _clear_session_state_prefixes("device_pre_", "interface_pre_", "host_", "vm_", "esxi_network_pre_",
-        "vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_name_", "vlan_pre_pat_", "vlan_pre_desc_",
-        "vlan_pre_new_vid", "vlan_pre_new_role", "vlan_pre_new_name", "vlan_pre_new_pat"
+        "vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_pat_", "vlan_pre_gnpat_", "vlan_pre_gppat_",
+        "vlan_pre_new_vid", "vlan_pre_new_role"
     )
     st.rerun()
 
@@ -997,7 +997,7 @@ def _host_editor(rules: dict) -> None:
     with st.container(border=True):
         col_t1, col_t2 = st.columns([3, 1])
         with col_t1:
-            st.markdown("#### 💻 HOSTS TYPE PRESETS (ESXI)")
+            st.markdown("#### 💻 HOSTS TYPE PRESETS")
         with col_t2:
             st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(host_presets)} presets</span></div>", unsafe_allow_html=True)
         st.caption("Manage physical hypervisor host naming patterns and presets.")
@@ -1119,6 +1119,7 @@ def _host_editor(rules: dict) -> None:
     if reset:
         _clear_session_state_prefixes("host_", "vm_")
         _reset_presets("host_vm", rules)
+        st.rerun()
         return
 
     if add_preset:
@@ -1268,6 +1269,7 @@ def _vm_editor(rules: dict) -> None:
     if reset:
         _clear_session_state_prefixes("host_", "vm_")
         _reset_presets("host_vm", rules)
+        st.rerun()
         return
 
     if add_role:
@@ -1399,9 +1401,9 @@ def _vlan_presets_editor(rules: dict) -> None:
         with col_t1:
             st.markdown("#### 🌐 VLAN ALLOCATION PRESETS")
         with col_t2:
-            total_count = sum(len(items) for items in vlan_presets.values())
+            total_count = sum(len(g.get("items", [])) for g in vlan_presets.values())
             st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{total_count} presets</span></div>", unsafe_allow_html=True)
-        st.caption("Manage reusable VLAN allocation groups. Each row's Pattern Template resolves VLAN descriptions in the IPAM tab. VLAN Description tags are configured in the dedicated mappings expander below.")
+        st.caption("Manage reusable VLAN allocation groups. Each group has default patterns applied to all its items. VLAN Description tags are configured in the dedicated mappings expander below.")
 
         _inject_preset_table_style()
 
@@ -1427,9 +1429,13 @@ def _vlan_presets_editor(rules: dict) -> None:
         )
 
         group_name = None
+        group = {"vlan_name_pattern": "<role>", "prefix_pattern": "", "items": []}
+        items = []
+        updated = []
         if not is_custom:
             group_name = sel
-            items = list(vlan_presets.get(group_name, []))
+            group = dict(vlan_presets.get(group_name, {"vlan_name_pattern": "<role>", "prefix_pattern": "", "items": []}))
+            items = list(group.get("items", []))
 
         _pending_del_key = "_vlan_pending_del"
         _pending_swap_key = "_vlan_pending_swap"
@@ -1441,9 +1447,10 @@ def _vlan_presets_editor(rules: dict) -> None:
                     st.session_state["vlan_pre_min_one"] = True
                 else:
                     items = [p for i, p in enumerate(items) if i != stale_del]
+                    group["items"] = items
                     rules["vlan_presets"] = dict(vlan_presets)
-                    rules["vlan_presets"][group_name] = items
-                    _clear_session_state_prefixes("vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_name_", "vlan_pre_pat_", "vlan_pre_desc_")
+                    rules["vlan_presets"][group_name] = group
+                    _clear_session_state_prefixes("vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_pat_")
                     _save_presets(rules)
                     return
 
@@ -1452,9 +1459,10 @@ def _vlan_presets_editor(rules: dict) -> None:
                 src, dst = pending_swap
                 if 0 <= src < len(items) and 0 <= dst < len(items):
                     items[src], items[dst] = items[dst], items[src]
+                    group["items"] = items
                     rules["vlan_presets"] = dict(vlan_presets)
-                    rules["vlan_presets"][group_name] = items
-                    _clear_session_state_prefixes("vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_name_", "vlan_pre_pat_", "vlan_pre_desc_")
+                    rules["vlan_presets"][group_name] = group
+                    _clear_session_state_prefixes("vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_pat_")
                     _save_presets(rules)
                     return
 
@@ -1468,38 +1476,49 @@ def _vlan_presets_editor(rules: dict) -> None:
                 label_visibility="visible",
             )
 
+        # ── Group-level pattern card ──────────────────────────────────────────
         if group_name is not None:
-            h_vid, h_role, h_name, h_pat, h_act = st.columns(PRESET_VLAN_COLS, vertical_alignment="center")
+            with st.container(border=True):
+                st.markdown("**Group Default Patterns**")
+                pc1, pc2 = st.columns(2)
+                with pc1:
+                    group_name_pattern = st.text_input(
+                        "Group VLAN Name Pattern",
+                        value=str(group.get("vlan_name_pattern", "<role>")),
+                        placeholder="<role>",
+                        key=f"vlan_pre_gnpat_{group_name}",
+                        help="Default template for VLAN Name across all items in this group. Example: <role> or <site>_DC_<role>",
+                    )
+                with pc2:
+                    group_prefix_pattern = st.text_input(
+                        "Group Prefix Description Pattern",
+                        value=str(group.get("prefix_pattern", "")),
+                        placeholder="<site> <role> -- VLAN <vid>",
+                        key=f"vlan_pre_gppat_{group_name}",
+                        help="Default template for Prefix Description across all items in this group.",
+                    )
+
+        if group_name is not None:
+            h_vid, h_role, h_act = st.columns(PRESET_VLAN_COLS, vertical_alignment="center")
             with h_vid:
                 st.markdown("**VID**")
             with h_role:
                 st.markdown("**Role**")
-            with h_name:
-                st.markdown("**VLAN Name Pattern**")
-            with h_pat:
-                st.markdown("**Pattern Template**")
             with h_act:
                 st.markdown("<span class='action-header'>**Action**</span>", unsafe_allow_html=True)
 
-            updated = []
             positions = {}
 
             nonce = st.session_state.get("standards_nonce", 0)
             for idx, p in enumerate(items):
                 vid = p.get("vid", "")
                 role_name = p.get("role", "")
-                vlan_name = p.get("vlan_name", "")
-                tpl = p.get("pattern_template", "")
 
-                c_vid, c_role, c_name, c_pat, c_actions = st.columns(PRESET_VLAN_COLS, vertical_alignment="center")
+                c_vid, c_role, c_actions = st.columns(PRESET_VLAN_COLS, vertical_alignment="center")
                 with c_vid:
                     nvid = st.text_input("VID", value=str(vid) if vid not in (None, "") else "", key=f"vlan_pre_vid_{nonce}_{idx}", label_visibility="collapsed").strip()
                 with c_role:
                     nrole = st.text_input("Role", value=str(role_name), key=f"vlan_pre_role_{nonce}_{idx}", label_visibility="collapsed").strip()
-                with c_name:
-                    nname = st.text_input("Name Pattern", value=str(vlan_name), key=f"vlan_pre_name_{nonce}_{idx}", label_visibility="collapsed", placeholder="<role>").strip()
-                with c_pat:
-                    ntpl = st.text_input("Pattern Template", value=str(tpl), key=f"vlan_pre_pat_{nonce}_{idx}", label_visibility="collapsed").strip()
                 with c_actions:
                     col_up, col_down, col_del = st.columns(PRESET_ACTION_COLS)
                     with col_up:
@@ -1534,9 +1553,6 @@ def _vlan_presets_editor(rules: dict) -> None:
                     updated.append({
                         "vid": nvid_int,
                         "role": nrole,
-                        "vlan_name": nname or nrole,
-                        "name_pattern": nname or "<role>",
-                        "pattern_template": ntpl,
                     })
                 positions[idx] = len(updated)
 
@@ -1544,25 +1560,34 @@ def _vlan_presets_editor(rules: dict) -> None:
                 st.warning("⚠️ At least one VLAN entry must remain. Delete a different entry first.")
         # END of the `if group_name is not None` block for headers + editable list.
 
+        # ── Save / Reset buttons below the list ──────────────────────────────
         col_save, col_reset = st.columns(2)
         with col_save:
             saved_presets = st.button("💾 Save & Apply Changes", key="vlan_pre_save", type="primary", width='stretch')
         with col_reset:
             reset_presets = st.button("🔄 Reset to Defaults", key="vlan_pre_reset", width='stretch')
 
+        # ── Add Row form ──────────────────────────────────────────────────────
         if group_name is not None:
             with st.form(key="vlan_pre_add_form", clear_on_submit=True):
-                ca_vid, ca_role, ca_name, ca_pat, ca_act = st.columns(PRESET_VLAN_COLS, vertical_alignment="center")
+                ca_vid, ca_role, ca_act = st.columns([1.0, 4.0, 1.2], vertical_alignment="center")
                 with ca_vid:
-                    new_vid = st.text_input("VID", value="", placeholder="900", key="vlan_pre_new_vid", label_visibility="collapsed").strip()
+                    new_vid = st.text_input("New VID", value="", placeholder="900", key="vlan_pre_new_vid", label_visibility="collapsed").strip()
                 with ca_role:
-                    new_role = st.text_input("Role", value="", placeholder="IoT", key="vlan_pre_new_role", label_visibility="collapsed").strip()
-                with ca_name:
-                    new_name = st.text_input("Name Pattern", value="", placeholder="<role>", key="vlan_pre_new_name", label_visibility="collapsed").strip()
-                with ca_pat:
-                    new_tpl = st.text_input("Pattern Template", value="", placeholder="<site> <role> -- VLAN <vid>", key="vlan_pre_new_pat", label_visibility="collapsed").strip()
+                    new_role = st.text_input("New Role", value="", placeholder="e.g. Surveillance / CCTV", key="vlan_pre_new_role", label_visibility="collapsed").strip()
                 with ca_act:
                     add_vlan = st.form_submit_button("➕ Add", width='stretch', help="Add new VLAN entry")
+        else:
+            new_vid = ""
+            new_role = ""
+            add_vlan = False
+
+    # Collect group-level pattern values when not custom
+    gnpat = group.get("vlan_name_pattern", "<role>")
+    gppat = group.get("prefix_pattern", "")
+    if group_name is not None:
+        gnpat = st.session_state.get(f"vlan_pre_gnpat_{group_name}", gnpat).strip()
+        gppat = st.session_state.get(f"vlan_pre_gppat_{group_name}", gppat).strip()
 
     if reset_presets:
         import copy
@@ -1582,21 +1607,20 @@ def _vlan_presets_editor(rules: dict) -> None:
             except (ValueError, TypeError):
                 new_vid_int = None
             if new_role or new_vid:
-                vlan_presets[group_key] = [{
-                    "vid": new_vid_int,
-                    "role": new_role,
-                    "vlan_name": new_name or new_role,
-                    "name_pattern": new_name or "<role>",
-                    "pattern_template": new_tpl,
-                }]
+                vlan_presets[group_key] = {
+                    "vlan_name_pattern": "<role>",
+                    "prefix_pattern": "<site> <role> -- VLAN <vid>",
+                    "items": [{
+                        "vid": new_vid_int,
+                        "role": new_role,
+                    }]
+                }
                 rules["vlan_presets"] = vlan_presets
                 st.session_state["vlan_pre_selected_group"] = group_key
-                _clear_session_state_prefixes("vlan_pre_new_vid", "vlan_pre_new_role", "vlan_pre_new_name", "vlan_pre_new_pat", "vlan_pre_new_group")
+                _clear_session_state_prefixes("vlan_pre_new_vid", "vlan_pre_new_role", "vlan_pre_new_group")
                 _save_presets(rules)
             else:
                 st.error("⚠️ Enter at least a Role or VID for the first entry.")
-            return
-        if group_name is None:
             return
         if new_role or new_vid:
             try:
@@ -1606,13 +1630,13 @@ def _vlan_presets_editor(rules: dict) -> None:
             items_added = list(items) + [{
                 "vid": new_vid_int,
                 "role": new_role,
-                "vlan_name": new_name or new_role,
-                "name_pattern": new_name or "<role>",
-                "pattern_template": new_tpl,
             }]
+            group["items"] = items_added
+            group["vlan_name_pattern"] = gnpat
+            group["prefix_pattern"] = gppat
             rules["vlan_presets"] = dict(vlan_presets)
-            rules["vlan_presets"][group_name] = items_added
-            _clear_session_state_prefixes("vlan_pre_new_vid", "vlan_pre_new_role", "vlan_pre_new_name", "vlan_pre_new_pat")
+            rules["vlan_presets"][group_name] = group
+            _clear_session_state_prefixes("vlan_pre_new_vid", "vlan_pre_new_role")
             _save_presets(rules)
         else:
             st.warning("⚠️ Enter at least a Role or VID to add.")
@@ -1627,14 +1651,22 @@ def _vlan_presets_editor(rules: dict) -> None:
             if not updated:
                 st.error("⚠️ At least one VLAN entry is required.")
                 return
-            vlan_presets[group_key] = updated
+            vlan_presets[group_key] = {
+                "vlan_name_pattern": "<role>",
+                "prefix_pattern": "<site> <role> -- VLAN <vid>",
+                "items": updated,
+            }
         else:
             if group_name is None:
                 return
             if not updated:
                 st.error("⚠️ At least one VLAN entry is required.")
                 return
-            vlan_presets[group_name] = updated
+            final_group = dict(group)
+            final_group["items"] = updated
+            final_group["vlan_name_pattern"] = gnpat
+            final_group["prefix_pattern"] = gppat
+            vlan_presets[group_name] = final_group
         rules["vlan_presets"] = vlan_presets
         if is_custom:
             st.session_state["vlan_pre_selected_group"] = new_group_name.strip() if new_group_name and new_group_name.strip() else st.session_state.get("vlan_pre_selected_group")

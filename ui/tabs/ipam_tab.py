@@ -186,14 +186,14 @@ def load_ipam_records_from_db(site_name: str) -> bool:
     best_group = None
     best_score = -1
     for grp_name, grp_items in dynamic_presets.items():
-        preset_vids = {p['vid'] for p in grp_items if 'vid' in p}
+        preset_vids = {p['vid'] for p in grp_items.get("items", []) if 'vid' in p}
         score = len(db_vids.intersection(preset_vids))
         if score > best_score:
             best_score = score
             best_group = grp_items
 
-    target_preset = best_group or []
-    order_map = {p['vid']: i for i, p in enumerate(target_preset)}
+    target_preset = best_group or {"items": [], "vlan_name_pattern": "<role>", "prefix_pattern": ""}
+    order_map = {p['vid']: i for i, p in enumerate(target_preset.get("items", []))}
 
     # Sort records by order in preset, then by vlan_id (handle None values)
     def sort_key(r):
@@ -253,6 +253,8 @@ def load_ipam_records_from_db(site_name: str) -> bool:
                 entry["prefix_desc"] = desc
 
     new_rows = []
+    g_vname_pat = target_preset.get("vlan_name_pattern", "<role>")
+    g_prefix_pat = target_preset.get("prefix_pattern", "")
     for vid in order:
         entry = merged[vid]
         # Keep the raw DB text so it is never replaced by generated descriptions
@@ -265,7 +267,9 @@ def load_ipam_records_from_db(site_name: str) -> bool:
             "_vlan_desc_manual": True,
             "_db_prefix_desc": entry["prefix_desc"] or entry["vlan_desc"],
             "_db_vlan_desc": entry["vlan_desc"] or entry["prefix_desc"],
-            "_name_pattern": "<role>",
+            "_name_pattern": g_vname_pat,
+            "_group_vlan_name_pattern": g_vname_pat,
+            "_group_prefix_pattern": g_prefix_pat,
         })
 
     st.session_state["ipam_persisted_rows"] = new_rows
@@ -288,30 +292,33 @@ def on_preset_change():
     dynamic_presets = get_vlan_presets(rules)
     vlan_desc_mappings = get_vlan_description_mappings(rules)
     role_rules = get_ipam_role_mappings(rules)
-    template_list = dynamic_presets.get(selected, [])
-    
+    template_list = dynamic_presets.get(selected, {})
+
     if "ipam_data_editor_live" in st.session_state:
         del st.session_state["ipam_data_editor_live"]
 
-    if not template_list:
+    if not template_list or not template_list.get("items"):
         st.session_state["ipam_persisted_rows"] = []
     else:
         site_display = format_branch_display(site_name)
+        group_vname_pattern = template_list.get("vlan_name_pattern", "<role>")
+        group_prefix_pattern = template_list.get("prefix_pattern", "")
         new_rows = []
-        for t in template_list:
+        for t in template_list.get("items", []):
             role_name = t["role"]
             vid = t["vid"]
-            name_pattern = t.get("name_pattern", "<role>") or "<role>"
-            vlan_name = resolve_vlan_name(site_display, vid, role_name, name_pattern)
-            pattern_template = t.get("pattern_template", "")
+            vlan_name = resolve_vlan_name(site_display, vid, role_name, group_vname_pattern)
             desc = resolve_vlan_description(vid, role_name, dynamic_presets, vlan_desc_mappings, role_rules)
+            prefix_desc = resolve_pattern_template(group_prefix_pattern, site_display, vid, role_name, vlan_name) if group_prefix_pattern else ""
             new_rows.append({
                 "VLAN ID": vid,
                 "Role": role_name,
                 "VLAN Name": vlan_name,
                 "VLAN Description": desc,
-                "_pattern_template": pattern_template,
-                "_name_pattern": name_pattern,
+                "_group_vlan_name_pattern": group_vname_pattern,
+                "_group_prefix_pattern": group_prefix_pattern,
+                "_pattern_template": prefix_desc,
+                "_name_pattern": group_vname_pattern,
                 "Subnet (CIDR)": ""
             })
         st.session_state["ipam_persisted_rows"] = new_rows

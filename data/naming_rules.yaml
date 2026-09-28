@@ -38,6 +38,7 @@
   "host_vm_proxmox_x_x": "<site_prefix><role_esx><seq>.<domain>",
   "branch_san": "san<country><state><site><zone><seq>",
   "branch_san_x": "SAN<country><state><site><seq>",
+  "vlan_name_pattern": "<role>",
   "custom_patterns": [],
   "device_presets": [
     {
@@ -85,7 +86,7 @@
   ],
   "interface_presets": [
     {
-      "code": "UPLINK",
+      "code": "Uplink",
       "label": "Switch Uplink (Inter-Switch)",
       "pattern_key": "switch_uplink_desc",
       "description": "Inter-switch uplink description"
@@ -97,19 +98,19 @@
       "description": "LACP aggregate member description"
     },
     {
-      "code": "PORT-CHANNEL",
+      "code": "Po",
       "label": "Switch Port-Channel (Logical)",
       "pattern_key": "switch_port_channel",
       "description": "Logical port-channel / port-group description"
     },
     {
-      "code": "ACCESS",
+      "code": "Access",
       "label": "Switch Access Port (Endpoint)",
       "pattern_key": "switch_access_desc",
       "description": "Endpoint access-port description"
     },
     {
-      "code": "FW ZONE",
+      "code": "FW Zone",
       "label": "Firewall Security Zone Interface",
       "pattern_key": "firewall_interface",
       "description": "Firewall security-zone interface description"
@@ -185,43 +186,50 @@
         "vid": 300,
         "role": "Corporate WiFi",
         "vlan_name": "Corporate WiFi",
-        "pattern_template": "<site> Corporate WiFi -- VLAN <vid>"
+        "name_pattern": "<role>",
+        "pattern_template": "<site> <role> -- VLAN <vid>"
       },
       {
         "vid": 100,
         "role": "Workstations",
         "vlan_name": "Workstations",
-        "pattern_template": "<site> Workstations -- VLAN <vid>"
+        "name_pattern": "<role>",
+        "pattern_template": "<site> <role> -- VLAN <vid>"
       },
       {
         "vid": 5,
         "role": "Management",
         "vlan_name": "Management",
-        "pattern_template": "<site> Management -- VLAN <vid>"
+        "name_pattern": "<role>",
+        "pattern_template": "<site> <role> -- VLAN <vid>"
       },
       {
         "vid": 700,
         "role": "Printers",
         "vlan_name": "Printers",
-        "pattern_template": "<site> Printers -- VLAN <vid>"
-      },
-      {
-        "vid": 200,
-        "role": "Guests",
-        "vlan_name": "Guests",
-        "pattern_template": "<site> Guest WiFi -- VLAN <vid>"
+        "name_pattern": "<role>",
+        "pattern_template": "<site> <role> -- VLAN <vid>"
       },
       {
         "vid": 800,
         "role": "Audio Visual",
         "vlan_name": "Audio Visual",
-        "pattern_template": "<site> Audio Visual -- VLAN <vid>"
+        "name_pattern": "<role>",
+        "pattern_template": "<site> <role> -- VLAN <vid>"
+      },
+      {
+        "vid": 200,
+        "role": "Guests",
+        "vlan_name": "Guests",
+        "name_pattern": "<role>",
+        "pattern_template": "<site> <role> -- VLAN <vid>"
       },
       {
         "vid": 400,
         "role": "Mobiles",
         "vlan_name": "Mobiles",
-        "pattern_template": "<site> Mobi WiFi -- VLAN <vid>"
+        "name_pattern": "<role>",
+        "pattern_template": "<site> <role> -- VLAN <vid>"
       }
     ],
     "Data Center VLAN Preset": [
@@ -229,31 +237,36 @@
         "vid": 10,
         "role": "Server Management",
         "vlan_name": "Server Management",
-        "pattern_template": "<site> Server Management -- VLAN <vid>"
+        "name_pattern": "<role>",
+        "pattern_template": "<site> <role> -- VLAN <vid>"
       },
       {
         "vid": 20,
         "role": "Production App",
         "vlan_name": "Production App",
-        "pattern_template": "<site> Production App -- VLAN <vid>"
+        "name_pattern": "<role>",
+        "pattern_template": "<site> <role> -- VLAN <vid>"
       },
       {
         "vid": 30,
         "role": "Database",
         "vlan_name": "Database",
-        "pattern_template": "<site> Database -- VLAN <vid>"
+        "name_pattern": "<role>",
+        "pattern_template": "<site> <role> -- VLAN <vid>"
       },
       {
         "vid": 40,
         "role": "DMZ",
         "vlan_name": "DMZ",
-        "pattern_template": "<site> DMZ -- VLAN <vid>"
+        "name_pattern": "<role>",
+        "pattern_template": "<site> <role> -- VLAN <vid>"
       },
       {
         "vid": 50,
         "role": "Storage / vSAN",
         "vlan_name": "Storage / vSAN",
-        "pattern_template": "<site> Storage / vSAN -- VLAN <vid>"
+        "name_pattern": "<role>",
+        "pattern_template": "<site> <role> -- VLAN <vid>"
       }
     ]
   },
@@ -296,7 +309,8 @@
     "esxi_pg_name": "PG-<pg_network>",
     "host_vm_proxmox_x_x": "<site_prefix><role_esx><seq>.<domain>",
     "branch_san": "san<country><state><site><zone><seq>",
-    "branch_san_x": "SAN<country><state><site><seq>"
+    "branch_san_x": "SAN<country><state><site><seq>",
+    "vlan_name_pattern": "<role>"
   },
   "pattern_variables": {
     "country": {
@@ -504,6 +518,50 @@
     "Audio Visual": "AV equipment",
     "Mobiles": "VIN_Mobi"
   },
+  "ipam_role_mappings": [
+    {
+      "pattern": "(?i)^guests?$",
+      "replacement": "Guests",
+      "description": "Normalize guest / guests to Guests",
+      "enabled": true
+    },
+    {
+      "pattern": "(?i)^corp[_\\s\\-]?wifi$",
+      "replacement": "Corporate WiFi",
+      "description": "Normalize corporate wifi variations",
+      "enabled": true
+    },
+    {
+      "pattern": "(?i)^workstations?$",
+      "replacement": "Workstations",
+      "description": "Normalize workstation / workstations",
+      "enabled": true
+    },
+    {
+      "pattern": "(?i)^mobiles?$",
+      "replacement": "Mobiles",
+      "description": "Normalize mobile / mobiles",
+      "enabled": true
+    },
+    {
+      "pattern": "(?i)^printers?$",
+      "replacement": "Printers",
+      "description": "Normalize printer / printers",
+      "enabled": true
+    },
+    {
+      "pattern": "(?i)^mgmt|management$",
+      "replacement": "Management",
+      "description": "Normalize mgmt / management",
+      "enabled": true
+    },
+    {
+      "pattern": "(?i)^av|audiovisual|audio[\\s\\-]?visual$",
+      "replacement": "Audio Visual",
+      "description": "Normalize AV variations",
+      "enabled": true
+    }
+  ],
   "token_order": {
     "esxi_vmkernel_name": [
       "vmk",

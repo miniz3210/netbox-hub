@@ -139,22 +139,30 @@ ESXI_NETWORK_PRESETS = [
 ]
 
 DEFAULT_VLAN_PRESETS = {
-    "Branch Office VLAN Preset": [
-        {"vid": 300, "role": "Corporate WiFi", "vlan_name": "Corporate WiFi", "name_pattern": "<role>", "pattern_template": "<site> <role> -- VLAN <vid>"},
-        {"vid": 100, "role": "Workstations", "vlan_name": "Workstations", "name_pattern": "<role>", "pattern_template": "<site> <role> -- VLAN <vid>"},
-        {"vid": 5, "role": "Management", "vlan_name": "Management", "name_pattern": "<role>", "pattern_template": "<site> <role> -- VLAN <vid>"},
-        {"vid": 700, "role": "Printers", "vlan_name": "Printers", "name_pattern": "<role>", "pattern_template": "<site> <role> -- VLAN <vid>"},
-        {"vid": 800, "role": "Audio Visual", "vlan_name": "Audio Visual", "name_pattern": "<role>", "pattern_template": "<site> <role> -- VLAN <vid>"},
-        {"vid": 200, "role": "Guests", "vlan_name": "Guests", "name_pattern": "<role>", "pattern_template": "<site> <role> -- VLAN <vid>"},
-        {"vid": 400, "role": "Mobiles", "vlan_name": "Mobiles", "name_pattern": "<role>", "pattern_template": "<site> <role> -- VLAN <vid>"}
-    ],
-    "Data Center VLAN Preset": [
-        {"vid": 10, "role": "Server Management", "vlan_name": "Server Management", "name_pattern": "<role>", "pattern_template": "<site> <role> -- VLAN <vid>"},
-        {"vid": 20, "role": "Production App", "vlan_name": "Production App", "name_pattern": "<role>", "pattern_template": "<site> <role> -- VLAN <vid>"},
-        {"vid": 30, "role": "Database", "vlan_name": "Database", "name_pattern": "<role>", "pattern_template": "<site> <role> -- VLAN <vid>"},
-        {"vid": 40, "role": "DMZ", "vlan_name": "DMZ", "name_pattern": "<role>", "pattern_template": "<site> <role> -- VLAN <vid>"},
-        {"vid": 50, "role": "Storage / vSAN", "vlan_name": "Storage / vSAN", "name_pattern": "<role>", "pattern_template": "<site> <role> -- VLAN <vid>"}
-    ]
+    "Branch Office VLAN Preset": {
+        "vlan_name_pattern": "<role>",
+        "prefix_pattern": "<site> <role> -- VLAN <vid>",
+        "items": [
+            {"vid": 300, "role": "Corporate WiFi"},
+            {"vid": 100, "role": "Workstations"},
+            {"vid": 5, "role": "Management"},
+            {"vid": 700, "role": "Printers"},
+            {"vid": 200, "role": "Guests"},
+            {"vid": 800, "role": "Audio Visual"},
+            {"vid": 400, "role": "Mobiles"}
+        ]
+    },
+    "Data Center VLAN Preset": {
+        "vlan_name_pattern": "<role>",
+        "prefix_pattern": "<site> <role> -- VLAN <vid>",
+        "items": [
+            {"vid": 10, "role": "Server Management"},
+            {"vid": 20, "role": "Production App"},
+            {"vid": 30, "role": "Database"},
+            {"vid": 40, "role": "DMZ"},
+            {"vid": 50, "role": "Storage / vSAN"}
+        ]
+    }
 }
 
 DEFAULT_IPAM_ROLE_MAPPINGS = [
@@ -542,6 +550,86 @@ def get_vlan_description_mappings(rules: dict) -> dict:
     return dict(DEFAULT_VLAN_DESCRIPTION_MAPPINGS)
 
 
+def _normalize_vlan_group(group_data):
+    """Normalize a VLAN preset group into the new dict schema.
+
+    Accepts either:
+      - A dict with keys ``vlan_name_pattern``, ``prefix_pattern``, ``items``
+        (already normalized).
+      - An old-style plain list of dicts (backward compat): extracts a default
+        ``vlan_name_pattern`` of ``<role>``, a default ``prefix_pattern`` of
+        ``<site> <role> -- VLAN <vid>``, and wraps each item as
+        ``{"vid": ..., "role": ...}``.
+    """
+    if isinstance(group_data, dict) and "items" in group_data:
+        items = group_data.get("items", [])
+        vlan_name_pattern = str(group_data.get("vlan_name_pattern", "<role>")).strip() or "<role>"
+        prefix_pattern = str(group_data.get("prefix_pattern", "")).strip()
+        if not isinstance(items, list):
+            items = []
+        normalized_items = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            vid = it.get("vid")
+            role = str(it.get("role", "")).strip()
+            if vid not in (None, "") or role:
+                normalized_items.append({"vid": vid, "role": role})
+        return {
+            "vlan_name_pattern": vlan_name_pattern,
+            "prefix_pattern": prefix_pattern,
+            "items": normalized_items,
+        }
+
+    # Backward-compat: old-style plain list of dicts.
+    if isinstance(group_data, list):
+        # Infer defaults from the first item, if any.
+        def _infer(item):
+            if not isinstance(item, dict):
+                return
+            for key in ("name_pattern", "vlan_name_pattern"):
+                v = item.get(key)
+                if v and str(v).strip():
+                    return str(v).strip()
+            return "<role>"
+
+        def _infer_prefix(item):
+            if not isinstance(item, dict):
+                return
+            for key in ("pattern_template", "prefix_pattern"):
+                v = item.get(key)
+                if v and str(v).strip():
+                    return str(v).strip()
+            return ""
+
+        default_name_pattern = "<role>"
+        default_prefix_pattern = ""
+        sample = next((it for it in group_data if isinstance(it, dict)), None)
+        if sample:
+            default_name_pattern = _infer(sample)
+            default_prefix_pattern = _infer_prefix(sample)
+        normalized_items = []
+        for it in group_data:
+            if not isinstance(it, dict):
+                continue
+            vid = it.get("vid")
+            role = str(it.get("role", "")).strip()
+            if vid not in (None, "") or role:
+                normalized_items.append({"vid": vid, "role": role})
+        return {
+            "vlan_name_pattern": default_name_pattern,
+            "prefix_pattern": default_prefix_pattern,
+            "items": normalized_items,
+        }
+
+    # Completely unexpected shape – return a blank normalized group.
+    return {
+        "vlan_name_pattern": "<role>",
+        "prefix_pattern": "",
+        "items": [],
+    }
+
+
 def _normalize_vlan_presets(raw_presets):
     """Normalize a list of VLAN preset items (vid/role/vlan_name/pattern_template).
 
@@ -570,16 +658,17 @@ def get_vlan_presets(rules: dict) -> dict:
     """Return the VLAN allocation presets dict (defaults if missing or malformed).
 
     Preset groups are stored under ``vlan_presets`` as a mapping of
-    ``group_name -> [ {vid, role, vlan_name, pattern_template}, ... ]``. Every group
-    is normalized through ``_normalize_vlan_presets`` so user edits stay clean.
+    ``group_name -> {vlan_name_pattern, prefix_pattern, items}`` where each item is
+    ``{vid, role}``. Every group is normalized through ``_normalize_vlan_group`` so
+    user edits stay clean. Old-style plain-list groups are normalized on load.
     """
     import copy
     raw = rules.get("vlan_presets")
     if not isinstance(raw, dict) or not raw:
         return copy.deepcopy(dict(DEFAULT_VLAN_PRESETS))
     normalized = {}
-    for group_name, items in raw.items():
-        normalized[str(group_name)] = _normalize_vlan_presets(items)
+    for group_name, group_data in raw.items():
+        normalized[str(group_name)] = _normalize_vlan_group(group_data)
     if not normalized:
         return copy.deepcopy(dict(DEFAULT_VLAN_PRESETS))
     return normalized
