@@ -693,6 +693,12 @@ def get_vlan_presets(rules: dict) -> dict:
         normalized[str(group_name)] = _normalize_vlan_group(group_data)
     if not normalized:
         return copy.deepcopy(dict(DEFAULT_VLAN_PRESETS))
+    if "Custom / Empty Preset" not in normalized:
+        normalized["Custom / Empty Preset"] = {
+            "vlan_name_pattern": "",
+            "prefix_pattern": "",
+            "items": []
+        }
     return normalized
 
 
