@@ -320,6 +320,7 @@ def _render_auto_correction_manager(active_model: str) -> None:
                                 "description": new_d,
                                 "enabled": True,
                             }]
+                            _clear_session_state_prefixes(f"ac_{category}_new_p", f"ac_{category}_new_r", f"ac_{category}_new_d")
                             _persist_auto_corrections(final)
                     else:
                         st.warning("⚠️ Enter a regex pattern to add.")
@@ -425,6 +426,7 @@ def _render_site_code_mapping_manager() -> None:
                     final["site_code_rules"] = dict(sr)
                     final["site_code_rules"]["exact_mappings"] = dict(updated)
                     final["site_code_rules"]["exact_mappings"][new_p.strip().lower()] = new_code.strip().upper()
+                    _clear_session_state_prefixes("sitecode_new_p", "sitecode_new_code")
                     _persist_site_code_mappings(final)
                     st.session_state["site_code_mappings_modified"] = dict(final["site_code_rules"]["exact_mappings"])
                 else:
@@ -647,7 +649,19 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
         if st.session_state.pop(f"{kind}_preset_min_one", False):
             st.warning("⚠️ At least one preset must remain. Delete a different entry first.")
 
-        # Inline Add Row (Zero Action Button on right)
+        col_save, col_reset = st.columns(2)
+        with col_save:
+            saved_presets = st.button(
+                "💾 Save & Apply Changes", key=f"{kind}_preset_save", type="primary",
+                width='stretch',
+            )
+        with col_reset:
+            reset_presets = st.button(
+                "🔄 Reset to Defaults", key=f"{kind}_preset_reset",
+                width='stretch',
+            )
+
+        # Inline Add Row (with dedicated + Add button on far right)
         is_esxi = kind == "esxi_network"
         code_ph = "e.g. DSwitch" if is_esxi else "e.g. SAN"
         lbl_ph = "e.g. Distributed Switch Uplink" if is_esxi else "e.g. SAN Storage (SAN)"
@@ -660,23 +674,54 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
         with ca3:
             new_tpl = st.text_input("Pattern Template", value="", placeholder=tpl_ph, key=f"{kind}_new_tpl", label_visibility="collapsed").strip()
         with ca4:
-            pass
-
-        col_save, col_reset = st.columns(2)
-        with col_save:
-            saved_presets = st.button(
-                "💾 Save Presets", key=f"{kind}_preset_save", type="primary",
-                width='stretch',
-            )
-        with col_reset:
-            reset_presets = st.button(
-                "🔄 Reset to Defaults", key=f"{kind}_preset_reset",
-                width='stretch',
-            )
+            add_preset = st.button("➕ Add", key=f"{kind}_add_new", width='stretch', help="Add new preset")
 
     if reset_presets:
         _clear_session_state_prefixes(f"{kind}_")
         _reset_presets(kind, rules)
+        return
+
+    if add_preset:
+        final_presets = list(updated)
+        final_patterns = dict(patterns)
+        final_patterns.update(patterns_updates)
+        if new_code and new_tpl:
+            nkey = make_preset_key(new_code, prefix)
+            while nkey in final_patterns and nkey not in [p["pattern_key"] for p in final_presets]:
+                nkey = f"{nkey}_x"
+            final_patterns[nkey] = new_tpl
+            final_presets.append({
+                "code": new_code,
+                "label": new_lbl or new_code,
+                "pattern_key": nkey,
+                "description": "",
+            })
+        elif new_code and not new_tpl:
+            st.error("⚠️ Provide a Pattern Template to add a new preset.")
+            return
+        if not final_presets:
+            st.error("⚠️ At least one preset is required.")
+            return
+        if kind == "esxi_network":
+            for p_item in final_presets:
+                pk = p_item.get("pattern_key", "")
+                val = final_patterns.get(pk, "")
+                if val:
+                    p_item["pattern"] = val
+                    p_item["pattern_template"] = val
+            for pkey, val in list(final_patterns.items()):
+                if pkey.startswith("esxinet_"):
+                    legacy_key = pkey.replace("esxinet_", "esxi_")
+                    final_patterns[legacy_key] = val
+                    rules[legacy_key] = val
+                elif pkey.startswith("esxi_"):
+                    alt_key = pkey.replace("esxi_", "esxinet_")
+                    final_patterns[alt_key] = val
+                    rules[alt_key] = val
+        rules["naming_patterns"] = final_patterns
+        rules[key_field] = final_presets
+        _clear_session_state_prefixes(f"{kind}_new_code", f"{kind}_new_lbl", f"{kind}_new_tpl")
+        _save_presets(rules)
         return
 
     if saved_presets:
@@ -887,6 +932,12 @@ def _host_editor(rules: dict) -> None:
             _save_presets(rules)
             return
 
+        col_save, col_reset = st.columns(2)
+        with col_save:
+            saved = st.button("💾 Save & Apply Changes", key="host_preset_save", type="primary", width='stretch')
+        with col_reset:
+            reset = st.button("🔄 Reset to Defaults", key="host_preset_reset", width='stretch')
+
         ca1, ca2, ca3, ca4 = st.columns(PRESET_COLS, vertical_alignment="center")
         with ca1:
             new_code = st.text_input("New Code", value="", placeholder="e.g. HYPV", key="host_new_code", label_visibility="collapsed").strip()
@@ -895,17 +946,34 @@ def _host_editor(rules: dict) -> None:
         with ca3:
             new_tpl = st.text_input("New Pattern Template", value="", placeholder="<site_prefix>hyp<seq>.<domain>", key="host_new_tpl", label_visibility="collapsed").strip()
         with ca4:
-            pass
-
-        col_save, col_reset = st.columns(2)
-        with col_save:
-            saved = st.button("💾 Save Hosts Presets", key="host_preset_save", type="primary", width='stretch')
-        with col_reset:
-            reset = st.button("🔄 Reset to Defaults", key="host_preset_reset", width='stretch')
+            add_preset = st.button("➕ Add", key="host_add_new", width='stretch', help="Add new preset")
 
     if reset:
         _clear_session_state_prefixes("host_", "vm_")
         _reset_presets("host_vm", rules)
+        return
+
+    if add_preset:
+        final_presets = list(updated)
+        final_patterns = {**patterns, **patterns_updates}
+        if new_code and new_tpl:
+            nkey = make_preset_key(new_code, "host_vm")
+            while nkey in final_patterns and nkey not in [p["pattern_key"] for p in final_presets]:
+                nkey = f"{nkey}_x"
+            final_patterns[nkey] = new_tpl
+            final_presets.append({
+                "code": new_code,
+                "label": new_lbl or new_code,
+                "pattern_key": nkey,
+                "description": "",
+            })
+        elif new_code and not new_tpl:
+            st.error("⚠️ Provide a Pattern Template to add a new preset.")
+            return
+        _clear_session_state_prefixes("host_new_code", "host_new_lbl", "host_new_tpl")
+        rules["naming_patterns"] = final_patterns
+        rules["host_vm_presets"] = final_presets + vm_presets
+        _save_presets(rules)
         return
 
     if saved:
@@ -1026,6 +1094,12 @@ def _vm_editor(rules: dict) -> None:
             _save_presets(rules)
             return
 
+        c_save, c_reset = st.columns(2)
+        with c_save:
+            saved = st.button("💾 Save & Apply Changes", key="vm_save", type="primary", width='stretch')
+        with c_reset:
+            reset = st.button("🔄 Reset to Defaults", key="vm_reset", width='stretch')
+
         ca1, ca2, ca3, ca4 = st.columns(PRESET_COLS, vertical_alignment="center")
         with ca1:
             new_code = st.text_input("New Code", value="", key="vm_new_code", placeholder="e.g. cvi", label_visibility="collapsed").strip()
@@ -1034,17 +1108,28 @@ def _vm_editor(rules: dict) -> None:
         with ca3:
             new_tpl = st.text_input("New Pattern Template", value="", key="vm_new_tpl", placeholder="<country><site><role><seq>", label_visibility="collapsed").strip()
         with ca4:
-            pass
-
-        c_save, c_reset = st.columns(2)
-        with c_save:
-            saved = st.button("💾 Save VM Presets", key="vm_save", type="primary", width='stretch')
-        with c_reset:
-            reset = st.button("🔄 Reset to Defaults", key="vm_reset", width='stretch')
+            add_role = st.button("➕ Add", key="vm_add_new", width='stretch', help="Add new VM role")
 
     if reset:
         _clear_session_state_prefixes("host_", "vm_")
         _reset_presets("host_vm", rules)
+        return
+
+    if add_role:
+        final = list(updated)
+        if new_code:
+            if new_tpl:
+                patterns["vm_host"] = new_tpl
+            final.append({
+                "code": new_code.lower(),
+                "label": new_label or new_code,
+                "pattern_key": "vm_host",
+                "description": "",
+            })
+        rules["naming_patterns"] = patterns
+        rules["host_vm_presets"] = host_presets + final
+        _clear_session_state_prefixes("vm_new_code", "vm_new_lbl", "vm_new_tpl")
+        _save_presets(rules)
         return
 
     if saved:
@@ -1120,7 +1205,7 @@ def _render_vlan_description_mappings_editor(rules: dict) -> None:
 
         col_save, col_reset = st.columns([1.2, 1.0])
         with col_save:
-            if st.button("💾 Save Mappings", key="vlandesc_save", type="primary", width='stretch'):
+            if st.button("💾 Save & Apply Changes", key="vlandesc_save", type="primary", width='stretch'):
                 if not updated:
                     st.warning("⚠️ At least one mapping is required.")
                 else:
@@ -1150,6 +1235,7 @@ def _render_vlan_description_mappings_editor(rules: dict) -> None:
                     updated[new_role.strip()] = new_desc.strip()
                     rules = dict(rules)
                     rules["vlan_description_mappings"] = updated
+                    _clear_session_state_prefixes("vlandesc_new_role", "vlandesc_new_desc")
                     _save_vlan_desc_mappings(rules)
                 else:
                     st.warning("⚠️ Enter a Role to add.")
@@ -1316,11 +1402,11 @@ def _vlan_presets_editor(rules: dict) -> None:
             with ca_pat:
                 new_tpl = st.text_input("Pattern Template", value="", placeholder="<site> IoT Devices -- VLAN <vid>", key="vlan_pre_new_pat", label_visibility="collapsed").strip()
             with ca_act:
-                pass
+                add_vlan = st.button("➕ Add", key="vlan_pre_add_new", width='stretch', help="Add new VLAN entry")
 
         col_save, col_reset = st.columns(2)
         with col_save:
-            saved_presets = st.button("💾 Save Presets", key="vlan_pre_save", type="primary", width='stretch')
+            saved_presets = st.button("💾 Save & Apply Changes", key="vlan_pre_save", type="primary", width='stretch')
         with col_reset:
             reset_presets = st.button("🔄 Reset to Defaults", key="vlan_pre_reset", width='stretch')
 
@@ -1329,6 +1415,51 @@ def _vlan_presets_editor(rules: dict) -> None:
         _clear_session_state_prefixes("vlan_pre")
         rules["vlan_presets"] = copy.deepcopy(dict(DEFAULT_VLAN_PRESETS))
         _save_presets(rules)
+        return
+
+    if add_vlan:
+        if is_custom:
+            if not new_group_name or not new_group_name.strip():
+                st.error("⚠️ Provide a name for the new preset group.")
+                return
+            group_key = new_group_name.strip()
+            try:
+                new_vid_int = int(new_vid) if new_vid else None
+            except (ValueError, TypeError):
+                new_vid_int = None
+            if new_role or new_vid:
+                vlan_presets[group_key] = [{
+                    "vid": new_vid_int,
+                    "role": new_role,
+                    "vlan_name": new_name or new_role,
+                    "pattern_template": new_tpl,
+                }]
+                rules["vlan_presets"] = vlan_presets
+                st.session_state["vlan_pre_selected_group"] = group_key
+                _clear_session_state_prefixes("vlan_pre_new_vid", "vlan_pre_new_role", "vlan_pre_new_name", "vlan_pre_new_pat", "vlan_pre_new_group")
+                _save_presets(rules)
+            else:
+                st.error("⚠️ Enter at least a Role or VID for the first entry.")
+            return
+        if group_name is None:
+            return
+        if new_role or new_vid:
+            try:
+                new_vid_int = int(new_vid) if new_vid else None
+            except (ValueError, TypeError):
+                new_vid_int = None
+            items_added = list(items) + [{
+                "vid": new_vid_int,
+                "role": new_role,
+                "vlan_name": new_name or new_role,
+                "pattern_template": new_tpl,
+            }]
+            rules["vlan_presets"] = dict(vlan_presets)
+            rules["vlan_presets"][group_name] = items_added
+            _clear_session_state_prefixes("vlan_pre_new_vid", "vlan_pre_new_role", "vlan_pre_new_name", "vlan_pre_new_pat")
+            _save_presets(rules)
+        else:
+            st.warning("⚠️ Enter at least a Role or VID to add.")
         return
 
     if saved_presets:
