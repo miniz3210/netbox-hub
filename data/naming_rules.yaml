@@ -37,6 +37,7 @@
   "esxi_pg_name": "PG-<pg_network>",
   "host_vm_proxmox_x_x": "<site_prefix><role_esx><seq>.<domain>",
   "branch_san": "san<country><state><site><zone><seq>",
+  "branch_san_x": "SAN<country><state><site><seq>",
   "custom_patterns": [],
   "device_presets": [
     {
@@ -221,6 +222,12 @@
         "role": "Mobiles",
         "vlan_name": "Mobiles",
         "pattern_template": "<site> Mobi WiFi -- VLAN <vid>"
+      },
+      {
+        "vid": 999,
+        "role": "IoT",
+        "vlan_name": "IoT device",
+        "pattern_template": "<site> iot -- VLAN <vid>"
       }
     ],
     "Data Center VLAN Preset": [
@@ -294,7 +301,8 @@
     "esxinet_pg_name": "PG-<pg_network>",
     "esxi_pg_name": "PG-<pg_network>",
     "host_vm_proxmox_x_x": "<site_prefix><role_esx><seq>.<domain>",
-    "branch_san": "san<country><state><site><zone><seq>"
+    "branch_san": "san<country><state><site><zone><seq>",
+    "branch_san_x": "SAN<country><state><site><seq>"
   },
   "pattern_variables": {
     "country": {
@@ -500,7 +508,8 @@
     "Printers": "Printers",
     "Guests": "VIN_Guest",
     "Audio Visual": "AV equipment",
-    "Mobiles": "VIN_Mobi"
+    "Mobiles": "VIN_Mobi",
+    "cctv": "Surveillance"
   },
   "token_order": {
     "esxi_vmkernel_name": [

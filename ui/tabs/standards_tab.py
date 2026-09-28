@@ -532,19 +532,21 @@ def _render_site_code_mapping_manager() -> None:
             if st.button("🔄 Reset to Defaults", key="sitecode_reset", width='stretch'):
                 _reset_site_code_mappings()
 
-        col_city, col_code, col_add = st.columns([4.0, 3.5, 1.0], vertical_alignment="center")
-        with col_city:
-            new_p = st.text_input(
-                "New City / Location", value="", key="sitecode_new_p",
-                placeholder="e.g. bristol", label_visibility="collapsed",
-            )
-        with col_code:
-            new_code = st.text_input(
-                "New Site Code", value="", key="sitecode_new_code",
-                placeholder="e.g. BRI", label_visibility="collapsed",
-            )
-        with col_add:
-            if st.button("➕ Add", key="sitecode_add", width='stretch', help="Add new mapping"):
+        with st.form(key="sitecode_add_form", clear_on_submit=True):
+            col_city, col_code, col_add = st.columns([4.0, 3.5, 1.0], vertical_alignment="center")
+            with col_city:
+                new_p = st.text_input(
+                    "New City / Location", value="", key="sitecode_new_p",
+                    placeholder="e.g. bristol", label_visibility="collapsed",
+                )
+            with col_code:
+                new_code = st.text_input(
+                    "New Site Code", value="", key="sitecode_new_code",
+                    placeholder="e.g. BRI", label_visibility="collapsed",
+                )
+            with col_add:
+                add_submitted = st.form_submit_button("➕ Add", width='stretch', help="Add new mapping")
+            if add_submitted:
                 if new_p.strip() and new_code.strip():
                     rules = load_naming_rules()
                     sr = get_site_code_rules(rules)
@@ -552,7 +554,6 @@ def _render_site_code_mapping_manager() -> None:
                     final["site_code_rules"] = dict(sr)
                     final["site_code_rules"]["exact_mappings"] = dict(updated)
                     final["site_code_rules"]["exact_mappings"][new_p.strip().lower()] = new_code.strip().upper()
-                    _clear_session_state_prefixes("sitecode_new_p", "sitecode_new_code")
                     _persist_site_code_mappings(final)
                     st.session_state["site_code_mappings_modified"] = dict(final["site_code_rules"]["exact_mappings"])
                 else:
@@ -788,19 +789,20 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
             )
 
         # Inline Add Row (with dedicated + Add button on far right)
-        is_esxi = kind == "esxi_network"
-        code_ph = "e.g. DSwitch" if is_esxi else "e.g. SAN"
-        lbl_ph = "e.g. Distributed Switch Uplink" if is_esxi else "e.g. SAN Storage (SAN)"
-        tpl_ph = "e.g. <vmnic> - <vds_name> (<status>)" if is_esxi else "e.g. SAN<country><site><seq>"
-        ca1, ca2, ca3, ca4 = st.columns(PRESET_COLS, vertical_alignment="center")
-        with ca1:
-            new_code = st.text_input("Code", value="", placeholder=code_ph, key=f"{kind}_new_code", label_visibility="collapsed").strip()
-        with ca2:
-            new_lbl = st.text_input("Display Label", value="", placeholder=lbl_ph, key=f"{kind}_new_lbl", label_visibility="collapsed").strip()
-        with ca3:
-            new_tpl = st.text_input("Pattern Template", value="", placeholder=tpl_ph, key=f"{kind}_new_tpl", label_visibility="collapsed").strip()
-        with ca4:
-            add_preset = st.button("➕ Add", key=f"{kind}_add_new", width='stretch', help="Add new preset")
+        with st.form(key=f"{kind}_add_form", clear_on_submit=True):
+            is_esxi = kind == "esxi_network"
+            code_ph = "e.g. DSwitch" if is_esxi else "e.g. SAN"
+            lbl_ph = "e.g. Distributed Switch Uplink" if is_esxi else "e.g. SAN Storage (SAN)"
+            tpl_ph = "e.g. <vmnic> - <vds_name> (<status>)" if is_esxi else "e.g. SAN<country><site><seq>"
+            ca1, ca2, ca3, ca4 = st.columns(PRESET_COLS, vertical_alignment="center")
+            with ca1:
+                new_code = st.text_input("Code", value="", placeholder=code_ph, key=f"{kind}_new_code", label_visibility="collapsed").strip()
+            with ca2:
+                new_lbl = st.text_input("Display Label", value="", placeholder=lbl_ph, key=f"{kind}_new_lbl", label_visibility="collapsed").strip()
+            with ca3:
+                new_tpl = st.text_input("Pattern Template", value="", placeholder=tpl_ph, key=f"{kind}_new_tpl", label_visibility="collapsed").strip()
+            with ca4:
+                add_preset = st.form_submit_button("➕ Add", width='stretch', help="Add new preset")
 
     if reset_presets:
         _clear_session_state_prefixes(f"{kind}_")
@@ -1050,15 +1052,16 @@ def _host_editor(rules: dict) -> None:
         with col_reset:
             reset = st.button("🔄 Reset to Defaults", key="host_preset_reset", width='stretch')
 
-        ca1, ca2, ca3, ca4 = st.columns(PRESET_COLS, vertical_alignment="center")
-        with ca1:
-            new_code = st.text_input("New Code", value="", placeholder="e.g. HYPV", key="host_new_code", label_visibility="collapsed").strip()
-        with ca2:
-            new_lbl = st.text_input("New Label", value="", placeholder="e.g. Hyper-V Host", key="host_new_lbl", label_visibility="collapsed").strip()
-        with ca3:
-            new_tpl = st.text_input("New Pattern Template", value="", placeholder="<site_prefix>hyp<seq>.<domain>", key="host_new_tpl", label_visibility="collapsed").strip()
-        with ca4:
-            add_preset = st.button("➕ Add", key="host_add_new", width='stretch', help="Add new preset")
+        with st.form(key="host_add_form", clear_on_submit=True):
+            ca1, ca2, ca3, ca4 = st.columns(PRESET_COLS, vertical_alignment="center")
+            with ca1:
+                new_code = st.text_input("New Code", value="", placeholder="e.g. HYPV", key="host_new_code", label_visibility="collapsed").strip()
+            with ca2:
+                new_lbl = st.text_input("New Label", value="", placeholder="e.g. Hyper-V Host", key="host_new_lbl", label_visibility="collapsed").strip()
+            with ca3:
+                new_tpl = st.text_input("New Pattern Template", value="", placeholder="<site_prefix>hyp<seq>.<domain>", key="host_new_tpl", label_visibility="collapsed").strip()
+            with ca4:
+                add_preset = st.form_submit_button("➕ Add", width='stretch', help="Add new preset")
 
     if reset:
         _clear_session_state_prefixes("host_", "vm_")
@@ -1198,15 +1201,16 @@ def _vm_editor(rules: dict) -> None:
         with c_reset:
             reset = st.button("🔄 Reset to Defaults", key="vm_reset", width='stretch')
 
-        ca1, ca2, ca3, ca4 = st.columns(PRESET_COLS, vertical_alignment="center")
-        with ca1:
-            new_code = st.text_input("New Code", value="", key="vm_new_code", placeholder="e.g. cvi", label_visibility="collapsed").strip()
-        with ca2:
-            new_label = st.text_input("New Label", value="", key="vm_new_lbl", placeholder="e.g. Core Virtualization (cvi)", label_visibility="collapsed").strip()
-        with ca3:
-            new_tpl = st.text_input("New Pattern Template", value="", key="vm_new_tpl", placeholder="<country><site><role><seq>", label_visibility="collapsed").strip()
-        with ca4:
-            add_role = st.button("➕ Add", key="vm_add_new", width='stretch', help="Add new VM role")
+        with st.form(key="vm_add_form", clear_on_submit=True):
+            ca1, ca2, ca3, ca4 = st.columns(PRESET_COLS, vertical_alignment="center")
+            with ca1:
+                new_code = st.text_input("New Code", value="", key="vm_new_code", placeholder="e.g. cvi", label_visibility="collapsed").strip()
+            with ca2:
+                new_label = st.text_input("New Label", value="", key="vm_new_lbl", placeholder="e.g. Core Virtualization (cvi)", label_visibility="collapsed").strip()
+            with ca3:
+                new_tpl = st.text_input("New Pattern Template", value="", key="vm_new_tpl", placeholder="<country><site><role><seq>", label_visibility="collapsed").strip()
+            with ca4:
+                add_role = st.form_submit_button("➕ Add", width='stretch', help="Add new VM role")
 
     if reset:
         _clear_session_state_prefixes("host_", "vm_")
@@ -1480,24 +1484,27 @@ def _vlan_presets_editor(rules: dict) -> None:
 
             if st.session_state.pop("vlan_pre_min_one", False):
                 st.warning("⚠️ At least one VLAN entry must remain. Delete a different entry first.")
-
-            ca_vid, ca_role, ca_name, ca_pat, ca_act = st.columns(PRESET_VLAN_COLS, vertical_alignment="center")
-            with ca_vid:
-                new_vid = st.text_input("VID", value="", placeholder="900", key="vlan_pre_new_vid", label_visibility="collapsed").strip()
-            with ca_role:
-                new_role = st.text_input("Role", value="", placeholder="IoT", key="vlan_pre_new_role", label_visibility="collapsed").strip()
-            with ca_name:
-                new_name = st.text_input("VLAN Name", value="", placeholder="IoT Devices", key="vlan_pre_new_name", label_visibility="collapsed").strip()
-            with ca_pat:
-                new_tpl = st.text_input("Pattern Template", value="", placeholder="<site> IoT Devices -- VLAN <vid>", key="vlan_pre_new_pat", label_visibility="collapsed").strip()
-            with ca_act:
-                add_vlan = st.button("➕ Add", key="vlan_pre_add_new", width='stretch', help="Add new VLAN entry")
+        # END of the `if group_name is not None` block for headers + editable list.
 
         col_save, col_reset = st.columns(2)
         with col_save:
             saved_presets = st.button("💾 Save & Apply Changes", key="vlan_pre_save", type="primary", width='stretch')
         with col_reset:
             reset_presets = st.button("🔄 Reset to Defaults", key="vlan_pre_reset", width='stretch')
+
+        if group_name is not None:
+            with st.form(key="vlan_pre_add_form", clear_on_submit=True):
+                ca_vid, ca_role, ca_name, ca_pat, ca_act = st.columns(PRESET_VLAN_COLS, vertical_alignment="center")
+                with ca_vid:
+                    new_vid = st.text_input("VID", value="", placeholder="900", key="vlan_pre_new_vid", label_visibility="collapsed").strip()
+                with ca_role:
+                    new_role = st.text_input("Role", value="", placeholder="IoT", key="vlan_pre_new_role", label_visibility="collapsed").strip()
+                with ca_name:
+                    new_name = st.text_input("VLAN Name", value="", placeholder="IoT Devices", key="vlan_pre_new_name", label_visibility="collapsed").strip()
+                with ca_pat:
+                    new_tpl = st.text_input("Pattern Template", value="", placeholder="<site> IoT Devices -- VLAN <vid>", key="vlan_pre_new_pat", label_visibility="collapsed").strip()
+                with ca_act:
+                    add_vlan = st.form_submit_button("➕ Add", width='stretch', help="Add new VLAN entry")
 
     if reset_presets:
         import copy
@@ -1506,7 +1513,7 @@ def _vlan_presets_editor(rules: dict) -> None:
         _save_presets(rules)
         return
 
-    if add_vlan:
+    if group_name is not None and add_vlan:
         if is_custom:
             if not new_group_name or not new_group_name.strip():
                 st.error("⚠️ Provide a name for the new preset group.")
