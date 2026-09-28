@@ -17,6 +17,7 @@ from core.ipam_engine import (
     format_branch_display,
     lookup_role_description,
     resolve_pattern_template,
+    resolve_vlan_description,
     generate_netbox_site_csv,
     generate_netbox_vlan_group_csv,
     generate_netbox_vlans_csv,
@@ -142,14 +143,14 @@ def handle_ipam_db_reset():
 
 
 def build_vlan_description(site_name: str, role: str, vlan_id, vlan_name: str = "", pattern_template: str = "") -> str:
-    """Build the editor's default VLAN description from current row values."""
-    branch = format_branch_display(site_name)
-    clean_role = str(role or "Data").strip()
-    if pattern_template:
-        return resolve_pattern_template(
-            pattern_template, branch, vlan_id, clean_role, vlan_name or clean_role
-        )
-    return f"{branch or 'Site'} {clean_role} -- VLAN {vlan_id}" if vlan_id else f"{branch or 'Site'} {clean_role}"
+    """Resolve the 'VLAN Description' tag from the exact (VID, Role) mapping.
+
+    Uses an explicit literal preset/template mapping when present, otherwise the
+    exact (VID, Role) lookup, and returns "" when the pair is not defined instead
+    of auto-generating a fallback string.
+    """
+    clean_role = str(role or "").strip()
+    return resolve_vlan_description(vlan_id, clean_role, pattern_template)
 
 def load_ipam_records_from_db(site_name: str) -> bool:
     """Load IPAM allocation rows for a site straight from the local database.
@@ -256,6 +257,7 @@ def load_ipam_records_from_db(site_name: str) -> bool:
             "VLAN Name": entry["vlan_name"],
             "VLAN Description": entry["vlan_desc"] or entry["prefix_desc"],
             "Subnet (CIDR)": entry["subnet"],
+            "_vlan_desc_manual": True,
             "_db_prefix_desc": entry["prefix_desc"] or entry["vlan_desc"],
             "_db_vlan_desc": entry["vlan_desc"] or entry["prefix_desc"],
         })
@@ -293,12 +295,13 @@ def on_preset_change():
             vid = t["vid"]
             vlan_name = t.get("vlan_name", role_name)
             pattern_template = t.get("pattern_template", "")
-            if pattern_template:
-                desc = resolve_pattern_template(
-                    pattern_template, site_display, vid, role_name, vlan_name
-                )
+            # VLAN Description: prefer an explicit literal preset value, then the
+            # exact (VID, Role) mapping, otherwise leave it empty.
+            explicit_desc = str(t.get("desc", "") or "").strip()
+            if explicit_desc:
+                desc = explicit_desc
             else:
-                desc = t.get("desc", lookup_role_description(role_name))
+                desc = resolve_vlan_description(vid, role_name, pattern_template)
             new_rows.append({
                 "VLAN ID": vid,
                 "Role": role_name,
@@ -587,12 +590,24 @@ def render_ipam_tab(active_model: str):
     for row_idx_str, changes in edited_cells.items():
         row_idx = int(row_idx_str)
         if row_idx < len(raw_rows):
+            # A direct edit to the "VLAN Description" cell is a manual override.
+            # Flag it so later re-renders (or edits to other columns) never
+            # recalculate over the user-entered value.
+            if "VLAN Description" in changes:
+                raw_rows[row_idx]["_vlan_desc_manual"] = True
+
+            manual_desc = raw_rows[row_idx].get("_vlan_desc_manual", False)
+
             # Role and VLAN ID edits must use the current site and row values.
             # Looking up by role alone can return a stale description from another
             # site (for example, "Auckland Management -- VLAN 5").
             if "Role" in changes and "VLAN Name" not in changes:
                 changes["VLAN Name"] = changes["Role"]
-            if ("Role" in changes or "VLAN ID" in changes) and "VLAN Description" not in changes:
+            if (
+                not manual_desc
+                and ("Role" in changes or "VLAN ID" in changes)
+                and "VLAN Description" not in changes
+            ):
                 next_role = changes.get("Role", raw_rows[row_idx].get("Role", ""))
                 next_vlan_id = changes.get("VLAN ID", raw_rows[row_idx].get("VLAN ID"))
                 next_vlan_name = changes.get("VLAN Name", raw_rows[row_idx].get("VLAN Name", next_role))
@@ -600,20 +615,28 @@ def render_ipam_tab(active_model: str):
                 changes["VLAN Description"] = build_vlan_description(
                     site_name, next_role, next_vlan_id, next_vlan_name, next_pattern
                 )
-            # Apply Title Case formatting to Role and Description
+            # Apply Title Case formatting to Role only. The VLAN Description is a
+            # literal NetBox tag (e.g. "VIN_Corp") and must be preserved verbatim.
             if "Role" in changes:
                 changes["Role"] = to_title_case_preserve_acronyms(changes["Role"])
-            if "VLAN Description" in changes:
-                changes["VLAN Description"] = to_title_case_preserve_acronyms(changes["VLAN Description"])
             raw_rows[row_idx].update(changes)
 
     for new_r in editor_state.get("added_rows", []):
         r_name = new_r.get("Role", "")
+        new_vid = new_r.get("VLAN ID", None)
+        typed_desc = str(new_r.get("VLAN Description", "") or "").strip()
+        if typed_desc:
+            vlan_desc = typed_desc
+            manual_flag = True
+        else:
+            vlan_desc = resolve_vlan_description(new_vid, r_name)
+            manual_flag = False
         raw_rows.append({
-            "VLAN ID": new_r.get("VLAN ID", None),
+            "VLAN ID": new_vid,
             "Role": to_title_case_preserve_acronyms(r_name),
             "VLAN Name": new_r.get("VLAN Name", r_name),
-            "VLAN Description": to_title_case_preserve_acronyms(new_r.get("VLAN Description", lookup_role_description(r_name))),
+            "VLAN Description": vlan_desc,
+            "_vlan_desc_manual": manual_flag,
             "_pattern_template": new_r.get("_pattern_template", ""),
             "Subnet (CIDR)": new_r.get("Subnet (CIDR)", "")
         })

@@ -62,6 +62,45 @@ ROLE_TO_DESC_MAP = {
     "backup / recovery": "Backup",
 }
 
+VID_ROLE_TO_VLAN_DESC = {
+    (300, "corporate wifi"): "VIN_Corp",
+    (100, "workstations"): "Wired Workstations",
+    (5, "management"): "Management",
+    (700, "printers"): "Printers",
+    (200, "guests"): "VIN_Guest",
+    (800, "audio visual"): "AV equipment",
+    (400, "mobiles"): "VIN_Mobi",
+}
+
+def _normalize_vid(vid) -> Optional[int]:
+    if vid in (None, ""):
+        return None
+    try:
+        return int(str(vid).strip())
+    except (TypeError, ValueError):
+        return None
+
+def resolve_vlan_description(vid, role: str, pattern_template: str = "") -> str:
+    """Resolve the NetBox object 'VLAN Description' tag for a (VID, Role) pair.
+
+    Resolution order:
+      1. An explicit literal mapping provided by the pattern_template / preset
+         (a template with no ``<>`` tokens is treated as a literal value).
+      2. The exact (VID, Role) mapping in ``VID_ROLE_TO_VLAN_DESC``.
+      3. Empty string ("") when the pair is not defined, instead of
+         auto-generating a fallback string.
+    """
+    template = (pattern_template or "").strip()
+    if template and not ("<" in template and ">" in template):
+        return template
+
+    norm_vid = _normalize_vid(vid)
+    norm_role = str(role or "").strip().lower()
+    if norm_vid is not None and (norm_vid, norm_role) in VID_ROLE_TO_VLAN_DESC:
+        return VID_ROLE_TO_VLAN_DESC[(norm_vid, norm_role)]
+
+    return ""
+
 def lookup_role_description(role_str: str) -> str:
     """1. Queries the SQLite DB for description. 2. Falls back to dictionary."""
     if not role_str:
@@ -363,7 +402,7 @@ def generate_netbox_vlans_csv(site_name: str, rows: List[Dict[str, Any]]) -> str
         if not vid or not subnet or "/" not in subnet:
             continue
         vname = r.get("VLAN Name") or r.get("Role") or f"VLAN_{vid}"
-        desc = r.get("VLAN Description") or lookup_role_description(str(r.get("Role") or ""))
+        desc = str(r.get("VLAN Description") or "").strip()
         role_val = r.get("Role") or vname
         lines.append(f"{vid},\"{vname}\",active,\"{clean}\",\"{clean} VLAN Group\",\"{desc}\",\"{role_val}\"")
     return "\n".join(lines)
@@ -398,7 +437,9 @@ def generate_netbox_prefixes_csv(
         if not subnet or "/" not in subnet or not vid or subnet == clean_supernet:
             continue
         role_val = r.get("Role") or r.get("VLAN Name") or ""
-        desc = f"{clean} {role_val} -- VLAN {vid}"
+        desc = str(r.get("Prefix Description") or "").strip()
+        if not desc:
+            desc = f"{clean} {role_val} -- VLAN {vid}"
         lines.append(f"\"{subnet}\",active,\"dcim.site\",{scope_val},\"{clean} VLAN Group\",{vid},\"{role_val}\",\"{desc}\"")
         
     return "\n".join(lines)
