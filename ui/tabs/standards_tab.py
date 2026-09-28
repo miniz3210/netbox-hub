@@ -1475,7 +1475,7 @@ def _vlan_presets_editor(rules: dict) -> None:
             with h_role:
                 st.markdown("**Role**")
             with h_name:
-                st.markdown("**VLAN Name**")
+                st.markdown("**VLAN Name Pattern**")
             with h_pat:
                 st.markdown("**Pattern Template**")
             with h_act:
@@ -1497,7 +1497,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                 with c_role:
                     nrole = st.text_input("Role", value=str(role_name), key=f"vlan_pre_role_{nonce}_{idx}", label_visibility="collapsed").strip()
                 with c_name:
-                    nname = st.text_input("VLAN Name", value=str(vlan_name), key=f"vlan_pre_name_{nonce}_{idx}", label_visibility="collapsed").strip()
+                    nname = st.text_input("Name Pattern", value=str(vlan_name), key=f"vlan_pre_name_{nonce}_{idx}", label_visibility="collapsed", placeholder="<role>").strip()
                 with c_pat:
                     ntpl = st.text_input("Pattern Template", value=str(tpl), key=f"vlan_pre_pat_{nonce}_{idx}", label_visibility="collapsed").strip()
                 with c_actions:
@@ -1535,6 +1535,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                         "vid": nvid_int,
                         "role": nrole,
                         "vlan_name": nname or nrole,
+                        "name_pattern": nname or "<role>",
                         "pattern_template": ntpl,
                     })
                 positions[idx] = len(updated)
@@ -1557,9 +1558,9 @@ def _vlan_presets_editor(rules: dict) -> None:
                 with ca_role:
                     new_role = st.text_input("Role", value="", placeholder="IoT", key="vlan_pre_new_role", label_visibility="collapsed").strip()
                 with ca_name:
-                    new_name = st.text_input("VLAN Name", value="", placeholder="IoT Devices", key="vlan_pre_new_name", label_visibility="collapsed").strip()
+                    new_name = st.text_input("Name Pattern", value="", placeholder="<role>", key="vlan_pre_new_name", label_visibility="collapsed").strip()
                 with ca_pat:
-                    new_tpl = st.text_input("Pattern Template", value="", placeholder="<site> IoT Devices -- VLAN <vid>", key="vlan_pre_new_pat", label_visibility="collapsed").strip()
+                    new_tpl = st.text_input("Pattern Template", value="", placeholder="<site> <role> -- VLAN <vid>", key="vlan_pre_new_pat", label_visibility="collapsed").strip()
                 with ca_act:
                     add_vlan = st.form_submit_button("➕ Add", width='stretch', help="Add new VLAN entry")
 
@@ -1585,6 +1586,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                     "vid": new_vid_int,
                     "role": new_role,
                     "vlan_name": new_name or new_role,
+                    "name_pattern": new_name or "<role>",
                     "pattern_template": new_tpl,
                 }]
                 rules["vlan_presets"] = vlan_presets
@@ -1605,6 +1607,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                 "vid": new_vid_int,
                 "role": new_role,
                 "vlan_name": new_name or new_role,
+                "name_pattern": new_name or "<role>",
                 "pattern_template": new_tpl,
             }]
             rules["vlan_presets"] = dict(vlan_presets)

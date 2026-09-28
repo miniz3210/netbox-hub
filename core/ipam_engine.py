@@ -64,6 +64,30 @@ def normalize_role_name(role: str, role_rules: list | None = None) -> str:
     return role
 
 
+def resolve_vlan_name(site: str, vid: int | str, role: str, name_pattern: str | None = None) -> str:
+    """Render a VLAN name from a dynamic name_pattern template.
+
+    Supports the tokens ``<site>``, ``<vid>``, and ``<role>``. Falls back to
+    the literal ``role`` string when the pattern is empty or yields no tokens.
+    """
+    site = str(site or "").strip()
+    vid = str(vid if vid not in (None, "") else "").strip()
+    role = str(role or "").strip()
+    pattern = (name_pattern or "<role>").strip()
+
+    if "<" not in pattern or ">" not in pattern:
+        return role or "VLAN"
+
+    rendered = pattern
+    rendered = rendered.replace("<site>", site)
+    rendered = rendered.replace("<vid>", vid)
+    rendered = rendered.replace("<role>", role)
+    rendered = rendered.replace("<name>", role)
+
+    result = rendered.strip()
+    return result if result else role
+
+
 def resolve_vlan_description(vid, role: str, vlan_presets=None, vlan_desc_mappings=None, role_rules: list | None = None) -> str:
     """Resolve the NetBox 'VLAN Description' tag for a (VID, Role) pair.
 
@@ -92,7 +116,9 @@ def resolve_vlan_description(vid, role: str, vlan_presets=None, vlan_desc_mappin
             if str(k).strip().lower() == norm_key:
                 mapped = str(v).strip()
                 if mapped:
-                    return mapped
+                    # Dynamically substitute <role> and <name> tokens in the mapped value
+                    rendered = mapped.replace("<role>", norm_role).replace("<name>", norm_role)
+                    return rendered.strip() or mapped
 
     return norm_role
 
@@ -153,6 +179,7 @@ def resolve_pattern_template(template: str, site_display: str, vid, role: str, v
         out = out.replace("<site>", site_display).replace("<branch>", site_display)
         out = out.replace("<vid>", str(vid) if vid not in (None, "") else "")
         out = out.replace("<role>", role)
+        out = out.replace("<name>", role)
         out = out.replace("<vlan_name>", vlan_name)
         return out.strip()
 

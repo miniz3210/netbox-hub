@@ -222,12 +222,6 @@
         "role": "Mobiles",
         "vlan_name": "Mobiles",
         "pattern_template": "<site> Mobi WiFi -- VLAN <vid>"
-      },
-      {
-        "vid": 999,
-        "role": "IoT",
-        "vlan_name": "IoT device",
-        "pattern_template": "<site> iot -- VLAN <vid>"
       }
     ],
     "Data Center VLAN Preset": [

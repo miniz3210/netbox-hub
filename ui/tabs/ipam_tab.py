@@ -18,6 +18,7 @@ from core.ipam_engine import (
     lookup_role_description,
     resolve_pattern_template,
     resolve_vlan_description,
+    resolve_vlan_name,
     normalize_role_name,
     generate_netbox_site_csv,
     generate_netbox_vlan_group_csv,
@@ -264,6 +265,7 @@ def load_ipam_records_from_db(site_name: str) -> bool:
             "_vlan_desc_manual": True,
             "_db_prefix_desc": entry["prefix_desc"] or entry["vlan_desc"],
             "_db_vlan_desc": entry["vlan_desc"] or entry["prefix_desc"],
+            "_name_pattern": "<role>",
         })
 
     st.session_state["ipam_persisted_rows"] = new_rows
@@ -299,7 +301,8 @@ def on_preset_change():
         for t in template_list:
             role_name = t["role"]
             vid = t["vid"]
-            vlan_name = t.get("vlan_name", role_name)
+            name_pattern = t.get("name_pattern", "<role>") or "<role>"
+            vlan_name = resolve_vlan_name(site_display, vid, role_name, name_pattern)
             pattern_template = t.get("pattern_template", "")
             desc = resolve_vlan_description(vid, role_name, dynamic_presets, vlan_desc_mappings, role_rules)
             new_rows.append({
@@ -308,6 +311,7 @@ def on_preset_change():
                 "VLAN Name": vlan_name,
                 "VLAN Description": desc,
                 "_pattern_template": pattern_template,
+                "_name_pattern": name_pattern,
                 "Subnet (CIDR)": ""
             })
         st.session_state["ipam_persisted_rows"] = new_rows
@@ -612,7 +616,15 @@ def render_ipam_tab(active_model: str):
                 # "Guest" -> "Guests", "corp wifi" -> "Corporate WiFi".
                 changes["Role"] = normalize_role_name(changes["Role"], role_rules)
                 if "VLAN Name" not in changes:
-                    changes["VLAN Name"] = changes["Role"]
+                    # Recalculate VLAN Name from the pattern template dynamically
+                    name_pattern = raw_rows[row_idx].get("_name_pattern", "<role>")
+                    site_display = format_branch_display(site_name)
+                    changes["VLAN Name"] = resolve_vlan_name(
+                        site_display,
+                        changes.get("VLAN ID", raw_rows[row_idx].get("VLAN ID")),
+                        changes["Role"],
+                        name_pattern
+                    )
             if (
                 not manual_desc
                 and ("Role" in changes or "VLAN ID" in changes)
@@ -630,19 +642,23 @@ def render_ipam_tab(active_model: str):
         r_name = new_r.get("Role", "")
         new_vid = new_r.get("VLAN ID", None)
         typed_desc = str(new_r.get("VLAN Description", "") or "").strip()
+        name_pattern = new_r.get("_name_pattern", "<role>") or "<role>"
+        site_display = format_branch_display(site_name)
         if typed_desc:
             vlan_desc = typed_desc
             manual_flag = True
         else:
             vlan_desc = resolve_vlan_description(new_vid, r_name, active_vlan_presets, vlan_desc_mappings, role_rules)
             manual_flag = False
+        vlan_name = resolve_vlan_name(site_display, new_vid, r_name, name_pattern)
         raw_rows.append({
             "VLAN ID": new_vid,
             "Role": normalize_role_name(r_name, role_rules) or to_title_case_preserve_acronyms(r_name),
-            "VLAN Name": new_r.get("VLAN Name", r_name),
+            "VLAN Name": vlan_name,
             "VLAN Description": vlan_desc,
             "_vlan_desc_manual": manual_flag,
             "_pattern_template": new_r.get("_pattern_template", ""),
+            "_name_pattern": name_pattern,
             "Subnet (CIDR)": new_r.get("Subnet (CIDR)", "")
         })
 
@@ -710,7 +726,7 @@ def render_ipam_tab(active_model: str):
         column_config={
             "VLAN ID": st.column_config.NumberColumn("VLAN ID", step=1, required=True),
             "Role": st.column_config.TextColumn("Role", help="VLAN Role. Auto-sets VLAN Name & Description via DB lookup."),
-            "VLAN Name": st.column_config.TextColumn("VLAN Name", help="VLAN Name in NetBox. Defaults to Role, or editable."),
+            "VLAN Name": st.column_config.TextColumn("VLAN Name", help="VLAN Name in NetBox. Defaults to Role (or dynamic pattern), or editable."),
             "VLAN Description": st.column_config.TextColumn("VLAN Description", help="VLAN Description. Auto-looked up from DB or editable."),
             "Suggest Subnet": st.column_config.TextColumn("Suggest Subnet", help="Calculated next available network IP ID.", disabled=True),
             "Subnet (CIDR)": st.column_config.TextColumn("Subnet (CIDR)", help="Type subnet CIDR (e.g. 10.113.252.0/23) and hit Enter."),
