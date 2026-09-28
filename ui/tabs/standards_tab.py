@@ -24,8 +24,8 @@ from utils.formatters import (
 PRESET_COLS = [1.0, 2.2, 7.5, 1.4]
 # Action cell sub-columns: Up, Down, Delete (equal thirds, right-aligned).
 PRESET_ACTION_COLS = [1, 1, 1]
-# VLAN allocation preset columns: VID, Role, VLAN Name, Pattern Template, Action.
-PRESET_VLAN_COLS = [1.0, 2.2, 2.2, 4.0, 1.4]
+# VLAN allocation preset columns: VID, Role, VLAN Name, VLAN Description, Pattern Template, Action.
+PRESET_VLAN_COLS = [0.9, 2.0, 2.0, 2.2, 3.4, 1.4]
 # Manage Pattern Variables columns: Name, Label, Placeholder, Auto-Fill, Optional, Up, Down, Delete.
 VARIABLE_COLS = [1.5, 2.5, 2.5, 1.5, 0.9, 0.45, 0.45, 0.45]
 # Auto-Correction rule columns: Original Pattern, Replacement, Description, Action.
@@ -1112,13 +1112,15 @@ def _vlan_presets_editor(rules: dict) -> None:
             )
 
         if group_name is not None:
-            h_vid, h_role, h_name, h_pat, h_act = st.columns(PRESET_VLAN_COLS, vertical_alignment="center")
+            h_vid, h_role, h_name, h_desc, h_pat, h_act = st.columns(PRESET_VLAN_COLS, vertical_alignment="center")
             with h_vid:
                 st.markdown("**VID**")
             with h_role:
                 st.markdown("**Role**")
             with h_name:
                 st.markdown("**VLAN Name**")
+            with h_desc:
+                st.markdown("**VLAN Description**")
             with h_pat:
                 st.markdown("**Pattern Template**")
             with h_act:
@@ -1132,15 +1134,18 @@ def _vlan_presets_editor(rules: dict) -> None:
                 vid = p.get("vid", "")
                 role_name = p.get("role", "")
                 vlan_name = p.get("vlan_name", "")
+                desc = p.get("desc", "")
                 tpl = p.get("pattern_template", "")
 
-                c_vid, c_role, c_name, c_pat, c_actions = st.columns(PRESET_VLAN_COLS, vertical_alignment="center")
+                c_vid, c_role, c_name, c_desc, c_pat, c_actions = st.columns(PRESET_VLAN_COLS, vertical_alignment="center")
                 with c_vid:
                     nvid = st.text_input("VID", value=str(vid) if vid not in (None, "") else "", key=f"vlan_pre_vid_{nonce}_{idx}", label_visibility="collapsed").strip()
                 with c_role:
                     nrole = st.text_input("Role", value=str(role_name), key=f"vlan_pre_role_{nonce}_{idx}", label_visibility="collapsed").strip()
                 with c_name:
                     nname = st.text_input("VLAN Name", value=str(vlan_name), key=f"vlan_pre_name_{nonce}_{idx}", label_visibility="collapsed").strip()
+                with c_desc:
+                    ndesc = st.text_input("VLAN Description", value=str(desc), key=f"vlan_pre_desc_{nonce}_{idx}", label_visibility="collapsed", placeholder="e.g. VIN_Guest").strip()
                 with c_pat:
                     ntpl = st.text_input("Pattern Template", value=str(tpl), key=f"vlan_pre_pat_{nonce}_{idx}", label_visibility="collapsed").strip()
                 with c_actions:

@@ -3,41 +3,6 @@ import re
 from typing import List, Dict, Any, Optional
 from core.db_manager import lookup_vlan_description_from_db
 
-BRANCH_VLAN_PRESET = [
-    {"vid": 1, "role": "Corporate", "vlan_name": "IT Generic", "desc": "IT Generic (Servers, network devices and PCs)"},
-    {"vid": 300, "role": "Corporate WiFi", "vlan_name": "Corporate WiFi", "desc": "VIN_Corp"},
-    {"vid": 100, "role": "Workstations", "vlan_name": "Workstations", "desc": "Wired Workstations"},
-    {"vid": 5, "role": "Management", "vlan_name": "Management", "desc": "Management"},
-    {"vid": 700, "role": "Printers", "vlan_name": "Printers", "desc": "Printers"},
-    {"vid": 800, "role": "Audio Visual", "vlan_name": "Audio Visual", "desc": "AV equipment"},
-    {"vid": 200, "role": "Guests", "vlan_name": "Guest", "desc": "VIN_Guest"},
-    {"vid": 400, "role": "Mobiles", "vlan_name": "Mobiles", "desc": "VIN_Mobi"},
-    {"vid": 247, "role": "VOIP", "vlan_name": "IT VoIP", "desc": "IT for VoIP devices"},
-    {"vid": 10, "role": "Routing", "vlan_name": "IT Internet exit", "desc": "Routing interface VLANs"},
-    {"vid": 500, "role": "OT", "vlan_name": "OT", "desc": "OT"},
-    {"vid": 600, "role": "IoT", "vlan_name": "IoT", "desc": "IoT/Security"},
-]
-
-DATACENTER_VLAN_PRESET = [
-    {"vid": 5, "role": "Management", "vlan_name": "Management", "desc": "Management"},
-    {"vid": 41, "role": "Infrastructure", "vlan_name": "IT vMotion", "desc": "vMotion for VMware"},
-    {"vid": 31, "role": "Backup", "vlan_name": "IT Backup", "desc": "To interconnect VMware with Synology NAS by iSCSI"},
-    {"vid": 50, "role": "Servers", "vlan_name": "Servers", "desc": "Server network"},
-    {"vid": 100, "role": "Workstations", "vlan_name": "Workstations", "desc": "Wired Workstations"},
-    {"vid": 300, "role": "Corporate WiFi", "vlan_name": "Corporate WiFi", "desc": "VIN_Corp"},
-    {"vid": 200, "role": "Guests", "vlan_name": "Guest", "desc": "VIN_Guest"},
-    {"vid": 11, "role": "DMZ", "vlan_name": "IT DMZ", "desc": "IT DMZ"},
-    {"vid": 500, "role": "OT", "vlan_name": "OT", "desc": "OT"},
-    {"vid": 40, "role": "OT", "vlan_name": "OT Transit", "desc": "OT Transit"},
-]
-
-VLAN_PRESETS = {
-    "-- Custom / Empty --": [],
-    "🗄️ Load From DB (Existing Site)": [],
-    "🏢 Branch Office VLAN Preset": BRANCH_VLAN_PRESET,
-    "🏛️ Data Center VLAN Preset": DATACENTER_VLAN_PRESET
-}
-
 ROLE_TO_DESC_MAP = {
     "corporate wifi": "VIN_Corp",
     "workstations": "Wired Workstations",
@@ -62,16 +27,6 @@ ROLE_TO_DESC_MAP = {
     "backup / recovery": "Backup",
 }
 
-VID_ROLE_TO_VLAN_DESC = {
-    (300, "corporate wifi"): "VIN_Corp",
-    (100, "workstations"): "Wired Workstations",
-    (5, "management"): "Management",
-    (700, "printers"): "Printers",
-    (200, "guests"): "VIN_Guest",
-    (800, "audio visual"): "AV equipment",
-    (400, "mobiles"): "VIN_Mobi",
-}
-
 def _normalize_vid(vid) -> Optional[int]:
     if vid in (None, ""):
         return None
@@ -80,26 +35,61 @@ def _normalize_vid(vid) -> Optional[int]:
     except (TypeError, ValueError):
         return None
 
-def resolve_vlan_description(vid, role: str, pattern_template: str = "") -> str:
-    """Resolve the NetBox object 'VLAN Description' tag for a (VID, Role) pair.
+def _iter_preset_rows(vlan_presets):
+    """Yield every preset row across all preset groups.
+
+    ``vlan_presets`` is the dynamic ``get_vlan_presets(rules)`` mapping of
+    ``group_name -> [ {vid, role, vlan_name, desc, pattern_template}, ... ]``.
+    A flat list of rows is also accepted for convenience.
+    """
+    if isinstance(vlan_presets, dict):
+        for items in vlan_presets.values():
+            if isinstance(items, list):
+                for row in items:
+                    if isinstance(row, dict):
+                        yield row
+    elif isinstance(vlan_presets, list):
+        for row in vlan_presets:
+            if isinstance(row, dict):
+                yield row
+
+def resolve_vlan_description(vid, role: str, vlan_presets=None) -> str:
+    """Resolve the NetBox 'VLAN Description' tag for a (VID, Role) pair.
+
+    Resolution is driven entirely by the dynamic VLAN Presets configured in the
+    Standards Tab; there are no hardcoded lookup dictionaries.
 
     Resolution order:
-      1. An explicit literal mapping provided by the pattern_template / preset
-         (a template with no ``<>`` tokens is treated as a literal value).
-      2. The exact (VID, Role) mapping in ``VID_ROLE_TO_VLAN_DESC``.
-      3. Empty string ("") when the pair is not defined, instead of
-         auto-generating a fallback string.
+      1. Match a preset row by exact ``(VID, Role)``; if it defines a non-blank
+         ``desc``, use that value (e.g. "VIN_Corp", "VIN_Guest").
+      2. Match a preset row by ``Role`` alone; if it defines a non-blank
+         ``desc``, use that value.
+      3. Fallback directly to the ``Role`` name itself (e.g. "Guests",
+         "CustomLab"). Returns "" only when no role is supplied.
     """
-    template = (pattern_template or "").strip()
-    if template and not ("<" in template and ">" in template):
-        return template
-
     norm_vid = _normalize_vid(vid)
     norm_role = str(role or "").strip().lower()
-    if norm_vid is not None and (norm_vid, norm_role) in VID_ROLE_TO_VLAN_DESC:
-        return VID_ROLE_TO_VLAN_DESC[(norm_vid, norm_role)]
 
-    return ""
+    vid_role_match = ""
+    role_match = ""
+    for row in _iter_preset_rows(vlan_presets):
+        row_role = str(row.get("role", "")).strip().lower()
+        if not row_role or row_role != norm_role:
+            continue
+        row_desc = str(row.get("desc", "")).strip()
+        row_vid = _normalize_vid(row.get("vid"))
+        if norm_vid is not None and row_vid == norm_vid and row_desc:
+            vid_role_match = row_desc
+            break
+        if row_desc and not role_match:
+            role_match = row_desc
+
+    if vid_role_match:
+        return vid_role_match
+    if role_match:
+        return role_match
+
+    return str(role or "").strip()
 
 def lookup_role_description(role_str: str) -> str:
     """1. Queries the SQLite DB for description. 2. Falls back to dictionary."""

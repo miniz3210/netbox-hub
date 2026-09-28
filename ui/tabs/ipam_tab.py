@@ -142,15 +142,17 @@ def handle_ipam_db_reset():
     st.toast("🗑️ Database Cleared. Restored default templates.", icon="🧹")
 
 
-def build_vlan_description(site_name: str, role: str, vlan_id, vlan_name: str = "", pattern_template: str = "") -> str:
-    """Resolve the 'VLAN Description' tag from the exact (VID, Role) mapping.
+def build_vlan_description(site_name: str, role: str, vlan_id, vlan_name: str = "", vlan_presets=None) -> str:
+    """Resolve the 'VLAN Description' tag from the dynamic VLAN Presets.
 
-    Uses an explicit literal preset/template mapping when present, otherwise the
-    exact (VID, Role) lookup, and returns "" when the pair is not defined instead
-    of auto-generating a fallback string.
+    Looks up the (VID, Role)/Role against the loaded Standards Tab presets and
+    falls back to the Role name itself when no matching preset description is
+    found. There are no hardcoded lookup dictionaries.
     """
     clean_role = str(role or "").strip()
-    return resolve_vlan_description(vlan_id, clean_role, pattern_template)
+    if vlan_presets is None:
+        vlan_presets = get_vlan_presets(load_naming_rules())
+    return resolve_vlan_description(vlan_id, clean_role, vlan_presets)
 
 def load_ipam_records_from_db(site_name: str) -> bool:
     """Load IPAM allocation rows for a site straight from the local database.
@@ -295,13 +297,14 @@ def on_preset_change():
             vid = t["vid"]
             vlan_name = t.get("vlan_name", role_name)
             pattern_template = t.get("pattern_template", "")
-            # VLAN Description: prefer an explicit literal preset value, then the
-            # exact (VID, Role) mapping, otherwise leave it empty.
+            # VLAN Description: prefer the preset's own explicit description, then
+            # resolve dynamically against the loaded presets (which falls back to
+            # the Role name). No hardcoded dictionaries are involved.
             explicit_desc = str(t.get("desc", "") or "").strip()
             if explicit_desc:
                 desc = explicit_desc
             else:
-                desc = resolve_vlan_description(vid, role_name, pattern_template)
+                desc = resolve_vlan_description(vid, role_name, dynamic_presets)
             new_rows.append({
                 "VLAN ID": vid,
                 "Role": role_name,
@@ -581,6 +584,10 @@ def render_ipam_tab(active_model: str):
     # Sync editor deltas
     raw_rows = [dict(r) for r in st.session_state["ipam_persisted_rows"]]
     editor_state = st.session_state.get("ipam_data_editor_live", {})
+
+    # VLAN Description resolution is driven purely by the dynamic Standards Tab
+    # presets loaded here (no hardcoded lookup dictionaries).
+    active_vlan_presets = get_vlan_presets(rules)
     
     deleted_indices = set(editor_state.get("deleted_rows", []))
     if deleted_indices:
@@ -611,9 +618,8 @@ def render_ipam_tab(active_model: str):
                 next_role = changes.get("Role", raw_rows[row_idx].get("Role", ""))
                 next_vlan_id = changes.get("VLAN ID", raw_rows[row_idx].get("VLAN ID"))
                 next_vlan_name = changes.get("VLAN Name", raw_rows[row_idx].get("VLAN Name", next_role))
-                next_pattern = raw_rows[row_idx].get("_pattern_template", "")
                 changes["VLAN Description"] = build_vlan_description(
-                    site_name, next_role, next_vlan_id, next_vlan_name, next_pattern
+                    site_name, next_role, next_vlan_id, next_vlan_name, active_vlan_presets
                 )
             # Apply Title Case formatting to Role only. The VLAN Description is a
             # literal NetBox tag (e.g. "VIN_Corp") and must be preserved verbatim.
@@ -629,7 +635,7 @@ def render_ipam_tab(active_model: str):
             vlan_desc = typed_desc
             manual_flag = True
         else:
-            vlan_desc = resolve_vlan_description(new_vid, r_name)
+            vlan_desc = resolve_vlan_description(new_vid, r_name, active_vlan_presets)
             manual_flag = False
         raw_rows.append({
             "VLAN ID": new_vid,

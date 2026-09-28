@@ -139,20 +139,20 @@ ESXI_NETWORK_PRESETS = [
 
 DEFAULT_VLAN_PRESETS = {
     "Branch Office VLAN Preset": [
-        {"vid": 300, "role": "Corporate WiFi", "vlan_name": "Corporate WiFi", "pattern_template": "<site> Corporate WiFi -- VLAN <vid>"},
-        {"vid": 100, "role": "Workstations", "vlan_name": "Workstations", "pattern_template": "<site> Workstations -- VLAN <vid>"},
-        {"vid": 5, "role": "Management", "vlan_name": "Management", "pattern_template": "<site> Management -- VLAN <vid>"},
-        {"vid": 700, "role": "Printers", "vlan_name": "Printers", "pattern_template": "<site> Printers -- VLAN <vid>"},
-        {"vid": 800, "role": "Audio Visual", "vlan_name": "Audio Visual", "pattern_template": "<site> Audio Visual -- VLAN <vid>"},
-        {"vid": 200, "role": "Guests", "vlan_name": "Guests", "pattern_template": "<site> Guest WiFi -- VLAN <vid>"},
-        {"vid": 400, "role": "Mobiles", "vlan_name": "Mobiles", "pattern_template": "<site> Mobi WiFi -- VLAN <vid>"}
+        {"vid": 300, "role": "Corporate WiFi", "vlan_name": "Corporate WiFi", "desc": "VIN_Corp", "pattern_template": "<site> Corporate WiFi -- VLAN <vid>"},
+        {"vid": 100, "role": "Workstations", "vlan_name": "Workstations", "desc": "Wired Workstations", "pattern_template": "<site> Workstations -- VLAN <vid>"},
+        {"vid": 5, "role": "Management", "vlan_name": "Management", "desc": "Management", "pattern_template": "<site> Management -- VLAN <vid>"},
+        {"vid": 700, "role": "Printers", "vlan_name": "Printers", "desc": "Printers", "pattern_template": "<site> Printers -- VLAN <vid>"},
+        {"vid": 800, "role": "Audio Visual", "vlan_name": "Audio Visual", "desc": "AV equipment", "pattern_template": "<site> Audio Visual -- VLAN <vid>"},
+        {"vid": 200, "role": "Guests", "vlan_name": "Guests", "desc": "VIN_Guest", "pattern_template": "<site> Guest WiFi -- VLAN <vid>"},
+        {"vid": 400, "role": "Mobiles", "vlan_name": "Mobiles", "desc": "VIN_Mobi", "pattern_template": "<site> Mobi WiFi -- VLAN <vid>"}
     ],
     "Data Center VLAN Preset": [
-        {"vid": 10, "role": "Server Management", "vlan_name": "Server Management", "pattern_template": "<site> Server Management -- VLAN <vid>"},
-        {"vid": 20, "role": "Production App", "vlan_name": "Production App", "pattern_template": "<site> Production App -- VLAN <vid>"},
-        {"vid": 30, "role": "Database", "vlan_name": "Database", "pattern_template": "<site> Database -- VLAN <vid>"},
-        {"vid": 40, "role": "DMZ", "vlan_name": "DMZ", "pattern_template": "<site> DMZ -- VLAN <vid>"},
-        {"vid": 50, "role": "Storage / vSAN", "vlan_name": "Storage / vSAN", "pattern_template": "<site> Storage / vSAN -- VLAN <vid>"}
+        {"vid": 10, "role": "Server Management", "vlan_name": "Server Management", "desc": "Server Management", "pattern_template": "<site> Server Management -- VLAN <vid>"},
+        {"vid": 20, "role": "Production App", "vlan_name": "Production App", "desc": "Production App", "pattern_template": "<site> Production App -- VLAN <vid>"},
+        {"vid": 30, "role": "Database", "vlan_name": "Database", "desc": "Database", "pattern_template": "<site> Database -- VLAN <vid>"},
+        {"vid": 40, "role": "DMZ", "vlan_name": "DMZ", "desc": "DMZ", "pattern_template": "<site> DMZ -- VLAN <vid>"},
+        {"vid": 50, "role": "Storage / vSAN", "vlan_name": "Storage / vSAN", "desc": "Storage / vSAN", "pattern_template": "<site> Storage / vSAN -- VLAN <vid>"}
     ]
 }
 
@@ -510,6 +510,7 @@ def _normalize_vlan_presets(raw_presets):
             "vid": p.get("vid"),
             "role": str(p.get("role", "")).strip(),
             "vlan_name": str(p.get("vlan_name", "")).strip(),
+            "desc": str(p.get("desc", "")).strip(),
             "pattern_template": str(p.get("pattern_template", "")).strip(),
         }
         if item["vid"] not in (None, "") or item["role"]:
