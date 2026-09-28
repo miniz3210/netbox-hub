@@ -127,28 +127,28 @@
       "description": ""
     },
     {
-      "code": "CVI",
+      "code": "cvi",
       "label": "Core Virtualization (cvi)",
       "pattern_key": "vm_host",
-      "description": "Core / Virtualization VM"
+      "description": ""
     },
     {
-      "code": "AFS",
+      "code": "afs",
       "label": "App & File Services (afs)",
       "pattern_key": "vm_host",
-      "description": "Application / File Services VM"
+      "description": ""
     },
     {
-      "code": "SANI",
+      "code": "sani",
       "label": "Storage Infrastructure (sani)",
       "pattern_key": "vm_host",
-      "description": "Storage Infrastructure VM"
+      "description": ""
     },
     {
-      "code": "VLAB",
+      "code": "vlab",
       "label": "Virtual Lab / Test (vlab)",
       "pattern_key": "vm_host",
-      "description": "Virtual Lab / Test VM"
+      "description": ""
     }
   ],
   "esxi_network_presets": [
@@ -157,6 +157,12 @@
       "label": "PCIeX/PortX",
       "pattern_key": "esxi_uplink",
       "description": "vmnic Uplink Interface"
+    },
+    {
+      "code": "PG_Name",
+      "label": "PG-VM Network",
+      "pattern_key": "esxinet_pg_name",
+      "description": ""
     },
     {
       "code": "PortGroup",
@@ -169,12 +175,6 @@
       "label": "vmk",
       "pattern_key": "esxi_vmkernel",
       "description": "VMkernel Management / vMotion / Storage"
-    },
-    {
-      "code": "PG_Name",
-      "label": "PG-VM Network",
-      "pattern_key": "esxinet_pg_name",
-      "description": ""
     }
   ],
   "vlan_presets": {
@@ -195,7 +195,7 @@
         "vid": 5,
         "role": "Management",
         "vlan_name": "Management",
-        "pattern_template": "Management -- VLAN"
+        "pattern_template": "Management Testing -- VLAN"
       },
       {
         "vid": 700,

@@ -98,6 +98,32 @@ def format_branch_display(name: str) -> str:
         return clean
     return " ".join([word.capitalize() for word in clean.split()])
 
+def resolve_pattern_template(template: str, site_display: str, vid, role: str, vlan_name: str) -> str:
+    """Resolve a naming pattern_template into a concrete VLAN/Prefix description.
+
+    Supported ``<>`` tokens: ``<site>`` / ``<branch>``, ``<vid>``, ``<role>``,
+    ``<vlan_name>``. If the template contains no ``<>`` tokens (legacy form like
+    ``Management Testing -- VLAN``), it is resolved dynamically as
+    ``{site_display} {template} {vid}``.
+    """
+    template = (template or "").strip()
+    site_display = str(site_display or "Site").strip()
+    role = str(role or "").strip()
+    vlan_name = str(vlan_name or "").strip()
+
+    if not template:
+        return f"{site_display} {role or 'Data'} -- VLAN {vid}" if vid else f"{site_display} {role or 'Data'}"
+
+    if "<" in template and ">" in template:
+        out = template
+        out = out.replace("<site>", site_display).replace("<branch>", site_display)
+        out = out.replace("<vid>", str(vid) if vid not in (None, "") else "")
+        out = out.replace("<role>", role)
+        out = out.replace("<vlan_name>", vlan_name)
+        return out.strip()
+
+    return f"{site_display} {template} {vid}".strip()
+
 def sanitize_cidr(cidr_raw: str) -> str:
     if not cidr_raw:
         return ""
@@ -155,14 +181,18 @@ def evaluate_subnet_row(
     role: str, 
     site_name: str, 
     supernet_str: str, 
-    existing_prefixes: List[str]
+    existing_prefixes: List[str],
+    vlan_name: str = "",
+    pattern_template: str = "",
 ) -> Dict[str, str]:
     clean_sub = sanitize_cidr(subnet_str)
     clean_supernet = sanitize_cidr(supernet_str)
 
-    branch = format_branch_display(site_name) or "Site"
+    branch = format_branch_display(site_name)
     clean_role = role.strip() if role else "Data"
-    desc = f"{branch} {clean_role} -- VLAN {vid}" if vid else f"{branch} {clean_role}"
+    desc = resolve_pattern_template(pattern_template, branch, vid, clean_role, vlan_name) or (
+        f"{branch or 'Site'} {clean_role} -- VLAN {vid}" if vid else f"{branch or 'Site'} {clean_role}"
+    )
 
     if not clean_sub or "/" not in clean_sub:
         return {"usable_range": "-", "status": "⚪ Unassigned", "desc": desc}

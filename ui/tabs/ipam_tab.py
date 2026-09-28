@@ -16,6 +16,7 @@ from core.ipam_engine import (
     calculate_ip_range_str,
     format_branch_display,
     lookup_role_description,
+    resolve_pattern_template,
     generate_netbox_site_csv,
     generate_netbox_vlan_group_csv,
     generate_netbox_vlans_csv,
@@ -140,11 +141,15 @@ def handle_ipam_db_reset():
     st.toast("🗑️ Database Cleared. Restored default templates.", icon="🧹")
 
 
-def build_vlan_description(site_name: str, role: str, vlan_id) -> str:
+def build_vlan_description(site_name: str, role: str, vlan_id, vlan_name: str = "", pattern_template: str = "") -> str:
     """Build the editor's default VLAN description from current row values."""
-    branch = format_branch_display(site_name) or "Site"
+    branch = format_branch_display(site_name)
     clean_role = str(role or "Data").strip()
-    return f"{branch} {clean_role} -- VLAN {vlan_id}" if vlan_id else f"{branch} {clean_role}"
+    if pattern_template:
+        return resolve_pattern_template(
+            pattern_template, branch, vlan_id, clean_role, vlan_name or clean_role
+        )
+    return f"{branch or 'Site'} {clean_role} -- VLAN {vlan_id}" if vlan_id else f"{branch or 'Site'} {clean_role}"
 
 def load_ipam_records_from_db(site_name: str) -> bool:
     """Load IPAM allocation rows for a site straight from the local database.
@@ -281,14 +286,25 @@ def on_preset_change():
     if not template_list:
         st.session_state["ipam_persisted_rows"] = []
     else:
+        site_display = format_branch_display(site_name)
         new_rows = []
         for t in template_list:
             role_name = t["role"]
+            vid = t["vid"]
+            vlan_name = t.get("vlan_name", role_name)
+            pattern_template = t.get("pattern_template", "")
+            if pattern_template:
+                desc = resolve_pattern_template(
+                    pattern_template, site_display, vid, role_name, vlan_name
+                )
+            else:
+                desc = t.get("desc", lookup_role_description(role_name))
             new_rows.append({
-                "VLAN ID": t["vid"],
+                "VLAN ID": vid,
                 "Role": role_name,
-                "VLAN Name": t.get("vlan_name", role_name),
-                "VLAN Description": t.get("desc", lookup_role_description(role_name)),
+                "VLAN Name": vlan_name,
+                "VLAN Description": desc,
+                "_pattern_template": pattern_template,
                 "Subnet (CIDR)": ""
             })
         st.session_state["ipam_persisted_rows"] = new_rows
@@ -579,8 +595,10 @@ def render_ipam_tab(active_model: str):
             if ("Role" in changes or "VLAN ID" in changes) and "VLAN Description" not in changes:
                 next_role = changes.get("Role", raw_rows[row_idx].get("Role", ""))
                 next_vlan_id = changes.get("VLAN ID", raw_rows[row_idx].get("VLAN ID"))
+                next_vlan_name = changes.get("VLAN Name", raw_rows[row_idx].get("VLAN Name", next_role))
+                next_pattern = raw_rows[row_idx].get("_pattern_template", "")
                 changes["VLAN Description"] = build_vlan_description(
-                    site_name, next_role, next_vlan_id
+                    site_name, next_role, next_vlan_id, next_vlan_name, next_pattern
                 )
             # Apply Title Case formatting to Role and Description
             if "Role" in changes:
@@ -596,6 +614,7 @@ def render_ipam_tab(active_model: str):
             "Role": to_title_case_preserve_acronyms(r_name),
             "VLAN Name": new_r.get("VLAN Name", r_name),
             "VLAN Description": to_title_case_preserve_acronyms(new_r.get("VLAN Description", lookup_role_description(r_name))),
+            "_pattern_template": new_r.get("_pattern_template", ""),
             "Subnet (CIDR)": new_r.get("Subnet (CIDR)", "")
         })
 
@@ -616,7 +635,9 @@ def render_ipam_tab(active_model: str):
             r.get("Role", ""), 
             site_name, 
             supernet_in, 
-            existing_prefixes
+            existing_prefixes,
+            vlan_name=r.get("VLAN Name", ""),
+            pattern_template=r.get("_pattern_template", ""),
         )
         r["Usable Range"] = eval_res["usable_range"]
         r["Status"] = eval_res["status"]
