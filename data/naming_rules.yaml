@@ -21,7 +21,7 @@
   "esxi_vmkernel": "<purpose> - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
   "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
   "iface_switch_zone": "<switch_zone>_<port>",
-  "host_vm_proxmox": "<site_prefix><role_esx><seq>.<domain>",
+  "host_vm_proxmox": "<site_prefix>pve<seq>.<domain>",
   "host_vm_proxmox_x": "<site_prefix><role_esx><seq>.<domain>",
   "esxinet_vswitch": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
   "esxinet_host": "<site_prefix><role_esx><seq>.<domain>",
@@ -118,7 +118,7 @@
   ],
   "host_vm_presets": [
     {
-      "code": "ESXI",
+      "code": "ESXi",
       "label": "ESXi Host",
       "pattern_key": "esxi_host",
       "description": "ESXi Hypervisor Host"
@@ -126,8 +126,8 @@
     {
       "code": "Proxmox",
       "label": "Proxmox Host",
-      "pattern_key": "host_vm_proxmox_x_x",
-      "description": ""
+      "pattern_key": "host_vm_proxmox",
+      "description": "Proxmox VE Hypervisor Host"
     },
     {
       "code": "cvi",
@@ -182,7 +182,7 @@
   ],
   "vlan_presets": {
     "Branch Office VLAN Preset": {
-      "vlan_name_pattern": "<role>",
+      "vlan_name_pattern": "<role><vid>",
       "prefix_pattern": "<site> <role> -- VLAN <vid>",
       "items": [
         {
@@ -265,7 +265,7 @@
     "esxi_vmkernel": "<purpose> - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
     "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
     "iface_switch_zone": "<switch_zone>_<port>",
-    "host_vm_proxmox": "<site_prefix><role_esx><seq>.<domain>",
+    "host_vm_proxmox": "<site_prefix>pve<seq>.<domain>",
     "host_vm_proxmox_x": "<site_prefix><role_esx><seq>.<domain>",
     "esxinet_vswitch": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
     "esxinet_host": "<site_prefix><role_esx><seq>.<domain>",

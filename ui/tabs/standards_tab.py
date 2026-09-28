@@ -56,6 +56,31 @@ def _clear_session_state_prefixes(*prefixes: str) -> None:
             st.session_state.pop(k, None)
 
 
+def render_auto_dismiss_banner(message: str, duration_sec: int = 10):
+    banner_html = f"""
+    <div id="status-banner" style="
+        background-color: rgba(46, 125, 50, 0.2);
+        border: 1px solid #2e7d32;
+        color: #81c784;
+        padding: 10px 16px;
+        border-radius: 6px;
+        margin-bottom: 14px;
+        font-weight: 500;
+        animation: autoFadeOut 0.8s ease-in-out {duration_sec}s forwards;
+    ">
+        {message}
+    </div>
+    <style>
+        @keyframes autoFadeOut {{
+            0% {{ opacity: 1; max-height: 60px; }}
+            99% {{ opacity: 0; max-height: 60px; }}
+            100% {{ opacity: 0; max-height: 0; padding: 0 16px; margin: 0; overflow: hidden; display: none; }}
+        }}
+    </style>
+    """
+    st.markdown(banner_html, unsafe_allow_html=True)
+
+
 def _inject_preset_table_style() -> None:
     """Inject the shared preset-table CSS.
 
@@ -180,11 +205,6 @@ def _persist_variables(rules: dict, variables: dict) -> None:
 
 
 def _render_auto_correction_manager(active_model: str) -> None:
-    if st.session_state.pop("autocorrect_saved", False):
-        st.success("✅ Auto-correction rules saved & applied!")
-    if st.session_state.pop("autocorrect_reset", False):
-        st.success("✅ Auto-correction rules reset to defaults!")
-
     _render_ipam_role_mapping_manager(active_model)
 
     rules = load_auto_corrections()
@@ -276,8 +296,8 @@ def _render_auto_correction_manager(active_model: str) -> None:
                 if st.button("🔄 Reset to Defaults", key=f"ac_reset_factory_{category}", width='stretch'):
                     reset_auto_corrections()
                     _clear_session_state_prefixes(f"ac_{category}_")
-                    st.session_state["autocorrect_reset"] = True
-                    st.rerun()
+    st.session_state["card_saved_banner"] = {"section": "auto_correction", "msg": "✅ Syntax Auto-Correction Rules reset to defaults!"}
+    st.rerun()
 
             with st.expander(f"✨ AI Assistant: Generate Rule for {category.replace('_', ' ').title()}", expanded=False):
                 ai_prompt = st.text_input(
@@ -336,11 +356,6 @@ def _render_auto_correction_manager(active_model: str) -> None:
 
 
 def _render_ipam_role_mapping_manager(active_model: str) -> None:
-    if st.session_state.pop("ipam_role_saved", False):
-        st.success("✅ IPAM role mapping rules saved & applied!")
-    if st.session_state.pop("ipam_role_reset", False):
-        st.success("✅ IPAM role mapping rules reset to defaults!")
-
     rules = load_naming_rules()
     role_rules = list(get_ipam_role_mappings(rules))
 
@@ -487,7 +502,7 @@ def _persist_ipam_role_mappings(rules: dict) -> None:
         delta = {"ipam_role_mappings": {"old": list(old_val), "new": list(new_val)}}
     add_to_history(delta, source="IPAM Role Mapping Rules: Management UI")
     st.session_state["naming_rules"] = load_naming_rules()
-    st.session_state["ipam_role_saved"] = True
+    st.session_state["card_saved_banner"] = {"section": "auto_correction", "msg": "✅ IPAM Role Mapping Rules saved & applied!"}
     st.rerun()
 
 
@@ -507,7 +522,7 @@ def _reset_ipam_role_mappings() -> None:
     add_to_history(delta, source="IPAM Role Mapping Rules: Reset to Defaults")
     _clear_session_state_prefixes("ipamrole_")
     st.session_state["naming_rules"] = load_naming_rules()
-    st.session_state["ipam_role_reset"] = True
+    st.session_state["card_saved_banner"] = {"section": "auto_correction", "msg": "✅ IPAM Role Mapping Rules reset to defaults!"}
     st.rerun()
 
 
@@ -626,7 +641,7 @@ def _persist_site_code_mappings(rules: dict) -> None:
                                     "new": dict(rules.get("site_code_rules") or {})}}
     add_to_history(delta, source="Site Code Mapping Rules: Management UI")
     st.session_state["naming_rules"] = load_naming_rules()
-    st.session_state["site_code_saved"] = True
+    st.session_state["card_saved_banner"] = {"section": "auto_correction", "msg": "✅ Site Code Mapping Rules saved & applied!"}
     st.rerun()
 
 
@@ -668,7 +683,7 @@ def _reset_site_code_mappings() -> None:
     _clear_session_state_prefixes("sitecode_")
     st.session_state.pop("site_code_mappings_modified", None)
     st.session_state["naming_rules"] = load_naming_rules()
-    st.session_state["site_code_reset"] = True
+    st.session_state["card_saved_banner"] = {"section": "auto_correction", "msg": "✅ Site Code Mapping Rules reset to defaults!"}
     st.rerun()
 
 
@@ -691,14 +706,14 @@ def _persist_auto_corrections(data: dict) -> None:
         delta = {"auto_correction_rules": {"old": None, "new": data}}
     add_to_history(delta, source="Auto-Correction: Management UI")
     st.session_state["autocorrect_rules_cache"] = data
-    st.session_state["autocorrect_saved"] = True
+    st.session_state["card_saved_banner"] = {"section": "auto_correction", "msg": "✅ Syntax Auto-Correction Rules saved & applied!"}
     st.rerun()
 
 
-def _save_presets(rules: dict) -> None:
+def _save_presets(rules: dict, section: str = "presets", section_label: str = "Presets") -> None:
     save_naming_rules(rules, source="Presets Manager")
     st.session_state["naming_rules"] = rules.copy()
-    st.session_state["presets_saved"] = True
+    st.session_state["card_saved_banner"] = {"section": section, "msg": f"✅ {section_label} saved & applied!"}
     st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
     # Clear all preset widget input keys while safely preserving group selections and system flags
     _clear_session_state_prefixes("device_pre_", "interface_pre_", "host_", "vm_", "esxi_network_pre_",
@@ -708,15 +723,16 @@ def _save_presets(rules: dict) -> None:
     st.rerun()
 
 
-def _save_vlan_desc_mappings(rules: dict) -> None:
+def _save_vlan_desc_mappings(rules: dict, section: str = "subnet_vlan", section_label: str = "VLAN Description Mappings") -> None:
     save_naming_rules(rules, source="VLAN Description Mappings Manager")
     st.session_state["naming_rules"] = rules.copy()
-    st.session_state["vlan_desc_mappings_saved"] = True
+    st.session_state["card_saved_banner"] = {"section": section, "msg": f"✅ {section_label} saved & applied!"}
     _clear_session_state_prefixes("vlandesc_")
     st.rerun()
 
 
-def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card_title: str, card_caption: str) -> None:
+def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card_title: str, card_caption: str,
+                        section: str = "presets", section_label: str = "Presets") -> None:
     patterns = dict(rules.get("naming_patterns") or {})
     key_field = "device_presets" if kind == "device" else (
         "interface_presets" if kind == "interface" else (
@@ -727,11 +743,14 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
     stale_del = st.session_state.pop(_pending_del_key, None)
     if stale_del is not None and 0 <= stale_del < len(presets):
         rules[key_field] = [p for i, p in enumerate(presets) if i != stale_del]
-        _save_presets(rules)
+        _save_presets(rules, section=section, section_label=section_label)
         return
     _pending_swap_key = f"_pending_swap_{kind}"
 
     with st.container(border=True):
+        if st.session_state.get("card_saved_banner", {}).get("section") == section:
+            render_auto_dismiss_banner(st.session_state["card_saved_banner"]["msg"])
+            del st.session_state["card_saved_banner"]
         col_t1, col_t2 = st.columns([3, 1])
         with col_t1:
             st.markdown(f"#### {card_title}")
@@ -825,7 +844,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
             final_patterns.update(patterns_updates)
             rules["naming_patterns"] = final_patterns
             rules[key_field] = list(updated)
-            _save_presets(rules)
+            _save_presets(rules, section=section, section_label=section_label)
             return
 
         if st.session_state.pop(f"{kind}_preset_min_one", False):
@@ -861,7 +880,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
 
     if reset_presets:
         _clear_session_state_prefixes(f"{kind}_")
-        _reset_presets(kind, rules)
+        _reset_presets(kind, rules, section=section, section_label=section_label)
         return
 
     if add_preset:
@@ -904,7 +923,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
         rules["naming_patterns"] = final_patterns
         rules[key_field] = final_presets
         _clear_session_state_prefixes(f"{kind}_new_code", f"{kind}_new_lbl", f"{kind}_new_tpl")
-        _save_presets(rules)
+        _save_presets(rules, section=section, section_label=section_label)
         return
 
     if saved_presets:
@@ -934,10 +953,8 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
 
         rules["naming_patterns"] = final_patterns
         rules[key_field] = final_presets
-        _save_presets(rules)
-
-
-def _reset_presets(kind: str, rules: dict) -> None:
+        _save_presets(rules, section=section, section_label=section_label)
+def _reset_presets(kind: str, rules: dict, section: str = "presets", section_label: str = "Presets") -> None:
     key_field = DEFAULT_PRESET_KEY_FIELD.get(kind)
     if not key_field:
         return
@@ -950,7 +967,7 @@ def _reset_presets(kind: str, rules: dict) -> None:
             patterns[pkey] = default_patterns[pkey]
     rules["naming_patterns"] = patterns
     rules[key_field] = defaults
-    _save_presets(rules)
+    _save_presets(rules, section=section, section_label=section_label)
 
 
 def _fmt_delta_val(value) -> str:
@@ -1003,8 +1020,9 @@ def _host_editor(rules: dict) -> None:
         with col_t2:
             st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(host_presets)} presets</span></div>", unsafe_allow_html=True)
         st.caption("Manage physical hypervisor host naming patterns and presets.")
-        if st.session_state.pop("host_presets_saved", False):
-            st.success("✅ Hosts Type Presets saved & applied!")
+        if st.session_state.get("card_saved_banner", {}).get("section") == "hosts_vms":
+            render_auto_dismiss_banner(st.session_state["card_saved_banner"]["msg"])
+            del st.session_state["card_saved_banner"]
 
         # Inject dynamic styling to guarantee Action buttons fit cleanly without squeezing
         _inject_preset_table_style()
@@ -1090,8 +1108,7 @@ def _host_editor(rules: dict) -> None:
                     updated[src_pos], updated[dst_pos] = updated[dst_pos], updated[src_pos]
             rules["naming_patterns"] = {**patterns, **patterns_updates}
             rules["host_vm_presets"] = updated + vm_presets
-            st.session_state["host_presets_saved"] = True
-            _save_presets(rules)
+            _save_presets(rules, section="hosts_vms", section_label="Hosts & Virtual Machines")
             return
 
         col_save, col_reset = st.columns(2)
@@ -1130,7 +1147,7 @@ def _host_editor(rules: dict) -> None:
         rules["naming_patterns"] = reset_patterns
         save_naming_rules(rules, source="Hosts Type Presets: Reset to Defaults")
         st.session_state["naming_rules"] = rules.copy()
-        st.session_state["presets_saved"] = True
+        st.session_state["card_saved_banner"] = {"section": "hosts_vms", "msg": "✅ Hosts & Virtual Machines reset to defaults!"}
         st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
         st.session_state.pop("host_preset_min_one", None)
         st.session_state.pop("_host_vm_del_idx", None)
@@ -1159,8 +1176,7 @@ def _host_editor(rules: dict) -> None:
         _clear_session_state_prefixes("host_new_code", "host_new_lbl", "host_new_tpl")
         rules["naming_patterns"] = final_patterns
         rules["host_vm_presets"] = final_presets + vm_presets
-        st.session_state["host_presets_saved"] = True
-        _save_presets(rules)
+        _save_presets(rules, section="hosts_vms", section_label="Hosts & Virtual Machines")
         return
 
     if saved:
@@ -1168,8 +1184,7 @@ def _host_editor(rules: dict) -> None:
         final_patterns = {**patterns, **patterns_updates}
         rules["naming_patterns"] = final_patterns
         rules["host_vm_presets"] = final_presets + vm_presets
-        st.session_state["host_presets_saved"] = True
-        _save_presets(rules)
+        _save_presets(rules, section="hosts_vms", section_label="Hosts & Virtual Machines")
 
 
 def _vm_editor(rules: dict) -> None:
@@ -1186,8 +1201,9 @@ def _vm_editor(rules: dict) -> None:
         with col_t2:
             st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(vm_presets)} presets</span></div>", unsafe_allow_html=True)
         st.caption("Manage virtual machine roles (cvi, afs, sani, vlab) and their shared hostname template.")
-        if st.session_state.pop("vm_presets_saved", False):
-            st.success("✅ VM Role Presets saved & applied!")
+        if st.session_state.get("card_saved_banner", {}).get("section") == "hosts_vms":
+            render_auto_dismiss_banner(st.session_state["card_saved_banner"]["msg"])
+            del st.session_state["card_saved_banner"]
 
         # Inject dynamic styling to guarantee Action buttons fit cleanly without squeezing
         _inject_preset_table_style()
@@ -1267,8 +1283,7 @@ def _vm_editor(rules: dict) -> None:
             patterns["vm_host"] = tpl
             rules["naming_patterns"] = patterns
             rules["host_vm_presets"] = host_presets + updated
-            st.session_state["vm_presets_saved"] = True
-            _save_presets(rules)
+            _save_presets(rules, section="hosts_vms", section_label="Hosts & Virtual Machines")
             return
 
         c_save, c_reset = st.columns(2)
@@ -1301,7 +1316,7 @@ def _vm_editor(rules: dict) -> None:
         rules["naming_patterns"] = vm_patterns
         save_naming_rules(rules, source="VM Presets: Reset to Defaults")
         st.session_state["naming_rules"] = rules.copy()
-        st.session_state["presets_saved"] = True
+        st.session_state["card_saved_banner"] = {"section": "hosts_vms", "msg": "✅ Hosts & Virtual Machines reset to defaults!"}
         st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
         _clear_session_state_prefixes("host_", "vm_", "preset_", "host_preset", "vm_preset")
         st.rerun()
@@ -1321,8 +1336,7 @@ def _vm_editor(rules: dict) -> None:
         rules["naming_patterns"] = patterns
         rules["host_vm_presets"] = host_presets + final
         _clear_session_state_prefixes("vm_new_code", "vm_new_lbl", "vm_new_tpl")
-        st.session_state["vm_presets_saved"] = True
-        _save_presets(rules)
+        _save_presets(rules, section="hosts_vms", section_label="Hosts & Virtual Machines")
         return
 
     if saved:
@@ -1332,8 +1346,7 @@ def _vm_editor(rules: dict) -> None:
         patterns["vm_host"] = tpl or "<country><site><role><seq>"
         rules["naming_patterns"] = patterns
         rules["host_vm_presets"] = host_presets + final
-        st.session_state["vm_presets_saved"] = True
-        _save_presets(rules)
+        _save_presets(rules, section="hosts_vms", section_label="Hosts & Virtual Machines")
 
 
 # Column widths for the VLAN Description Mappings editor: Role, Description, Action.
@@ -1342,8 +1355,9 @@ VLAND_MAPPINGS_COLS = [3.2, 4.8, 1.0]
 
 def _render_vlan_description_mappings_editor(rules: dict) -> None:
     with st.expander("🏷️ VLAN Description Mappings (Role → Description)", expanded=True):
-        if st.session_state.pop("vlan_desc_mappings_saved", False):
-            st.success("✅ VLAN Description mappings saved & applied!")
+        if st.session_state.get("card_saved_banner", {}).get("section") == "subnet_vlan":
+            render_auto_dismiss_banner(st.session_state["card_saved_banner"]["msg"])
+            del st.session_state["card_saved_banner"]
 
         mappings = dict(get_vlan_description_mappings(rules))
 
@@ -1441,8 +1455,9 @@ def _vlan_presets_editor(rules: dict) -> None:
             total_count = sum(len(g.get("items", [])) for g in vlan_presets.values())
             st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{total_count} presets</span></div>", unsafe_allow_html=True)
         st.caption("Manage reusable VLAN allocation groups. Each group has default patterns applied to all its items. VLAN Description tags are configured in the dedicated mappings expander below.")
-        if st.session_state.pop("vlan_presets_saved", False):
-            st.success("✅ VLAN Allocation Presets saved & applied!")
+        if st.session_state.get("card_saved_banner", {}).get("section") == "subnet_vlan":
+            render_auto_dismiss_banner(st.session_state["card_saved_banner"]["msg"])
+            del st.session_state["card_saved_banner"]
 
         _inject_preset_table_style()
 
@@ -1490,8 +1505,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                     rules["vlan_presets"] = dict(vlan_presets)
                     rules["vlan_presets"][group_name] = group
                     _clear_session_state_prefixes("vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_pat_")
-                    st.session_state["vlan_presets_saved"] = True
-                    _save_presets(rules)
+                    _save_presets(rules, section="subnet_vlan", section_label="Subnet & VLAN Allocation Presets")
                     return
 
             pending_swap = st.session_state.pop(_pending_swap_key, None)
@@ -1503,8 +1517,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                     rules["vlan_presets"] = dict(vlan_presets)
                     rules["vlan_presets"][group_name] = group
                     _clear_session_state_prefixes("vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_pat_")
-                    st.session_state["vlan_presets_saved"] = True
-                    _save_presets(rules)
+                    _save_presets(rules, section="subnet_vlan", section_label="Subnet & VLAN Allocation Presets")
                     return
 
         new_group_name = None
@@ -1634,8 +1647,7 @@ def _vlan_presets_editor(rules: dict) -> None:
         import copy
         _clear_session_state_prefixes("vlan_pre")
         rules["vlan_presets"] = copy.deepcopy(dict(DEFAULT_VLAN_PRESETS))
-        st.session_state["vlan_presets_saved"] = True
-        _save_presets(rules)
+        _save_presets(rules, section="subnet_vlan", section_label="Subnet & VLAN Allocation Presets")
         return
 
     if group_name is not None and add_vlan:
@@ -1660,8 +1672,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                 rules["vlan_presets"] = vlan_presets
                 st.session_state["vlan_pre_selected_group"] = group_key
                 _clear_session_state_prefixes("vlan_pre_new_vid", "vlan_pre_new_role", "vlan_pre_new_group")
-                st.session_state["vlan_presets_saved"] = True
-                _save_presets(rules)
+                _save_presets(rules, section="subnet_vlan", section_label="Subnet & VLAN Allocation Presets")
             else:
                 st.error("⚠️ Enter at least a Role or VID for the first entry.")
             return
@@ -1680,8 +1691,7 @@ def _vlan_presets_editor(rules: dict) -> None:
             rules["vlan_presets"] = dict(vlan_presets)
             rules["vlan_presets"][group_name] = group
             _clear_session_state_prefixes("vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_pat_")
-            st.session_state["vlan_presets_saved"] = True
-            _save_presets(rules)
+            _save_presets(rules, section="subnet_vlan", section_label="Subnet & VLAN Allocation Presets")
         else:
             st.warning("⚠️ Enter at least a Role or VID to add.")
         return
@@ -1714,8 +1724,7 @@ def _vlan_presets_editor(rules: dict) -> None:
         rules["vlan_presets"] = vlan_presets
         if is_custom:
             st.session_state["vlan_pre_selected_group"] = new_group_name.strip() if new_group_name and new_group_name.strip() else st.session_state.get("vlan_pre_selected_group")
-        st.session_state["vlan_presets_saved"] = True
-        _save_presets(rules)
+        _save_presets(rules, section="subnet_vlan", section_label="Subnet & VLAN Allocation Presets")
 
     _render_vlan_description_mappings_editor(rules)
 
@@ -1723,24 +1732,6 @@ def _vlan_presets_editor(rules: dict) -> None:
 def render_standards_tab(active_model):
     st.subheader("📖 Infrastructure Naming Standards Configuration")
     st.caption("Define and manage your organization's naming conventions. All patterns configured here are automatically applied in the Naming tab.")
-    
-    if "variables_saved" in st.session_state and st.session_state["variables_saved"]:
-        st.success("✅ Variables saved successfully!")
-        st.session_state["variables_saved"] = False
-
-    if "standards_saved" in st.session_state and st.session_state["standards_saved"]:
-        st.success("✅ Naming standards saved successfully!")
-        st.session_state["standards_saved"] = False
-    
-    if "standards_reset" in st.session_state and st.session_state["standards_reset"]:
-        st.success("✅ Reset to default standards!")
-        st.session_state["standards_reset"] = False
-
-    if st.session_state.pop("site_code_saved", False):
-        st.success("✅ Site code mapping rules saved & applied!")
-
-    if st.session_state.pop("site_code_reset", False):
-        st.success("✅ Site code mapping rules reset to defaults!")
 
     st.markdown(
         """
@@ -1764,32 +1755,53 @@ def render_standards_tab(active_model):
     tab_edit, tab_vars, tab_history = st.tabs(["📝 Edit Standards", "📘 Pattern Variables Reference", "📜 Change History"])
     
     with tab_edit:
-        with st.expander("🌐 Subnet & VLAN Allocation Presets", expanded=True):
-            _vlan_presets_editor(current_rules)
+    with st.expander("🌐 Subnet & VLAN Allocation Presets", expanded=True):
+        if st.session_state.get("card_saved_banner", {}).get("section") == "subnet_vlan":
+            render_auto_dismiss_banner(st.session_state["card_saved_banner"]["msg"])
+            del st.session_state["card_saved_banner"]
+        _vlan_presets_editor(current_rules)
 
         with st.expander("🔧 Network & Security Devices", expanded=True):
+            if st.session_state.get("card_saved_banner", {}).get("section") == "network_devices":
+                render_auto_dismiss_banner(st.session_state["card_saved_banner"]["msg"])
+                del st.session_state["card_saved_banner"]
             _preset_type_editor("device", get_device_presets(current_rules), current_rules, prefix="branch",
                                 card_title="🔧 DEVICE TYPE PRESETS",
-                                card_caption="Manage device naming patterns and presets (SW, VS, FW, ION, WAP, RTR, VA).")
+                                card_caption="Manage device naming patterns and presets (SW, VS, FW, ION, WAP, RTR, VA).",
+                                section="network_devices", section_label="Network & Security Devices")
             st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
             _preset_type_editor("interface", get_interface_presets(current_rules), current_rules, prefix="iface",
                                 card_title="🔌 INTERFACE TYPE PRESETS",
-                                card_caption="Manage interface description presets (Uplink, LAG, Po, Access, FW Zone).")
+                                card_caption="Manage interface description presets (Uplink, LAG, Po, Access, FW Zone).",
+                                section="network_devices", section_label="Network & Security Devices")
 
         with st.expander("🖥️ Hosts & Virtual Machines", expanded=True):
+            if st.session_state.get("card_saved_banner", {}).get("section") == "hosts_vms":
+                render_auto_dismiss_banner(st.session_state["card_saved_banner"]["msg"])
+                del st.session_state["card_saved_banner"]
             _host_editor(current_rules)
             st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
             _vm_editor(current_rules)
 
         with st.expander("☁️ ESXi Virtualization & Networking", expanded=True):
+            if st.session_state.get("card_saved_banner", {}).get("section") == "esxi":
+                render_auto_dismiss_banner(st.session_state["card_saved_banner"]["msg"])
+                del st.session_state["card_saved_banner"]
             _preset_type_editor("esxi_network", get_esxi_network_presets(current_rules), current_rules, prefix="esxinet",
                                 card_title="☁️ ESXI NETWORK DESCRIPTION PRESETS",
-                                card_caption="Manage ESXi interface descriptions (Uplink, PortGroup, VMkernel). Quick Copy dynamically renders from these templates.")
+                                card_caption="Manage ESXi interface descriptions (Uplink, PortGroup, VMkernel). Quick Copy dynamically renders from these templates.",
+                                section="esxi", section_label="ESXi Virtualization & Networking")
 
         with st.expander("🛠️ Manage Syntax Auto-Correction Rules", expanded=False):
+            if st.session_state.get("card_saved_banner", {}).get("section") == "auto_correction":
+                render_auto_dismiss_banner(st.session_state["card_saved_banner"]["msg"])
+                del st.session_state["card_saved_banner"]
             _render_auto_correction_manager(active_model)
 
         with st.expander("📋 NetBox Server & Hardware YAML Guidelines", expanded=False):
+            if st.session_state.get("card_saved_banner", {}).get("section") == "yaml_guidelines":
+                render_auto_dismiss_banner(st.session_state["card_saved_banner"]["msg"])
+                del st.session_state["card_saved_banner"]
             st.caption("Document and enforce the NetBox server hardware YAML schema used across your environment.")
             with st.expander("✨ AI Assistant: Generate NetBox Server YAML Specs", expanded=False):
                 ai_desc = st.text_input(
@@ -1822,7 +1834,8 @@ def render_standards_tab(active_model):
                     rules["netbox_server_yaml"] = yaml_text
                     save_naming_rules(rules, source="YAML Guidelines Save")
                     st.session_state["naming_rules"] = rules.copy()
-                    st.toast("Guidelines saved successfully!", icon="✅")
+                    st.session_state["card_saved_banner"] = {"section": "yaml_guidelines", "msg": "✅ NetBox Server & Hardware YAML Guidelines saved & applied!"}
+                    st.rerun()
             with col_reset_yaml:
                 if st.button("🔄 Reset to Defaults", width='stretch'):
                     default_yaml = DEFAULT_RULES.get("netbox_server_yaml", DEFAULT_NAMING_PATTERNS.get("netbox_server_yaml", ""))
@@ -1830,6 +1843,7 @@ def render_standards_tab(active_model):
                     rules["netbox_server_yaml"] = default_yaml
                     save_naming_rules(rules, source="YAML Guidelines Reset")
                     st.session_state["naming_rules"] = rules.copy()
+                    st.session_state["card_saved_banner"] = {"section": "yaml_guidelines", "msg": "✅ NetBox Server & Hardware YAML Guidelines reset to defaults!"}
                     st.rerun()
 
         full_prompt_text = export_rules_as_prompt(current_rules)
