@@ -1193,7 +1193,7 @@ def _vlan_presets_editor(rules: dict) -> None:
             with ca_name:
                 new_name = st.text_input("VLAN Name", value="", placeholder="IoT Devices", key="vlan_pre_new_name", label_visibility="collapsed").strip()
             with ca_pat:
-                new_tpl = st.text_input("Pattern Template", value="", placeholder=" IoT Devices -- VLAN ", key="vlan_pre_new_pat", label_visibility="collapsed").strip()
+                new_tpl = st.text_input("Pattern Template", value="", placeholder="<site> IoT Devices -- VLAN <vid>", key="vlan_pre_new_pat", label_visibility="collapsed").strip()
             with ca_act:
                 pass
 
@@ -1204,8 +1204,9 @@ def _vlan_presets_editor(rules: dict) -> None:
             reset_presets = st.button("🔄 Reset to Defaults", key="vlan_pre_reset", width='stretch')
 
     if reset_presets:
+        import copy
         _clear_session_state_prefixes("vlan_pre")
-        rules["vlan_presets"] = dict(DEFAULT_VLAN_PRESETS)
+        rules["vlan_presets"] = copy.deepcopy(dict(DEFAULT_VLAN_PRESETS))
         _save_presets(rules)
         return
 

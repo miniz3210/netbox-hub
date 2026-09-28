@@ -139,20 +139,20 @@ ESXI_NETWORK_PRESETS = [
 
 DEFAULT_VLAN_PRESETS = {
     "Branch Office VLAN Preset": [
-        {"vid": 300, "role": "Corporate WiFi", "vlan_name": "Corporate WiFi", "pattern_template": " Corporate WiFi -- VLAN "},
-        {"vid": 100, "role": "Workstations", "vlan_name": "Workstations", "pattern_template": " Workstations -- VLAN "},
-        {"vid": 5, "role": "Management", "vlan_name": "Management", "pattern_template": " Management -- VLAN "},
-        {"vid": 700, "role": "Printers", "vlan_name": "Printers", "pattern_template": " Printers -- VLAN "},
-        {"vid": 800, "role": "Audio Visual", "vlan_name": "Audio Visual", "pattern_template": " Audio Visual -- VLAN "},
-        {"vid": 200, "role": "Guests", "vlan_name": "Guests", "pattern_template": " Guest WiFi -- VLAN "},
-        {"vid": 400, "role": "Mobiles", "vlan_name": "Mobiles", "pattern_template": " Mobi WiFi -- VLAN "}
+        {"vid": 300, "role": "Corporate WiFi", "vlan_name": "Corporate WiFi", "pattern_template": "<site> Corporate WiFi -- VLAN <vid>"},
+        {"vid": 100, "role": "Workstations", "vlan_name": "Workstations", "pattern_template": "<site> Workstations -- VLAN <vid>"},
+        {"vid": 5, "role": "Management", "vlan_name": "Management", "pattern_template": "<site> Management -- VLAN <vid>"},
+        {"vid": 700, "role": "Printers", "vlan_name": "Printers", "pattern_template": "<site> Printers -- VLAN <vid>"},
+        {"vid": 800, "role": "Audio Visual", "vlan_name": "Audio Visual", "pattern_template": "<site> Audio Visual -- VLAN <vid>"},
+        {"vid": 200, "role": "Guests", "vlan_name": "Guests", "pattern_template": "<site> Guest WiFi -- VLAN <vid>"},
+        {"vid": 400, "role": "Mobiles", "vlan_name": "Mobiles", "pattern_template": "<site> Mobi WiFi -- VLAN <vid>"}
     ],
     "Data Center VLAN Preset": [
-        {"vid": 10, "role": "Server Management", "vlan_name": "Server Management", "pattern_template": " Server Management -- VLAN "},
-        {"vid": 20, "role": "Production App", "vlan_name": "Production App", "pattern_template": " Production App -- VLAN "},
-        {"vid": 30, "role": "Database", "vlan_name": "Database", "pattern_template": " Database -- VLAN "},
-        {"vid": 40, "role": "DMZ", "vlan_name": "DMZ", "pattern_template": " DMZ -- VLAN "},
-        {"vid": 50, "role": "Storage / vSAN", "vlan_name": "Storage / vSAN", "pattern_template": " Storage / vSAN -- VLAN "}
+        {"vid": 10, "role": "Server Management", "vlan_name": "Server Management", "pattern_template": "<site> Server Management -- VLAN <vid>"},
+        {"vid": 20, "role": "Production App", "vlan_name": "Production App", "pattern_template": "<site> Production App -- VLAN <vid>"},
+        {"vid": 30, "role": "Database", "vlan_name": "Database", "pattern_template": "<site> Database -- VLAN <vid>"},
+        {"vid": 40, "role": "DMZ", "vlan_name": "DMZ", "pattern_template": "<site> DMZ -- VLAN <vid>"},
+        {"vid": 50, "role": "Storage / vSAN", "vlan_name": "Storage / vSAN", "pattern_template": "<site> Storage / vSAN -- VLAN <vid>"}
     ]
 }
 
