@@ -338,9 +338,14 @@ def _render_site_code_mapping_manager() -> None:
             "Assistant uses these exact mappings directly. A location that matches a pattern is "
             "resolved to its code before any algorithmic fallback."
         )
-        rules = load_naming_rules()
-        sr = get_site_code_rules(rules)
-        exact = dict(sr.get("exact_mappings") or {})
+
+        # Use session-state copy if available to avoid reloading stale disk data after edits
+        if "site_code_mappings_modified" in st.session_state:
+            exact = dict(st.session_state["site_code_mappings_modified"])
+        else:
+            rules = load_naming_rules()
+            sr = get_site_code_rules(rules)
+            exact = dict(sr.get("exact_mappings") or {})
 
         m_col_p, m_col_r, m_col_del = st.columns([4.0, 3.5, 1.0], vertical_alignment="center")
         with m_col_p:
@@ -370,7 +375,18 @@ def _render_site_code_mapping_manager() -> None:
                     pending_delete = idx
 
             if pending_delete == idx:
-                continue
+                key_to_del = pat.strip().lower()
+                if key_to_del in exact:
+                    del exact[key_to_del]
+                st.session_state["site_code_mappings_modified"] = dict(exact)
+                # Persist immediately after deletion (this helper reruns the app)
+                rules = load_naming_rules()
+                sr = get_site_code_rules(rules)
+                final = dict(rules)
+                final["site_code_rules"] = dict(sr)
+                final["site_code_rules"]["exact_mappings"] = dict(exact)
+                _persist_site_code_mappings(final)
+                return
             key = np_.strip().lower()
             if key:
                 updated[key] = nr_.strip().upper()
@@ -378,10 +394,13 @@ def _render_site_code_mapping_manager() -> None:
         col_save, col_reset = st.columns([1.2, 1.0])
         with col_save:
             if st.button("💾 Save & Apply Changes", key="sitecode_save", type="primary", width='stretch'):
+                rules = load_naming_rules()
+                sr = get_site_code_rules(rules)
                 final = dict(rules)
                 final["site_code_rules"] = dict(sr)
                 final["site_code_rules"]["exact_mappings"] = updated
                 _persist_site_code_mappings(final)
+                st.session_state["site_code_mappings_modified"] = dict(updated)
         with col_reset:
             if st.button("🔄 Reset to Defaults", key="sitecode_reset", width='stretch'):
                 _reset_site_code_mappings()
@@ -400,11 +419,14 @@ def _render_site_code_mapping_manager() -> None:
         with col_add:
             if st.button("➕ Add", key="sitecode_add", width='stretch', help="Add new mapping"):
                 if new_p.strip() and new_code.strip():
+                    rules = load_naming_rules()
+                    sr = get_site_code_rules(rules)
                     final = dict(rules)
                     final["site_code_rules"] = dict(sr)
                     final["site_code_rules"]["exact_mappings"] = dict(updated)
                     final["site_code_rules"]["exact_mappings"][new_p.strip().lower()] = new_code.strip().upper()
                     _persist_site_code_mappings(final)
+                    st.session_state["site_code_mappings_modified"] = dict(final["site_code_rules"]["exact_mappings"])
                 else:
                     st.warning("⚠️ Enter both a city/location and a site code to add.")
 
@@ -460,6 +482,7 @@ def _reset_site_code_mappings() -> None:
         }}
     add_to_history(delta, source="Site Code Mapping Rules: Reset to Defaults")
     _clear_session_state_prefixes("sitecode_")
+    st.session_state.pop("site_code_mappings_modified", None)
     st.session_state["naming_rules"] = load_naming_rules()
     st.session_state["site_code_reset"] = True
     st.rerun()
@@ -495,7 +518,8 @@ def _save_presets(rules: dict) -> None:
     st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
     # Clear all preset widget input keys while safely preserving group selections and system flags
     _clear_session_state_prefixes("device_pre_", "interface_pre_", "host_", "vm_", "esxi_network_pre_",
-        "vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_name_", "vlan_pre_pat_", "vlan_pre_desc_"
+        "vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_name_", "vlan_pre_pat_", "vlan_pre_desc_",
+        "vlan_pre_new_vid", "vlan_pre_new_role", "vlan_pre_new_name", "vlan_pre_new_pat"
     )
     st.rerun()
 
@@ -1047,7 +1071,7 @@ VLAND_MAPPINGS_COLS = [3.2, 4.8, 1.0]
 
 
 def _render_vlan_description_mappings_editor(rules: dict) -> None:
-    with st.expander("🏷️ VLAN Description Mappings (Role → Description)", expanded=False):
+    with st.expander("🏷️ VLAN Description Mappings (Role → Description)", expanded=True):
         if st.session_state.pop("vlan_desc_mappings_saved", False):
             st.success("✅ VLAN Description mappings saved & applied!")
 
