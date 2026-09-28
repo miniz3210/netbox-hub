@@ -156,6 +156,31 @@ DEFAULT_VLAN_PRESETS = {
     ]
 }
 
+DEFAULT_IPAM_ROLE_MAPPINGS = {
+    "guest": "Guests",
+    "guests": "Guests",
+    "corp wifi": "Corporate WiFi",
+    "corporate wifi": "Corporate WiFi",
+    "corp_wifi": "Corporate WiFi",
+    "workstation": "Workstations",
+    "workstations": "Workstations",
+    "mobile": "Mobiles",
+    "mobiles": "Mobiles",
+    "printer": "Printers",
+    "printers": "Printers",
+    "mgmt": "Management",
+    "management": "Management",
+    "av": "Audio Visual",
+    "audiovisual": "Audio Visual",
+    "audio visual": "Audio Visual",
+}
+
+def get_ipam_role_mappings(rules: dict) -> dict:
+    raw = rules.get("ipam_role_mappings")
+    if isinstance(raw, dict) and raw:
+        return {str(k).strip(): str(v).strip() for k, v in raw.items()}
+    return dict(DEFAULT_IPAM_ROLE_MAPPINGS)
+
 DEFAULT_VLAN_DESCRIPTION_MAPPINGS = {
     "Corporate WiFi": "VIN_Corp",
     "Workstations": "Wired Workstations",
@@ -449,6 +474,9 @@ def _normalize_rules(raw: dict) -> dict:
 
     if isinstance(raw.get("vlan_description_mappings"), dict):
         merged["vlan_description_mappings"] = raw["vlan_description_mappings"]
+
+    if isinstance(raw.get("ipam_role_mappings"), dict):
+        merged["ipam_role_mappings"] = raw["ipam_role_mappings"]
 
     if isinstance(raw.get("token_order"), dict):
         normalized_to = {}

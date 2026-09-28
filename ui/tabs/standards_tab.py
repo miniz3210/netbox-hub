@@ -13,6 +13,7 @@ from config.naming_rules import (
     get_esxi_network_presets,
     default_presets_for, DEFAULT_PRESET_KEY_FIELD, DEFAULT_NAMING_PATTERNS,
     DEFAULT_RULES, DEFAULT_VLAN_PRESETS, DEFAULT_VLAN_DESCRIPTION_MAPPINGS,
+    get_ipam_role_mappings, DEFAULT_IPAM_ROLE_MAPPINGS,
 )
 from core.naming_engine import generate_naming_pattern, generate_autocorrect_rule
 from utils.formatters import (
@@ -182,6 +183,8 @@ def _render_auto_correction_manager(active_model: str) -> None:
     if st.session_state.pop("autocorrect_reset", False):
         st.success("✅ Auto-correction rules reset to defaults!")
 
+    _render_ipam_role_mapping_manager()
+
     rules = load_auto_corrections()
     categories = list(rules.keys())
 
@@ -328,6 +331,129 @@ def _render_auto_correction_manager(active_model: str) -> None:
     _render_site_code_mapping_manager()
 
     st.markdown("---")
+
+
+def _render_ipam_role_mapping_manager() -> None:
+    with st.expander("🏷️ IPAM Role Mapping Rules (Alias to Canonical Role)", expanded=False):
+        if st.session_state.pop("ipam_role_saved", False):
+            st.success("✅ IPAM role mapping rules saved & applied!")
+        if st.session_state.pop("ipam_role_reset", False):
+            st.success("✅ IPAM role mapping rules reset to defaults!")
+
+        rules = load_naming_rules()
+        mappings = dict(get_ipam_role_mappings(rules))
+
+        st.caption(
+            "Map role aliases to their canonical role name. Each alias is compared "
+            "case-insensitively and resolves to the canonical role, which is also used "
+            "as the canonical form for the VLAN description lookup in the IPAM tab."
+        )
+
+        m_col_p, m_col_r, m_col_del = st.columns([4.0, 3.5, 1.0], vertical_alignment="center")
+        with m_col_p:
+            st.markdown("**Alias**")
+        with m_col_r:
+            st.markdown("**Canonical Role**")
+        with m_col_del:
+            pass
+
+        items = list(mappings.items())
+        updated = {}
+        pending_delete = None
+        for idx, (alias, canon) in enumerate(items):
+            col_p, col_r, col_del = st.columns([4.0, 3.5, 1.0], vertical_alignment="center")
+            with col_p:
+                na = st.text_input(
+                    "Alias", value=alias, key=f"ipamrole_{idx}_a",
+                    label_visibility="collapsed",
+                )
+            with col_r:
+                nc = st.text_input(
+                    "Canonical Role", value=canon, key=f"ipamrole_{idx}_r",
+                    label_visibility="collapsed",
+                )
+            with col_del:
+                if _render_centered_del_btn(f"ipamrole_{idx}_del", "Delete this mapping"):
+                    pending_delete = idx
+
+            if pending_delete == idx:
+                key_to_del = alias.strip().lower()
+                if key_to_del in mappings:
+                    del mappings[key_to_del]
+                final = dict(rules)
+                final["ipam_role_mappings"] = dict(mappings)
+                _persist_ipam_role_mappings(final)
+                return
+            k = na.strip().lower()
+            if k:
+                updated[k] = nc.strip()
+
+        col_save, col_reset = st.columns([1.2, 1.0])
+        with col_save:
+            if st.button("💾 Save & Apply Changes", key="ipamrole_save", type="primary", width='stretch'):
+                final = dict(rules)
+                final["ipam_role_mappings"] = updated
+                _persist_ipam_role_mappings(final)
+        with col_reset:
+            if st.button("🔄 Reset to Defaults", key="ipamrole_reset", width='stretch'):
+                _reset_ipam_role_mappings()
+
+        col_alias, col_canon, col_add = st.columns([4.0, 3.5, 1.0], vertical_alignment="center")
+        with col_alias:
+            new_alias = st.text_input(
+                "New Alias", value="", key="ipamrole_new_alias",
+                placeholder="e.g. corp wifi", label_visibility="collapsed",
+            )
+        with col_canon:
+            new_canon = st.text_input(
+                "New Canonical Role", value="", key="ipamrole_new_canon",
+                placeholder="e.g. Corporate WiFi", label_visibility="collapsed",
+            )
+        with col_add:
+            if st.button("➕ Add", key="ipamrole_add", width='stretch', help="Add new mapping"):
+                if new_alias.strip() and new_canon.strip():
+                    final = dict(rules)
+                    final["ipam_role_mappings"] = dict(updated)
+                    final["ipam_role_mappings"][new_alias.strip().lower()] = new_canon.strip()
+                    _clear_session_state_prefixes("ipamrole_new_alias", "ipamrole_new_canon")
+                    _persist_ipam_role_mappings(final)
+                else:
+                    st.warning("⚠️ Enter both an alias and a canonical role to add.")
+
+
+def _persist_ipam_role_mappings(rules: dict) -> None:
+    from config.naming_rules import compute_delta, add_to_history
+
+    old_rules = load_naming_rules()
+    save_naming_rules(rules, source="IPAM Role Mapping Rules: Management UI")
+    delta = compute_delta(old_rules, rules)
+    if not delta:
+        delta = {"ipam_role_mappings": {"old": dict(old_rules.get("ipam_role_mappings") or {}),
+                                      "new": dict(rules.get("ipam_role_mappings") or {})}}
+    add_to_history(delta, source="IPAM Role Mapping Rules: Management UI")
+    st.session_state["naming_rules"] = load_naming_rules()
+    st.session_state["ipam_role_saved"] = True
+    st.rerun()
+
+
+def _reset_ipam_role_mappings() -> None:
+    from config.naming_rules import compute_delta
+
+    old_rules = load_naming_rules()
+    new_rules = dict(old_rules)
+    new_rules["ipam_role_mappings"] = dict(DEFAULT_IPAM_ROLE_MAPPINGS)
+    save_naming_rules(new_rules, source="IPAM Role Mapping Rules: Reset to Defaults")
+    delta = compute_delta(old_rules, new_rules)
+    if not delta:
+        delta = {"ipam_role_mappings": {
+            "old": dict(old_rules.get("ipam_role_mappings") or {}),
+            "new": dict(DEFAULT_IPAM_ROLE_MAPPINGS),
+        }}
+    add_to_history(delta, source="IPAM Role Mapping Rules: Reset to Defaults")
+    _clear_session_state_prefixes("ipamrole_")
+    st.session_state["naming_rules"] = load_naming_rules()
+    st.session_state["ipam_role_reset"] = True
+    st.rerun()
 
 
 def _render_site_code_mapping_manager() -> None:
@@ -728,20 +854,6 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
         final_presets = list(updated)
         final_patterns = dict(patterns)
         final_patterns.update(patterns_updates)
-        if new_code and new_tpl:
-            nkey = make_preset_key(new_code, prefix)
-            while nkey in final_patterns and nkey not in [p["pattern_key"] for p in final_presets]:
-                nkey = f"{nkey}_x"
-            final_patterns[nkey] = new_tpl
-            final_presets.append({
-                "code": new_code,
-                "label": new_lbl or new_code,
-                "pattern_key": nkey,
-                "description": "",
-            })
-        elif new_code and not new_tpl:
-            st.error("⚠️ Provide a Pattern Template to add a new preset.")
-            return
         if not final_presets:
             st.error("⚠️ At least one preset is required.")
             return
@@ -979,20 +1091,6 @@ def _host_editor(rules: dict) -> None:
     if saved:
         final_presets = list(updated)
         final_patterns = {**patterns, **patterns_updates}
-        if new_code and new_tpl:
-            nkey = make_preset_key(new_code, "host_vm")
-            while nkey in final_patterns and nkey not in [p["pattern_key"] for p in final_presets]:
-                nkey = f"{nkey}_x"
-            final_patterns[nkey] = new_tpl
-            final_presets.append({
-                "code": new_code,
-                "label": new_lbl or new_code,
-                "pattern_key": nkey,
-                "description": "",
-            })
-        elif new_code and not new_tpl:
-            st.error("⚠️ Provide a Pattern Template to add a new preset.")
-            return
         rules["naming_patterns"] = final_patterns
         rules["host_vm_presets"] = final_presets + vm_presets
         _save_presets(rules)
@@ -1134,16 +1232,7 @@ def _vm_editor(rules: dict) -> None:
 
     if saved:
         final = list(updated)
-        if new_code:
-            if new_tpl:
-                patterns["vm_host"] = new_tpl
-            final.append({
-                "code": new_code.lower(),
-                "label": new_label or new_code,
-                "pattern_key": "vm_host",
-                "description": "",
-            })
-        elif not updated and not new_code:
+        if not updated:
             st.warning("⚠️ At least one preset must remain.")
         patterns["vm_host"] = tpl or "<country><site><role><seq>"
         rules["naming_patterns"] = patterns
@@ -1468,34 +1557,13 @@ def _vlan_presets_editor(rules: dict) -> None:
                 st.error("⚠️ Provide a name for the new preset group.")
                 return
             group_key = new_group_name.strip()
-            try:
-                new_vid_int = int(new_vid) if new_vid else None
-            except (ValueError, TypeError):
-                new_vid_int = None
-            if new_role or new_vid:
-                vlan_presets[group_key] = [{
-                    "vid": new_vid_int,
-                    "role": new_role,
-                    "vlan_name": new_name or new_role,
-                    "pattern_template": new_tpl,
-                }]
-            else:
-                st.error("⚠️ Enter at least a Role or VID for the first entry.")
+            if not updated:
+                st.error("⚠️ At least one VLAN entry is required.")
                 return
+            vlan_presets[group_key] = updated
         else:
             if group_name is None:
                 return
-            if new_role or new_vid:
-                try:
-                    new_vid_int = int(new_vid) if new_vid else None
-                except (ValueError, TypeError):
-                    new_vid_int = None
-                updated.append({
-                    "vid": new_vid_int,
-                    "role": new_role,
-                    "vlan_name": new_name or new_role,
-                    "pattern_template": new_tpl,
-                })
             if not updated:
                 st.error("⚠️ At least one VLAN entry is required.")
                 return

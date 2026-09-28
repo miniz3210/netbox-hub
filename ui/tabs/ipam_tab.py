@@ -6,7 +6,7 @@ from typing import Dict, List
 import streamlit as st
 import pandas as pd
 import openpyxl
-from config.naming_rules import load_naming_rules, get_vlan_presets, get_vlan_description_mappings
+from config.naming_rules import load_naming_rules, get_vlan_presets, get_vlan_description_mappings, get_ipam_role_mappings
 from core.ipam_engine import (
     compute_chained_rows,
     slugify,
@@ -143,7 +143,7 @@ def handle_ipam_db_reset():
     st.toast("🗑️ Database Cleared. Restored default templates.", icon="🧹")
 
 
-def build_vlan_description(site_name: str, role: str, vlan_id, vlan_name: str = "", vlan_presets=None, vlan_desc_mappings=None) -> str:
+def build_vlan_description(site_name: str, role: str, vlan_id, vlan_name: str = "", vlan_presets=None, vlan_desc_mappings=None, role_mappings=None) -> str:
     """Resolve the 'VLAN Description' tag from the dynamic Role -> Description
     mappings configured in the Standards Tab.
 
@@ -154,7 +154,7 @@ def build_vlan_description(site_name: str, role: str, vlan_id, vlan_name: str = 
     clean_role = str(role or "").strip()
     if vlan_presets is None:
         vlan_presets = get_vlan_presets(load_naming_rules())
-    return resolve_vlan_description(vlan_id, clean_role, vlan_presets, vlan_desc_mappings)
+    return resolve_vlan_description(vlan_id, clean_role, vlan_presets, vlan_desc_mappings, role_mappings)
 
 def load_ipam_records_from_db(site_name: str) -> bool:
     """Load IPAM allocation rows for a site straight from the local database.
@@ -285,6 +285,7 @@ def on_preset_change():
     rules = load_naming_rules()
     dynamic_presets = get_vlan_presets(rules)
     vlan_desc_mappings = get_vlan_description_mappings(rules)
+    role_mappings = get_ipam_role_mappings(rules)
     template_list = dynamic_presets.get(selected, [])
     
     if "ipam_data_editor_live" in st.session_state:
@@ -300,7 +301,7 @@ def on_preset_change():
             vid = t["vid"]
             vlan_name = t.get("vlan_name", role_name)
             pattern_template = t.get("pattern_template", "")
-            desc = resolve_vlan_description(vid, role_name, dynamic_presets, vlan_desc_mappings)
+            desc = resolve_vlan_description(vid, role_name, dynamic_presets, vlan_desc_mappings, role_mappings)
             new_rows.append({
                 "VLAN ID": vid,
                 "Role": role_name,
@@ -585,6 +586,7 @@ def render_ipam_tab(active_model: str):
     # presets loaded here (no hardcoded lookup dictionaries).
     active_vlan_presets = get_vlan_presets(rules)
     vlan_desc_mappings = get_vlan_description_mappings(rules)
+    role_mappings = get_ipam_role_mappings(rules)
     
     deleted_indices = set(editor_state.get("deleted_rows", []))
     if deleted_indices:
@@ -608,7 +610,7 @@ def render_ipam_tab(active_model: str):
             if "Role" in changes:
                 # Auto-correct the role to its canonical casing, e.g. "guest" /
                 # "Guest" -> "Guests", "corp wifi" -> "Corporate WiFi".
-                changes["Role"] = normalize_role_name(changes["Role"])
+                changes["Role"] = normalize_role_name(changes["Role"], role_mappings)
                 if "VLAN Name" not in changes:
                     changes["VLAN Name"] = changes["Role"]
             if (
@@ -620,7 +622,7 @@ def render_ipam_tab(active_model: str):
                 next_vlan_id = changes.get("VLAN ID", raw_rows[row_idx].get("VLAN ID"))
                 next_vlan_name = changes.get("VLAN Name", raw_rows[row_idx].get("VLAN Name", next_role))
                 changes["VLAN Description"] = build_vlan_description(
-                    site_name, next_role, next_vlan_id, next_vlan_name, active_vlan_presets, vlan_desc_mappings
+                    site_name, next_role, next_vlan_id, next_vlan_name, active_vlan_presets, vlan_desc_mappings, role_mappings
                 )
             raw_rows[row_idx].update(changes)
 
@@ -632,11 +634,11 @@ def render_ipam_tab(active_model: str):
             vlan_desc = typed_desc
             manual_flag = True
         else:
-            vlan_desc = resolve_vlan_description(new_vid, r_name, active_vlan_presets, vlan_desc_mappings)
+            vlan_desc = resolve_vlan_description(new_vid, r_name, active_vlan_presets, vlan_desc_mappings, role_mappings)
             manual_flag = False
         raw_rows.append({
             "VLAN ID": new_vid,
-            "Role": normalize_role_name(r_name) or to_title_case_preserve_acronyms(r_name),
+            "Role": normalize_role_name(r_name, role_mappings) or to_title_case_preserve_acronyms(r_name),
             "VLAN Name": new_r.get("VLAN Name", r_name),
             "VLAN Description": vlan_desc,
             "_vlan_desc_manual": manual_flag,

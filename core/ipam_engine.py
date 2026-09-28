@@ -27,46 +27,30 @@ ROLE_TO_DESC_MAP = {
     "backup / recovery": "Backup",
 }
 
-# Canonical role-name aliases. Every key is compared case-insensitively
-# (after stripping) and resolves to the standard casing below, which is also
-# the canonical form used as a lookup key in ``vlan_description_mappings``.
-ROLE_ALIASES = {
-    "guest": "Guests",
-    "guests": "Guests",
-    "corp wifi": "Corporate WiFi",
-    "corporate wifi": "Corporate WiFi",
-    "corp_wifi": "Corporate WiFi",
-    "workstation": "Workstations",
-    "workstations": "Workstations",
-    "mobile": "Mobiles",
-    "mobiles": "Mobiles",
-    "printer": "Printers",
-    "printers": "Printers",
-    "mgmt": "Management",
-    "management": "Management",
-    "av": "Audio Visual",
-    "audiovisual": "Audio Visual",
-    "audio visual": "Audio Visual",
-}
+# Canonical role-name aliases removed — now driven by DEFAULT_IPAM_ROLE_MAPPINGS
+# in config/naming_rules.py, loaded via get_ipam_role_mappings().
 
 
-def normalize_role_name(role: str) -> str:
+def normalize_role_name(role: str, role_mappings: dict | None = None) -> str:
     """Normalize a raw role string to its canonical, standard-cased form.
 
     1. Strips leading/trailing whitespace.
-    2. Applies a case-insensitive alias mapping (e.g. "guest"/"guests" ->
-       "Guests", "corp wifi"/"corporate wifi" -> "Corporate WiFi").
+    2. Performs a case-insensitive lookup against ``role_mappings`` (falling back
+       to ``DEFAULT_IPAM_ROLE_MAPPINGS`` when ``None``), e.g. "guest" ->
+       "Guests", "corp wifi" -> "Corporate WiFi".
     3. Otherwise the stripped role is returned as-is.
     """
+    from config.naming_rules import get_ipam_role_mappings
     role = str(role or "").strip()
     if not role:
         return ""
 
-    canonical = ROLE_ALIASES.get(role.lower(), role)
+    mappings = get_ipam_role_mappings({}) if role_mappings is None else role_mappings
+    canonical = mappings.get(role.lower(), role)
     return canonical
 
 
-def resolve_vlan_description(vid, role: str, vlan_presets=None, vlan_desc_mappings=None) -> str:
+def resolve_vlan_description(vid, role: str, vlan_presets=None, vlan_desc_mappings=None, role_mappings: dict | None = None) -> str:
     """Resolve the NetBox 'VLAN Description' tag for a (VID, Role) pair.
 
     Resolution is driven by the dynamic ``vlan_description_mappings`` configured in
@@ -86,7 +70,7 @@ def resolve_vlan_description(vid, role: str, vlan_presets=None, vlan_desc_mappin
     no longer consulted for description resolution — that responsibility now lives
     entirely in ``vlan_desc_mappings``.
     """
-    norm_role = normalize_role_name(role)
+    norm_role = normalize_role_name(role, role_mappings)
     norm_key = norm_role.lower()
 
     if isinstance(vlan_desc_mappings, dict):
