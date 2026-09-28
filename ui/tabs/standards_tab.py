@@ -551,7 +551,7 @@ def _reset_ipam_role_mappings() -> None:
     st.rerun()
 
 
-def _render_site_code_mapping_manager() -> None:
+def _render_site_code_mapping_manager(key_prefix: str = "std_scm") -> None:
     from config.naming_rules import get_site_code_rules
 
     with st.expander("📍 Site Code Mapping Rules (City / Location to Code)", expanded=False):
@@ -584,16 +584,16 @@ def _render_site_code_mapping_manager() -> None:
             col_p, col_r, col_del = st.columns([4.0, 3.5, 1.0], vertical_alignment="center")
             with col_p:
                 np_ = st.text_input(
-                    "Original Pattern", value=pat, key=f"sitecode_{idx}_p",
+                    "Original Pattern", value=pat, key=f"{key_prefix}_sitecode_{idx}_p",
                     label_visibility="collapsed",
                 )
             with col_r:
                 nr_ = st.text_input(
-                    "Replacement", value=code, key=f"sitecode_{idx}_r",
+                    "Replacement", value=code, key=f"{key_prefix}_sitecode_{idx}_r",
                     label_visibility="collapsed",
                 )
             with col_del:
-                if _render_centered_del_btn(f"sitecode_{idx}_del", "Delete this mapping"):
+                if _render_centered_del_btn(f"{key_prefix}_sitecode_{idx}_del", "Delete this mapping"):
                     pending_delete = idx
 
             if pending_delete == idx:
@@ -615,7 +615,7 @@ def _render_site_code_mapping_manager() -> None:
 
         col_save, col_reset = st.columns([1.2, 1.0])
         with col_save:
-            if st.button("💾 Save & Apply Changes", key="sitecode_save", type="primary", width='stretch'):
+            if st.button("💾 Save & Apply Changes", key=f"{key_prefix}_sitecode_save", type="primary", width='stretch'):
                 rules = load_naming_rules()
                 sr = get_site_code_rules(rules)
                 final = dict(rules)
@@ -624,19 +624,19 @@ def _render_site_code_mapping_manager() -> None:
                 _persist_site_code_mappings(final)
                 st.session_state["site_code_mappings_modified"] = dict(updated)
         with col_reset:
-            if st.button("🔄 Reset to Defaults", key="sitecode_reset", width='stretch'):
+            if st.button("🔄 Reset to Defaults", key=f"{key_prefix}_sitecode_reset", width='stretch'):
                 _reset_site_code_mappings()
 
-        with st.form(key="sitecode_add_form", clear_on_submit=True):
+        with st.form(key=f"{key_prefix}_sitecode_add_form", clear_on_submit=True):
             col_city, col_code, col_add = st.columns([4.0, 3.5, 1.0], vertical_alignment="center")
             with col_city:
                 new_p = st.text_input(
-                    "New City / Location", value="", key="sitecode_new_p",
+                    "New City / Location", value="", key=f"{key_prefix}_sitecode_new_p",
                     placeholder="e.g. bristol", label_visibility="collapsed",
                 )
             with col_code:
                 new_code = st.text_input(
-                    "New Site Code", value="", key="sitecode_new_code",
+                    "New Site Code", value="", key=f"{key_prefix}_sitecode_new_code",
                     placeholder="e.g. BRI", label_visibility="collapsed",
                 )
             with col_add:

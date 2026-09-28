@@ -244,12 +244,7 @@
     "Custom / Empty Preset": {
       "vlan_name_pattern": "<role>",
       "prefix_pattern": "<site> <role> -- VLAN <vid>",
-      "items": [
-        {
-          "vid": 5,
-          "role": "Management"
-        }
-      ]
+      "items": []
     }
   },
   "naming_patterns": {
