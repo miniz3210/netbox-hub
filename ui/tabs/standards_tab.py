@@ -1032,9 +1032,9 @@ def _host_editor(rules: dict) -> None:
 
             c_code, c_label, c_pattern, c_actions = st.columns(PRESET_COLS, vertical_alignment="center")
             with c_code:
-                ncode = st.text_input("Code", value=preset.get("code", "ESXi"), key=f"host_{nonce}_{idx}_code", label_visibility="collapsed").strip()
+                ncode = st.text_input("Code", value=preset.get("code") or "ESXi", key=f"host_{nonce}_{idx}_code", label_visibility="collapsed").strip()
             with c_label:
-                nlbl = st.text_input("Label", value=preset.get("label", "ESXi Host"), key=f"host_{nonce}_{idx}_lbl", label_visibility="collapsed").strip()
+                nlbl = st.text_input("Label", value=preset.get("label") or "ESXi Host", key=f"host_{nonce}_{idx}_lbl", label_visibility="collapsed").strip()
             with c_pattern:
                 ntpl = st.text_input("Pattern Template", value=tpl, key=f"host_{nonce}_{idx}_tpl", label_visibility="collapsed").strip()
             with c_actions:
@@ -1677,11 +1677,11 @@ def _vlan_presets_editor(rules: dict) -> None:
             group["items"] = items_added
             group["vlan_name_pattern"] = gnpat
             group["prefix_pattern"] = gppat
-                    rules["vlan_presets"] = dict(vlan_presets)
-                    rules["vlan_presets"][group_name] = group
-                    _clear_session_state_prefixes("vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_pat_")
-                    st.session_state["vlan_presets_saved"] = True
-                    _save_presets(rules)
+            rules["vlan_presets"] = dict(vlan_presets)
+            rules["vlan_presets"][group_name] = group
+            _clear_session_state_prefixes("vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_pat_")
+            st.session_state["vlan_presets_saved"] = True
+            _save_presets(rules)
         else:
             st.warning("⚠️ Enter at least a Role or VID to add.")
         return
