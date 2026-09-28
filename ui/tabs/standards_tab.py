@@ -1190,13 +1190,15 @@ def _vlan_presets_editor(rules: dict) -> None:
             if st.session_state.pop("vlan_pre_min_one", False):
                 st.warning("⚠️ At least one VLAN entry must remain. Delete a different entry first.")
 
-            ca_vid, ca_role, ca_name, ca_pat, ca_act = st.columns(PRESET_VLAN_COLS, vertical_alignment="center")
+            ca_vid, ca_role, ca_name, ca_desc, ca_pat, ca_act = st.columns(PRESET_VLAN_COLS, vertical_alignment="center")
             with ca_vid:
                 new_vid = st.text_input("VID", value="", placeholder="900", key="vlan_pre_new_vid", label_visibility="collapsed").strip()
             with ca_role:
                 new_role = st.text_input("Role", value="", placeholder="IoT", key="vlan_pre_new_role", label_visibility="collapsed").strip()
             with ca_name:
                 new_name = st.text_input("VLAN Name", value="", placeholder="IoT Devices", key="vlan_pre_new_name", label_visibility="collapsed").strip()
+            with ca_desc:
+                new_desc = st.text_input("VLAN Description", value="", placeholder="e.g. VIN_Guest", key=f"vlan_pre_new_desc_{nonce}", label_visibility="collapsed").strip()
             with ca_pat:
                 new_tpl = st.text_input("Pattern Template", value="", placeholder="<site> IoT Devices -- VLAN <vid>", key="vlan_pre_new_pat", label_visibility="collapsed").strip()
             with ca_act:
@@ -1230,6 +1232,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                     "vid": new_vid_int,
                     "role": new_role,
                     "vlan_name": new_name or new_role,
+                    "desc": new_desc,
                     "pattern_template": new_tpl,
                 }]
             else:
@@ -1247,6 +1250,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                     "vid": new_vid_int,
                     "role": new_role,
                     "vlan_name": new_name or new_role,
+                    "desc": new_desc,
                     "pattern_template": new_tpl,
                 })
             if not updated:
