@@ -595,8 +595,7 @@ def _normalize_vlan_group(group_data):
                 continue
             vid = it.get("vid")
             role = str(it.get("role", "")).strip()
-            if vid not in (None, "") or role:
-                normalized_items.append({"vid": vid, "role": role})
+            normalized_items.append({"vid": vid, "role": role})
         return {
             "vlan_name_pattern": vlan_name_pattern,
             "prefix_pattern": prefix_pattern,

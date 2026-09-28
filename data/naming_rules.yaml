@@ -182,7 +182,7 @@
   ],
   "vlan_presets": {
     "Branch Office VLAN Preset": {
-      "vlan_name_pattern": "<role><vid>",
+      "vlan_name_pattern": "<role>",
       "prefix_pattern": "<site> <role> -- VLAN <vid>",
       "items": [
         {
@@ -238,6 +238,16 @@
         {
           "vid": 50,
           "role": "Storage / vSAN"
+        }
+      ]
+    },
+    "Custom / Empty Preset": {
+      "vlan_name_pattern": "<role>",
+      "prefix_pattern": "<site> <role> -- VLAN <vid>",
+      "items": [
+        {
+          "vid": 5,
+          "role": "Management"
         }
       ]
     }

@@ -748,7 +748,7 @@ def _save_presets(rules: dict, section: str = "presets", section_label: str = "P
     st.rerun()
 
 
-def _save_vlan_desc_mappings(rules: dict, section: str = "subnet_vlan", section_label: str = "VLAN Description Mappings") -> None:
+def _save_vlan_desc_mappings(rules: dict, section: str = "vlan_desc_mappings", section_label: str = "VLAN Description Mappings") -> None:
     save_naming_rules(rules, source="VLAN Description Mappings Manager")
     st.session_state["naming_rules"] = rules.copy()
     st.session_state["card_saved_banner"] = {"section": section, "msg": f"✅ {section_label} saved & applied!", "time": time.time()}
@@ -1043,7 +1043,7 @@ def _host_editor(rules: dict) -> None:
         with col_t2:
             st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(host_presets)} presets</span></div>", unsafe_allow_html=True)
         st.caption("Manage physical hypervisor host naming patterns and presets.")
-        _check_and_render_banner("hosts_vms")
+        _check_and_render_banner("hosts")
 
         # Inject dynamic styling to guarantee Action buttons fit cleanly without squeezing
         _inject_preset_table_style()
@@ -1129,7 +1129,7 @@ def _host_editor(rules: dict) -> None:
                     updated[src_pos], updated[dst_pos] = updated[dst_pos], updated[src_pos]
             rules["naming_patterns"] = {**patterns, **patterns_updates}
             rules["host_vm_presets"] = updated + vm_presets
-            _save_presets(rules, section="hosts_vms", section_label="Hosts & Virtual Machines")
+            _save_presets(rules, section="hosts", section_label="Hosts Type Presets")
             return
 
         col_save, col_reset = st.columns(2)
@@ -1168,7 +1168,7 @@ def _host_editor(rules: dict) -> None:
         rules["naming_patterns"] = reset_patterns
         save_naming_rules(rules, source="Hosts Type Presets: Reset to Defaults")
         st.session_state["naming_rules"] = rules.copy()
-        st.session_state["card_saved_banner"] = {"section": "hosts_vms", "msg": "✅ Hosts & Virtual Machines reset to defaults!", "time": time.time()}
+        st.session_state["card_saved_banner"] = {"section": "hosts", "msg": "✅ Hosts Type Presets reset to defaults!", "time": time.time()}
         st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
         st.session_state.pop("host_preset_min_one", None)
         st.session_state.pop("_host_vm_del_idx", None)
@@ -1197,7 +1197,7 @@ def _host_editor(rules: dict) -> None:
         _clear_session_state_prefixes("host_new_code", "host_new_lbl", "host_new_tpl")
         rules["naming_patterns"] = final_patterns
         rules["host_vm_presets"] = final_presets + vm_presets
-        _save_presets(rules, section="hosts_vms", section_label="Hosts & Virtual Machines")
+        _save_presets(rules, section="hosts", section_label="Hosts Type Presets")
         return
 
     if saved:
@@ -1205,7 +1205,7 @@ def _host_editor(rules: dict) -> None:
         final_patterns = {**patterns, **patterns_updates}
         rules["naming_patterns"] = final_patterns
         rules["host_vm_presets"] = final_presets + vm_presets
-        _save_presets(rules, section="hosts_vms", section_label="Hosts & Virtual Machines")
+        _save_presets(rules, section="hosts", section_label="Hosts Type Presets")
 
 
 def _vm_editor(rules: dict) -> None:
@@ -1222,7 +1222,7 @@ def _vm_editor(rules: dict) -> None:
         with col_t2:
             st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(vm_presets)} presets</span></div>", unsafe_allow_html=True)
         st.caption("Manage virtual machine roles (cvi, afs, sani, vlab) and their shared hostname template.")
-        _check_and_render_banner("hosts_vms")
+        _check_and_render_banner("vm_roles")
 
         # Inject dynamic styling to guarantee Action buttons fit cleanly without squeezing
         _inject_preset_table_style()
@@ -1302,7 +1302,7 @@ def _vm_editor(rules: dict) -> None:
             patterns["vm_host"] = tpl
             rules["naming_patterns"] = patterns
             rules["host_vm_presets"] = host_presets + updated
-            _save_presets(rules, section="hosts_vms", section_label="Hosts & Virtual Machines")
+            _save_presets(rules, section="vm_roles", section_label="VM Role Presets")
             return
 
         c_save, c_reset = st.columns(2)
@@ -1335,7 +1335,7 @@ def _vm_editor(rules: dict) -> None:
         rules["naming_patterns"] = vm_patterns
         save_naming_rules(rules, source="VM Presets: Reset to Defaults")
         st.session_state["naming_rules"] = rules.copy()
-        st.session_state["card_saved_banner"] = {"section": "hosts_vms", "msg": "✅ Hosts & Virtual Machines reset to defaults!", "time": time.time()}
+        st.session_state["card_saved_banner"] = {"section": "vm_roles", "msg": "✅ VM Role Presets reset to defaults!", "time": time.time()}
         st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
         _clear_session_state_prefixes("host_", "vm_", "preset_", "host_preset", "vm_preset")
         st.rerun()
@@ -1355,7 +1355,7 @@ def _vm_editor(rules: dict) -> None:
         rules["naming_patterns"] = patterns
         rules["host_vm_presets"] = host_presets + final
         _clear_session_state_prefixes("vm_new_code", "vm_new_lbl", "vm_new_tpl")
-        _save_presets(rules, section="hosts_vms", section_label="Hosts & Virtual Machines")
+        _save_presets(rules, section="vm_roles", section_label="VM Role Presets")
         return
 
     if saved:
@@ -1365,7 +1365,7 @@ def _vm_editor(rules: dict) -> None:
         patterns["vm_host"] = tpl or "<country><site><role><seq>"
         rules["naming_patterns"] = patterns
         rules["host_vm_presets"] = host_presets + final
-        _save_presets(rules, section="hosts_vms", section_label="Hosts & Virtual Machines")
+        _save_presets(rules, section="vm_roles", section_label="VM Role Presets")
 
 
 # Column widths for the VLAN Description Mappings editor: Role, Description, Action.
@@ -1374,7 +1374,7 @@ VLAND_MAPPINGS_COLS = [3.2, 4.8, 1.0]
 
 def _render_vlan_description_mappings_editor(rules: dict) -> None:
     with st.expander("🏷️ VLAN Description Mappings (Role → Description)", expanded=True):
-        _check_and_render_banner("subnet_vlan")
+        _check_and_render_banner("vlan_desc_mappings")
 
         mappings = dict(get_vlan_description_mappings(rules))
 
@@ -1472,7 +1472,7 @@ def _vlan_presets_editor(rules: dict) -> None:
             total_count = sum(len(g.get("items", [])) for g in vlan_presets.values())
             st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{total_count} presets</span></div>", unsafe_allow_html=True)
         st.caption("Manage reusable VLAN allocation groups. Each group has default patterns applied to all its items. VLAN Description tags are configured in the dedicated mappings expander below.")
-        _check_and_render_banner("subnet_vlan")
+        _check_and_render_banner("vlan_presets")
 
         _inject_preset_table_style()
 
@@ -1514,15 +1514,12 @@ def _vlan_presets_editor(rules: dict) -> None:
         if group_name is not None:
             stale_del = st.session_state.pop(_pending_del_key, None)
             if stale_del is not None and 0 <= stale_del < len(items):
-                if len(items) <= 1:
-                    st.session_state["vlan_pre_min_one"] = True
-                else:
                     items = [p for i, p in enumerate(items) if i != stale_del]
                     group["items"] = items
                     rules["vlan_presets"] = dict(vlan_presets)
                     rules["vlan_presets"][group_name] = group
                     _clear_session_state_prefixes("vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_pat_")
-                    _save_presets(rules, section="subnet_vlan", section_label="Subnet & VLAN Allocation Presets")
+                    _save_presets(rules, section="vlan_presets", section_label="VLAN Allocation Presets")
                     return
 
             pending_swap = st.session_state.pop(_pending_swap_key, None)
@@ -1534,7 +1531,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                     rules["vlan_presets"] = dict(vlan_presets)
                     rules["vlan_presets"][group_name] = group
                     _clear_session_state_prefixes("vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_pat_")
-                    _save_presets(rules, section="subnet_vlan", section_label="Subnet & VLAN Allocation Presets")
+                    _save_presets(rules, section="vlan_presets", section_label="VLAN Allocation Presets")
                     return
 
         new_group_name = None
@@ -1569,7 +1566,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                         help="Default template for Prefix Description across all items in this group.",
                     )
 
-        if group_name is not None:
+        if group_name is not None and items:
             h_vid, h_role, h_act = st.columns(PRESET_VLAN_COLS, vertical_alignment="center")
             with h_vid:
                 st.markdown("**VID**")
@@ -1608,10 +1605,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                             st.empty()
                     with col_del:
                         if st.button("🗑️", key=f"vlan_pre_del_{idx}", help="Delete this entry"):
-                            if len(items) <= 1:
-                                st.session_state["vlan_pre_min_one"] = True
-                            else:
-                                st.session_state[_pending_del_key] = idx
+                            st.session_state[_pending_del_key] = idx
                             st.rerun()
 
                 if stale_del == idx:
@@ -1630,6 +1624,9 @@ def _vlan_presets_editor(rules: dict) -> None:
             if st.session_state.pop("vlan_pre_min_one", False):
                 st.warning("⚠️ At least one VLAN entry must remain. Delete a different entry first.")
         # END of the `if group_name is not None` block for headers + editable list.
+
+        if group_name is not None and not items:
+            st.info("ℹ️ No preset VLAN items defined in this group. It will load as a blank table in IPAM, or you can add items below.")
 
         # ── Save / Reset buttons below the list ──────────────────────────────
         col_save, col_reset = st.columns(2)
@@ -1664,7 +1661,7 @@ def _vlan_presets_editor(rules: dict) -> None:
         import copy
         _clear_session_state_prefixes("vlan_pre")
         rules["vlan_presets"] = copy.deepcopy(dict(DEFAULT_VLAN_PRESETS))
-        _save_presets(rules, section="subnet_vlan", section_label="Subnet & VLAN Allocation Presets")
+        _save_presets(rules, section="vlan_presets", section_label="VLAN Allocation Presets")
         return
 
     if group_name is not None and add_vlan:
@@ -1689,7 +1686,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                 rules["vlan_presets"] = vlan_presets
                 st.session_state["vlan_pre_selected_group"] = group_key
                 _clear_session_state_prefixes("vlan_pre_new_vid", "vlan_pre_new_role", "vlan_pre_new_group")
-                _save_presets(rules, section="subnet_vlan", section_label="Subnet & VLAN Allocation Presets")
+                _save_presets(rules, section="vlan_presets", section_label="VLAN Allocation Presets")
             else:
                 st.error("⚠️ Enter at least a Role or VID for the first entry.")
             return
@@ -1708,7 +1705,7 @@ def _vlan_presets_editor(rules: dict) -> None:
             rules["vlan_presets"] = dict(vlan_presets)
             rules["vlan_presets"][group_name] = group
             _clear_session_state_prefixes("vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_pat_")
-            _save_presets(rules, section="subnet_vlan", section_label="Subnet & VLAN Allocation Presets")
+            _save_presets(rules, section="vlan_presets", section_label="VLAN Allocation Presets")
         else:
             st.warning("⚠️ Enter at least a Role or VID to add.")
         return
@@ -1719,9 +1716,6 @@ def _vlan_presets_editor(rules: dict) -> None:
                 st.error("⚠️ Provide a name for the new preset group.")
                 return
             group_key = new_group_name.strip()
-            if not updated:
-                st.error("⚠️ At least one VLAN entry is required.")
-                return
             vlan_presets[group_key] = {
                 "vlan_name_pattern": "<role>",
                 "prefix_pattern": "<site> <role> -- VLAN <vid>",
@@ -1729,9 +1723,6 @@ def _vlan_presets_editor(rules: dict) -> None:
             }
         else:
             if group_name is None:
-                return
-            if not updated:
-                st.error("⚠️ At least one VLAN entry is required.")
                 return
             final_group = dict(group)
             final_group["items"] = updated
@@ -1741,7 +1732,7 @@ def _vlan_presets_editor(rules: dict) -> None:
         rules["vlan_presets"] = vlan_presets
         if is_custom:
             st.session_state["vlan_pre_selected_group"] = new_group_name.strip() if new_group_name and new_group_name.strip() else st.session_state.get("vlan_pre_selected_group")
-        _save_presets(rules, section="subnet_vlan", section_label="Subnet & VLAN Allocation Presets")
+        _save_presets(rules, section="vlan_presets", section_label="VLAN Allocation Presets")
 
     _render_vlan_description_mappings_editor(rules)
 
@@ -1773,7 +1764,6 @@ def render_standards_tab(active_model):
     
     with tab_edit:
         with st.expander("🌐 Subnet & VLAN Allocation Presets", expanded=True):
-            _check_and_render_banner("subnet_vlan")
             _vlan_presets_editor(current_rules)
 
             with st.expander("🔧 Network & Security Devices", expanded=True):
@@ -1789,7 +1779,6 @@ def render_standards_tab(active_model):
                                     section="network_devices", section_label="Network & Security Devices")
 
             with st.expander("🖥️ Hosts & Virtual Machines", expanded=True):
-                _check_and_render_banner("hosts_vms")
                 _host_editor(current_rules)
                 st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
                 _vm_editor(current_rules)
