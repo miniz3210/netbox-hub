@@ -9,9 +9,9 @@ from config.naming_rules import (
     load_history, restore_from_history, clear_history, add_to_history,
     get_pattern_variables, get_naming_patterns, get_custom_patterns,
     get_device_presets, get_interface_presets, get_host_vm_presets,
-    get_esxi_network_presets, get_vlan_presets, make_preset_key,
+    get_vlan_presets, get_vlan_description_mappings, make_preset_key,
     default_presets_for, DEFAULT_PRESET_KEY_FIELD, DEFAULT_NAMING_PATTERNS,
-    DEFAULT_RULES, DEFAULT_VLAN_PRESETS,
+    DEFAULT_RULES, DEFAULT_VLAN_PRESETS, DEFAULT_VLAN_DESCRIPTION_MAPPINGS,
 )
 from core.naming_engine import generate_naming_pattern, generate_autocorrect_rule
 from utils.formatters import (
@@ -24,8 +24,8 @@ from utils.formatters import (
 PRESET_COLS = [1.0, 2.2, 7.5, 1.4]
 # Action cell sub-columns: Up, Down, Delete (equal thirds, right-aligned).
 PRESET_ACTION_COLS = [1, 1, 1]
-# VLAN allocation preset columns: VID, Role, VLAN Name, VLAN Description, Pattern Template, Action.
-PRESET_VLAN_COLS = [0.9, 2.0, 2.0, 2.2, 3.4, 1.4]
+# VLAN allocation preset columns: VID, Role, VLAN Name, Pattern Template, Action.
+PRESET_VLAN_COLS = [0.9, 2.0, 2.0, 3.4, 1.4]
 # Manage Pattern Variables columns: Name, Label, Placeholder, Auto-Fill, Optional, Up, Down, Delete.
 VARIABLE_COLS = [1.5, 2.5, 2.5, 1.5, 0.9, 0.45, 0.45, 0.45]
 # Auto-Correction rule columns: Original Pattern, Replacement, Description, Action.
@@ -493,10 +493,17 @@ def _save_presets(rules: dict) -> None:
     st.session_state["presets_saved"] = True
     st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
     # Clear all preset widget input keys while safely preserving group selections and system flags
-    _clear_session_state_prefixes(
-        "device_pre_", "interface_pre_", "host_", "vm_", "esxi_network_pre_",
-        "vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_name_", "vlan_pre_pat_"
+    _clear_session_state_prefixes("device_pre_", "interface_pre_", "host_", "vm_", "esxi_network_pre_",
+        "vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_name_", "vlan_pre_pat_", "vlan_pre_desc_"
     )
+    st.rerun()
+
+
+def _save_vlan_desc_mappings(rules: dict) -> None:
+    save_naming_rules(rules, source="VLAN Description Mappings Manager")
+    st.session_state["naming_rules"] = rules.copy()
+    st.session_state["vlan_desc_mappings_saved"] = True
+    _clear_session_state_prefixes("vlandesc_")
     st.rerun()
 
 
@@ -1034,6 +1041,95 @@ def _vm_editor(rules: dict) -> None:
         _save_presets(rules)
 
 
+# Column widths for the VLAN Description Mappings editor: Role, Description, Action.
+VLAND_MAPPINGS_COLS = [3.2, 4.8, 1.0]
+
+
+def _render_vlan_description_mappings_editor(rules: dict) -> None:
+    with st.expander("🏷️ VLAN Description Mappings (Role → Description)", expanded=False):
+        if st.session_state.pop("vlan_desc_mappings_saved", False):
+            st.success("✅ VLAN Description mappings saved & applied!")
+
+        mappings = dict(get_vlan_description_mappings(rules))
+
+        st.caption(
+            "Map each VLAN Role to its NetBox VLAN Description tag. When a role "
+            "matches, its mapped value is used; otherwise the Role name itself is "
+            "returned. These mappings are consulted by the IPAM tab's dynamic "
+            "resolution logic."
+        )
+
+        h_role, h_desc, h_del = st.columns(VLAND_MAPPINGS_COLS, vertical_alignment="center")
+        with h_role:
+            st.markdown("**Role**")
+        with h_desc:
+            st.markdown("**VLAN Description**")
+        with h_del:
+            pass
+
+        items = list(mappings.items())
+        updated = {}
+        pending_delete = None
+
+        for idx, (role, desc) in enumerate(items):
+            col_role, col_desc, col_del = st.columns(VLAND_MAPPINGS_COLS, vertical_alignment="center")
+            with col_role:
+                nrole = st.text_input(
+                    "Role", value=role, key=f"vlandesc_{idx}_role",
+                    label_visibility="collapsed",
+                )
+            with col_desc:
+                ndesc = st.text_input(
+                    "VLAN Description", value=desc, key=f"vlandesc_{idx}_desc",
+                    label_visibility="collapsed",
+                )
+            with col_del:
+                if _render_centered_del_btn(f"vlandesc_{idx}_del", "Delete this mapping"):
+                    pending_delete = idx
+
+            if pending_delete == idx:
+                continue
+            role_key = nrole.strip()
+            if role_key:
+                updated[role_key] = ndesc.strip()
+
+        col_save, col_reset = st.columns([1.2, 1.0])
+        with col_save:
+            if st.button("💾 Save Mappings", key="vlandesc_save", type="primary", width='stretch'):
+                if not updated:
+                    st.warning("⚠️ At least one mapping is required.")
+                else:
+                    rules = dict(rules)
+                    rules["vlan_description_mappings"] = updated
+                    _save_vlan_desc_mappings(rules)
+        with col_reset:
+            if st.button("🔄 Reset to Defaults", key="vlandesc_reset", width='stretch'):
+                rules = dict(rules)
+                rules["vlan_description_mappings"] = dict(DEFAULT_VLAN_DESCRIPTION_MAPPINGS)
+                _save_vlan_desc_mappings(rules)
+
+        col_role_new, col_desc_new, col_add = st.columns(VLAND_MAPPINGS_COLS, vertical_alignment="center")
+        with col_role_new:
+            new_role = st.text_input(
+                "New Role", value="", placeholder="e.g. Corporate WiFi",
+                key="vlandesc_new_role", label_visibility="collapsed",
+            )
+        with col_desc_new:
+            new_desc = st.text_input(
+                "New Description", value="", placeholder="e.g. VIN_Corp",
+                key="vlandesc_new_desc", label_visibility="collapsed",
+            )
+        with col_add:
+            if st.button("➕ Add", key="vlandesc_add", width='stretch', help="Add new mapping"):
+                if new_role.strip():
+                    updated[new_role.strip()] = new_desc.strip()
+                    rules = dict(rules)
+                    rules["vlan_description_mappings"] = updated
+                    _save_vlan_desc_mappings(rules)
+                else:
+                    st.warning("⚠️ Enter a Role to add.")
+
+
 def _vlan_presets_editor(rules: dict) -> None:
     vlan_presets = get_vlan_presets(rules)
 
@@ -1044,7 +1140,7 @@ def _vlan_presets_editor(rules: dict) -> None:
         with col_t2:
             total_count = sum(len(items) for items in vlan_presets.values())
             st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{total_count} presets</span></div>", unsafe_allow_html=True)
-        st.caption("Manage reusable VLAN allocation groups. Each row's Pattern Template resolves VLAN descriptions in the IPAM tab.")
+        st.caption("Manage reusable VLAN allocation groups. Each row's Pattern Template resolves VLAN descriptions in the IPAM tab. VLAN Description tags are configured in the dedicated mappings expander below.")
 
         _inject_preset_table_style()
 
@@ -1086,7 +1182,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                     items = [p for i, p in enumerate(items) if i != stale_del]
                     rules["vlan_presets"] = dict(vlan_presets)
                     rules["vlan_presets"][group_name] = items
-                    _clear_session_state_prefixes("vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_name_", "vlan_pre_pat_")
+                    _clear_session_state_prefixes("vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_name_", "vlan_pre_pat_", "vlan_pre_desc_")
                     _save_presets(rules)
                     return
 
@@ -1097,7 +1193,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                     items[src], items[dst] = items[dst], items[src]
                     rules["vlan_presets"] = dict(vlan_presets)
                     rules["vlan_presets"][group_name] = items
-                    _clear_session_state_prefixes("vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_name_", "vlan_pre_pat_")
+                    _clear_session_state_prefixes("vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_name_", "vlan_pre_pat_", "vlan_pre_desc_")
                     _save_presets(rules)
                     return
 
@@ -1112,15 +1208,13 @@ def _vlan_presets_editor(rules: dict) -> None:
             )
 
         if group_name is not None:
-            h_vid, h_role, h_name, h_desc, h_pat, h_act = st.columns(PRESET_VLAN_COLS, vertical_alignment="center")
+            h_vid, h_role, h_name, h_pat, h_act = st.columns(PRESET_VLAN_COLS, vertical_alignment="center")
             with h_vid:
                 st.markdown("**VID**")
             with h_role:
                 st.markdown("**Role**")
             with h_name:
                 st.markdown("**VLAN Name**")
-            with h_desc:
-                st.markdown("**VLAN Description**")
             with h_pat:
                 st.markdown("**Pattern Template**")
             with h_act:
@@ -1134,18 +1228,15 @@ def _vlan_presets_editor(rules: dict) -> None:
                 vid = p.get("vid", "")
                 role_name = p.get("role", "")
                 vlan_name = p.get("vlan_name", "")
-                desc = p.get("desc", "")
                 tpl = p.get("pattern_template", "")
 
-                c_vid, c_role, c_name, c_desc, c_pat, c_actions = st.columns(PRESET_VLAN_COLS, vertical_alignment="center")
+                c_vid, c_role, c_name, c_pat, c_actions = st.columns(PRESET_VLAN_COLS, vertical_alignment="center")
                 with c_vid:
                     nvid = st.text_input("VID", value=str(vid) if vid not in (None, "") else "", key=f"vlan_pre_vid_{nonce}_{idx}", label_visibility="collapsed").strip()
                 with c_role:
                     nrole = st.text_input("Role", value=str(role_name), key=f"vlan_pre_role_{nonce}_{idx}", label_visibility="collapsed").strip()
                 with c_name:
                     nname = st.text_input("VLAN Name", value=str(vlan_name), key=f"vlan_pre_name_{nonce}_{idx}", label_visibility="collapsed").strip()
-                with c_desc:
-                    ndesc = st.text_input("VLAN Description", value=str(desc), key=f"vlan_pre_desc_{nonce}_{idx}", label_visibility="collapsed", placeholder="e.g. VIN_Guest").strip()
                 with c_pat:
                     ntpl = st.text_input("Pattern Template", value=str(tpl), key=f"vlan_pre_pat_{nonce}_{idx}", label_visibility="collapsed").strip()
                 with c_actions:
@@ -1190,15 +1281,13 @@ def _vlan_presets_editor(rules: dict) -> None:
             if st.session_state.pop("vlan_pre_min_one", False):
                 st.warning("⚠️ At least one VLAN entry must remain. Delete a different entry first.")
 
-            ca_vid, ca_role, ca_name, ca_desc, ca_pat, ca_act = st.columns(PRESET_VLAN_COLS, vertical_alignment="center")
+            ca_vid, ca_role, ca_name, ca_pat, ca_act = st.columns(PRESET_VLAN_COLS, vertical_alignment="center")
             with ca_vid:
                 new_vid = st.text_input("VID", value="", placeholder="900", key="vlan_pre_new_vid", label_visibility="collapsed").strip()
             with ca_role:
                 new_role = st.text_input("Role", value="", placeholder="IoT", key="vlan_pre_new_role", label_visibility="collapsed").strip()
             with ca_name:
                 new_name = st.text_input("VLAN Name", value="", placeholder="IoT Devices", key="vlan_pre_new_name", label_visibility="collapsed").strip()
-            with ca_desc:
-                new_desc = st.text_input("VLAN Description", value="", placeholder="e.g. VIN_Guest", key=f"vlan_pre_new_desc_{nonce}", label_visibility="collapsed").strip()
             with ca_pat:
                 new_tpl = st.text_input("Pattern Template", value="", placeholder="<site> IoT Devices -- VLAN <vid>", key="vlan_pre_new_pat", label_visibility="collapsed").strip()
             with ca_act:
@@ -1232,7 +1321,6 @@ def _vlan_presets_editor(rules: dict) -> None:
                     "vid": new_vid_int,
                     "role": new_role,
                     "vlan_name": new_name or new_role,
-                    "desc": new_desc,
                     "pattern_template": new_tpl,
                 }]
             else:
@@ -1250,7 +1338,6 @@ def _vlan_presets_editor(rules: dict) -> None:
                     "vid": new_vid_int,
                     "role": new_role,
                     "vlan_name": new_name or new_role,
-                    "desc": new_desc,
                     "pattern_template": new_tpl,
                 })
             if not updated:
@@ -1309,6 +1396,8 @@ def render_standards_tab(active_model):
     with tab_edit:
         with st.expander("🌐 Subnet & VLAN Allocation Presets", expanded=True):
             _vlan_presets_editor(current_rules)
+
+        _render_vlan_description_mappings_editor(current_rules)
 
         with st.expander("🔧 Network & Security Devices", expanded=True):
             _preset_type_editor("device", get_device_presets(current_rules), current_rules, prefix="branch",

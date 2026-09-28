@@ -27,69 +27,36 @@ ROLE_TO_DESC_MAP = {
     "backup / recovery": "Backup",
 }
 
-def _normalize_vid(vid) -> Optional[int]:
-    if vid in (None, ""):
-        return None
-    try:
-        return int(str(vid).strip())
-    except (TypeError, ValueError):
-        return None
 
-def _iter_preset_rows(vlan_presets):
-    """Yield every preset row across all preset groups.
-
-    ``vlan_presets`` is the dynamic ``get_vlan_presets(rules)`` mapping of
-    ``group_name -> [ {vid, role, vlan_name, desc, pattern_template}, ... ]``.
-    A flat list of rows is also accepted for convenience.
-    """
-    if isinstance(vlan_presets, dict):
-        for items in vlan_presets.values():
-            if isinstance(items, list):
-                for row in items:
-                    if isinstance(row, dict):
-                        yield row
-    elif isinstance(vlan_presets, list):
-        for row in vlan_presets:
-            if isinstance(row, dict):
-                yield row
-
-def resolve_vlan_description(vid, role: str, vlan_presets=None) -> str:
+def resolve_vlan_description(vid, role: str, vlan_presets=None, vlan_desc_mappings=None) -> str:
     """Resolve the NetBox 'VLAN Description' tag for a (VID, Role) pair.
 
-    Resolution is driven entirely by the dynamic VLAN Presets configured in the
-    Standards Tab; there are no hardcoded lookup dictionaries.
+    Resolution is driven by the dynamic ``vlan_description_mappings`` configured in
+    the Standards Tab (Role -> Description). There are no hardcoded lookup
+    dictionaries in this function.
 
     Resolution order:
-      1. Match a preset row by exact ``(VID, Role)``; if it defines a non-blank
-         ``desc``, use that value (e.g. "VIN_Corp", "VIN_Guest").
-      2. Match a preset row by ``Role`` alone; if it defines a non-blank
-         ``desc``, use that value.
-      3. Fallback directly to the ``Role`` name itself (e.g. "Guests",
-         "CustomLab"). Returns "" only when no role is supplied.
+      1. Check ``vlan_desc_mappings`` (Role -> Description). If a
+         case-insensitive match exists and the mapped value is non-blank,
+         return it (e.g. "Guests" -> "VIN_Guest").
+      2. Fallback directly to the ``Role`` name itself (e.g. "CustomLab").
+         Returns "" only when no role is supplied.
+
+    The ``vlan_presets`` argument is retained for backward compatibility but is
+    no longer consulted for description resolution — that responsibility now lives
+    entirely in ``vlan_desc_mappings``.
     """
-    norm_vid = _normalize_vid(vid)
-    norm_role = str(role or "").strip().lower()
+    norm_role = str(role or "").strip()
+    norm_key = norm_role.lower()
 
-    vid_role_match = ""
-    role_match = ""
-    for row in _iter_preset_rows(vlan_presets):
-        row_role = str(row.get("role", "")).strip().lower()
-        if not row_role or row_role != norm_role:
-            continue
-        row_desc = str(row.get("desc", "")).strip()
-        row_vid = _normalize_vid(row.get("vid"))
-        if norm_vid is not None and row_vid == norm_vid and row_desc:
-            vid_role_match = row_desc
-            break
-        if row_desc and not role_match:
-            role_match = row_desc
+    if isinstance(vlan_desc_mappings, dict):
+        for k, v in vlan_desc_mappings.items():
+            if str(k).strip().lower() == norm_key:
+                mapped = str(v).strip()
+                if mapped:
+                    return mapped
 
-    if vid_role_match:
-        return vid_role_match
-    if role_match:
-        return role_match
-
-    return str(role or "").strip()
+    return norm_role
 
 def lookup_role_description(role_str: str) -> str:
     """1. Queries the SQLite DB for description. 2. Falls back to dictionary."""

@@ -6,7 +6,7 @@ from typing import Dict, List
 import streamlit as st
 import pandas as pd
 import openpyxl
-from config.naming_rules import load_naming_rules, get_vlan_presets
+from config.naming_rules import load_naming_rules, get_vlan_presets, get_vlan_description_mappings
 from core.ipam_engine import (
     compute_chained_rows,
     slugify,
@@ -142,17 +142,18 @@ def handle_ipam_db_reset():
     st.toast("🗑️ Database Cleared. Restored default templates.", icon="🧹")
 
 
-def build_vlan_description(site_name: str, role: str, vlan_id, vlan_name: str = "", vlan_presets=None) -> str:
-    """Resolve the 'VLAN Description' tag from the dynamic VLAN Presets.
+def build_vlan_description(site_name: str, role: str, vlan_id, vlan_name: str = "", vlan_presets=None, vlan_desc_mappings=None) -> str:
+    """Resolve the 'VLAN Description' tag from the dynamic Role -> Description
+    mappings configured in the Standards Tab.
 
-    Looks up the (VID, Role)/Role against the loaded Standards Tab presets and
-    falls back to the Role name itself when no matching preset description is
-    found. There are no hardcoded lookup dictionaries.
+    Looks up the role against ``vlan_desc_mappings``; if a match exists its
+    mapped value is returned (e.g. "Guests" -> "VIN_Guest"). Otherwise the
+    Role name itself is returned. There are no hardcoded lookup dictionaries.
     """
     clean_role = str(role or "").strip()
     if vlan_presets is None:
         vlan_presets = get_vlan_presets(load_naming_rules())
-    return resolve_vlan_description(vlan_id, clean_role, vlan_presets)
+    return resolve_vlan_description(vlan_id, clean_role, vlan_presets, vlan_desc_mappings)
 
 def load_ipam_records_from_db(site_name: str) -> bool:
     """Load IPAM allocation rows for a site straight from the local database.
@@ -282,6 +283,7 @@ def on_preset_change():
     st.session_state["ipam_loaded_site"] = None
     rules = load_naming_rules()
     dynamic_presets = get_vlan_presets(rules)
+    vlan_desc_mappings = get_vlan_description_mappings(rules)
     template_list = dynamic_presets.get(selected, [])
     
     if "ipam_data_editor_live" in st.session_state:
@@ -297,14 +299,7 @@ def on_preset_change():
             vid = t["vid"]
             vlan_name = t.get("vlan_name", role_name)
             pattern_template = t.get("pattern_template", "")
-            # VLAN Description: prefer the preset's own explicit description, then
-            # resolve dynamically against the loaded presets (which falls back to
-            # the Role name). No hardcoded dictionaries are involved.
-            explicit_desc = str(t.get("desc", "") or "").strip()
-            if explicit_desc:
-                desc = explicit_desc
-            else:
-                desc = resolve_vlan_description(vid, role_name, dynamic_presets)
+            desc = resolve_vlan_description(vid, role_name, dynamic_presets, vlan_desc_mappings)
             new_rows.append({
                 "VLAN ID": vid,
                 "Role": role_name,
@@ -588,6 +583,7 @@ def render_ipam_tab(active_model: str):
     # VLAN Description resolution is driven purely by the dynamic Standards Tab
     # presets loaded here (no hardcoded lookup dictionaries).
     active_vlan_presets = get_vlan_presets(rules)
+    vlan_desc_mappings = get_vlan_description_mappings(rules)
     
     deleted_indices = set(editor_state.get("deleted_rows", []))
     if deleted_indices:
@@ -619,7 +615,7 @@ def render_ipam_tab(active_model: str):
                 next_vlan_id = changes.get("VLAN ID", raw_rows[row_idx].get("VLAN ID"))
                 next_vlan_name = changes.get("VLAN Name", raw_rows[row_idx].get("VLAN Name", next_role))
                 changes["VLAN Description"] = build_vlan_description(
-                    site_name, next_role, next_vlan_id, next_vlan_name, active_vlan_presets
+                    site_name, next_role, next_vlan_id, next_vlan_name, active_vlan_presets, vlan_desc_mappings
                 )
             # Apply Title Case formatting to Role only. The VLAN Description is a
             # literal NetBox tag (e.g. "VIN_Corp") and must be preserved verbatim.
@@ -635,7 +631,7 @@ def render_ipam_tab(active_model: str):
             vlan_desc = typed_desc
             manual_flag = True
         else:
-            vlan_desc = resolve_vlan_description(new_vid, r_name, active_vlan_presets)
+            vlan_desc = resolve_vlan_description(new_vid, r_name, active_vlan_presets, vlan_desc_mappings)
             manual_flag = False
         raw_rows.append({
             "VLAN ID": new_vid,
