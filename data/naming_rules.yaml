@@ -509,7 +509,8 @@
     "Guests": "VIN_Guest",
     "Audio Visual": "AV equipment",
     "Mobiles": "VIN_Mobi",
-    "cctv": "Surveillance"
+    "cctv": "Surveillance",
+    "iot": "IoT Device"
   },
   "token_order": {
     "esxi_vmkernel_name": [

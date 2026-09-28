@@ -1272,7 +1272,6 @@ def _render_vlan_description_mappings_editor(rules: dict) -> None:
 
         items = list(mappings.items())
         updated = {}
-        pending_delete = None
 
         for idx, (role, desc) in enumerate(items):
             col_role, col_desc, col_del = st.columns(VLAND_MAPPINGS_COLS, vertical_alignment="center")
@@ -1288,10 +1287,12 @@ def _render_vlan_description_mappings_editor(rules: dict) -> None:
                 )
             with col_del:
                 if _render_centered_del_btn(f"vlandesc_{idx}_del", "Delete this mapping"):
-                    pending_delete = idx
+                    new_mappings = {r: d for i, (r, d) in enumerate(items) if i != idx}
+                    rules_to_save = dict(rules)
+                    rules_to_save["vlan_description_mappings"] = new_mappings
+                    _save_vlan_desc_mappings(rules_to_save)
+                    return
 
-            if pending_delete == idx:
-                continue
             role_key = nrole.strip()
             if role_key:
                 updated[role_key] = ndesc.strip()
@@ -1311,24 +1312,27 @@ def _render_vlan_description_mappings_editor(rules: dict) -> None:
                 rules["vlan_description_mappings"] = dict(DEFAULT_VLAN_DESCRIPTION_MAPPINGS)
                 _save_vlan_desc_mappings(rules)
 
-        col_role_new, col_desc_new, col_add = st.columns(VLAND_MAPPINGS_COLS, vertical_alignment="center")
-        with col_role_new:
-            new_role = st.text_input(
-                "New Role", value="", placeholder="e.g. Corporate WiFi",
-                key="vlandesc_new_role", label_visibility="collapsed",
-            )
-        with col_desc_new:
-            new_desc = st.text_input(
-                "New Description", value="", placeholder="e.g. VIN_Corp",
-                key="vlandesc_new_desc", label_visibility="collapsed",
-            )
-        with col_add:
-            if st.button("➕ Add", key="vlandesc_add", width='stretch', help="Add new mapping"):
+        with st.form(key="vlandesc_add_form", clear_on_submit=True):
+            col_role_new, col_desc_new, col_add = st.columns(VLAND_MAPPINGS_COLS, vertical_alignment="center")
+            with col_role_new:
+                new_role = st.text_input(
+                    "New Role", value="", placeholder="e.g. Corporate WiFi",
+                    key="vlandesc_new_role", label_visibility="collapsed",
+                )
+            with col_desc_new:
+                new_desc = st.text_input(
+                    "New Description", value="", placeholder="e.g. VIN_Corp",
+                    key="vlandesc_new_desc", label_visibility="collapsed",
+                )
+            with col_add:
+                add_submitted = st.form_submit_button("➕ Add", width='stretch', help="Add new mapping")
+
+            if add_submitted:
                 if new_role.strip():
-                    updated[new_role.strip()] = new_desc.strip()
                     rules = dict(rules)
-                    rules["vlan_description_mappings"] = updated
-                    _clear_session_state_prefixes("vlandesc_new_role", "vlandesc_new_desc")
+                    final_mappings = dict(updated)
+                    final_mappings[new_role.strip()] = new_desc.strip()
+                    rules["vlan_description_mappings"] = final_mappings
                     _save_vlan_desc_mappings(rules)
                 else:
                     st.warning("⚠️ Enter a Role to add.")
