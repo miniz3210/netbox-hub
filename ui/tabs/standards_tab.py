@@ -183,7 +183,7 @@ def _render_auto_correction_manager(active_model: str) -> None:
     if st.session_state.pop("autocorrect_reset", False):
         st.success("✅ Auto-correction rules reset to defaults!")
 
-    _render_ipam_role_mapping_manager()
+    _render_ipam_role_mapping_manager(active_model)
 
     rules = load_auto_corrections()
     categories = list(rules.keys())
@@ -333,92 +333,144 @@ def _render_auto_correction_manager(active_model: str) -> None:
     st.markdown("---")
 
 
-def _render_ipam_role_mapping_manager() -> None:
+def _render_ipam_role_mapping_manager(active_model: str) -> None:
+    if st.session_state.pop("ipam_role_saved", False):
+        st.success("✅ IPAM role mapping rules saved & applied!")
+    if st.session_state.pop("ipam_role_reset", False):
+        st.success("✅ IPAM role mapping rules reset to defaults!")
+
+    rules = load_naming_rules()
+    role_rules = list(get_ipam_role_mappings(rules))
+
     with st.expander("🏷️ IPAM Role Mapping Rules (Alias to Canonical Role)", expanded=False):
-        if st.session_state.pop("ipam_role_saved", False):
-            st.success("✅ IPAM role mapping rules saved & applied!")
-        if st.session_state.pop("ipam_role_reset", False):
-            st.success("✅ IPAM role mapping rules reset to defaults!")
-
-        rules = load_naming_rules()
-        mappings = dict(get_ipam_role_mappings(rules))
-
         st.caption(
-            "Map role aliases to their canonical role name. Each alias is compared "
-            "case-insensitively and resolves to the canonical role, which is also used "
-            "as the canonical form for the VLAN description lookup in the IPAM tab."
+            "Each row is a regex pattern → canonical role pair. Edit inline or use "
+            "the AI generator below to create new rules."
         )
 
-        m_col_p, m_col_r, m_col_del = st.columns([4.0, 3.5, 1.0], vertical_alignment="center")
-        with m_col_p:
-            st.markdown("**Alias**")
-        with m_col_r:
-            st.markdown("**Canonical Role**")
-        with m_col_del:
+        ch_p, ch_r, ch_d, ch_del = st.columns(AUTOCORRECT_COLS, vertical_alignment="center")
+        with ch_p:
+            st.markdown("**Original Pattern**")
+        with ch_r:
+            st.markdown("**Replacement**")
+        with ch_d:
+            st.markdown("**Description**")
+        with ch_del:
             pass
 
-        items = list(mappings.items())
-        updated = {}
+        items = list(role_rules)
+        updated = []
         pending_delete = None
-        for idx, (alias, canon) in enumerate(items):
-            col_p, col_r, col_del = st.columns([4.0, 3.5, 1.0], vertical_alignment="center")
+        for idx, rule in enumerate(items):
+            col_p, col_r, col_d, col_del = st.columns(AUTOCORRECT_COLS, vertical_alignment="center")
             with col_p:
-                na = st.text_input(
-                    "Alias", value=alias, key=f"ipamrole_{idx}_a",
+                p = st.text_input(
+                    "Original Pattern",
+                    value=rule.get("pattern", ""),
+                    key=f"ipamrole_{idx}_p",
                     label_visibility="collapsed",
                 )
             with col_r:
-                nc = st.text_input(
-                    "Canonical Role", value=canon, key=f"ipamrole_{idx}_r",
+                r = st.text_input(
+                    "Replacement",
+                    value=rule.get("replacement", ""),
+                    key=f"ipamrole_{idx}_r",
+                    label_visibility="collapsed",
+                )
+            with col_d:
+                d = st.text_input(
+                    "Description",
+                    value=rule.get("description", ""),
+                    key=f"ipamrole_{idx}_d",
                     label_visibility="collapsed",
                 )
             with col_del:
-                if _render_centered_del_btn(f"ipamrole_{idx}_del", "Delete this mapping"):
+                if _render_centered_del_btn(f"ipamrole_{idx}_del", "Delete this rule"):
                     pending_delete = idx
 
             if pending_delete == idx:
-                key_to_del = alias.strip().lower()
-                if key_to_del in mappings:
-                    del mappings[key_to_del]
-                final = dict(rules)
-                final["ipam_role_mappings"] = dict(mappings)
-                _persist_ipam_role_mappings(final)
-                return
-            k = na.strip().lower()
-            if k:
-                updated[k] = nc.strip()
+                continue
+            if p.strip():
+                updated.append({
+                    "pattern": p,
+                    "replacement": r,
+                    "description": d,
+                    "enabled": rule.get("enabled", True),
+                })
 
+        # Side-by-side Save & Reset buttons above the AI Assistant
         col_save, col_reset = st.columns([1.2, 1.0])
         with col_save:
             if st.button("💾 Save & Apply Changes", key="ipamrole_save", type="primary", width='stretch'):
-                final = dict(rules)
-                final["ipam_role_mappings"] = updated
-                _persist_ipam_role_mappings(final)
+                failed = []
+                for rule in updated:
+                    pat = rule.get("pattern", "")
+                    repl = rule.get("replacement", "")
+                    ok, msg = validate_regex_replacement(pat, repl)
+                    if not ok:
+                        desc = rule.get("description", pat)
+                        failed.append(f"- `{desc}`: {msg}")
+                if failed:
+                    st.error("❌ Cannot save — invalid rule(s):\n" + "\n".join(failed))
+                else:
+                    final = dict(rules)
+                    final["ipam_role_mappings"] = updated
+                    _persist_ipam_role_mappings(final)
         with col_reset:
             if st.button("🔄 Reset to Defaults", key="ipamrole_reset", width='stretch'):
                 _reset_ipam_role_mappings()
 
-        col_alias, col_canon, col_add = st.columns([4.0, 3.5, 1.0], vertical_alignment="center")
-        with col_alias:
-            new_alias = st.text_input(
-                "New Alias", value="", key="ipamrole_new_alias",
-                placeholder="e.g. corp wifi", label_visibility="collapsed",
+        with st.expander("✨ AI Assistant: Generate Role Mapping Rule", expanded=False):
+            ai_prompt = st.text_input(
+                "Describe rule in natural language:",
+                key="ipamrole_ai_input",
+                placeholder="e.g. Map cctv or ip cam to Surveillance",
             )
-        with col_canon:
-            new_canon = st.text_input(
-                "New Canonical Role", value="", key="ipamrole_new_canon",
-                placeholder="e.g. Corporate WiFi", label_visibility="collapsed",
-            )
-        with col_add:
-            if st.button("➕ Add", key="ipamrole_add", width='stretch', help="Add new mapping"):
-                if new_alias.strip() and new_canon.strip():
-                    final = dict(rules)
-                    final["ipam_role_mappings"] = dict(updated)
-                    final["ipam_role_mappings"][new_alias.strip().lower()] = new_canon.strip()
-                    _clear_session_state_prefixes("ipamrole_new_alias", "ipamrole_new_canon")
-                    _persist_ipam_role_mappings(final)
+            if st.button("Generate Regex Rule", key="ipamrole_ai_btn", width='stretch'):
+                if ai_prompt.strip():
+                    try:
+                        with st.spinner(f"Generating rule using {active_model}..."):
+                            result = generate_autocorrect_rule(ai_prompt.strip(), active_model)
+                        st.session_state["ipamrole_new_p"] = result["pattern"]
+                        st.session_state["ipamrole_new_r"] = result["replacement"]
+                        st.session_state["ipamrole_new_d"] = result["description"]
+                        st.toast("Rule generated! Review and click '➕ Add' to apply.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ AI rule generation failed: {e}")
                 else:
-                    st.warning("⚠️ Enter both an alias and a canonical role to add.")
+                    st.warning("⚠️ Please describe the rule first.")
+
+        # Inline Add Rule row wrapped in a clear_on_submit form
+        with st.form(key="ipam_role_add_form", clear_on_submit=True):
+            col_add_p, col_add_r, col_add_d, col_add_btn = st.columns(AUTOCORRECT_COLS, vertical_alignment="center")
+            with col_add_p:
+                new_p = st.text_input("New Pattern", value="", key="ipamrole_new_p",
+                                     placeholder=r"(?i)^cctv|ip[\s\-]?cam$", label_visibility="collapsed")
+            with col_add_r:
+                new_r = st.text_input("New Replacement", value="", key="ipamrole_new_r",
+                                     placeholder="Surveillance", label_visibility="collapsed")
+            with col_add_d:
+                new_d = st.text_input("New Description", value="", key="ipamrole_new_d",
+                                     placeholder="Normalize CCTV variations", label_visibility="collapsed")
+            with col_add_btn:
+                add_submitted = st.form_submit_button("➕ Add", width='stretch', help="Add new rule")
+            if add_submitted:
+                if new_p.strip():
+                    ok, msg = validate_regex_replacement(new_p, new_r)
+                    if not ok:
+                        st.error(f"❌ Cannot add rule — {msg}")
+                    else:
+                        final = dict(rules)
+                        final["ipam_role_mappings"] = list(updated) + [{
+                            "pattern": new_p,
+                            "replacement": new_r,
+                            "description": new_d,
+                            "enabled": True,
+                        }]
+                        _persist_ipam_role_mappings(final)
+                else:
+                    st.warning("⚠️ Enter a regex pattern to add.")
 
 
 def _persist_ipam_role_mappings(rules: dict) -> None:
@@ -428,8 +480,9 @@ def _persist_ipam_role_mappings(rules: dict) -> None:
     save_naming_rules(rules, source="IPAM Role Mapping Rules: Management UI")
     delta = compute_delta(old_rules, rules)
     if not delta:
-        delta = {"ipam_role_mappings": {"old": dict(old_rules.get("ipam_role_mappings") or {}),
-                                      "new": dict(rules.get("ipam_role_mappings") or {})}}
+        old_val = rules.get("ipam_role_mappings") or []
+        new_val = old_rules.get("ipam_role_mappings") or []
+        delta = {"ipam_role_mappings": {"old": list(old_val), "new": list(new_val)}}
     add_to_history(delta, source="IPAM Role Mapping Rules: Management UI")
     st.session_state["naming_rules"] = load_naming_rules()
     st.session_state["ipam_role_saved"] = True
@@ -441,13 +494,13 @@ def _reset_ipam_role_mappings() -> None:
 
     old_rules = load_naming_rules()
     new_rules = dict(old_rules)
-    new_rules["ipam_role_mappings"] = dict(DEFAULT_IPAM_ROLE_MAPPINGS)
+    new_rules["ipam_role_mappings"] = list(DEFAULT_IPAM_ROLE_MAPPINGS)
     save_naming_rules(new_rules, source="IPAM Role Mapping Rules: Reset to Defaults")
     delta = compute_delta(old_rules, new_rules)
     if not delta:
         delta = {"ipam_role_mappings": {
-            "old": dict(old_rules.get("ipam_role_mappings") or {}),
-            "new": dict(DEFAULT_IPAM_ROLE_MAPPINGS),
+            "old": list(old_rules.get("ipam_role_mappings") or []),
+            "new": list(DEFAULT_IPAM_ROLE_MAPPINGS),
         }}
     add_to_history(delta, source="IPAM Role Mapping Rules: Reset to Defaults")
     _clear_session_state_prefixes("ipamrole_")

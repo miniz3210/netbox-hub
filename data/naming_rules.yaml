@@ -508,9 +508,7 @@
     "Printers": "Printers",
     "Guests": "VIN_Guest",
     "Audio Visual": "AV equipment",
-    "Mobiles": "VIN_Mobi",
-    "cctv": "Surveillance",
-    "iot": "IoT Device"
+    "Mobiles": "VIN_Mobi"
   },
   "token_order": {
     "esxi_vmkernel_name": [

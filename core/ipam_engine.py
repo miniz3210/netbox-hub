@@ -31,26 +31,40 @@ ROLE_TO_DESC_MAP = {
 # in config/naming_rules.py, loaded via get_ipam_role_mappings().
 
 
-def normalize_role_name(role: str, role_mappings: dict | None = None) -> str:
+def normalize_role_name(role: str, role_rules: list | None = None) -> str:
     """Normalize a raw role string to its canonical, standard-cased form.
 
-    1. Strips leading/trailing whitespace.
-    2. Performs a case-insensitive lookup against ``role_mappings`` (falling back
-       to ``DEFAULT_IPAM_ROLE_MAPPINGS`` when ``None``), e.g. "guest" ->
-       "Guests", "corp wifi" -> "Corporate WiFi".
-    3. Otherwise the stripped role is returned as-is.
+    Returns "" for empty input. Iterates through role_rules (falling back to
+    get_ipam_role_mappings), applying each enabled regex pattern via re.sub.
     """
-    from config.naming_rules import get_ipam_role_mappings
     role = str(role or "").strip()
     if not role:
         return ""
 
-    mappings = get_ipam_role_mappings({}) if role_mappings is None else role_mappings
-    canonical = mappings.get(role.lower(), role)
-    return canonical
+    if role_rules is None:
+        from config.naming_rules import get_ipam_role_mappings
+        role_rules = get_ipam_role_mappings({})
+
+    for rule in role_rules:
+        if not isinstance(rule, dict):
+            continue
+        if not rule.get("enabled", True):
+            continue
+        pattern = rule.get("pattern", "")
+        replacement = rule.get("replacement", "")
+        if not pattern:
+            continue
+        try:
+            replaced = re.sub(pattern, replacement, role)
+        except re.error:
+            continue
+        if replaced != role:
+            return replaced
+
+    return role
 
 
-def resolve_vlan_description(vid, role: str, vlan_presets=None, vlan_desc_mappings=None, role_mappings: dict | None = None) -> str:
+def resolve_vlan_description(vid, role: str, vlan_presets=None, vlan_desc_mappings=None, role_rules: list | None = None) -> str:
     """Resolve the NetBox 'VLAN Description' tag for a (VID, Role) pair.
 
     Resolution is driven by the dynamic ``vlan_description_mappings`` configured in
@@ -70,7 +84,7 @@ def resolve_vlan_description(vid, role: str, vlan_presets=None, vlan_desc_mappin
     no longer consulted for description resolution — that responsibility now lives
     entirely in ``vlan_desc_mappings``.
     """
-    norm_role = normalize_role_name(role, role_mappings)
+    norm_role = normalize_role_name(role, role_rules)
     norm_key = norm_role.lower()
 
     if isinstance(vlan_desc_mappings, dict):
