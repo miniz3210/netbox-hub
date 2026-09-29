@@ -144,7 +144,7 @@ def _resolve_active_model(model: str = "") -> str:
     return "google/gemini-2.0-flash"
 
 
-def analyze_esxi_topology_screenshot(images, naming_rules: dict, active_model: str = "") -> list:
+def analyze_hypervisor_topology_screenshot(images, naming_rules: dict, active_model: str = "") -> list:
     """Run AI Vision over the provided screenshot file objects and return dataframe rows.
 
     ``images`` may be a single upload or a list of ``UploadedFile`` objects. ``active_model``
@@ -187,6 +187,10 @@ def analyze_esxi_topology_screenshot(images, naming_rules: dict, active_model: s
 
     parsed = _parse_content(content)
     return [r for r in (_row(x) for x in parsed) if r is not None]
+
+
+# Backward compatibility alias
+analyze_esxi_topology_screenshot = analyze_hypervisor_topology_screenshot
 
 
 def _parse_content(content: str) -> list:

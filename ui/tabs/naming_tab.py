@@ -419,6 +419,15 @@ def _interface_ref_examples(intf_code):
     return f"🟡 Default Examples — No ingested interface descriptions found matching this type.", defaults
 
 
+def _is_vision_capable_model(model_name: str) -> bool:
+    """Return True if model name indicates multimodal vision support."""
+    if not model_name:
+        return False
+    m = model_name.lower()
+    vision_keywords = ["vision", "-vl", "4o", "gpt-5", "claude", "gemini", "pixtral", "qwen2.5-vl"]
+    return any(k in m for k in vision_keywords)
+
+
 def _render_esxi_pattern(pat: str, vals: dict, variables: dict) -> str:
     """Interpolate an ESXi description pattern through the unified rendering pipeline,
     which strips empty optional clauses before substitution. All fixed words (Active,
@@ -902,15 +911,18 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 st.warning(f"Failed to process pasted image: {e}")
 
         if uploaded_imgs and st.button("🚀 Analyze Topology & Auto-Populate", key="btn_analyze_esxi_img", type="primary"):
-            with st.spinner("Analyzing topology with AI Vision..."):
-                try:
-                    from core.ai_assistant import analyze_esxi_topology_screenshot
-                    results = analyze_esxi_topology_screenshot(uploaded_imgs, naming_rules, active_model)
-                    st.session_state["esxi_parsed_descriptions"] = results
-                    st.success("Successfully analyzed topology and generated NetBox descriptions!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Vision analysis failed: {str(e)}")
+            if not _is_vision_capable_model(active_model):
+                st.error(f"❌ Selected model [{active_model}] does not support Image/Vision analysis. Please select a vision-capable model (e.g. gpt-4o, gpt-5.6-luna, claude-3-5-sonnet) from the left sidebar.")
+            else:
+                with st.spinner(f"Analyzing topology with AI Vision ({active_model})..."):
+                    try:
+                        from core.ai_assistant import analyze_hypervisor_topology_screenshot
+                        results = analyze_hypervisor_topology_screenshot(uploaded_imgs, naming_rules, active_model)
+                        st.session_state["esxi_parsed_descriptions"] = results
+                        st.success("Successfully analyzed topology and generated NetBox descriptions!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Vision analysis failed: {str(e)}")
 
         # 2️⃣ Step 2: Preview & Review Topology Data (Full-Width)
         st.markdown("---")
@@ -992,25 +1004,20 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             vswitches = sorted(list(extracted_vswitches))
             purposes = sorted(list(extracted_purposes))
 
-            # Hardware slot resolution aligned with NetBox Device Types (PSU, OCP3, PCIe1-3)
+            # Hardware slot resolution strictly aligned with Standards (Zero Hardcode)
             from config.naming_rules import get_hardware_slot_mappings
             user_slot_map = get_hardware_slot_mappings(naming_rules)
 
             def _resolve_hw_slot(nic_name):
-                digits = re.sub(r"\D", "", nic_name)
+                clean_name = str(nic_name).strip()
+                digits = re.sub(r"\D", "", clean_name)
+                # Check direct name (e.g. "vmnic1") or digit key (e.g. "1")
+                if clean_name in user_slot_map:
+                    return user_slot_map[clean_name]
                 if digits in user_slot_map:
                     return user_slot_map[digits]
-                if digits.isdigit():
-                    num = int(digits)
-                    if num in [0, 1]:
-                        return f"OCP3:Port{num + 1}"
-                    elif num in [2, 3]:
-                        return f"PCIe1:Port{num - 1}"
-                    elif num in [4, 5]:
-                        return f"PCIe2:Port{num - 3}"
-                    elif num in [6, 7]:
-                        return f"PCIe3:Port{num - 5}"
-                return f"PCIe1:Port1"
+                # Fallback strictly to interface name if not defined in Standards
+                return clean_name
 
             slots = sorted(list(set(_resolve_hw_slot(v) for v in vmnics if v)))
 
