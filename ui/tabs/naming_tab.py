@@ -812,6 +812,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             st.session_state["esxi_paste_counter"] = 0
         if "topo_uploader_key_ver" not in st.session_state:
             st.session_state["topo_uploader_key_ver"] = 0
+        if "paste_input_ver" not in st.session_state:
+            st.session_state["paste_input_ver"] = 0
 
         with col_up1:
             uploader_key = f"hypervisor_topo_file_uploader_{st.session_state['topo_uploader_key_ver']}"
@@ -838,7 +840,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
         with col_up2:
             st.markdown("**📋 Or Paste from Clipboard (Ctrl+V)**")
-            paste_box_key = f"esxi_paste_input_{st.session_state['esxi_paste_counter']}"
+            paste_box_key = f"esxi_paste_input_{st.session_state['paste_input_ver']}"
             pasted_data = st.text_input(
                 "Paste Area",
                 placeholder="Click here and press Ctrl+V",
@@ -893,6 +895,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
         def _clear_all_topology_state():
             st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
+            st.session_state.pop("paste_input_ver", None)
             for k in ["topo_uploaded_imgs", "pasted_clipboard_imgs", "hypervisor_parsed_descriptions",
                       "hypervisor_preview_df", "hypervisor_extracted_variables", "topo_is_analyzing"]:
                 st.session_state.pop(k, None)
@@ -924,6 +927,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 pasted_file.size = len(img_bytes)
                 st.session_state["pasted_clipboard_imgs"] = [pasted_file]
                 st.session_state["esxi_paste_counter"] += 1
+                st.session_state["paste_input_ver"] = st.session_state.get("paste_input_ver", 0) + 1
+                st.rerun()
             except Exception as e:
                 st.warning(f"Failed to process pasted image: {e}")
 

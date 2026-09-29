@@ -1,6 +1,5 @@
-import time
 from pathlib import Path
-from typing import Callable, Dict, List, Tuple
+from typing import Callable
 from datetime import datetime
 
 import streamlit as st
@@ -10,9 +9,7 @@ from core.ai_client import (
     call_ai,
     fetch_free_models,
     healthcheck_ai,
-    ping_model,
     sanitize_model_id,
-    test_model_connection,
 )
 from core.backup_manager import (
     CSV_FILENAMES,
@@ -1070,26 +1067,6 @@ def _sidebar_placeholder(loaded: bool, has_options: bool) -> str:
     return "-- Select a model --"
 
 
-def _sidebar_health_badge(ok: bool, latency: int, msg: str) -> None:
-    """Render a temporary status badge for the last ping result."""
-    if ok:
-        st.success(f"✅ **Operational** (Latency: {latency}ms)", icon="✅")
-    else:
-        st.error(f"❌ **Failed:** {msg}", icon="❌")
-
-
-def _run_single_ping(model: str) -> Tuple[bool, int, str]:
-    """Execute a quick pre-flight ping and store the result for the given model."""
-    ok, latency, msg = ping_model(model)
-    st.session_state["model_test_history"][model] = {
-        "ok": ok,
-        "latency": latency,
-        "msg": msg,
-        "ts": time.time(),
-    }
-    return ok, latency, msg
-
-
 def render_sidebar() -> str:
     with st.sidebar:
         st.header("⚙️ AI Engine Selection")
@@ -1111,25 +1088,15 @@ def render_sidebar() -> str:
             st.session_state["free_models_cache"] = []
         if "models_loaded" not in st.session_state:
             st.session_state["models_loaded"] = False
-        if "verified_models" not in st.session_state:
-            st.session_state["verified_models"] = {}
-        if "verified_only_mode" not in st.session_state:
-            st.session_state["verified_only_mode"] = False
         if "model_test_history" not in st.session_state:
             st.session_state["model_test_history"] = {}
 
         test_models = st.session_state["free_models_cache"]
 
         # Dropdown candidates: only sanitized models, minus any that are presets.
-        filtered_suggestions = [
+        dropdown_options = [
             m for m in test_models if m not in AVAILABLE_MODELS
         ]
-        # Option B: restrict strictly to verified models when a scan has run.
-        verified_only = sorted(st.session_state["verified_models"].keys())
-        dropdown_options = (
-            verified_only if verified_only and st.session_state["verified_only_mode"]
-            else filtered_suggestions
-        )
 
         placeholder = _sidebar_placeholder(
             st.session_state["models_loaded"], bool(dropdown_options)
@@ -1141,7 +1108,7 @@ def render_sidebar() -> str:
                 "Quick-Select Test Model",
                 options=[placeholder] + dropdown_options,
                 index=0,
-                help="Sanitized models. Refresh to reload; use Scan & Verify to keep only working models.",
+                help="Sanitized models. Refresh to reload.",
             )
         with q2:
             st.markdown("<br>", unsafe_allow_html=True)
@@ -1156,81 +1123,24 @@ def render_sidebar() -> str:
                         st.success(f"Loaded {len(fetched)} usable models")
                 st.rerun()
 
-        # Option B: Scan & Verify working models in the background, cached in session state.
-        s1, s2 = st.columns([3, 1])
-        with s1:
-            if st.button("🔍 Scan & Verify Working Models", key="btn_scan_verify", width="stretch"):
-                candidates = filtered_suggestions or test_models
-                if not candidates:
-                    st.warning("Refresh the model list first.")
-                else:
-                    verified: Dict[str, Tuple[int, str]] = {}
-                    fail_count = 0
-                    progress = st.progress(0.0)
-                    for i, candidate in enumerate(candidates):
-                        progress.progress((i + 1) / len(candidates))
-                        ok, latency, msg = ping_model(candidate)
-                        if ok:
-                            verified[candidate] = (latency, msg)
-                        else:
-                            fail_count += 1
-                    progress.empty()
-                    st.session_state["verified_models"] = verified
-                    st.session_state["verified_only_mode"] = True
-                    st.success(
-                        f"Verified {len(verified)}/{len(candidates)} working models "
-                        f"({fail_count} failed)."
-                    )
-                    if verified:
-                        st.session_state["free_models_cache"] = sorted(verified.keys())
-                    st.rerun()
-        with s2:
-            if st.button("⟨ All ⟩", key="btn_clear_verify", help="Show all sanitized models"):
-                st.session_state["verified_only_mode"] = False
-                st.rerun()
-
-        # Option A: on-demand pre-flight healthcheck via the app's own call_ai pipeline.
+        # Unified Apply & Verify action
         selected_quick = "" if quick_pick.startswith("--") else quick_pick
         if selected_quick:
-            is_pinging = st.session_state.get("is_pinging_model", False)
-            t1, t2 = st.columns([1, 1])
-            with t1:
-                if is_pinging:
-                    if st.button("🛑 Cancel Ping", key="btn_cancel_ping_quick", type="primary", width="stretch"):
-                        st.session_state["is_pinging_model"] = False
-                        st.info("Ping cancelled.")
-                        st.rerun()
+            if st.button("➔ Apply & Verify Model", key="btn_apply_verify", type="primary", width="stretch"):
+                ok, latency, msg = healthcheck_ai(selected_quick)
+                if ok:
+                    st.session_state["active_ai_model"] = selected_quick
+                    history = st.session_state.get("model_test_history", {})
+                    history[selected_quick] = {
+                        "ok": ok, "latency": latency, "msg": msg,
+                    }
+                    st.session_state["model_test_history"] = history
+                    st.toast(f"✅ Active model: {selected_quick}", icon="✅")
+                    st.rerun()
                 else:
-                    if st.button("⚡ Ping / Health...", key="btn_ping_quick", width="stretch"):
-                        st.session_state["is_pinging_model"] = True
-                        st.session_state["model_test_history"][selected_quick] = {
-                            "ok": False, "latency": 0, "msg": "", "ts": time.time(),
-                        }
-                        ok, latency, msg = healthcheck_ai(selected_quick)
-                        st.session_state["model_test_history"][selected_quick] = {
-                            "ok": ok, "latency": latency, "msg": msg, "ts": time.time(),
-                        }
-                        st.session_state["is_pinging_model"] = False
-                        if ok:
-                            st.success(f"✅ Connected: Response in {latency}ms")
-                        else:
-                            st.error(f"❌ Healthcheck failed: {msg}")
-            with t2:
-                if st.button("➔ Apply", key="btn_apply_quick", type="primary", width="stretch",
-                            help="Only applied after the model passes a healthcheck."):
-                    ok, latency, msg = healthcheck_ai(selected_quick)
-                    if ok:
-                        if "approved_model" not in st.session_state:
-                            st.session_state["approved_model"] = ""
-                        st.session_state["approved_model"] = selected_quick
-                        st.success(f"✅ Connected: Response in {latency}ms")
-                    else:
-                        st.warning(f"Not applied: healthcheck failed → {msg}")
-            _last = st.session_state["model_test_history"].get(selected_quick)
-            if _last and _last.get("msg"):
-                _sidebar_health_badge(_last["ok"], _last["latency"], _last["msg"])
+                    st.error(f"❌ Failed to connect: {msg}")
 
-        # 3. Custom Manual Input (with permissive session-state guard)
+        # 3. Custom Manual Input
         default_manual = "" if quick_pick.startswith("--") else quick_pick
         custom_model = st.text_input(
             "Custom Model",
@@ -1239,46 +1149,24 @@ def render_sidebar() -> str:
             help="Overrides preset when populated.",
         ).strip()
 
-        # Active Model Resolution + unverified guard: only apply a freshly typed / quick-selected
-        # model once the user has explicitly confirmed it via a successful ping.
+        # Active Model Resolution
         if custom_model:
-            if custom_model in st.session_state["verified_models"]:
-                active_model = custom_model
-            elif custom_model == st.session_state.get("approved_model"):
-                active_model = custom_model
-            else:
-                pending_model = custom_model
-                active_model = selected_preset
-                if "unverified_model" not in st.session_state:
-                    st.session_state["unverified_model"] = pending_model
-                st.caption(
-                    f"⚪ `{pending_model}` selected but **unverified** — it will not be "
-                    f"used until it passes the ⚡ ping test."
-                )
+            active_model = custom_model
         else:
             active_model = selected_preset
 
-        # 4. Global connection test (legacy, heavier) kept for the full pipeline.
-        if st.button("🧪 Test Full Connection", key="btn_ping_model", width="stretch",
-                    help="Runs the heavier end-to-end connection test (max_tokens=100)."):
-            with st.spinner(f"Testing `{active_model}`..."):
-                ok, latency, msg = test_model_connection(active_model)
-                st.session_state["model_test_history"][active_model] = {
-                    "ok": ok, "latency": latency, "msg": msg, "ts": time.time(),
-                }
-
-        # 5. Active Model Card with latency or failure detail.
-        history = st.session_state["model_test_history"]
+        # Clean active badge
+        history = st.session_state.get("model_test_history", {})
         if active_model in history:
             res = history[active_model]
             if res["ok"]:
-                st.success(f"**Selected:**\n`{active_model}` — ⚡ **{res['latency']}ms**")
+                st.success(f"**Active:** `{active_model}` — ⚡ **{res['latency']}ms**")
             else:
-                st.error(f"**Selected:**\n~~`{active_model}`~~ ❌ *(Offline)*\n\n`{res['msg']}`")
+                st.warning(f"**Active:** `{active_model}` — ❌ *(Offline)*")
         else:
-            st.info(f"**Selected:**\n`{active_model}`")
+            st.info(f"**Active:** `{active_model}`")
 
-        # 6. Test Results History Log
+        # Test Results History Log
         if history:
             with st.expander("📋 Model Test Log", expanded=False):
                 for m_name, data in history.items():

@@ -163,7 +163,7 @@
     },
     {
       "code": "PG_Name",
-      "label": "PGroup-VM Network",
+      "label": "PG-VM Network",
       "pattern_key": "esxinet_pg_name",
       "description": ""
     },
