@@ -1139,6 +1139,11 @@ def render_sidebar() -> str:
                     st.rerun()
                 else:
                     st.error(f"❌ Failed to connect: {msg}")
+                    history = st.session_state.get("model_test_history", {})
+                    history[selected_quick] = {
+                        "ok": False, "latency": None, "msg": msg,
+                    }
+                    st.session_state["model_test_history"] = history
 
         # 3. Custom Manual Input
         default_manual = "" if quick_pick.startswith("--") else quick_pick
@@ -1166,14 +1171,14 @@ def render_sidebar() -> str:
         else:
             st.info(f"**Active:** `{active_model}`")
 
-        # Test Results History Log
-        if history:
-            with st.expander("📋 Model Test Log", expanded=False):
-                for m_name, data in history.items():
-                    if data["ok"]:
-                        st.markdown(f"• `{m_name}`: 🟢 **{data['latency']}ms**")
-                    else:
-                        st.markdown(f"• ~~`{m_name}`~~: 🔴 **Fail**")
+        # Model Test Log Expander
+        with st.expander("📋 Model Test Log", expanded=False):
+            entries = st.session_state.get("model_test_history", [])
+            for m_name, data in (entries.items() if isinstance(entries, dict) else entries):
+                if isinstance(data, dict) and data.get("ok"):
+                    st.markdown(f"• {m_name}: 🟢 {data['latency']}ms")
+                else:
+                    st.markdown(f"• ~~{m_name}~~: 🔴 Fail")
 
         st.caption(f"🔌 Routed via **OmniRoute** (`{OPENROUTER_BASE_URL}`)")
 

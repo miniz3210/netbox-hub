@@ -437,7 +437,7 @@ def _render_esxi_pattern(pat: str, vals: dict, variables: dict) -> str:
 
 
 def render_naming_tab(active_model):
-    st.subheader("Standardized Infrastructure Naming Generator", help="Generate and validate standardized hostnames and interface descriptions. All preset-driven patterns are configured in the Standards Tab.")
+    st.subheader("🏷️ Standardized Infrastructure Naming Generator", help="Generate and validate standardized hostnames and interface descriptions. All preset-driven patterns are configured in the Standards Tab.")
     st.caption("Generate and validate standardized hostnames for network devices, servers, VMs, and ESXi configurations using AI-powered naming conventions aligned with your NetBox inventory data.")
 
     naming_rules = load_naming_rules()
@@ -1097,6 +1097,11 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
             # --- Dynamic Token Bag Inspector (Discovers all OCR keys, e.g. for Proxmox/KVM) ---
             raw_token_dict = {}
+            # Inject canonical tokens into raw token dict for complete coverage
+            raw_token_dict["vmnic"] = set(vmnics)
+            raw_token_dict["v_switch"] = set(vswitches)
+            raw_token_dict["slot"] = set(slots)
+            raw_token_dict["purpose"] = set(purposes)
             for r in rows:
                 if not isinstance(r, dict):
                     continue
@@ -1107,7 +1112,18 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                             raw_token_dict.setdefault(norm_k, set()).add(str(v).strip())
 
             existing_vars = get_pattern_variables(naming_rules)
-            existing_token_names = set(existing_vars.keys())
+            # Flatten nested-by-scope pattern variables for accurate existence checks
+            existing_token_names = set()
+            if isinstance(existing_vars, dict):
+                for k, v in existing_vars.items():
+                    if isinstance(v, dict) and "label" in v:
+                        existing_token_names.add(k.lower())
+                    elif isinstance(v, dict):
+                        for sub_k in v.keys():
+                            existing_token_names.add(sub_k.lower())
+            # Also include flat helper
+            for k in get_pattern_variables(naming_rules).keys():
+                existing_token_names.add(str(k).lower())
 
             with st.expander("🔍 OCR Raw Token Dictionary (Platform-Agnostic Variable Bag)", expanded=False):
                 st.caption("All extracted tokens discovered from the uploaded topology. These keys are immediately available in Step 4 patterns and can be synced to Standards.")
@@ -1116,7 +1132,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     col_target = tok_cols[idx % 3]
                     sample_vals = ", ".join(list(t_vals)[:3])
                     sync_key = f"btn_sync_tok_{t_name}"
-                    is_existing = t_name in existing_token_names
+                    is_existing = t_name.strip("<>_").lower() in existing_token_names
                     with col_target:
                         if is_existing:
                             st.button(f"✅ <{t_name}> (In Standards)", key=sync_key, disabled=True, width='stretch')

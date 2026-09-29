@@ -57,46 +57,23 @@ def _clear_session_state_prefixes(*prefixes: str) -> None:
             st.session_state.pop(k, None)
 
 
-def render_auto_dismiss_banner(message: str, duration_sec: int = 10):
-    banner_html = f"""
-    <div id="status-banner" style="
-        background-color: rgba(46, 125, 50, 0.2);
-        border: 1px solid #2e7d32;
-        color: #81c784;
-        padding: 10px 16px;
-        border-radius: 6px;
-        margin-bottom: 14px;
-        font-weight: 500;
-        animation: autoFadeOut 0.8s ease-in-out {duration_sec}s forwards;
-    ">
-        {message}
-    </div>
-    <style>
-        @keyframes autoFadeOut {{
-            0% {{ opacity: 1; max-height: 60px; }}
-            99% {{ opacity: 0; max-height: 60px; }}
-            100% {{ opacity: 0; max-height: 0; padding: 0 16px; margin: 0; overflow: hidden; display: none; }}
-        }}
-    </style>
-    """
-    st.markdown(banner_html, unsafe_allow_html=True)
-
-
 def _check_and_render_banner(section_id: str, msg_template: str = "", duration_sec: int = 10) -> bool:
     """Check session state for a banner matching *section_id* and render it if still valid.
 
-    Returns True when a banner was rendered (and remains in state), False otherwise.
+    Returns True when a banner was rendered (and consumed from state), False otherwise.
     The banner expires after *duration_sec* seconds based on the stored timestamp.
+    Expired banners are removed from session state so they do not linger forever.
     """
-    banner = st.session_state.get("card_saved_banner")
-    if not banner or banner.get("section") != section_id:
+    banner_data = st.session_state.get("card_saved_banner")
+    if not banner_data or banner_data.get("section") != section_id:
         return False
     now = time.time()
-    elapsed = now - banner.get("time", 0)
-    if elapsed < duration_sec:
-        msg = banner.get("msg", msg_template)
+    elapsed = now - banner_data.get("ts", 0)
+    if elapsed <= duration_sec:
+        msg = banner_data.get("msg", msg_template)
         if msg:
-            render_auto_dismiss_banner(msg, duration_sec=duration_sec)
+            st.success(msg)
+        st.session_state.pop("card_saved_banner", None)
         return True
     st.session_state.pop("card_saved_banner", None)
     return False
@@ -522,7 +499,7 @@ def _persist_ipam_role_mappings(rules: dict) -> None:
         delta = {"ipam_role_mappings": {"old": list(old_val), "new": list(new_val)}}
     add_to_history(delta, source="IPAM Role Mapping Rules: Management UI")
     st.session_state["naming_rules"] = load_naming_rules()
-    st.toast("✅ IPAM Role Mapping Rules saved & applied!", icon="✅")
+    st.session_state["card_saved_banner"] = {"section": "auto_correction", "msg": "✅ IPAM Role Mapping Rules saved & applied!", "ts": time.time()}
     st.rerun()
 
 
@@ -542,7 +519,7 @@ def _reset_ipam_role_mappings() -> None:
     add_to_history(delta, source="IPAM Role Mapping Rules: Reset to Defaults")
     _clear_session_state_prefixes("ipamrole_")
     st.session_state["naming_rules"] = load_naming_rules()
-    st.toast("✅ IPAM Role Mapping Rules reset to defaults!", icon="✅")
+    st.session_state["card_saved_banner"] = {"section": "auto_correction", "msg": "✅ IPAM Role Mapping Rules reset to defaults!", "ts": time.time()}
     st.rerun()
 
 
@@ -661,7 +638,7 @@ def _persist_site_code_mappings(rules: dict) -> None:
                                     "new": dict(rules.get("site_code_rules") or {})}}
     add_to_history(delta, source="Site Code Mapping Rules: Management UI")
     st.session_state["naming_rules"] = load_naming_rules()
-    st.toast("✅ Site Code Mapping Rules saved & applied!", icon="✅")
+    st.session_state["card_saved_banner"] = {"section": "auto_correction", "msg": "✅ Site Code Mapping Rules saved & applied!", "ts": time.time()}
     st.rerun()
 
 
@@ -703,7 +680,7 @@ def _reset_site_code_mappings() -> None:
     _clear_session_state_prefixes("sitecode_")
     st.session_state.pop("site_code_mappings_modified", None)
     st.session_state["naming_rules"] = load_naming_rules()
-    st.toast("✅ Site Code Mapping Rules reset to defaults!", icon="✅")
+    st.session_state["card_saved_banner"] = {"section": "auto_correction", "msg": "✅ Site Code Mapping Rules reset to defaults!", "ts": time.time()}
     st.rerun()
 
 
@@ -726,14 +703,14 @@ def _persist_auto_corrections(data: dict) -> None:
         delta = {"auto_correction_rules": {"old": None, "new": data}}
     add_to_history(delta, source="Auto-Correction: Management UI")
     st.session_state["autocorrect_rules_cache"] = data
-    st.toast("✅ Syntax Auto-Correction Rules saved & applied!", icon="✅")
+    st.session_state["card_saved_banner"] = {"section": "auto_correction", "msg": "✅ Syntax Auto-Correction Rules saved & applied!", "ts": time.time()}
     st.rerun()
 
 
 def _save_presets(rules: dict, section: str = "presets", section_label: str = "Presets") -> None:
     save_naming_rules(rules, source="Presets Manager")
     st.session_state["naming_rules"] = rules.copy()
-    st.toast(f"✅ {section_label} saved & applied!", icon="✅")
+    st.session_state["card_saved_banner"] = {"section": section, "msg": f"✅ {section_label} saved & applied!", "ts": time.time()}
     st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
     # Clear all preset widget input keys while safely preserving group selections and system flags
     _clear_session_state_prefixes("device_pre_", "interface_pre_", "host_", "vm_", "esxi_network_pre_",
@@ -746,7 +723,7 @@ def _save_presets(rules: dict, section: str = "presets", section_label: str = "P
 def _save_csv_schemas(rules: dict) -> None:
     save_naming_rules(rules, source="CSV Schemas Manager")
     st.session_state["naming_rules"] = rules.copy()
-    st.toast("✅ NetBox Bulk Import CSV Schemas saved & applied!", icon="✅")
+    st.session_state["card_saved_banner"] = {"section": "csv_schemas", "msg": "✅ NetBox Bulk Import CSV Schemas saved & applied!", "ts": time.time()}
     _clear_session_state_prefixes("csv_sch_")
     st.rerun()
 
@@ -755,7 +732,7 @@ def _reset_csv_schemas(rules: dict) -> None:
     rules["csv_schemas"] = copy.deepcopy(DEFAULT_CSV_SCHEMAS)
     save_naming_rules(rules, source="CSV Schemas Reset")
     st.session_state["naming_rules"] = rules.copy()
-    st.toast("✅ NetBox Bulk Import CSV Schemas reset to defaults!", icon="✅")
+    st.session_state["card_saved_banner"] = {"section": "csv_schemas", "msg": "✅ NetBox Bulk Import CSV Schemas reset to defaults!", "ts": time.time()}
     _clear_session_state_prefixes("csv_sch_")
     st.rerun()
 
@@ -764,6 +741,7 @@ def _render_csv_schemas_editor(rules: dict) -> None:
     schemas = get_csv_schemas(rules)
 
     with st.expander("📊 NetBox Bulk Import CSV Schemas", expanded=False):
+        _check_and_render_banner("csv_schemas")
         st.caption("Customize headers and dynamic cell templates for the 4 offline NetBox bulk import CSVs (Site, VLAN Group, VLANs, Prefixes). Supports Universal Context tokens like `<site>`, `<vid>`, `<prefix>`, `<role>`, etc.")
 
         schema_meta = [
@@ -830,7 +808,7 @@ def _render_csv_schemas_editor(rules: dict) -> None:
 def _save_vlan_desc_mappings(rules: dict, section: str = "vlan_desc_mappings", section_label: str = "VLAN Description Mappings") -> None:
     save_naming_rules(rules, source="VLAN Description Mappings Manager")
     st.session_state["naming_rules"] = rules.copy()
-    st.toast(f"✅ {section_label} saved & applied!", icon="✅")
+    st.session_state["card_saved_banner"] = {"section": section, "msg": f"✅ {section_label} saved & applied!", "ts": time.time()}
     _clear_session_state_prefixes("vlandesc_")
     st.rerun()
 
@@ -852,6 +830,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
     _pending_swap_key = f"_pending_swap_{kind}"
 
     with st.container(border=True):
+        _check_and_render_banner(section)
         col_t1, col_t2 = st.columns([3, 1])
         with col_t1:
             st.markdown(f"#### {card_title}")
@@ -1115,6 +1094,7 @@ def _host_editor(rules: dict) -> None:
     patterns = dict(rules.get("naming_patterns") or {})
 
     with st.container(border=True):
+        _check_and_render_banner("hosts")
         col_t1, col_t2 = st.columns([3, 1])
         with col_t1:
             st.markdown("#### 💻 HOSTS TYPE PRESETS")
@@ -1245,7 +1225,7 @@ def _host_editor(rules: dict) -> None:
         rules["naming_patterns"] = reset_patterns
         save_naming_rules(rules, source="Hosts Type Presets: Reset to Defaults")
         st.session_state["naming_rules"] = rules.copy()
-        st.toast("✅ Hosts Type Presets reset to defaults!", icon="✅")
+        st.session_state["card_saved_banner"] = {"section": "hosts", "msg": "✅ Hosts Type Presets reset to defaults!", "ts": time.time()}
         st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
         st.session_state.pop("host_preset_min_one", None)
         st.session_state.pop("_host_vm_del_idx", None)
@@ -1293,6 +1273,7 @@ def _vm_editor(rules: dict) -> None:
     tpl = patterns.get("vm_host", "")
 
     with st.container(border=True):
+        _check_and_render_banner("vm_roles")
         col_t1, col_t2 = st.columns([3, 1])
         with col_t1:
             st.markdown("#### 🖱️ VIRTUAL MACHINE PRESETS")
@@ -1411,7 +1392,7 @@ def _vm_editor(rules: dict) -> None:
         rules["naming_patterns"] = vm_patterns
         save_naming_rules(rules, source="VM Presets: Reset to Defaults")
         st.session_state["naming_rules"] = rules.copy()
-        st.toast("✅ VM Role Presets reset to defaults!", icon="✅")
+        st.session_state["card_saved_banner"] = {"section": "vm_roles", "msg": "✅ VM Role Presets reset to defaults!", "ts": time.time()}
         st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
         _clear_session_state_prefixes("host_", "vm_", "preset_", "host_preset", "vm_preset")
         st.rerun()
@@ -1450,6 +1431,7 @@ VLAND_MAPPINGS_COLS = [3.2, 4.8, 1.0]
 
 def _render_vlan_description_mappings_editor(rules: dict) -> None:
     with st.expander("🏷️ VLAN Description Mappings (Role → Description)", expanded=True):
+        _check_and_render_banner("vlan_desc_mappings")
 
         mappings = dict(get_vlan_description_mappings(rules))
 
@@ -1540,6 +1522,7 @@ def _vlan_presets_editor(rules: dict) -> None:
     vlan_presets = get_vlan_presets(rules)
 
     with st.container(border=True):
+        _check_and_render_banner("vlan_presets")
         col_t1, col_t2 = st.columns([3, 1])
         with col_t1:
             st.markdown("#### 🌐 VLAN ALLOCATION PRESETS")
@@ -1841,6 +1824,7 @@ def render_standards_tab(active_model):
             _vlan_presets_editor(current_rules)
 
         with st.expander("🔧 Network & Security Devices", expanded=False):
+            _check_and_render_banner("network_devices")
             _preset_type_editor("device", get_device_presets(current_rules), current_rules, prefix="branch",
                                 card_title="🔧 DEVICE TYPE PRESETS",
                                 card_caption="Manage device naming patterns and presets (SW, VS, FW, ION, WAP, RTR, VA).",
@@ -1857,17 +1841,20 @@ def render_standards_tab(active_model):
             _vm_editor(current_rules)
 
         with st.expander("☁️ Hypervisor Virtualization & Networking", expanded=False):
+            _check_and_render_banner("esxi")
             _preset_type_editor("esxi_network", get_esxi_network_presets(current_rules), current_rules, prefix="esxinet",
                                 card_title="☁️️ HYPERVISOR NETWORK DESCRIPTION PRESETS",
                                 card_caption="Manage Hypervisor interface descriptions (Uplink, PortGroup, Bridge, VMkernel/Management). Quick Copy dynamically renders from these templates.",
                                 section="esxi", section_label="ESXi Virtualization & Networking")
 
         with st.expander("🛠️ Manage Syntax Auto-Correction Rules", expanded=False):
+            _check_and_render_banner("auto_correction")
             _render_auto_correction_manager(active_model)
 
         _render_csv_schemas_editor(current_rules)
 
         with st.expander("📋 NetBox Server & Hardware YAML Guidelines", expanded=False):
+            _check_and_render_banner("yaml_guidelines")
             st.caption("Document and enforce the NetBox server hardware YAML schema used across your environment.")
             with st.expander("✨ AI Assistant: Generate NetBox Server YAML Specs", expanded=False):
                 ai_desc = st.text_input(
@@ -1900,7 +1887,7 @@ def render_standards_tab(active_model):
                     rules["netbox_server_yaml"] = yaml_text
                     save_naming_rules(rules, source="YAML Guidelines Save")
                     st.session_state["naming_rules"] = rules.copy()
-                    st.toast("✅ NetBox Server & Hardware YAML Guidelines saved & applied!", icon="✅")
+                    st.session_state["card_saved_banner"] = {"section": "yaml_guidelines", "msg": "✅ NetBox Server & Hardware YAML Guidelines saved & applied!", "ts": time.time()}
                     st.rerun()
             with col_reset_yaml:
                 if st.button("🔄 Reset to Defaults", width='stretch'):
@@ -1909,7 +1896,7 @@ def render_standards_tab(active_model):
                     rules["netbox_server_yaml"] = default_yaml
                     save_naming_rules(rules, source="YAML Guidelines Reset")
                     st.session_state["naming_rules"] = rules.copy()
-                    st.toast("✅ NetBox Server & Hardware YAML Guidelines reset to defaults!", icon="✅")
+                    st.session_state["card_saved_banner"] = {"section": "yaml_guidelines", "msg": "✅ NetBox Server & Hardware YAML Guidelines reset to defaults!", "ts": time.time()}
                     st.rerun()
 
         full_prompt_text = export_rules_as_prompt(current_rules)
@@ -1948,6 +1935,7 @@ def render_standards_tab(active_model):
         for scope_code, title, desc, s_key in scope_meta:
             scope_items = grouped_vars.get(s_key, {})
             with st.container(border=True):
+                _check_and_render_banner(f"vars_{s_key}")
                 col_t1, col_t2 = st.columns([3, 1])
                 with col_t1:
                     st.markdown(f"#### {title}")
@@ -2000,14 +1988,14 @@ def render_standards_tab(active_model):
                 col_save, col_rst = st.columns([4, 1])
                 with col_save:
                     if st.button(f"💾 Save & Apply Changes", key=f"save_scope_{s_key}", type="primary", width="stretch"):
-                        st.toast(f"✅ {s_key.title()} Variables saved & applied!", icon="✅")
+                        st.session_state["card_saved_banner"] = {"section": f"vars_{s_key}", "msg": f"✅ {s_key.title()} Variables saved & applied!", "ts": time.time()}
                         _persist_variables(current_rules, all_edited_vars)
                 with col_rst:
                     if st.button("🔄 Reset Scope", key=f"reset_scope_{s_key}", type="secondary", width="stretch"):
                         from config.naming_rules import PATTERN_VARIABLES
                         default_scope_vars = {k: v for k, v in PATTERN_VARIABLES.items() if v.get("scope") == s_key}
                         all_edited_vars.update(default_scope_vars)
-                        st.toast(f"✅ {s_key.title()} Variables reset to defaults!", icon="✅")
+                        st.session_state["card_saved_banner"] = {"section": f"vars_{s_key}", "msg": f"✅ {s_key.title()} Variables reset to defaults!", "ts": time.time()}
                         _persist_variables(current_rules, all_edited_vars)
 
                 # 2. Bottom Inline Add Row (Seamless table extension matching Preset style)
