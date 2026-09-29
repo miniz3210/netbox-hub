@@ -778,7 +778,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             st.info("Verified against ESXi naming standards.")
 
     # --- SECTION 2: 📸 SCREENSHOT OCR PIPELINE (4-STEP WORKFLOW) ---
-    with st.expander("📸 Screenshot OCR Pipeline (4-Step Workflow)", expanded=True):
+    with st.expander("📸 Screenshot OCR Pipeline (4-Step Workflow)", expanded=False):
         st.caption("4-step workflow to analyze ESXi topology screenshots and generate bulk NetBox descriptions.")
 
         # 1️⃣ Step 1: Upload Screenshots & Analyze
@@ -912,29 +912,40 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 st.warning(f"Failed to process pasted image: {e}")
 
         st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
-        btn_col1, btn_col2 = st.columns([3, 1])
+        btn_col1, btn_col2, btn_col3, _ = st.columns([2.2, 1.2, 1.2, 3.4])
         with btn_col1:
             has_imgs = bool(uploaded_imgs)
-            if st.button("🚀 Analyze Topology & Auto-Populate", key="btn_analyze_hypervisor_img", type="primary", disabled=not has_imgs, use_container_width=True):
-                if not _is_vision_capable_model(active_model):
-                    st.error(f"❌ Selected model [{active_model}] does not support Image/Vision analysis. Please select a vision-capable model (e.g. gpt-4o, gpt-5.6-luna, claude-3-5-sonnet) from the left sidebar.")
-                else:
-                    with st.spinner(f"Analyzing topology with AI Vision ({active_model})..."):
-                        try:
-                            from core.ai_assistant import analyze_hypervisor_topology_screenshot
-                            results = analyze_hypervisor_topology_screenshot(uploaded_imgs, naming_rules, active_model)
-                            st.session_state["esxi_parsed_descriptions"] = results
-                            st.success("Successfully analyzed topology and generated NetBox descriptions!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Vision analysis failed: {str(e)}")
+            start_analyze = st.button("🚀 Analyze Topology & Auto-Populate", key="btn_analyze_hypervisor_img", type="primary", disabled=not has_imgs)
         with btn_col2:
+            stop_analyze = st.button("🛑 Stop", key="btn_stop_hypervisor_analysis", type="secondary")
+            if stop_analyze:
+                st.session_state["topo_is_analyzing"] = False
+                st.info("Analysis stopped by user.")
+                st.stop()
+        with btn_col3:
             has_data = bool(uploaded_imgs or st.session_state.get("esxi_parsed_descriptions"))
-            if st.button("🗑️ Clear All", key="btn_clear_topo_data", type="secondary", disabled=not has_data, use_container_width=True):
+            if st.button("🗑️ Clear All", key="btn_clear_topo_data", type="secondary", disabled=not has_data):
                 st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
-                for key_to_del in ["esxi_parsed_descriptions", "esxi_preview_df", "esxi_extracted_variables"]:
+                for key_to_del in ["esxi_parsed_descriptions", "esxi_preview_df", "esxi_extracted_variables", "topo_is_analyzing"]:
                     st.session_state.pop(key_to_del, None)
                 st.rerun()
+
+        if start_analyze:
+            if not _is_vision_capable_model(active_model):
+                st.error(f"❌ Selected model [{active_model}] does not support Image/Vision analysis. Please select a vision-capable model (e.g. gpt-4o, gpt-5.6-luna, claude-3-5-sonnet) from the left sidebar.")
+            else:
+                st.session_state["topo_is_analyzing"] = True
+                with st.spinner(f"Analyzing topology with AI Vision ({active_model})..."):
+                    try:
+                        from core.ai_assistant import analyze_hypervisor_topology_screenshot
+                        results = analyze_hypervisor_topology_screenshot(uploaded_imgs, naming_rules, active_model)
+                        st.session_state["esxi_parsed_descriptions"] = results
+                        st.session_state["topo_is_analyzing"] = False
+                        st.success("Successfully analyzed topology and generated NetBox descriptions!")
+                        st.rerun()
+                    except Exception as e:
+                        st.session_state["topo_is_analyzing"] = False
+                        st.error(f"Vision analysis failed: {str(e)}")
 
         # 2️⃣ Step 2: Preview & Review Topology Data (Full-Width)
         st.markdown("---")
