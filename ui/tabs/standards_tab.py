@@ -1853,148 +1853,115 @@ def render_standards_tab(active_model):
     
     with tab_vars:
         st.markdown("##### 📘 Pattern Variables Reference Guide")
-        st.caption("All available pattern variables currently configured. These drive the dynamic input fields in the Naming tab.")
-        variables_now = get_pattern_variables(current_rules)
+        st.caption("Unified registry of all pattern variables. Scoped by domain to eliminate naming collision between IPAM, Naming, and ESXi templates.")
+        
+        from config.naming_rules import get_grouped_pattern_variables, PATTERN_VARIABLES
+        grouped_vars = get_grouped_pattern_variables(current_rules)
         patterns_now = get_naming_patterns(current_rules)
 
-        var_names = list(variables_now.keys())
-        with st.container(border=True):
-            col_t1, col_t2 = st.columns([3, 1])
-            with col_t1:
-                st.markdown("#### 📘 PATTERN VARIABLES")
-            with col_t2:
-                st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(var_names)} variables</span></div>", unsafe_allow_html=True)
-            st.caption("Add, edit, or reorder template tokens. Optional variables are omitted when left empty.")
+        scope_meta = [
+            ("shared", "🏢 GLOBAL & SHARED VARIABLES", "Variables shared across all infrastructure naming and IPAM provisioning.", "shared"),
+            ("ipam", "🌐 IPAM & SUBNET VARIABLES", "Variables for VLANs, subnets, supernets, and NetBox bulk import schemas.", "ipam"),
+            ("naming", "💻 DEVICE & VM NAMING VARIABLES", "Variables driving network device, router, firewall, and virtual machine hostnames.", "naming"),
+            ("esxi", "☁️ ESXI VIRTUALIZATION & NETWORKING", "Variables for physical uplinks, vSwitches, Port Groups, and VMkernels.", "esxi")
+        ]
 
-            # Inject dynamic styling to guarantee Action buttons fit cleanly without squeezing
-            st.markdown(
-                """
-                <style>
-                div[data-testid="column"]:last-child {
-                    min-width: 36px !important;
-                    display: flex !important;
-                    justify-content: flex-end !important;
-                    align-items: center !important;
-                }
-                div[data-testid="column"]:last-child button {
-                    padding-left: 4px !important;
-                    padding-right: 4px !important;
-                    min-width: 32px !important;
-                }
-                .action-header {
-                    white-space: nowrap !important;
-                }
-                </style>
-                """,
-                unsafe_allow_html=True,
-            )
+        VARIABLE_COLS_OPTIMIZED = [1.5, 3.2, 3.8, 1.2, 0.8, 0.6]
 
-            if variables_now:
-                # Optimized column ratios: Name, Label, Placeholder, Auto-Fill, Optional, Up, Down, Delete(Action)
-                VARIABLE_COLS_OPTIMIZED = [1.2, 3.5, 4.2, 1.0, 0.8, 0.5, 0.5, 0.5]
-                c_nh_nm, c_nh_lb, c_nh_ph, c_nh_df, c_nh_opt, c_nh_up, c_nh_dn, c_nh_del = st.columns(VARIABLE_COLS_OPTIMIZED, vertical_alignment="center")
-                with c_nh_nm:
-                    st.markdown("**Name**")
-                with c_nh_lb:
-                    st.markdown("**Label**")
-                with c_nh_ph:
-                    st.markdown("**Placeholder**")
-                with c_nh_df:
-                    st.markdown("**Auto-Fill**")
-                with c_nh_opt:
-                    st.markdown("**Optional**")
-                with c_nh_up:
-                    pass
-                with c_nh_dn:
-                    pass
-                with c_nh_del:
-                    st.markdown("<span class='action-header'>**Action**</span>", unsafe_allow_html=True)
+        # Gather updated dictionary across all scope cards
+        all_edited_vars = {}
+        for _, _, _, s_key in scope_meta:
+            all_edited_vars.update(grouped_vars.get(s_key, {}))
 
-                edited_vars = {}
-                total_vars = len(var_names)
-                for idx, name in enumerate(var_names):
-                    meta = variables_now.get(name) if isinstance(variables_now.get(name), dict) else {}
-                    c_nm, c_lb, c_ph, c_df, c_opt, c_up, c_dn, c_del = st.columns(VARIABLE_COLS_OPTIMIZED, vertical_alignment="center")
-                    with c_nm:
-                        var_key = st.text_input("Name", value=name, key=f"var_key_{name}", label_visibility="collapsed").strip()
-                        var_key = _normalize_var_name(var_key)
-                    with c_lb:
-                        var_lbl = st.text_input("Label", value=meta.get("label", name), key=f"var_lbl_{name}", label_visibility="collapsed").strip()
-                    with c_ph:
-                        var_ph = st.text_input("Placeholder", value=meta.get("placeholder", ""), key=f"var_ph_{name}", label_visibility="collapsed").strip()
-                    with c_df:
-                        var_def = st.text_input("Auto-Fill", value=meta.get("default", ""), key=f"var_def_{name}", label_visibility="collapsed")
-                    with c_opt:
-                        var_opt = st.checkbox("Optional", value=bool(meta.get("optional")), key=f"var_opt_{name}", label_visibility="collapsed")
-                    with c_up:
-                        if idx > 0:
-                            if st.button("⬆️", key=f"var_up_{idx}", help=f"Move <{name}> up"):
-                                var_names[idx - 1], var_names[idx] = var_names[idx], var_names[idx - 1]
-                                reordered = {k: variables_now[k] for k in var_names}
-                                _persist_variables(current_rules, reordered)
-                        else:
-                            pass
-                    with c_dn:
-                        if idx < total_vars - 1:
-                            if st.button("⬇️", key=f"var_dn_{idx}", help=f"Move <{name}> down"):
-                                var_names[idx], var_names[idx + 1] = var_names[idx + 1], var_names[idx]
-                                reordered = {k: variables_now[k] for k in var_names}
-                                _persist_variables(current_rules, reordered)
-                        else:
-                            pass
-                    with c_del:
-                        if st.button("🗑️", key=f"var_del_{name}", help=f"Remove <{name}>"):
-                            edited_vars[name] = None
-                            continue
+        for scope_code, title, desc, s_key in scope_meta:
+            scope_items = grouped_vars.get(s_key, {})
+            with st.container(border=True):
+                col_t1, col_t2 = st.columns([3, 1])
+                with col_t1:
+                    st.markdown(f"#### {title}")
+                with col_t2:
+                    st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(scope_items)} variables</span></div>", unsafe_allow_html=True)
+                st.caption(desc)
 
-                    var_key = var_key or name
-                    entry = {
-                        "label": var_lbl or var_key,
-                        "placeholder": var_ph or f"e.g. {var_key}",
-                    }
-                    if var_def:
-                        entry["default"] = var_def
-                    entry["optional"] = bool(var_opt)
-                    edited_vars[var_key] = entry
+                if scope_items:
+                    c_h1, c_h2, c_h3, c_h4, c_h5, c_h6 = st.columns(VARIABLE_COLS_OPTIMIZED, vertical_alignment="center")
+                    with c_h1:
+                        st.markdown("**Token**")
+                    with c_h2:
+                        st.markdown("**Label**")
+                    with c_h3:
+                        st.markdown("**Placeholder**")
+                    with c_h4:
+                        st.markdown("**Default**")
+                    with c_h5:
+                        st.markdown("**Optional**")
+                    with c_h6:
+                        st.markdown("<span class='action-header'>**Action**</span>", unsafe_allow_html=True)
 
-                # Inline Add Row
-                ca_nm, ca_lb, ca_ph, ca_df, ca_opt, ca_up, ca_dn, ca_del = st.columns(VARIABLE_COLS_OPTIMIZED, vertical_alignment="center")
-                with ca_nm:
-                    new_name = st.text_input("Name", value="", placeholder="e.g. speed", key="var_new_name", label_visibility="collapsed").strip()
-                    new_name = _normalize_var_name(new_name)
-                with ca_lb:
-                    new_label = st.text_input("Label", value="", placeholder="e.g. Link Speed", key="var_new_label", label_visibility="collapsed").strip()
-                with ca_ph:
-                    new_ph = st.text_input("Placeholder", value="", placeholder="e.g. 10G", key="var_new_ph", label_visibility="collapsed").strip()
-                with ca_df:
-                    new_def = st.text_input("Auto-Fill", value="", placeholder="e.g. 10G", key="var_new_def", label_visibility="collapsed")
-                with ca_opt:
-                    new_optional = st.checkbox("Optional", value=True, key="var_new_optional", label_visibility="collapsed")
-                with ca_up:
-                    pass
-                with ca_dn:
-                    pass
-                with ca_del:
-                    pass
+                    for name, meta in list(scope_items.items()):
+                        c1, c2, c3, c4, c5, c6 = st.columns(VARIABLE_COLS_OPTIMIZED, vertical_alignment="center")
+                        with c1:
+                            st.code(f"<{name}>", language="text")
+                        with c2:
+                            lbl = st.text_input("Label", value=meta.get("label", name), key=f"vscope_{s_key}_lbl_{name}", label_visibility="collapsed").strip()
+                        with c3:
+                            ph = st.text_input("Placeholder", value=meta.get("placeholder", ""), key=f"vscope_{s_key}_ph_{name}", label_visibility="collapsed").strip()
+                        with c4:
+                            df_val = st.text_input("Default", value=meta.get("default", ""), key=f"vscope_{s_key}_df_{name}", label_visibility="collapsed")
+                        with c5:
+                            opt = st.checkbox("Optional", value=bool(meta.get("optional", False)), key=f"vscope_{s_key}_opt_{name}", label_visibility="collapsed")
+                        with c6:
+                            if _render_centered_del_btn(f"vscope_del_{s_key}_{name}", f"Delete <{name}>"):
+                                all_edited_vars.pop(name, None)
+                                _persist_variables(current_rules, all_edited_vars)
+                                return
 
-                col_save_var, col_reset_var = st.columns(2)
-                with col_save_var:
-                    if st.button("💾 Save Variables", key="var_apply", type="primary", width='stretch'):
-                        final_vars = {k: v for k, v in edited_vars.items() if v is not None}
+                        all_edited_vars[name] = {
+                            "label": lbl or name,
+                            "placeholder": ph or f"e.g. {name}",
+                            "default": df_val,
+                            "optional": bool(opt),
+                            "scope": s_key
+                        }
+
+                # Inline Add Row per Scope Card
+                with st.form(key=f"var_add_form_{s_key}", clear_on_submit=True):
+                    ca1, ca2, ca3, ca4, ca5, ca6 = st.columns(VARIABLE_COLS_OPTIMIZED, vertical_alignment="center")
+                    with ca1:
+                        new_name = st.text_input("New Token", value="", placeholder="e.g. tier", key=f"vnew_{s_key}_name", label_visibility="collapsed").strip()
+                        new_name = _normalize_var_name(new_name)
+                    with ca2:
+                        new_lbl = st.text_input("New Label", value="", placeholder="e.g. Service Tier", key=f"vnew_{s_key}_lbl", label_visibility="collapsed").strip()
+                    with ca3:
+                        new_ph = st.text_input("New Placeholder", value="", placeholder="e.g. Tier-1, Tier-2", key=f"vnew_{s_key}_ph", label_visibility="collapsed").strip()
+                    with ca4:
+                        new_df = st.text_input("Default", value="", placeholder="Tier-1", key=f"vnew_{s_key}_df", label_visibility="collapsed")
+                    with ca5:
+                        new_opt = st.checkbox("Optional", value=True, key=f"vnew_{s_key}_opt", label_visibility="collapsed")
+                    with ca6:
+                        add_tok = st.form_submit_button("➕", width='stretch', help=f"Add variable to {title}")
+
+                    if add_tok:
                         if new_name:
-                            final_vars[new_name] = {
-                                "label": new_label or new_name,
+                            all_edited_vars[new_name] = {
+                                "label": new_lbl or new_name,
                                 "placeholder": new_ph or f"e.g. {new_name}",
-                                "default": new_def,
-                                "optional": bool(new_optional),
+                                "default": new_df,
+                                "optional": bool(new_opt),
+                                "scope": s_key
                             }
-                        _persist_variables(current_rules, final_vars)
-                with col_reset_var:
-                    if st.button("🔄 Reset to Defaults", key="var_reset", width='stretch'):
-                        from config.naming_rules import PATTERN_VARIABLES
-                        _persist_variables(current_rules, dict(PATTERN_VARIABLES))
-            else:
-                st.info("No variables defined yet.")
+                            _persist_variables(current_rules, all_edited_vars)
+                            return
+                        else:
+                            st.warning("⚠️ Enter a token name to add.")
+
+        col_save_var, col_reset_var = st.columns(2)
+        with col_save_var:
+            if st.button("💾 Save All Variables", key="var_apply_all", type="primary", width='stretch'):
+                _persist_variables(current_rules, all_edited_vars)
+        with col_reset_var:
+            if st.button("🔄 Reset Variables to Defaults", key="var_reset_all", width='stretch'):
+                _persist_variables(current_rules, dict(PATTERN_VARIABLES))
 
         with st.expander("🧩 Active Patterns", expanded=False):
             if patterns_now:
@@ -2002,7 +1969,7 @@ def render_standards_tab(active_model):
                     st.markdown(f"**{key}:** `{pat}`")
 
         st.markdown("---")
-        st.caption("Use these variables in your naming patterns. The Naming tab will automatically replace them with actual values; optional ones only appear when filled.")
+        st.caption("All variables defined here automatically power input boxes and template resolution across Naming, IPAM, and CSV generators.")
     
     with tab_history:
         st.markdown("##### 📜 Naming Standards Change History")
