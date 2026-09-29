@@ -1955,13 +1955,22 @@ def render_standards_tab(active_model):
                         else:
                             st.warning("⚠️ Enter a token name to add.")
 
-        col_save_var, col_reset_var = st.columns(2)
-        with col_save_var:
-            if st.button("💾 Save All Variables", key="var_apply_all", type="primary", width='stretch'):
-                _persist_variables(current_rules, all_edited_vars)
-        with col_reset_var:
-            if st.button("🔄 Reset Variables to Defaults", key="var_reset_all", width='stretch'):
-                _persist_variables(current_rules, dict(PATTERN_VARIABLES))
+                # Save button directly inside this Scoped Card
+                if st.button(f"💾 Save {title.split(' ')[1].title()} Variables", key=f"save_scope_{s_key}", type="primary", width="stretch"):
+                    _persist_variables(current_rules, all_edited_vars)
+
+                st.markdown("---")
+                st.caption(f"➕ Add a new variable token to {title.split(' ')[1].title()}:")
+
+        # Bottom Global Reset Option
+        with st.container(border=True):
+            col_r1, col_r2 = st.columns([3, 1])
+            with col_r1:
+                st.markdown("##### 🔄 Reset All Variables")
+                st.caption("Restore all variables across all scopes back to system factory defaults.")
+            with col_r2:
+                if st.button("Reset to Defaults", key="var_reset_all", type="secondary", width='stretch'):
+                    _persist_variables(current_rules, dict(PATTERN_VARIABLES))
 
         with st.expander("🧩 Active Patterns", expanded=False):
             if patterns_now:
