@@ -880,7 +880,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         
         # Load user-configured patterns dynamically from Standards rules
         raw_esxi_presets = naming_rules.get("esxi_network_presets", [])
-        esxi_presets = {p["code"]: p for p in raw_esxi_presets if isinstance(p, dict)
+        esxi_presets = {p["code"]: p for p in raw_esxi_presets if isinstance(p, dict)}
         
         uplink_tpl = (
             patterns.get("esxinet_uplink")
@@ -1030,7 +1030,10 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     if not isinstance(preset, dict):
                         continue
                     p_code = str(preset.get("code", "")).strip().lower()
-                    if p_code in [f"{row_type.lower()}_name", "pg_name" if row_type == "PortGroup" else "]:
+                    target_codes = [f"{row_type.lower()}_name"]
+                    if row_type == "PortGroup":
+                        target_codes.append("pg_name")
+                    if p_code in target_codes:
                         name_tpl = preset.get("pattern", "") or preset.get("pattern_template", "")
                         break
 
