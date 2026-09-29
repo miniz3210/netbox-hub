@@ -1,13 +1,9 @@
 import re
 import json
-import base64
-import logging
-import requests
 from typing import Dict, List, Any
 from core.ai_client import call_ai
 from config.naming_rules import load_naming_rules, export_rules_as_prompt
 from core.db_manager import get_records_by_category
-from config.settings import OPENROUTER_BASE_URL, OPENROUTER_API_KEY
 
 def build_inventory_context_for_ai(category: str, site_filter: str = "") -> str:
     """Builds a contextual summary of actual uploaded NetBox Data records."""
@@ -162,73 +158,3 @@ def generate_naming_pattern(description: str, model_name: str) -> str:
     # Strip any accidental markdown fences
     result = re.sub(r"^```(?:text)?\s*|```$", "", result, flags=re.IGNORECASE).strip()
     return result
-
-
-logger = logging.getLogger(__name__)
-
-
-def analyze_esxi_screenshot(image_bytes: bytes, active_model: str = "") -> str:
-    """Analyze a single ESXi topology screenshot and return plain-text vision output.
-
-    ``image_bytes`` is the raw image payload (e.g. from ``UploadedFile.read()``).
-    ``active_model`` optionally names the configured AI model; when omitted it is
-    resolved from session state or the first configured preset.
-    """
-    if not image_bytes:
-        return ""
-
-    if active_model:
-        model = active_model
-    else:
-        try:
-            import streamlit as st
-            for key in ("active_model", "approved_model"):
-                val = st.session_state.get(key)
-                if val:
-                    model = val
-                    break
-            else:
-                from config.settings import AVAILABLE_MODELS
-                model = AVAILABLE_MODELS[0] if AVAILABLE_MODELS else "google/gemini-2.0-flash"
-        except Exception:
-            from config.settings import AVAILABLE_MODELS
-            model = AVAILABLE_MODELS[0] if AVAILABLE_MODELS else "google/gemini-2.0-flash"
-
-    b64 = base64.b64encode(image_bytes).decode("ascii")
-    prompt_text = (
-        "Analyze this ESXi virtual switch topology screenshot. "
-        "List every vmnic adapter, the vSwitch it belongs to, and any "
-        "visible Port Groups or VMkernel adapters on separate lines. "
-        "Include link purpose (Management, vMotion, Storage, iSCSI, VM Network) "
-        "and Active/Standby status when visible."
-    )
-    content = [
-        {"type": "text", "text": prompt_text},
-        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
-    ]
-
-    base = OPENROUTER_BASE_URL.rstrip("/")
-    endpoint = f"{base}/chat/completions" if base.endswith("/v1") else f"{base}/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "user", "content": content},
-        ],
-        "temperature": 0.0,
-    }
-
-    try:
-        resp = requests.post(endpoint, headers=headers, json=payload, timeout=120)
-        resp.raise_for_status()
-        body = resp.json()
-        return (body.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
-    except requests.RequestException as e:
-        logger.error("ESXi screenshot vision API failed: %s", e, exc_info=True)
-        raise RuntimeError(f"Vision API request failed: {e}") from e
-    except Exception as e:
-        logger.error("ESXi screenshot analysis failed: %s", e, exc_info=True)
-        raise RuntimeError(f"ESXi screenshot analysis failed: {e}") from e
