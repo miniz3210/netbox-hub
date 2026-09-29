@@ -402,22 +402,84 @@ def get_subnet_availability_analysis(
 
     return "\n".join(analysis_lines)
 
-# ── BULK NETBOX CSV GENERATORS ──────────────────────────────────────────
+# ── SCHEMA-DRIVEN BULK NETBOX CSV GENERATORS ─────────────────────────────
 
-def generate_netbox_site_csv(site_name: str) -> str:
-    clean = format_branch_display(site_name)
-    slug = slugify(clean)
-    return f"name,slug,status\n\"{clean}\",\"{slug}\",active"
+def render_csv_cell(template: str, context: Dict[str, Any]) -> str:
+    """Render a single CSV cell template using universal context substitution."""
+    if not template:
+        return ""
+    result = template
+    for key, val in context.items():
+        val_str = str(val) if val is not None else ""
+        result = result.replace(f"<{key}>", val_str)
+    return result
 
-def generate_netbox_vlan_group_csv(site_name: str, scope_id: str) -> str:
-    clean = format_branch_display(site_name)
-    slug = slugify(f"{clean} VLAN Group")
-    scope_val = scope_id if scope_id else "<SCOPE_ID>"
-    return f"name,slug,scope_type,scope_id\n\"{clean} VLAN Group\",\"{slug}\",\"dcim.site\",{scope_val}"
+def _get_global_ipam_context(site_name: str, scope_id: str, supernet_str: str = "") -> Dict[str, Any]:
+    clean_site = format_branch_display(site_name)
+    clean_slug = slugify(clean_site)
+    clean_supernet = sanitize_cidr(supernet_str)
+    scope_val = str(scope_id).strip() if scope_id else "<SCOPE_ID>"
+    vlan_group = f"{clean_site} VLAN Group"
+    vlan_group_slug = slugify(vlan_group)
 
-def generate_netbox_vlans_csv(site_name: str, rows: List[Dict[str, Any]]) -> str:
-    clean = format_branch_display(site_name)
-    lines = ["vid,name,status,site,group,description,role"]
+    supernet_desc = f"Site Subnet - {clean_supernet}"
+    if clean_supernet and "/" in clean_supernet:
+        try:
+            sup_net = ipaddress.ip_network(clean_supernet, strict=False)
+            supernet_desc = f"Site Subnet - {calculate_subnet_boundary_str(sup_net)}"
+        except ValueError:
+            pass
+
+    return {
+        "site": clean_site,
+        "site_slug": clean_slug,
+        "scope_id": scope_val,
+        "scope_type": "dcim.site",
+        "site_supernet": clean_supernet,
+        "supernet_desc": supernet_desc,
+        "vlan_group": vlan_group,
+        "vlan_group_slug": vlan_group_slug,
+        "status": "active"
+    }
+
+def generate_netbox_site_csv(site_name: str, rules: Optional[Dict[str, Any]] = None) -> str:
+    from config.naming_rules import get_csv_schemas, load_naming_rules
+    if rules is None:
+        rules = load_naming_rules()
+    schemas = get_csv_schemas(rules)
+    schema = schemas.get("import_site", {})
+    headers = schema.get("headers", ["name", "slug", "status"])
+    row_tpl = schema.get("row_template", ["\"<site>\"", "\"<site_slug>\"", "active"])
+    
+    ctx = _get_global_ipam_context(site_name, "")
+    rendered_row = [render_csv_cell(cell, ctx) for cell in row_tpl]
+    return f"{','.join(headers)}\n{','.join(rendered_row)}"
+
+def generate_netbox_vlan_group_csv(site_name: str, scope_id: str, rules: Optional[Dict[str, Any]] = None) -> str:
+    from config.naming_rules import get_csv_schemas, load_naming_rules
+    if rules is None:
+        rules = load_naming_rules()
+    schemas = get_csv_schemas(rules)
+    schema = schemas.get("import_vlan_group", {})
+    headers = schema.get("headers", ["name", "slug", "scope_type", "scope_id"])
+    row_tpl = schema.get("row_template", ["\"<vlan_group>\"", "\"<vlan_group_slug>\"", "\"<scope_type>\"", "<scope_id>"])
+
+    ctx = _get_global_ipam_context(site_name, scope_id)
+    rendered_row = [render_csv_cell(cell, ctx) for cell in row_tpl]
+    return f"{','.join(headers)}\n{','.join(rendered_row)}"
+
+def generate_netbox_vlans_csv(site_name: str, rows: List[Dict[str, Any]], rules: Optional[Dict[str, Any]] = None) -> str:
+    from config.naming_rules import get_csv_schemas, load_naming_rules
+    if rules is None:
+        rules = load_naming_rules()
+    schemas = get_csv_schemas(rules)
+    schema = schemas.get("import_vlans", {})
+    headers = schema.get("headers", ["vid", "name", "status", "site", "group", "description", "role"])
+    row_tpl = schema.get("row_template", ["<vid>", "\"<vlan_name>\"", "active", "\"<site>\"", "\"<vlan_group>\"", "\"<vlan_desc>\"", "\"<role>\""])
+
+    global_ctx = _get_global_ipam_context(site_name, "")
+    lines = [",".join(headers)]
+
     for r in rows:
         vid = r.get("VLAN ID")
         subnet = sanitize_cidr(str(r.get("Subnet (CIDR)") or "").strip())
@@ -426,7 +488,20 @@ def generate_netbox_vlans_csv(site_name: str, rows: List[Dict[str, Any]]) -> str
         vname = r.get("VLAN Name") or r.get("Role") or f"VLAN_{vid}"
         desc = str(r.get("VLAN Description") or "").strip()
         role_val = r.get("Role") or vname
-        lines.append(f"{vid},\"{vname}\",active,\"{clean}\",\"{clean} VLAN Group\",\"{desc}\",\"{role_val}\"")
+
+        row_ctx = {
+            **global_ctx,
+            "vid": vid,
+            "vlan_id": vid,
+            "role": role_val,
+            "vlan_name": vname,
+            "vlan_desc": desc,
+            "subnet": subnet,
+            "prefix": subnet
+        }
+        rendered_cells = [render_csv_cell(cell, row_ctx) for cell in row_tpl]
+        lines.append(",".join(rendered_cells))
+
     return "\n".join(lines)
 
 def generate_netbox_prefixes_csv(
@@ -435,22 +510,25 @@ def generate_netbox_prefixes_csv(
     supernet_str: str,
     rows: List[Dict[str, Any]],
     include_site_subnet: bool = True,
+    rules: Optional[Dict[str, Any]] = None,
 ) -> str:
-    clean = format_branch_display(site_name)
-    clean_supernet = sanitize_cidr(supernet_str)
-    scope_val = scope_id if scope_id else "<SCOPE_ID>"
-    lines = ["prefix,status,scope_type,scope_id,vlan_group,vlan,role,description"]
-    
+    from config.naming_rules import get_csv_schemas, load_naming_rules
+    if rules is None:
+        rules = load_naming_rules()
+    schemas = get_csv_schemas(rules)
+    schema = schemas.get("import_prefixes", {})
+    headers = schema.get("headers", ["prefix", "status", "scope_type", "scope_id", "vlan_group", "vlan", "role", "description"])
+    row_tpl = schema.get("row_template", ["\"<prefix>\"", "active", "\"<scope_type>\"", "<scope_id>", "\"<vlan_group>\"", "<vid>", "\"<role>\"", "\"<prefix_desc>\""])
+    sup_tpl = schema.get("supernet_template", ["\"<site_supernet>\"", "active", "\"<scope_type>\"", "<scope_id>", "\"<vlan_group>\"", "", "", "\"<supernet_desc>\""])
+
+    global_ctx = _get_global_ipam_context(site_name, scope_id, supernet_str)
+    lines = [",".join(headers)]
+
     # 1. Top-Level Supernet Container
+    clean_supernet = global_ctx["site_supernet"]
     if include_site_subnet and clean_supernet and "/" in clean_supernet:
-        try:
-            sup_net = ipaddress.ip_network(clean_supernet, strict=False)
-            bound_str = calculate_subnet_boundary_str(sup_net)
-            supernet_desc = f"Site Subnet - {bound_str}"
-        except ValueError:
-            supernet_desc = f"Site Subnet - {clean_supernet}"
-            
-        lines.append(f"\"{clean_supernet}\",active,\"dcim.site\",{scope_val},\"{clean} VLAN Group\",,,,\"{supernet_desc}\"")
+        rendered_sup = [render_csv_cell(cell, global_ctx) for cell in sup_tpl]
+        lines.append(",".join(rendered_sup))
 
     # 2. Member Subnets
     for r in rows:
@@ -461,7 +539,19 @@ def generate_netbox_prefixes_csv(
         role_val = r.get("Role") or r.get("VLAN Name") or ""
         desc = str(r.get("Prefix Description") or "").strip()
         if not desc:
-            desc = f"{clean} {role_val} -- VLAN {vid}"
-        lines.append(f"\"{subnet}\",active,\"dcim.site\",{scope_val},\"{clean} VLAN Group\",{vid},\"{role_val}\",\"{desc}\"")
-        
+            desc = f"{global_ctx['site']} {role_val} -- VLAN {vid}"
+
+        row_ctx = {
+            **global_ctx,
+            "vid": vid,
+            "vlan_id": vid,
+            "role": role_val,
+            "vlan_name": r.get("VLAN Name") or role_val,
+            "prefix": subnet,
+            "subnet": subnet,
+            "prefix_desc": desc
+        }
+        rendered_cells = [render_csv_cell(cell, row_ctx) for cell in row_tpl]
+        lines.append(",".join(rendered_cells))
+
     return "\n".join(lines)

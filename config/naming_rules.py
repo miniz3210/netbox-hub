@@ -187,6 +187,34 @@ DEFAULT_VLAN_PRESETS = {
     }
 }
 
+DEFAULT_CSV_SCHEMAS = {
+    "import_site": {
+        "headers": ["name", "slug", "status"],
+        "row_template": ["\"<site>\"", "\"<site_slug>\"", "active"]
+    },
+    "import_vlan_group": {
+        "headers": ["name", "slug", "scope_type", "scope_id"],
+        "row_template": ["\"<vlan_group>\"", "\"<vlan_group_slug>\"", "\"<scope_type>\"", "<scope_id>"]
+    },
+    "import_vlans": {
+        "headers": ["vid", "name", "status", "site", "group", "description", "role"],
+        "row_template": ["<vid>", "\"<vlan_name>\"", "active", "\"<site>\"", "\"<vlan_group>\"", "\"<vlan_desc>\"", "\"<role>\""]
+    },
+    "import_prefixes": {
+        "headers": ["prefix", "status", "scope_type", "scope_id", "vlan_group", "vlan", "role", "description"],
+        "row_template": ["\"<prefix>\"", "active", "\"<scope_type>\"", "<scope_id>", "\"<vlan_group>\"", "<vid>", "\"<role>\"", "\"<prefix_desc>\""],
+        "supernet_template": ["\"<site_supernet>\"", "active", "\"<scope_type>\"", "<scope_id>", "\"<vlan_group>\"", "", "", "\"<supernet_desc>\""]
+    }
+}
+
+def get_csv_schemas(rules: dict) -> dict:
+    """Return configured CSV schemas or defaults."""
+    import copy
+    raw = rules.get("csv_schemas")
+    if isinstance(raw, dict) and raw:
+        return copy.deepcopy(raw)
+    return copy.deepcopy(DEFAULT_CSV_SCHEMAS)
+
 DEFAULT_IPAM_ROLE_MAPPINGS = [
     {"pattern": r"(?i)^guests?$", "replacement": "Guests", "description": "Normalize guest / guests to Guests", "enabled": True},
     {"pattern": r"(?i)^corp[_\s\-]?wifi$", "replacement": "Corporate WiFi", "description": "Normalize corporate wifi variations", "enabled": True},
@@ -501,6 +529,8 @@ def _normalize_rules(raw: dict) -> dict:
         merged["ipam_role_mappings"] = raw["ipam_role_mappings"]
     elif isinstance(raw.get("ipam_role_mappings"), list):
         merged["ipam_role_mappings"] = raw["ipam_role_mappings"]
+
+    merged["csv_schemas"] = get_csv_schemas(raw)
 
     if isinstance(raw.get("token_order"), dict):
         normalized_to = {}
