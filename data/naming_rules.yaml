@@ -293,104 +293,142 @@
     "site": {
       "label": "Site / Branch Name",
       "placeholder": "e.g. Bristol, AGE, NYC",
-      "scope": "shared"
+      "scope": "shared",
+      "default": "",
+      "optional": false
     },
     "site_slug": {
       "label": "Site URL Slug",
       "placeholder": "e.g. bristol, age, nyc",
-      "scope": "shared"
+      "scope": "shared",
+      "default": "",
+      "optional": false
     },
     "country": {
       "label": "Country Code (2-letter)",
       "placeholder": "e.g. US, UK, AU, DE, JP",
-      "scope": "shared"
+      "scope": "shared",
+      "default": "",
+      "optional": false
     },
     "state": {
       "label": "State / Region (Optional)",
       "placeholder": "e.g. NY, CA, TX, NSW",
-      "scope": "shared"
+      "scope": "shared",
+      "default": "",
+      "optional": false
     },
     "domain": {
       "label": "Domain Name (FQDN Suffix)",
       "placeholder": "e.g. corp.example.com, internal.net",
-      "scope": "shared"
+      "scope": "shared",
+      "default": "",
+      "optional": false
     },
     "status": {
       "label": "Object Status",
       "placeholder": "active / planned",
       "default": "active",
-      "scope": "shared"
+      "scope": "shared",
+      "optional": false
     },
     "vid": {
       "label": "VLAN ID",
       "placeholder": "e.g. 100, 300",
-      "scope": "ipam"
+      "scope": "ipam",
+      "default": "",
+      "optional": false
     },
     "vlan_id": {
       "label": "VLAN ID (Alias)",
       "placeholder": "e.g. 100, 300",
-      "scope": "ipam"
+      "scope": "ipam",
+      "default": "",
+      "optional": false
     },
     "role": {
       "label": "VLAN / Subnet Role",
       "placeholder": "e.g. Corporate WiFi, Workstations",
-      "scope": "ipam"
+      "scope": "ipam",
+      "default": "",
+      "optional": false
     },
     "vlan_name": {
       "label": "NetBox VLAN Name",
       "placeholder": "e.g. Corporate WiFi",
-      "scope": "ipam"
+      "scope": "ipam",
+      "default": "",
+      "optional": false
     },
     "vlan_desc": {
       "label": "VLAN Description",
       "placeholder": "e.g. VIN_Corp",
-      "scope": "ipam"
+      "scope": "ipam",
+      "default": "",
+      "optional": false
     },
     "subnet": {
       "label": "Subnet (CIDR)",
       "placeholder": "e.g. 10.113.64.0/24",
-      "scope": "ipam"
+      "scope": "ipam",
+      "default": "",
+      "optional": false
     },
     "prefix": {
       "label": "Prefix (CIDR)",
       "placeholder": "e.g. 10.113.64.0/24",
-      "scope": "ipam"
+      "scope": "ipam",
+      "default": "",
+      "optional": false
     },
     "prefix_desc": {
       "label": "Prefix Description",
       "placeholder": "e.g. Bristol Corporate WiFi -- VLAN 300",
-      "scope": "ipam"
+      "scope": "ipam",
+      "default": "",
+      "optional": false
     },
     "scope_id": {
       "label": "NetBox Scope ID (Site ID)",
       "placeholder": "e.g. 30",
-      "scope": "ipam"
+      "scope": "ipam",
+      "default": "",
+      "optional": false
     },
     "scope_type": {
       "label": "NetBox Scope Type",
       "placeholder": "dcim.site",
       "default": "dcim.site",
-      "scope": "ipam"
+      "scope": "ipam",
+      "optional": false
     },
     "site_supernet": {
       "label": "Site Supernet (CIDR)",
       "placeholder": "e.g. 10.113.64.0/21",
-      "scope": "ipam"
+      "scope": "ipam",
+      "default": "",
+      "optional": false
     },
     "supernet_desc": {
       "label": "Supernet Description",
       "placeholder": "e.g. Site Subnet - 10.113.64.1 - 10.113.71.254",
-      "scope": "ipam"
+      "scope": "ipam",
+      "default": "",
+      "optional": false
     },
     "vlan_group": {
       "label": "VLAN Group Name",
       "placeholder": "e.g. Bristol VLAN Group",
-      "scope": "ipam"
+      "scope": "ipam",
+      "default": "",
+      "optional": false
     },
     "vlan_group_slug": {
       "label": "VLAN Group Slug",
       "placeholder": "e.g. bristol-vlan-group",
-      "scope": "ipam"
+      "scope": "ipam",
+      "default": "",
+      "optional": false
     },
     "zone": {
       "label": "Zone / Role / Vendor (Optional)",
@@ -511,6 +549,12 @@
       "placeholder": "vmk",
       "default": "vmk",
       "scope": "esxi"
+    },
+    "switch_zone": {
+      "label": "Switch Zone",
+      "placeholder": "e.g. switch_zone",
+      "scope": "esxi",
+      "optional": true
     }
   },
   "site_code_rules": {
