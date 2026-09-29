@@ -1883,11 +1883,10 @@ def render_standards_tab(active_model):
                     st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(scope_items)} variables</span></div>", unsafe_allow_html=True)
                 st.caption(desc)
 
-                # Scoped Success Feedback Banner
+                # Scoped Success Feedback Banner (10-second CSS auto-dismiss animation)
                 success_key = f"vars_scope_{s_key}_saved"
                 if st.session_state.get(success_key):
-                    st.success(f"✅ {title.split(' ')[1].title()} Variables saved & applied!")
-                    # Clear notification flag safely for next run without dropping current render
+                    render_auto_dismiss_banner(f"✅ {title.split(' ')[1].title()} Variables saved & applied!", duration_sec=10)
                     st.session_state[success_key] = False
 
                 if scope_items:

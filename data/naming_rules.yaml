@@ -433,77 +433,107 @@
     "zone": {
       "label": "Zone / Role / Vendor (Optional)",
       "placeholder": "e.g. CORE, DIST, EDGE, PA",
-      "scope": "naming"
+      "scope": "naming",
+      "default": "",
+      "optional": false
     },
     "vendor": {
       "label": "Vendor (Optional)",
       "placeholder": "e.g. PA, CISCO, HUAWEI",
-      "scope": "naming"
+      "scope": "naming",
+      "default": "",
+      "optional": false
     },
     "seq": {
       "label": "Sequence Number",
       "placeholder": "e.g. 01, 02",
-      "scope": "naming"
+      "scope": "naming",
+      "default": "",
+      "optional": false
     },
     "stack_id": {
       "label": "Stack / Member ID (Optional)",
       "placeholder": "e.g. 0, 1",
-      "scope": "naming"
+      "scope": "naming",
+      "default": "",
+      "optional": false
     },
     "local_device": {
       "label": "Local Device Hostname",
       "placeholder": "e.g. SWUSNYC01-0",
-      "scope": "naming"
+      "scope": "naming",
+      "default": "",
+      "optional": false
     },
     "local_port": {
       "label": "Local Port",
       "placeholder": "e.g. Gi1/0/48, Te1/0/1",
-      "scope": "naming"
+      "scope": "naming",
+      "default": "",
+      "optional": false
     },
     "remote_device": {
       "label": "Remote Device Hostname",
       "placeholder": "e.g. SWUSNYC02-0",
-      "scope": "naming"
+      "scope": "naming",
+      "default": "",
+      "optional": false
     },
     "remote_port": {
       "label": "Remote Port",
       "placeholder": "e.g. Gi1/0/48, Te1/0/1",
-      "scope": "naming"
+      "scope": "naming",
+      "default": "",
+      "optional": false
     },
     "local_po_id": {
       "label": "Local Port-Channel ID",
       "placeholder": "LAG1",
-      "scope": "naming"
+      "scope": "naming",
+      "default": "",
+      "optional": false
     },
     "device": {
       "label": "Connected Device",
       "placeholder": "e.g. WAP01",
-      "scope": "naming"
+      "scope": "naming",
+      "default": "",
+      "optional": false
     },
     "port": {
       "label": "Connected Port",
       "placeholder": "e.g. Gi0/1",
-      "scope": "naming"
+      "scope": "naming",
+      "default": "",
+      "optional": false
     },
     "role_zone": {
       "label": "Security Zone / Role",
       "placeholder": "e.g. INSIDE, OUTSIDE",
-      "scope": "naming"
+      "scope": "naming",
+      "default": "",
+      "optional": false
     },
     "role_esx": {
       "label": "Host Role (Optional)",
       "placeholder": "e.g. esx, otinfhost, infhost",
-      "scope": "naming"
+      "scope": "naming",
+      "default": "",
+      "optional": false
     },
     "site_prefix": {
       "label": "Site Prefix (Short Code)",
       "placeholder": "e.g. age, nyc, lon, syd",
-      "scope": "naming"
+      "scope": "naming",
+      "default": "",
+      "optional": false
     },
     "vm_site": {
       "label": "Site Prefix / Country & Site",
       "placeholder": "e.g. age, usnyc, uklon",
-      "scope": "naming"
+      "scope": "naming",
+      "default": "",
+      "optional": false
     },
     "vmnic": {
       "label": "vmnic Name",
