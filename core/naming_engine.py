@@ -195,18 +195,20 @@ def analyze_esxi_screenshot(image_bytes: bytes, active_model: str = "") -> str:
             model = AVAILABLE_MODELS[0] if AVAILABLE_MODELS else "google/gemini-2.0-flash"
 
     b64 = base64.b64encode(image_bytes).decode("ascii")
+    prompt_text = (
+        "Analyze this ESXi virtual switch topology screenshot. "
+        "List every vmnic adapter, the vSwitch it belongs to, and any "
+        "visible Port Groups or VMkernel adapters on separate lines. "
+        "Include link purpose (Management, vMotion, Storage, iSCSI, VM Network) "
+        "and Active/Standby status when visible."
+    )
     content = [
-        {"type": "text", "text": (
-            "Analyze this ESXi virtual switch topology screenshot. "
-            "List every vmnic adapter, the vSwitch it belongs to, and any "
-            "visible Port Groups or VMkernel adapters on separate lines. "
-            "Include link purpose (Management, vMotion, Storage, iSCSI, VM Network) "
-            "and Active/Standby status when visible."
-        )},
+        {"type": "text", "text": prompt_text},
         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
     ]
 
-    endpoint = f"{OPENROUTER_BASE_URL}/chat/completions"
+    base = OPENROUTER_BASE_URL.rstrip("/")
+    endpoint = f"{base}/chat/completions" if base.endswith("/v1") else f"{base}/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
@@ -214,11 +216,6 @@ def analyze_esxi_screenshot(image_bytes: bytes, active_model: str = "") -> str:
     payload = {
         "model": model,
         "messages": [
-            {"role": "system", "content": (
-                "You are an expert VMware ESXi networking engineer. "
-                "Output plain text lines only — one logical item per line. "
-                "Never wrap the output in markdown code fences."
-            )},
             {"role": "user", "content": content},
         ],
         "temperature": 0.0,

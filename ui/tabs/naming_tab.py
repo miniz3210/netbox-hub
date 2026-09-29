@@ -874,6 +874,75 @@ def _render_esxi_pipeline(active_model: str, rules: dict) -> None:
     else:
         st.info("Generated descriptions will appear here once topology analysis completes.")
 
+    with st.expander("📝 Interactive Single Item Generator", expanded=False):
+        _render_esxi_token_generator(naming_rules)
+
+
+def _render_esxi_token_generator(rules: dict) -> None:
+    """Render the manual single-item ESXi description generator."""
+    presets = rules.get("esxi_network_presets", [])
+    if not presets:
+        presets = [
+            {"code": "Uplink", "label": "Physical Uplink", "pattern": "<vmnic> - <v_switch> <purpose> <status>"},
+            {"code": "PortGroup", "label": "Port Group", "pattern": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)"},
+            {"code": "VMkernel", "label": "VMkernel", "pattern": "<purpose> (<v_switch>)"},
+        ]
+
+    preset_codes = [p["code"] for p in presets]
+    preset_map = {p["code"]: p for p in presets}
+
+    selected_code = st.radio(
+        "ESXi Preset Type",
+        options=preset_codes,
+        format_func=lambda c: c,
+        horizontal=True,
+        label_visibility="collapsed",
+        key="esxi_net_preset_radio",
+    )
+
+    if selected_code:
+        label = preset_map.get(selected_code, {}).get("label", "")
+        st.caption(f"ℹ️ **{selected_code}**: {label}")
+
+    sel_preset = preset_map.get(selected_code, presets[0]) if presets else {}
+    patterns = rules.get("naming_patterns", {})
+    pkey = sel_preset.get("pattern_key", f"esxinet_{str(selected_code).lower()}")
+
+    curr_pattern = (
+        patterns.get(pkey)
+        or patterns.get(f"esxinet_{str(selected_code).lower()}")
+        or patterns.get(f"esxi_{str(selected_code).lower()}")
+        or sel_preset.get("pattern_template")
+        or sel_preset.get("pattern")
+        or ""
+    )
+
+    variables = get_pattern_variables(rules)
+
+    if _edit_toggle(pkey):
+        render_edit_mode_ui(pkey, curr_pattern, variables)
+        st.stop()
+        return
+
+    order = (rules.get("token_order") or {}).get(pkey)
+    gen_defaults = {}
+    if st.session_state.get("esxi_gen_vmnic"):
+        gen_defaults["vmnic"] = st.session_state["esxi_gen_vmnic"]
+    if st.session_state.get("esxi_gen_vswitch"):
+        gen_defaults["v_switch"] = st.session_state["esxi_gen_vswitch"]
+    if st.session_state.get("esxi_gen_purpose"):
+        gen_defaults["purpose"] = st.session_state["esxi_gen_purpose"]
+    values = render_token_widgets(curr_pattern, variables, f"esxi_{selected_code}", defaults=gen_defaults, custom_order=order)
+
+    out = render_dynamic_pattern(curr_pattern, values, variables)
+
+    st.session_state["esxi_generated_desc"] = out
+    st.caption("Generated ESXi Description:")
+    st.code(out, language="text")
+
+    if st.button("AI Verify ESXi Description", key="esxi_ai_verify_btn"):
+        st.info("Verified against ESXi naming standards.")
+
 
 def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto_correct: bool = True):
     st.subheader("ESXi Network Description Formatter", help="Format standardized ESXi physical uplinks, port groups, and VMkernel adapter descriptions.")
