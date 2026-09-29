@@ -805,14 +805,11 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
         col_up1, col_up2 = st.columns([1, 1])
 
-        # Initialize unified screenshot store and counters
-        if "unified_screenshots" not in st.session_state:
-            st.session_state["unified_screenshots"] = []
+        # Initialize counters (images are derived transiently, not stored persistently)
         if "esxi_upload_counter" not in st.session_state:
             st.session_state["esxi_upload_counter"] = 0
         if "esxi_paste_counter" not in st.session_state:
             st.session_state["esxi_paste_counter"] = 0
-        # Upload screenshots
         if "topo_uploader_key_ver" not in st.session_state:
             st.session_state["topo_uploader_key_ver"] = 0
 
@@ -825,16 +822,18 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 key=uploader_key,
                 help="Upload one or multiple screenshots...",
             )
-            # Ingest uploaded files immediately and reset uploader widget so it stays clean
+            # Transient ingestion: replace (not append) uploaded files for this run
             if raw_uploaded:
-                import io
+                import io as _io
+                stored = []
                 for uf in raw_uploaded:
                     file_bytes = uf.read()
-                    bio = io.BytesIO(file_bytes)
+                    bio = _io.BytesIO(file_bytes)
                     bio.name = uf.name
                     bio.type = uf.type
                     bio.size = len(file_bytes)
-                    st.session_state["unified_screenshots"].append(bio)
+                    stored.append(bio)
+                st.session_state["topo_uploaded_imgs"] = stored
                 st.session_state["esxi_upload_counter"] += 1
 
         with col_up2:
@@ -892,24 +891,43 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
         # --- END OF 2-COLUMN INPUT LAYOUT (col_up1, col_up2) ---
 
-        # Set unified list as uploaded_imgs for preview and analysis (unconditional init)
-        uploaded_imgs = st.session_state["unified_screenshots"]
+        def _clear_all_topology_state():
+            st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
+            for k in ["topo_uploaded_imgs", "pasted_clipboard_imgs", "hypervisor_parsed_descriptions",
+                      "hypervisor_preview_df", "hypervisor_extracted_variables", "topo_is_analyzing"]:
+                st.session_state.pop(k, None)
+                st.session_state[k] = [] if "imgs" in k else None
 
-        # Process newly pasted image and cleanly auto-clear via counter increment
+        def _derive_active_topology_images():
+            """Derive active image list purely from current-run transient inputs, deduplicated by (name, size)."""
+            uploaded = list(st.session_state.get("topo_uploaded_imgs") or [])
+            clipboard = list(st.session_state.get("pasted_clipboard_imgs") or [])
+            seen = set()
+            deduped = []
+            for item in uploaded + clipboard:
+                key = (getattr(item, "name", None), getattr(item, "size", None))
+                if key not in seen and key[0] is not None:
+                    seen.add(key)
+                    deduped.append(item)
+            return deduped
+
+        # Transient clipboard ingestion
         if pasted_data and pasted_data.startswith("data:image"):
-            import base64, io
+            import base64 as _b64, io as _io
             try:
                 header, encoded = pasted_data.split(",", 1)
-                img_bytes = base64.b64decode(encoded)
-                pasted_file = io.BytesIO(img_bytes)
-                idx = len(st.session_state["unified_screenshots"]) + 1
+                img_bytes = _b64.b64decode(encoded)
+                pasted_file = _io.BytesIO(img_bytes)
+                idx = len(st.session_state.get("pasted_clipboard_imgs") or []) + 1
                 pasted_file.name = f"clipboard_screenshot_{idx}.png"
                 pasted_file.type = "image/png"
                 pasted_file.size = len(img_bytes)
-                st.session_state["unified_screenshots"].append(pasted_file)
+                st.session_state["pasted_clipboard_imgs"] = [pasted_file]
                 st.session_state["esxi_paste_counter"] += 1
             except Exception as e:
                 st.warning(f"Failed to process pasted image: {e}")
+
+        uploaded_imgs = _derive_active_topology_images()
 
         st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
         btn_col1, btn_col2, _ = st.columns([2.2, 1.2, 6.6])
@@ -926,9 +944,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         with btn_col2:
             has_data = bool(uploaded_imgs or st.session_state.get("hypervisor_parsed_descriptions"))
             if st.button("🗑️ Clear All", key="btn_clear_topo_data", type="secondary", disabled=not has_data, width='stretch'):
-                st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
-                for key_to_del in ["hypervisor_parsed_descriptions", "hypervisor_preview_df", "hypervisor_extracted_variables", "topo_is_analyzing"]:
-                    st.session_state.pop(key_to_del, None)
+                _clear_all_topology_state()
                 st.rerun()
 
         if not topo_is_analyzing and start_analyze:
@@ -951,11 +967,11 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         # 2️⃣ Step 2: Preview & Review Topology Data (Full-Width)
         st.markdown("---")
         st.markdown("##### 2️⃣ Preview & Check Topology Data")
-        if "unified_screenshots" in st.session_state and st.session_state["unified_screenshots"]:
-            with st.expander(f"🔍 Preview Uploaded Screenshots ({len(st.session_state['unified_screenshots'])} file(s))", expanded=False):
-                preview_cols = st.columns(min(len(st.session_state["unified_screenshots"]), 4))
+        if uploaded_imgs:
+            with st.expander(f"🔍 Preview Uploaded Screenshots ({len(uploaded_imgs)} file(s))", expanded=False):
+                preview_cols = st.columns(min(len(uploaded_imgs), 4))
                 remove_idx = None
-                for img_idx, img_item in enumerate(st.session_state["unified_screenshots"]):
+                for img_idx, img_item in enumerate(uploaded_imgs):
                     with preview_cols[img_idx % len(preview_cols)]:
                         img_title = getattr(img_item, "name", f"Screenshot #{img_idx + 1}")
                         st.caption(f"#{img_idx + 1}: {img_title}")
@@ -963,7 +979,10 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         if st.button("✖ Remove", key=f"unified_remove_btn_{img_idx}"):
                             remove_idx = img_idx
                 if remove_idx is not None:
-                    st.session_state["unified_screenshots"].pop(remove_idx)
+                    st.session_state["topo_uploaded_imgs"] = [
+                        img for i, img in enumerate(st.session_state.get("topo_uploaded_imgs") or [])
+                        if i != remove_idx
+                    ]
                     st.rerun()
 
         if "hypervisor_parsed_descriptions" in st.session_state and st.session_state["hypervisor_parsed_descriptions"]:
