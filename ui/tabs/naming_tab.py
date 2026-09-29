@@ -840,7 +840,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 with preview_cols[img_idx % len(preview_cols)]:
                     img_title = getattr(img_item, "name", f"Screenshot #{img_idx + 1}")
                     st.caption(f"#{img_idx + 1}: {img_title}")
-                    st.image(img_item, use_container_width=True)
+                    st.image(img_item, width="stretch")
                     if st.button("✖ Remove", key=f"unified_remove_btn_{img_idx}"):
                         remove_idx = img_idx
             if remove_idx is not None:
@@ -879,7 +879,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         patterns = naming_rules.get("naming_patterns", {})
         
         # Load user-configured patterns dynamically from Standards rules
-        esxi_presets = {p["code"]: p for p in naming_rules.get("esxi_network_presets", [])}
+        raw_esxi_presets = naming_rules.get("esxi_network_presets", [])
+        esxi_presets = {p["code"]: p for p in raw_esxi_presets if isinstance(p, dict)
         
         uplink_tpl = (
             patterns.get("esxinet_uplink")
@@ -1025,10 +1026,12 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 # Check for any dynamic name template (e.g. PG_Name, PortGroup_Name, <type>_Name)
                 header_iface = iface
                 name_tpl = None
-                for preset in esxi_presets:
+                for preset in raw_esxi_presets:
+                    if not isinstance(preset, dict):
+                        continue
                     p_code = str(preset.get("code", "")).strip().lower()
-                    if p_code in [f"{row_type.lower()}_name", "pg_name" if row_type == "PortGroup" else ""]:
-                        name_tpl = preset.get("pattern", "")
+                    if p_code in [f"{row_type.lower()}_name", "pg_name" if row_type == "PortGroup" else "]:
+                        name_tpl = preset.get("pattern", "") or preset.get("pattern_template", "")
                         break
 
                 if name_tpl:
