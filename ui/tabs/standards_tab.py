@@ -1844,7 +1844,18 @@ def render_standards_tab(active_model):
 
     current_rules = load_naming_rules()
     st.session_state["naming_rules"] = current_rules
-    
+
+    # Auto-migrate legacy 'esxi' scope to 'hypervisor' and clean up
+    if "pattern_variables" in current_rules:
+        pvars = current_rules["pattern_variables"]
+        if "esxi" in pvars:
+            if "hypervisor" not in pvars or not isinstance(pvars["hypervisor"], list):
+                pvars["hypervisor"] = []
+            existing_tokens = {item.get("token") for item in pvars["hypervisor"] if isinstance(item, dict)}
+            for old_item in pvars.pop("esxi", []):
+                if isinstance(old_item, dict) and old_item.get("token") not in existing_tokens:
+                    pvars["hypervisor"].append(old_item)
+
     tab_edit, tab_vars, tab_history = st.tabs(["📝 Edit Standards", "📘 Pattern Variables Reference", "📜 Change History"])
     
     with tab_edit:
@@ -1951,7 +1962,6 @@ def render_standards_tab(active_model):
             ("ipam", "🌐 IPAM & SUBNET VARIABLES", "Variables for VLANs, subnets, supernets, and NetBox bulk import schemas.", "ipam"),
             ("naming", "💻 DEVICE & VM NAMING VARIABLES", "Variables driving network device, router, firewall, and virtual machine hostnames.", "naming"),
             ("hypervisor", "☁️ Hypervisor Virtualization & Networking", "Variables for physical uplinks, vSwitches, Port Groups, and VMkernels.", "hypervisor"),
-            ("esxi", "☁️ Hypervisor Virtualization & Networking", "Variables for physical uplinks, vSwitches, Port Groups, and VMkernels.", "esxi")
         ]
 
         VARIABLE_COLS_OPTIMIZED = [1.5, 3.2, 3.8, 1.2, 0.8, 0.6]

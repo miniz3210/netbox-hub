@@ -779,11 +779,11 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
     # --- SECTION 2: 📸 SCREENSHOT OCR PIPELINE (4-STEP WORKFLOW) ---
     with st.expander("📸 Screenshot OCR Pipeline (4-Step Workflow)", expanded=False):
-        st.caption("4-step workflow to analyze ESXi topology screenshots and generate bulk NetBox descriptions.")
+        st.caption("4-step workflow to analyze Hypervisor topology screenshots and generate bulk NetBox descriptions.")
 
         # 1️⃣ Step 1: Upload Screenshots & Analyze
-        st.markdown("##### 1️⃣ Upload ESXi Topology Screenshots")
-        st.caption("Upload screenshots of Virtual Switches, Physical Adapters, or VMkernel Adapters from vSphere / ESXi Host Client.")
+        st.markdown("##### 1️⃣ Upload Hypervisor Topology Screenshots")
+        st.caption("Upload screenshots of Virtual Switches, Physical Adapters, Bridges, or VMkernel/Management Adapters from Hypervisor Host Client (vSphere/ESXi, Proxmox VE, KVM).")
 
         with st.expander("📸 Screenshot Guidelines (Virtual Switches Topology)", expanded=False):
             st.markdown("""
@@ -817,7 +817,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             st.session_state["topo_uploader_key_ver"] = 0
 
         with col_up1:
-            uploader_key = f"esxi_topo_file_uploader_{st.session_state['topo_uploader_key_ver']}"
+            uploader_key = f"hypervisor_topo_file_uploader_{st.session_state['topo_uploader_key_ver']}"
             raw_uploaded = st.file_uploader(
                 "Upload Screenshots (Drag & Drop)",
                 type=["png", "jpg", "jpeg"],
@@ -923,10 +923,10 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 st.info("Analysis stopped by user.")
                 st.stop()
         with btn_col3:
-            has_data = bool(uploaded_imgs or st.session_state.get("esxi_parsed_descriptions"))
+            has_data = bool(uploaded_imgs or st.session_state.get("hypervisor_parsed_descriptions"))
             if st.button("🗑️ Clear All", key="btn_clear_topo_data", type="secondary", disabled=not has_data):
                 st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
-                for key_to_del in ["esxi_parsed_descriptions", "esxi_preview_df", "esxi_extracted_variables", "topo_is_analyzing"]:
+                for key_to_del in ["hypervisor_parsed_descriptions", "hypervisor_preview_df", "hypervisor_extracted_variables", "topo_is_analyzing"]:
                     st.session_state.pop(key_to_del, None)
                 st.rerun()
 
@@ -939,7 +939,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     try:
                         from core.ai_assistant import analyze_hypervisor_topology_screenshot
                         results = analyze_hypervisor_topology_screenshot(uploaded_imgs, naming_rules, active_model)
-                        st.session_state["esxi_parsed_descriptions"] = results
+                        st.session_state["hypervisor_parsed_descriptions"] = results
                         st.session_state["topo_is_analyzing"] = False
                         st.success("Successfully analyzed topology and generated NetBox descriptions!")
                         st.rerun()
@@ -965,23 +965,23 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     st.session_state["unified_screenshots"].pop(remove_idx)
                     st.rerun()
 
-        if "esxi_parsed_descriptions" in st.session_state and st.session_state["esxi_parsed_descriptions"]:
+        if "hypervisor_parsed_descriptions" in st.session_state and st.session_state["hypervisor_parsed_descriptions"]:
             st.caption("Review and edit parsed topology directly below. Batch text updates reactively in real time.")
             edited_descriptions = st.data_editor(
-                st.session_state["esxi_parsed_descriptions"],
+                st.session_state["hypervisor_parsed_descriptions"],
                 use_container_width=True,
                 num_rows="dynamic",
                 key="esxi_topology_editor"
             )
-            st.session_state["esxi_parsed_descriptions"] = edited_descriptions
+            st.session_state["hypervisor_parsed_descriptions"] = edited_descriptions
         else:
             st.info("⚪ No topology data analyzed yet. Upload screenshot(s) and click analyze above.")
 
         # 3️⃣ Step 3: Extracted Variables Inspector (Full-Width & Clean Filtering)
         st.markdown("---")
         st.markdown("##### 3️⃣ Extracted Variables Inspector")
-        if "esxi_parsed_descriptions" in st.session_state and st.session_state["esxi_parsed_descriptions"]:
-            rows = st.session_state["esxi_parsed_descriptions"]
+        if "hypervisor_parsed_descriptions" in st.session_state and st.session_state["hypervisor_parsed_descriptions"]:
+            rows = st.session_state["hypervisor_parsed_descriptions"]
 
             extracted_vmnics = set()
             extracted_vswitches = set()
@@ -1110,13 +1110,14 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 sync_tok_val = st.text_input("Value / Default", placeholder="e.g. vmbr0, 100", key="esxi_sync_tok_val").strip()
             with vcol3:
                 st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-                if st.button("💾 Sync Variable", key="btn_sync_tok_standards", width='stretch'):
+                if st.button("💾 Sync Variable", key="btn_sync_var_standards", width='stretch'):
+                    target_scope = "hypervisor"
                     if sync_tok_name:
                         from config.naming_rules import save_naming_rules
                         norm_token = re.sub(r"[^a-z0-9_]", "", sync_tok_name)
                         if "pattern_variables" not in naming_rules:
                             naming_rules["pattern_variables"] = {}
-                        existing_scope = naming_rules.get("scope", "esxi")
+                        existing_scope = naming_rules.get("scope", "hypervisor")
                         naming_rules["pattern_variables"][norm_token] = {
                             "label": norm_token.replace("_", " ").title(),
                             "placeholder": f"e.g. {sync_tok_val or norm_token}",
@@ -1136,18 +1137,18 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         # 4️⃣ Step 4: NetBox Descriptions (Ready-to-Copy)
         st.markdown("---")
         st.markdown("##### 4️⃣ NetBox Descriptions (Ready-to-Copy)")
-        if "esxi_parsed_descriptions" in st.session_state and st.session_state["esxi_parsed_descriptions"]:
+        if "hypervisor_parsed_descriptions" in st.session_state and st.session_state["hypervisor_parsed_descriptions"]:
             st.markdown("###### 📋 Generated NetBox Interface Descriptions (Editable)")
             st.caption("Review and edit parsed topology directly below. Batch text updates reactively in real time.")
 
             edited_descriptions = st.data_editor(
-                st.session_state["esxi_parsed_descriptions"],
+                st.session_state["hypervisor_parsed_descriptions"],
                 width="stretch",
                 hide_index=True,
                 num_rows="dynamic",
                 key="esxi_vision_data_editor"
             )
-            st.session_state["esxi_parsed_descriptions"] = edited_descriptions
+            st.session_state["hypervisor_parsed_descriptions"] = edited_descriptions
 
             st.markdown("###### 📋 Quick Copy for NetBox (Batch Text)")
             rows = edited_descriptions

@@ -116,7 +116,7 @@ def healthcheck_ai(selected_model: str) -> Tuple[bool, int, str]:
     """
     start = time.time()
     try:
-        call_ai("ping", selected_model)
+        call_ai("ping", selected_model, timeout=6)
     except AIProviderError as exc:
         latency = round((time.time() - start) * 1000)
         return False, latency, str(exc)
@@ -379,7 +379,7 @@ def parse_raw_gateway_payload(raw_text: str) -> str:
     # Strategy 3: text fallback — return the raw body unchanged
     return raw_text or ""
 
-def call_ai(prompt: str, selected_model: str, custom_system_msg: Optional[str] = None) -> str:
+def call_ai(prompt: str, selected_model: str, custom_system_msg: Optional[str] = None, timeout: int = 90) -> str:
     rules = load_naming_rules()
     naming_context = export_rules_as_prompt(rules)
     system_msg = custom_system_msg or (
@@ -412,7 +412,7 @@ def call_ai(prompt: str, selected_model: str, custom_system_msg: Optional[str] =
     endpoint = f"{base}/chat/completions" if base.endswith("/v1") else f"{base}/v1/chat/completions"
 
     try:
-        response = requests.post(endpoint, headers=headers, json=payload, timeout=90)
+        response = requests.post(endpoint, headers=headers, json=payload, timeout=timeout)
         if response.status_code != 200:
             raise AIProviderError(f"HTTP {response.status_code}: {response.text}")
             

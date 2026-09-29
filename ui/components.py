@@ -1192,10 +1192,17 @@ def render_sidebar() -> str:
         # Option A: on-demand pre-flight healthcheck via the app's own call_ai pipeline.
         selected_quick = "" if quick_pick.startswith("--") else quick_pick
         if selected_quick:
+            is_pinging = st.session_state.get("is_pinging_model", False)
             t1, t2 = st.columns([1, 1])
             with t1:
-                if st.button("⚡ Ping / Healthcheck", key="btn_ping_quick", width="stretch"):
-                    with st.spinner(f"Pinging `{selected_quick}`..."):
+                if is_pinging:
+                    if st.button("🛑 Cancel Ping", key="btn_cancel_ping_quick", type="primary", width="stretch"):
+                        st.session_state["is_pinging_model"] = False
+                        st.info("Ping cancelled.")
+                        st.rerun()
+                else:
+                    if st.button("⚡ Ping / Health...", key="btn_ping_quick", width="stretch"):
+                        st.session_state["is_pinging_model"] = True
                         st.session_state["model_test_history"][selected_quick] = {
                             "ok": False, "latency": 0, "msg": "", "ts": time.time(),
                         }
@@ -1203,12 +1210,13 @@ def render_sidebar() -> str:
                         st.session_state["model_test_history"][selected_quick] = {
                             "ok": ok, "latency": latency, "msg": msg, "ts": time.time(),
                         }
+                        st.session_state["is_pinging_model"] = False
                         if ok:
                             st.success(f"✅ Connected: Response in {latency}ms")
                         else:
                             st.error(f"❌ Healthcheck failed: {msg}")
             with t2:
-                if st.button("➜ Apply", key="btn_apply_quick", type="primary", width="stretch",
+                if st.button("➔ Apply", key="btn_apply_quick", type="primary", width="stretch",
                             help="Only applied after the model passes a healthcheck."):
                     ok, latency, msg = healthcheck_ai(selected_quick)
                     if ok:
