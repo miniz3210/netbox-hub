@@ -1192,7 +1192,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     row_vals["vmnic"] = norm_iface
                     row_vals["interface"] = norm_iface
 
-                    # Purpose / Service normalization (strip trailing "network")
+                    # Purpose / Service normalization (PRESERVE "Network" suffixes intact)
                     raw_purpose = (
                         row_vals.get("purpose") or
                         row_vals.get("service") or
@@ -1206,7 +1206,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                                 raw_purpose = re.sub(r"(Active Uplink|Standby Uplink)$", "", raw_purpose).strip()
                         else:
                             raw_purpose = desc.split("(")[0].strip()
-                    clean_purpose = re.sub(r"(?i)\s+network$", "", raw_purpose).strip()
+                    clean_purpose = re.sub(r"(?i)\s+(active uplink|standby uplink)$", "", raw_purpose).strip()
                     row_vals["purpose"] = clean_purpose
                     row_vals["service"] = clean_purpose
 
@@ -1238,26 +1238,29 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     rendered = re.sub(r"\s*-\s*$", "", rendered)
                     rendered = re.sub(r"\s{2,}", " ", rendered).strip()
 
-                    # 5. Schema-Free Dynamic Interface Header Name Resolution
-                    # Check for any dynamic name template (e.g. PG_Name, PortGroup_Name, <type>_Name)
+                    # 5. Dynamic Interface Header Resolution
                     header_iface = iface
-                    name_tpl = None
-                    for preset in raw_esxi_presets:
-                        if not isinstance(preset, dict):
-                            continue
-                        p_code = str(preset.get("code", "")).strip().lower()
-                        target_codes = [f"{row_type.lower()}_name"]
-                        if row_type == "PortGroup":
-                            target_codes.append("pg_name")
-                        if p_code in target_codes:
-                            name_tpl = preset.get("pattern", "") or preset.get("pattern_template", "")
-                            break
+                    if row_type == "Uplink":
+                        # Embed hardware slot in physical interface header for NetBox cross-check
+                        hw_slot = _resolve_hw_slot(iface)
+                        header_iface = f"{hw_slot} ({iface})"
+                    elif row_type == "PortGroup":
+                        name_tpl = None
+                        for preset in raw_esxi_presets:
+                            if not isinstance(preset, dict):
+                                continue
+                            p_code = str(preset.get("code", "")).strip().lower()
+                            if p_code in ["portgroup_name", "pg_name", "portgroup"]:
+                                name_tpl = preset.get("pattern", "") or preset.get("pattern_template", "")
+                                break
+                        if not name_tpl:
+                            name_tpl = _patterns.get("esxinet_pg_name") or _patterns.get("esxi_pg_name") or "PG-<network>"
 
-                    if name_tpl:
                         name_vals = dict(row_vals)
                         name_vals["pg_network"] = iface
                         name_vals["network"] = iface
                         name_vals["name"] = iface
+                        name_vals["portgroup_name"] = iface
                         rendered_name = render_dynamic_pattern(name_tpl, name_vals, pattern_vars)
                         rendered_name = re.sub(r"<[^>]+>", "", rendered_name).strip()
                         if rendered_name:
