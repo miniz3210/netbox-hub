@@ -444,7 +444,7 @@ def render_naming_tab(active_model):
             [
                 "🔧 Network & Security Devices (Switches, APs, Firewalls, Routers)",
                 "🖥️ Hosts & Virtual Machines (ESXi & VMs)",
-                "☁️ ESXi Network Descriptions (vmnic, PortGroup, VMkernel)",
+                "☁️ Hypervisor Network Descriptions (ESXi, Proxmox, etc.)",
             ],
             horizontal=True,
             help="Select the asset class to generate standardized infrastructure names. Each class loads its preset-driven form. Configured in the Standards Tab > Device Type Presets / Interface Type Presets / ESXi Network Description Presets.",
@@ -704,7 +704,7 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables, global_s
 
 
 def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto_correct: bool = True):
-    st.subheader("ESXi Network Description Formatter", help="Format standardized ESXi physical uplinks, port groups, and VMkernel adapter descriptions.")
+    st.subheader("☁️ Hypervisor Network Description Formatter", help="Format standardized hypervisor network descriptions (VMware ESXi, Proxmox VE, Linux Bridges, etc.) matching infrastructure guidelines.")
 
     # --- SECTION 1: 🛠️ INTERACTIVE SINGLE ITEM GENERATOR ---
     with st.expander("🛠️ Interactive Single Item Generator", expanded=False):
@@ -942,7 +942,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         else:
             st.info("⚪ No topology data analyzed yet. Upload screenshot(s) and click analyze above.")
 
-        # 3️⃣ Step 3: Extracted Variables Inspector (Full-Width & Strict Type-Aware Filtering)
+        # 3️⃣ Step 3: Extracted Variables Inspector (Full-Width & Clean Filtering)
         st.markdown("---")
         st.markdown("##### 3️⃣ Extracted Variables Inspector")
         if "esxi_parsed_descriptions" in st.session_state and st.session_state["esxi_parsed_descriptions"]:
@@ -971,44 +971,74 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 elif last_seen_switch:
                     extracted_vswitches.add(last_seen_switch)
 
-                # Strict vmnic extraction (only physical uplinks or genuine NIC names)
+                # Strict physical NIC extraction
                 raw_iface = str(r.get("Interface / vmnic") or r.get("Interface") or r.get("vmnic") or r.get("NIC") or "").strip()
                 if row_type == "Uplink" or re.search(r"^(vmnic|eno|ens|enp|eth)\d+", raw_iface, re.IGNORECASE):
                     m_nic = re.search(r"\b(vmnic\d+|eno\w+|ens\w+|enp\w+|eth\d+)\b", raw_iface, re.IGNORECASE)
                     if m_nic:
                         extracted_vmnics.add(m_nic.group(1))
 
-                # Strict purpose extraction (only PortGroups & VMkernels)
+                # Exact Purpose extraction: preserve "Management Network", "VM Network", reject vmkX interfaces
                 raw_purp = str(r.get("Role / PortGroup") or r.get("Purpose") or r.get("Service") or r.get("PortGroup") or "").strip()
                 if not raw_purp and row_type in ["PortGroup", "VMkernel"]:
                     raw_purp = raw_iface
                 if raw_purp:
-                    clean_purp = re.sub(r"(?i)\s+(network|active uplink|standby uplink)$", "", raw_purp).strip()
+                    clean_purp = re.sub(r"(?i)\s+(active uplink|standby uplink)$", "", raw_purp).strip()
                     clean_purp = re.sub(r"\s*\([^)]*\)", "", clean_purp).strip()
-                    if clean_purp and not re.match(r"^(vmnic\d+|vSwitch\w*)$", clean_purp, re.IGNORECASE):
+                    if clean_purp and not re.match(r"^(vmnic\d+|vSwitch\w*|vmk\d+)$", clean_purp, re.IGNORECASE):
                         extracted_purposes.add(clean_purp)
 
             vmnics = sorted(list(extracted_vmnics))
             vswitches = sorted(list(extracted_vswitches))
             purposes = sorted(list(extracted_purposes))
 
+            # Hardware slot resolution aligned with NetBox Device Types (PSU, OCP3, PCIe1-3)
             from config.naming_rules import get_hardware_slot_mappings
-            slot_map = get_hardware_slot_mappings(naming_rules)
-            slots = sorted(list(set(slot_map.get(re.sub(r"\D", "", v), f"Slot:{v}") for v in vmnics if v)))
+            user_slot_map = get_hardware_slot_mappings(naming_rules)
+
+            def _resolve_hw_slot(nic_name):
+                digits = re.sub(r"\D", "", nic_name)
+                if digits in user_slot_map:
+                    return user_slot_map[digits]
+                if digits.isdigit():
+                    num = int(digits)
+                    if num in [0, 1]:
+                        return f"OCP3:Port{num + 1}"
+                    elif num in [2, 3]:
+                        return f"PCIe1:Port{num - 1}"
+                    elif num in [4, 5]:
+                        return f"PCIe2:Port{num - 3}"
+                    elif num in [6, 7]:
+                        return f"PCIe3:Port{num - 5}"
+                return f"PCIe1:Port1"
+
+            slots = sorted(list(set(_resolve_hw_slot(v) for v in vmnics if v)))
+
+            # Render styled Badge Cards matching NetBox Hub dark glass theme
+            def _render_pill_card(title, items, color="#38bdf8"):
+                st.markdown(f"""
+                <div style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 12px 14px; min-height: 120px;">
+                    <div style="font-weight: 600; color: {color}; margin-bottom: 8px; font-size: 0.88rem; display: flex; justify-content: space-between;">
+                        <span>{title}</span>
+                        <span style="background: rgba(255,255,255,0.1); padding: 1px 6px; border-radius: 10px; font-size: 0.75rem; color: #cbd5e1;">{len(items)}</span>
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                        {"".join([f'<span style="background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; padding: 3px 8px; font-size: 0.8rem; font-family: monospace; color: #f1f5f9;">{it}</span>' for it in items]) if items else '<span style="color: #64748b; font-size: 0.8rem;">None detected</span>'}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
 
             c1, c2, c3, c4 = st.columns(4)
             with c1:
-                st.markdown("**`<vmnic>`**")
-                st.code("\n".join(vmnics) if vmnics else "None", language="text")
+                _render_pill_card("&lt;vmnic&gt;", vmnics, "#38bdf8")
             with c2:
-                st.markdown("**`<v_switch>`**")
-                st.code("\n".join(vswitches) if vswitches else "None", language="text")
+                _render_pill_card("&lt;v_switch&gt;", vswitches, "#a78bfa")
             with c3:
-                st.markdown("**`<slot>`**")
-                st.code("\n".join(slots) if slots else "None", language="text")
+                _render_pill_card("&lt;slot&gt;", slots, "#34d399")
             with c4:
-                st.markdown("**`<purpose>`**")
-                st.code("\n".join(purposes) if purposes else "None", language="text")
+                _render_pill_card("&lt;purpose&gt;", purposes, "#f472b6")
+
+            st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
 
             # ➕ Add / Update Variable with persistent Standards sync
             st.markdown("**➕ Add / Update Variable (Sync to Standards)**")
@@ -1041,235 +1071,235 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         else:
             st.caption("Tokens will be listed here after analyzing topology screenshots.")
 
-    # 4️⃣ Step 4: NetBox Descriptions (Ready-to-Copy)
-    st.markdown("---")
-    st.markdown("##### 4️⃣ NetBox Descriptions (Ready-to-Copy)")
-    if "esxi_parsed_descriptions" in st.session_state and st.session_state["esxi_parsed_descriptions"]:
-        st.markdown("###### 📋 Generated NetBox Interface Descriptions (Editable)")
-        st.caption("Review and edit parsed topology directly below. Batch text updates reactively in real time.")
+        # 4️⃣ Step 4: NetBox Descriptions (Ready-to-Copy)
+        st.markdown("---")
+        st.markdown("##### 4️⃣ NetBox Descriptions (Ready-to-Copy)")
+        if "esxi_parsed_descriptions" in st.session_state and st.session_state["esxi_parsed_descriptions"]:
+            st.markdown("###### 📋 Generated NetBox Interface Descriptions (Editable)")
+            st.caption("Review and edit parsed topology directly below. Batch text updates reactively in real time.")
 
-        edited_descriptions = st.data_editor(
-            st.session_state["esxi_parsed_descriptions"],
-            width="stretch",
-            hide_index=True,
-            num_rows="dynamic",
-            key="esxi_vision_data_editor"
-        )
-        st.session_state["esxi_parsed_descriptions"] = edited_descriptions
-
-        st.markdown("###### 📋 Quick Copy for NetBox (Batch Text)")
-        rows = edited_descriptions
-
-        # Get patterns from session state
-        _naming_rules = st.session_state.get("naming_rules", {})
-        _patterns = _naming_rules.get("naming_patterns", {})
-
-        # Load user-configured patterns dynamically from Standards rules
-        raw_esxi_presets = _naming_rules.get("esxi_network_presets", [])
-        esxi_presets = {p["code"]: p for p in raw_esxi_presets if isinstance(p, dict)}
-
-        uplink_tpl = (
-            _patterns.get("esxinet_uplink")
-            or _patterns.get("esxi_uplink")
-            or esxi_presets.get("Uplink", {}).get("pattern_template")
-            or esxi_presets.get("Uplink", {}).get("pattern")
-            or "<vmnic> - <v_switch> <purpose> <status>"
-        )
-        pg_tpl = (
-            _patterns.get("esxinet_portgroup")
-            or _patterns.get("esxi_portgroup")
-            or esxi_presets.get("PortGroup", {}).get("pattern_template")
-            or esxi_presets.get("PortGroup", {}).get("pattern")
-            or "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)"
-        )
-        vmk_tpl = (
-            _patterns.get("esxinet_vmkernel")
-            or _patterns.get("esxi_vmkernel")
-            or esxi_presets.get("VMkernel", {}).get("pattern_template")
-            or esxi_presets.get("VMkernel", {}).get("pattern")
-            or "<purpose> (<v_switch>)"
-        )
-
-        groups = {}
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            vs = (row.get("vSwitch") or row.get("vswitch") or row.get("VSwitch") or "").strip()
-            groups.setdefault(vs, []).append(row)
-
-        type_order = {"Uplink": 0, "PortGroup": 1, "VMkernel": 2}
-
-        blocks = []
-        for vs in sorted(groups):
-            items = sorted(
-                groups[vs],
-                key=lambda r: (
-                    type_order.get(r.get("Type", ""), 3),
-                    str(r.get("Interface", "")),
-                ),
+            edited_descriptions = st.data_editor(
+                st.session_state["esxi_parsed_descriptions"],
+                width="stretch",
+                hide_index=True,
+                num_rows="dynamic",
+                key="esxi_vision_data_editor"
             )
-            vs_lines = [f"=== {vs} ==="]
-            for row in items:
-                iface = row.get("Interface", "")
-                desc = row.get("Description", "")
-                ip = row.get("IP Address", "")
-                row_type = row.get("Type", "")
+            st.session_state["esxi_parsed_descriptions"] = edited_descriptions
 
-                # Safely resolve dynamic variables dictionary from naming_rules
-                pattern_vars = _naming_rules.get("variables", {}) if isinstance(_naming_rules, dict) else {}
+            st.markdown("###### 📋 Quick Copy for NetBox (Batch Text)")
+            rows = edited_descriptions
 
-                # Robust switch extraction
-                resolved_vs = (
-                    vs
-                    or str(row.get("vSwitch", "")).strip()
-                    or str(row.get("v_switch", "")).strip()
-                    or str(row.get("Switch", "")).strip()
-                    or str(row.get("vswitch", "")).strip()
+            # Get patterns from session state
+            _naming_rules = st.session_state.get("naming_rules", {})
+            _patterns = _naming_rules.get("naming_patterns", {})
+
+            # Load user-configured patterns dynamically from Standards rules
+            raw_esxi_presets = _naming_rules.get("esxi_network_presets", [])
+            esxi_presets = {p["code"]: p for p in raw_esxi_presets if isinstance(p, dict)}
+
+            uplink_tpl = (
+                _patterns.get("esxinet_uplink")
+                or _patterns.get("esxi_uplink")
+                or esxi_presets.get("Uplink", {}).get("pattern_template")
+                or esxi_presets.get("Uplink", {}).get("pattern")
+                or "<vmnic> - <v_switch> <purpose> <status>"
+            )
+            pg_tpl = (
+                _patterns.get("esxinet_portgroup")
+                or _patterns.get("esxi_portgroup")
+                or esxi_presets.get("PortGroup", {}).get("pattern_template")
+                or esxi_presets.get("PortGroup", {}).get("pattern")
+                or "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)"
+            )
+            vmk_tpl = (
+                _patterns.get("esxinet_vmkernel")
+                or _patterns.get("esxi_vmkernel")
+                or esxi_presets.get("VMkernel", {}).get("pattern_template")
+                or esxi_presets.get("VMkernel", {}).get("pattern")
+                or "<purpose> (<v_switch>)"
+            )
+
+            groups = {}
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                vs = (row.get("vSwitch") or row.get("vswitch") or row.get("VSwitch") or "").strip()
+                groups.setdefault(vs, []).append(row)
+
+            type_order = {"Uplink": 0, "PortGroup": 1, "VMkernel": 2}
+
+            blocks = []
+            for vs in sorted(groups):
+                items = sorted(
+                    groups[vs],
+                    key=lambda r: (
+                        type_order.get(r.get("Type", ""), 3),
+                        str(r.get("Interface", "")),
+                    ),
                 )
+                vs_lines = [f"=== {vs} ==="]
+                for row in items:
+                    iface = row.get("Interface", "")
+                    desc = row.get("Description", "")
+                    ip = row.get("IP Address", "")
+                    row_type = row.get("Type", "")
 
-                # Robust purpose extraction without trailing "network"
-                raw_purpose = str(row.get("Service") or row.get("Purpose") or (desc.split("(")[0] if "(" in desc else desc)).strip()
-                clean_svc = re.sub(r"(?i)\s+network$", "", raw_purpose).strip()
+                    # Safely resolve dynamic variables dictionary from naming_rules
+                    pattern_vars = _naming_rules.get("variables", {}) if isinstance(_naming_rules, dict) else {}
 
-                # Extract active and standby vmnics
-                act_nics = str(row.get("Active") or row.get("Active_vmnics") or "").strip()
-                stb_nics = str(row.get("Standby") or row.get("Standby_vmnics") or "").strip()
+                    # Robust switch extraction
+                    resolved_vs = (
+                        vs
+                        or str(row.get("vSwitch", "")).strip()
+                        or str(row.get("v_switch", "")).strip()
+                        or str(row.get("Switch", "")).strip()
+                        or str(row.get("vswitch", "")).strip()
+                    )
 
-                # 1. Base Universal Token Bag: dynamically ingest all row keys/values
-                row_vals = {}
-                for k, v in row.items():
-                    if v is not None and not str(v).lower() in ["nan", "none"]:
-                        norm_k = re.sub(r"[^a-zA-Z0-9]+", "_", str(k).strip().lower()).strip("_")
-                        row_vals[norm_k] = str(v).strip()
+                    # Robust purpose extraction without trailing "network"
+                    raw_purpose = str(row.get("Service") or row.get("Purpose") or (desc.split("(")[0] if "(" in desc else desc)).strip()
+                    clean_svc = re.sub(r"(?i)\s+network$", "", raw_purpose).strip()
 
-                # 2. Canonical Aliases & Intelligent Derivations
-                # Switch normalization
-                resolved_vs = (
-                    row_vals.get("vswitch") or
-                    row_vals.get("v_switch") or
-                    row_vals.get("switch") or
-                    vs or ""
-                )
-                if not resolved_vs and desc:
-                    m_vs = re.search(r"\b(vSwitch\w*)\b", desc)
-                    if m_vs:
-                        resolved_vs = m_vs.group(1)
-                row_vals["vswitch"] = resolved_vs
-                row_vals["v_switch"] = resolved_vs
+                    # Extract active and standby vmnics
+                    act_nics = str(row.get("Active") or row.get("Active_vmnics") or "").strip()
+                    stb_nics = str(row.get("Standby") or row.get("Standby_vmnics") or "").strip()
 
-                # Interface normalization
-                norm_iface = str(iface or row_vals.get("interface") or "").strip()
-                row_vals["vmnic"] = norm_iface
-                row_vals["interface"] = norm_iface
+                    # 1. Base Universal Token Bag: dynamically ingest all row keys/values
+                    row_vals = {}
+                    for k, v in row.items():
+                        if v is not None and not str(v).lower() in ["nan", "none"]:
+                            norm_k = re.sub(r"[^a-zA-Z0-9]+", "_", str(k).strip().lower()).strip("_")
+                            row_vals[norm_k] = str(v).strip()
 
-                # Purpose / Service normalization (strip trailing "network")
-                raw_purpose = (
-                    row_vals.get("purpose") or
-                    row_vals.get("service") or
-                    ""
-                )
-                if not raw_purpose and desc:
-                    if row_type == "Uplink":
-                        parts = desc.split("-")
-                        if len(parts) >= 2:
-                            raw_purpose = re.sub(r"^(vSwitch\w*|Active Uplink|Standby Uplink)\s*", "", parts[-1].strip())
-                            raw_purpose = re.sub(r"(Active Uplink|Standby Uplink)$", "", raw_purpose).strip()
+                    # 2. Canonical Aliases & Intelligent Derivations
+                    # Switch normalization
+                    resolved_vs = (
+                        row_vals.get("vswitch") or
+                        row_vals.get("v_switch") or
+                        row_vals.get("switch") or
+                        vs or ""
+                    )
+                    if not resolved_vs and desc:
+                        m_vs = re.search(r"\b(vSwitch\w*)\b", desc)
+                        if m_vs:
+                            resolved_vs = m_vs.group(1)
+                    row_vals["vswitch"] = resolved_vs
+                    row_vals["v_switch"] = resolved_vs
+
+                    # Interface normalization
+                    norm_iface = str(iface or row_vals.get("interface") or "").strip()
+                    row_vals["vmnic"] = norm_iface
+                    row_vals["interface"] = norm_iface
+
+                    # Purpose / Service normalization (strip trailing "network")
+                    raw_purpose = (
+                        row_vals.get("purpose") or
+                        row_vals.get("service") or
+                        ""
+                    )
+                    if not raw_purpose and desc:
+                        if row_type == "Uplink":
+                            parts = desc.split("-")
+                            if len(parts) >= 2:
+                                raw_purpose = re.sub(r"^(vSwitch\w*|Active Uplink|Standby Uplink)\s*", "", parts[-1].strip())
+                                raw_purpose = re.sub(r"(Active Uplink|Standby Uplink)$", "", raw_purpose).strip()
+                        else:
+                            raw_purpose = desc.split("(")[0].strip()
+                    clean_purpose = re.sub(r"(?i)\s+network$", "", raw_purpose).strip()
+                    row_vals["purpose"] = clean_purpose
+                    row_vals["service"] = clean_purpose
+
+                    # Uplink active/standby mapping
+                    act_vmnics = row_vals.get("active") or row_vals.get("active_vmnics") or ""
+                    stb_vmnics = row_vals.get("standby") or row_vals.get("standby_vmnics") or ""
+                    row_vals["active_vmnics"] = act_vmnics
+                    row_vals["standby_vmnics"] = stb_vmnics
+
+                    # Status / Role
+                    status_val = row_vals.get("role") or row_vals.get("status") or "Active Uplink"
+                    row_vals["status"] = status_val
+                    row_vals["role"] = status_val
+
+                    # 3. Dynamic Pattern Resolution via Universal Engine
+                    if row_type == "VMkernel":
+                        rendered = render_dynamic_pattern(vmk_tpl, row_vals, pattern_vars)
+                    elif row_type == "PortGroup":
+                        rendered = render_dynamic_pattern(pg_tpl, row_vals, pattern_vars)
+                    elif row_type == "Uplink":
+                        rendered = render_dynamic_pattern(uplink_tpl, row_vals, pattern_vars)
                     else:
-                        raw_purpose = desc.split("(")[0].strip()
-                clean_purpose = re.sub(r"(?i)\s+network$", "", raw_purpose).strip()
-                row_vals["purpose"] = clean_purpose
-                row_vals["service"] = clean_purpose
+                        rendered = desc or ""
 
-                # Uplink active/standby mapping
-                act_vmnics = row_vals.get("active") or row_vals.get("active_vmnics") or ""
-                stb_vmnics = row_vals.get("standby") or row_vals.get("standby_vmnics") or ""
-                row_vals["active_vmnics"] = act_vmnics
-                row_vals["standby_vmnics"] = stb_vmnics
+                    # 4. Clean formatting: eliminate leftover tokens and collapse spaces
+                    rendered = re.sub(r"\([^)]*<[^>]+>[^)]*\)", "", rendered)
+                    rendered = re.sub(r"<[^>]+>", "", rendered)
+                    rendered = re.sub(r"\(\s*[/_-]*\s*\)", "", rendered)
+                    rendered = re.sub(r"\s*-\s*$", "", rendered)
+                    rendered = re.sub(r"\s{2,}", " ", rendered).strip()
 
-                # Status / Role
-                status_val = row_vals.get("role") or row_vals.get("status") or "Active Uplink"
-                row_vals["status"] = status_val
-                row_vals["role"] = status_val
+                    # 5. Schema-Free Dynamic Interface Header Name Resolution
+                    # Check for any dynamic name template (e.g. PG_Name, PortGroup_Name, <type>_Name)
+                    header_iface = iface
+                    name_tpl = None
+                    for preset in raw_esxi_presets:
+                        if not isinstance(preset, dict):
+                            continue
+                        p_code = str(preset.get("code", "")).strip().lower()
+                        target_codes = [f"{row_type.lower()}_name"]
+                        if row_type == "PortGroup":
+                            target_codes.append("pg_name")
+                        if p_code in target_codes:
+                            name_tpl = preset.get("pattern", "") or preset.get("pattern_template", "")
+                            break
 
-                # 3. Dynamic Pattern Resolution via Universal Engine
-                if row_type == "VMkernel":
-                    rendered = render_dynamic_pattern(vmk_tpl, row_vals, pattern_vars)
-                elif row_type == "PortGroup":
-                    rendered = render_dynamic_pattern(pg_tpl, row_vals, pattern_vars)
-                elif row_type == "Uplink":
-                    rendered = render_dynamic_pattern(uplink_tpl, row_vals, pattern_vars)
-                else:
-                    rendered = desc or ""
+                    if name_tpl:
+                        name_vals = dict(row_vals)
+                        name_vals["pg_network"] = iface
+                        name_vals["network"] = iface
+                        name_vals["name"] = iface
+                        rendered_name = render_dynamic_pattern(name_tpl, name_vals, pattern_vars)
+                        rendered_name = re.sub(r"<[^>]+>", "", rendered_name).strip()
+                        if rendered_name:
+                            header_iface = rendered_name
 
-                # 4. Clean formatting: eliminate leftover tokens and collapse spaces
-                rendered = re.sub(r"\([^)]*<[^>]+>[^)]*\)", "", rendered)
-                rendered = re.sub(r"<[^>]+>", "", rendered)
-                rendered = re.sub(r"\(\s*[/_-]*\s*\)", "", rendered)
-                rendered = re.sub(r"\s*-\s*$", "", rendered)
-                rendered = re.sub(r"\s{2,}", " ", rendered).strip()
-
-                # 5. Schema-Free Dynamic Interface Header Name Resolution
-                # Check for any dynamic name template (e.g. PG_Name, PortGroup_Name, <type>_Name)
-                header_iface = iface
-                name_tpl = None
-                for preset in raw_esxi_presets:
-                    if not isinstance(preset, dict):
-                        continue
-                    p_code = str(preset.get("code", "")).strip().lower()
-                    target_codes = [f"{row_type.lower()}_name"]
-                    if row_type == "PortGroup":
-                        target_codes.append("pg_name")
-                    if p_code in target_codes:
-                        name_tpl = preset.get("pattern", "") or preset.get("pattern_template", "")
-                        break
-
-                if name_tpl:
-                    name_vals = dict(row_vals)
-                    name_vals["pg_network"] = iface
-                    name_vals["network"] = iface
-                    name_vals["name"] = iface
-                    rendered_name = render_dynamic_pattern(name_tpl, name_vals, pattern_vars)
-                    rendered_name = re.sub(r"<[^>]+>", "", rendered_name).strip()
-                    if rendered_name:
-                        header_iface = rendered_name
-
-                if ip and ip.strip():
-                    if f"(IP: {ip})" not in rendered:
-                        vs_lines.append(f"{header_iface}:\n{rendered} (IP: {ip})\n")
+                    if ip and ip.strip():
+                        if f"(IP: {ip})" not in rendered:
+                            vs_lines.append(f"{header_iface}:\n{rendered} (IP: {ip})\n")
+                        else:
+                            vs_lines.append(f"{header_iface}:\n{rendered}\n")
                     else:
                         vs_lines.append(f"{header_iface}:\n{rendered}\n")
-                else:
-                    vs_lines.append(f"{header_iface}:\n{rendered}\n")
-            blocks.append("\n".join(vs_lines))
+                blocks.append("\n".join(vs_lines))
 
-        # Build clean output with proper double line breaks between sections
-        uplinks_section = "\n\n".join([b for b in blocks if "=== " in b and "Uplink" in b])
-        pg_section = "\n\n".join([b for b in blocks if "=== " in b and "PortGroup" in b])
-        vmk_section = "\n\n".join([b for b in blocks if "=== " in b and "VMkernel" in b])
+            # Build clean output with proper double line breaks between sections
+            uplinks_section = "\n\n".join([b for b in blocks if "=== " in b and "Uplink" in b])
+            pg_section = "\n\n".join([b for b in blocks if "=== " in b and "PortGroup" in b])
+            vmk_section = "\n\n".join([b for b in blocks if "=== " in b and "VMkernel" in b])
 
-        sections = []
-        if uplinks_section:
-            sections.append("=== Uplinks ===\n" + uplinks_section)
-        if pg_section:
-            sections.append("=== Port Groups ===\n" + pg_section)
-        if vmk_section:
-            sections.append("=== VMkernels ===\n" + vmk_section)
+            sections = []
+            if uplinks_section:
+                sections.append("=== Uplinks ===\n" + uplinks_section)
+            if pg_section:
+                sections.append("=== Port Groups ===\n" + pg_section)
+            if vmk_section:
+                sections.append("=== VMkernels ===\n" + vmk_section)
 
-        bulk_text = "# NOTE: Verify Active/Standby via ESXi: vSwitch -> EDIT -> Teaming and failover -> Failover order.\n\n" + "\n\n".join(sections).strip()
-        st.code(bulk_text, language="text")
+            bulk_text = "# NOTE: Verify Active/Standby via ESXi: vSwitch -> EDIT -> Teaming and failover -> Failover order.\n\n" + "\n\n".join(sections).strip()
+            st.code(bulk_text, language="text")
 
-        uplink_lines = []
-        for r in edited_descriptions:
-            vm = r.get("vmnic", "")
-            vsw = r.get("vswitch", r.get("vSwitch", ""))
-            purp = r.get("purpose", "")
-            stat = r.get("status", "Active Uplink")
-            uplink_lines.append(f"{vm} - {vsw} {purp} {stat}".strip())
+            uplink_lines = []
+            for r in edited_descriptions:
+                vm = r.get("vmnic", "")
+                vsw = r.get("vswitch", r.get("vSwitch", ""))
+                purp = r.get("purpose", "")
+                stat = r.get("status", "Active Uplink")
+                uplink_lines.append(f"{vm} - {vsw} {purp} {stat}".strip())
 
-        st.download_button(
-            "📥 Download Generated Descriptions (.txt)",
-            "\n".join(uplink_lines).encode("utf-8"),
-            file_name="esxi-netbox-descriptions.txt",
-            mime="text/plain",
-            key="dl_esxi_descriptions_pipe"
-        )
+            st.download_button(
+                "📥 Download Generated Descriptions (.txt)",
+                "\n".join(uplink_lines).encode("utf-8"),
+                file_name="esxi-netbox-descriptions.txt",
+                mime="text/plain",
+                key="dl_esxi_descriptions_pipe"
+            )
