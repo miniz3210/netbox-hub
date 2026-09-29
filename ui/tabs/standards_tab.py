@@ -1851,92 +1851,92 @@ def render_standards_tab(active_model):
         with st.expander("🌐 Subnet & VLAN Allocation Presets", expanded=True):
             _vlan_presets_editor(current_rules)
 
-            with st.expander("🔧 Network & Security Devices", expanded=True):
-                _check_and_render_banner("network_devices")
-                _preset_type_editor("device", get_device_presets(current_rules), current_rules, prefix="branch",
-                                    card_title="🔧 DEVICE TYPE PRESETS",
-                                    card_caption="Manage device naming patterns and presets (SW, VS, FW, ION, WAP, RTR, VA).",
-                                    section="network_devices", section_label="Network & Security Devices")
-                st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
-                _preset_type_editor("interface", get_interface_presets(current_rules), current_rules, prefix="iface",
-                                    card_title="🔌 INTERFACE TYPE PRESETS",
-                                    card_caption="Manage interface description presets (Uplink, LAG, Po, Access, FW Zone).",
-                                    section="network_devices", section_label="Network & Security Devices")
+        with st.expander("🔧 Network & Security Devices", expanded=False):
+            _check_and_render_banner("network_devices")
+            _preset_type_editor("device", get_device_presets(current_rules), current_rules, prefix="branch",
+                                card_title="🔧 DEVICE TYPE PRESETS",
+                                card_caption="Manage device naming patterns and presets (SW, VS, FW, ION, WAP, RTR, VA).",
+                                section="network_devices", section_label="Network & Security Devices")
+            st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+            _preset_type_editor("interface", get_interface_presets(current_rules), current_rules, prefix="iface",
+                                card_title="🔌 INTERFACE TYPE PRESETS",
+                                card_caption="Manage interface description presets (Uplink, LAG, Po, Access, FW Zone).",
+                                section="network_devices", section_label="Network & Security Devices")
 
-            with st.expander("🖥️ Hosts & Virtual Machines", expanded=True):
-                _host_editor(current_rules)
-                st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
-                _vm_editor(current_rules)
+        with st.expander("🖥️ Hosts & Virtual Machines", expanded=False):
+            _host_editor(current_rules)
+            st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+            _vm_editor(current_rules)
 
-            with st.expander("☁️ ESXi Virtualization & Networking", expanded=True):
-                _check_and_render_banner("esxi")
-                _preset_type_editor("esxi_network", get_esxi_network_presets(current_rules), current_rules, prefix="esxinet",
-                                    card_title="☁️ ESXI NETWORK DESCRIPTION PRESETS",
-                                    card_caption="Manage ESXi interface descriptions (Uplink, PortGroup, VMkernel). Quick Copy dynamically renders from these templates.",
-                                    section="esxi", section_label="ESXi Virtualization & Networking")
+        with st.expander("☁️ ESXi Virtualization & Networking", expanded=False):
+            _check_and_render_banner("esxi")
+            _preset_type_editor("esxi_network", get_esxi_network_presets(current_rules), current_rules, prefix="esxinet",
+                                card_title="☁️ ESXI NETWORK DESCRIPTION PRESETS",
+                                card_caption="Manage ESXi interface descriptions (Uplink, PortGroup, VMkernel). Quick Copy dynamically renders from these templates.",
+                                section="esxi", section_label="ESXi Virtualization & Networking")
 
-            with st.expander("🛠️ Manage Syntax Auto-Correction Rules", expanded=False):
-                _check_and_render_banner("auto_correction")
-                _render_auto_correction_manager(active_model)
+        with st.expander("🛠️ Manage Syntax Auto-Correction Rules", expanded=False):
+            _check_and_render_banner("auto_correction")
+            _render_auto_correction_manager(active_model)
 
-            _render_csv_schemas_editor(current_rules)
+        _render_csv_schemas_editor(current_rules)
 
-            with st.expander("📋 NetBox Server & Hardware YAML Guidelines", expanded=False):
-                _check_and_render_banner("yaml_guidelines")
-                st.caption("Document and enforce the NetBox server hardware YAML schema used across your environment.")
-                with st.expander("✨ AI Assistant: Generate NetBox Server YAML Specs", expanded=False):
-                    ai_desc = st.text_input(
-                        "Describe the NetBox server hardware YAML spec",
-                        key="custom_ai_desc",
-                        placeholder="e.g. Generate server hardware YAML for a Dell R740 with dual 25G NICs and 4x 2.5in drive bays",
-                    )
-                    if st.button("Generate NetBox Server YAML Specs with AI", key="custom_ai_gen", width='stretch'):
-                        if ai_desc.strip():
-                            with st.spinner(f"Generating spec using {active_model}..."):
-                                try:
-                                    generated = generate_naming_pattern(ai_desc.strip(), active_model)
-                                    st.session_state["form_yaml"] = generated
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"❌ AI spec generation failed: {e}")
-                        else:
-                            st.warning("⚠️ Please describe the server hardware YAML spec first.")
-                st.text_area(
-                    "NetBox Server YAML Guidelines",
-                    value=current_rules.get("netbox_server_yaml", ""),
-                    height=120,
-                    key="form_yaml",
+        with st.expander("📋 NetBox Server & Hardware YAML Guidelines", expanded=False):
+            _check_and_render_banner("yaml_guidelines")
+            st.caption("Document and enforce the NetBox server hardware YAML schema used across your environment.")
+            with st.expander("✨ AI Assistant: Generate NetBox Server YAML Specs", expanded=False):
+                ai_desc = st.text_input(
+                    "Describe the NetBox server hardware YAML spec",
+                    key="custom_ai_desc",
+                    placeholder="e.g. Generate server hardware YAML for a Dell R740 with dual 25G NICs and 4x 2.5in drive bays",
                 )
-                col_save_yaml, col_reset_yaml = st.columns(2)
-                with col_save_yaml:
-                    if st.button("💾 Save Guidelines", type="primary", width='stretch'):
-                        yaml_text = st.session_state.get("form_yaml", "")
-                        rules = load_naming_rules()
-                        rules["netbox_server_yaml"] = yaml_text
-                        save_naming_rules(rules, source="YAML Guidelines Save")
-                        st.session_state["naming_rules"] = rules.copy()
-                        st.session_state["card_saved_banner"] = {"section": "yaml_guidelines", "msg": "✅ NetBox Server & Hardware YAML Guidelines saved & applied!", "time": time.time()}
-                        st.rerun()
-                with col_reset_yaml:
-                    if st.button("🔄 Reset to Defaults", width='stretch'):
-                        default_yaml = DEFAULT_RULES.get("netbox_server_yaml", DEFAULT_NAMING_PATTERNS.get("netbox_server_yaml", ""))
-                        rules = load_naming_rules()
-                        rules["netbox_server_yaml"] = default_yaml
-                        save_naming_rules(rules, source="YAML Guidelines Reset")
-                        st.session_state["naming_rules"] = rules.copy()
-                        st.session_state["card_saved_banner"] = {"section": "yaml_guidelines", "msg": "✅ NetBox Server & Hardware YAML Guidelines reset to defaults!", "time": time.time()}
-                        st.rerun()
+                if st.button("Generate NetBox Server YAML Specs with AI", key="custom_ai_gen", width='stretch'):
+                    if ai_desc.strip():
+                        with st.spinner(f"Generating spec using {active_model}..."):
+                            try:
+                                generated = generate_naming_pattern(ai_desc.strip(), active_model)
+                                st.session_state["form_yaml"] = generated
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ AI spec generation failed: {e}")
+                    else:
+                        st.warning("⚠️ Please describe the server hardware YAML spec first.")
+            st.text_area(
+                "NetBox Server YAML Guidelines",
+                value=current_rules.get("netbox_server_yaml", ""),
+                height=120,
+                key="form_yaml",
+            )
+            col_save_yaml, col_reset_yaml = st.columns(2)
+            with col_save_yaml:
+                if st.button("💾 Save Guidelines", type="primary", width='stretch'):
+                    yaml_text = st.session_state.get("form_yaml", "")
+                    rules = load_naming_rules()
+                    rules["netbox_server_yaml"] = yaml_text
+                    save_naming_rules(rules, source="YAML Guidelines Save")
+                    st.session_state["naming_rules"] = rules.copy()
+                    st.session_state["card_saved_banner"] = {"section": "yaml_guidelines", "msg": "✅ NetBox Server & Hardware YAML Guidelines saved & applied!", "time": time.time()}
+                    st.rerun()
+            with col_reset_yaml:
+                if st.button("🔄 Reset to Defaults", width='stretch'):
+                    default_yaml = DEFAULT_RULES.get("netbox_server_yaml", DEFAULT_NAMING_PATTERNS.get("netbox_server_yaml", ""))
+                    rules = load_naming_rules()
+                    rules["netbox_server_yaml"] = default_yaml
+                    save_naming_rules(rules, source="YAML Guidelines Reset")
+                    st.session_state["naming_rules"] = rules.copy()
+                    st.session_state["card_saved_banner"] = {"section": "yaml_guidelines", "msg": "✅ NetBox Server & Hardware YAML Guidelines reset to defaults!", "time": time.time()}
+                    st.rerun()
 
-            full_prompt_text = export_rules_as_prompt(current_rules)
-            with st.expander("📋 Export Full System Prompt for External AI", expanded=False):
-                st.caption("Copy this complete prompt directly into ChatGPT, Claude, or other external AI models to enforce your organization's naming standards.")
-                st.code(full_prompt_text, language="markdown")
-                st.download_button(
-                    label="💾 Download Prompt (.txt)",
-                    data=full_prompt_text,
-                    file_name="infrastructure_naming_standards_prompt.txt",
-                    mime="text/plain"
-                )
+        full_prompt_text = export_rules_as_prompt(current_rules)
+        with st.expander("📋 Export Full System Prompt for External AI", expanded=False):
+            st.caption("Copy this complete prompt directly into ChatGPT, Claude, or other external AI models to enforce your organization's naming standards.")
+            st.code(full_prompt_text, language="markdown")
+            st.download_button(
+                label="💾 Download Prompt (.txt)",
+                data=full_prompt_text,
+                file_name="infrastructure_naming_standards_prompt.txt",
+                mime="text/plain"
+            )
     
     with tab_vars:
         st.markdown("##### 📘 Pattern Variables Reference Guide")
