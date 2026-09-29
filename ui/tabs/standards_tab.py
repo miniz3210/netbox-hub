@@ -1868,11 +1868,11 @@ def render_standards_tab(active_model):
             st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
             _vm_editor(current_rules)
 
-        with st.expander("☁️ ESXi Virtualization & Networking", expanded=False):
+        with st.expander("☁️ Hypervisor Virtualization & Networking", expanded=False):
             _check_and_render_banner("esxi")
             _preset_type_editor("esxi_network", get_esxi_network_presets(current_rules), current_rules, prefix="esxinet",
-                                card_title="☁️ ESXI NETWORK DESCRIPTION PRESETS",
-                                card_caption="Manage ESXi interface descriptions (Uplink, PortGroup, VMkernel). Quick Copy dynamically renders from these templates.",
+                                card_title="☁️️ HYPERVISOR NETWORK DESCRIPTION PRESETS",
+                                card_caption="Manage Hypervisor interface descriptions (Uplink, PortGroup, Bridge, VMkernel/Management). Quick Copy dynamically renders from these templates.",
                                 section="esxi", section_label="ESXi Virtualization & Networking")
 
         with st.expander("🛠️ Manage Syntax Auto-Correction Rules", expanded=False):
@@ -1950,7 +1950,8 @@ def render_standards_tab(active_model):
             ("shared", "🏢 GLOBAL & SHARED VARIABLES", "Variables shared across all infrastructure naming and IPAM provisioning.", "shared"),
             ("ipam", "🌐 IPAM & SUBNET VARIABLES", "Variables for VLANs, subnets, supernets, and NetBox bulk import schemas.", "ipam"),
             ("naming", "💻 DEVICE & VM NAMING VARIABLES", "Variables driving network device, router, firewall, and virtual machine hostnames.", "naming"),
-            ("esxi", "☁️ ESXI VIRTUALIZATION & NETWORKING", "Variables for physical uplinks, vSwitches, Port Groups, and VMkernels.", "esxi")
+            ("hypervisor", "☁️ Hypervisor Virtualization & Networking", "Variables for physical uplinks, vSwitches, Port Groups, and VMkernels.", "hypervisor"),
+            ("esxi", "☁️ Hypervisor Virtualization & Networking", "Variables for physical uplinks, vSwitches, Port Groups, and VMkernels.", "esxi")
         ]
 
         VARIABLE_COLS_OPTIMIZED = [1.5, 3.2, 3.8, 1.2, 0.8, 0.6]

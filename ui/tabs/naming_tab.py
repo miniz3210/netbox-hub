@@ -812,15 +812,18 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             st.session_state["esxi_upload_counter"] = 0
         if "esxi_paste_counter" not in st.session_state:
             st.session_state["esxi_paste_counter"] = 0
+        # Upload screenshots
+        if "topo_uploader_key_ver" not in st.session_state:
+            st.session_state["topo_uploader_key_ver"] = 0
 
         with col_up1:
-            uploader_key = f"esxi_file_uploader_{st.session_state['esxi_upload_counter']}"
+            uploader_key = f"esxi_topo_file_uploader_{st.session_state['topo_uploader_key_ver']}"
             raw_uploaded = st.file_uploader(
                 "Upload Screenshots (Drag & Drop)",
                 type=["png", "jpg", "jpeg"],
                 accept_multiple_files=True,
                 key=uploader_key,
-                help="Upload Virtual Switches topology and/or Physical Adapters (expanded '>>' for MAC & CDP).",
+                help="Upload one or multiple screenshots...",
             )
             # Ingest uploaded files immediately and reset uploader widget so it stays clean
             if raw_uploaded:
@@ -910,19 +913,28 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             except Exception as e:
                 st.warning(f"Failed to process pasted image: {e}")
 
-        if uploaded_imgs and st.button("🚀 Analyze Topology & Auto-Populate", key="btn_analyze_esxi_img", type="primary"):
-            if not _is_vision_capable_model(active_model):
-                st.error(f"❌ Selected model [{active_model}] does not support Image/Vision analysis. Please select a vision-capable model (e.g. gpt-4o, gpt-5.6-luna, claude-3-5-sonnet) from the left sidebar.")
-            else:
-                with st.spinner(f"Analyzing topology with AI Vision ({active_model})..."):
-                    try:
-                        from core.ai_assistant import analyze_hypervisor_topology_screenshot
-                        results = analyze_hypervisor_topology_screenshot(uploaded_imgs, naming_rules, active_model)
-                        st.session_state["esxi_parsed_descriptions"] = results
-                        st.success("Successfully analyzed topology and generated NetBox descriptions!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Vision analysis failed: {str(e)}")
+        btn_col1, btn_col2 = st.columns([3, 1])
+        with btn_col1:
+            if uploaded_imgs and st.button("🚀 Analyze Topology & Auto-Populate", key="btn_analyze_esxi_img", type="primary", use_container_width=True):
+                if not _is_vision_capable_model(active_model):
+                    st.error(f"❌ Selected model [{active_model}] does not support Image/Vision analysis. Please select a vision-capable model (e.g. gpt-4o, gpt-5.6-luna, claude-3-5-sonnet) from the left sidebar.")
+                else:
+                    with st.spinner(f"Analyzing topology with AI Vision ({active_model})..."):
+                        try:
+                            from core.ai_assistant import analyze_hypervisor_topology_screenshot
+                            results = analyze_hypervisor_topology_screenshot(uploaded_imgs, naming_rules, active_model)
+                            st.session_state["esxi_parsed_descriptions"] = results
+                            st.success("Successfully analyzed topology and generated NetBox descriptions!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Vision analysis failed: {str(e)}")
+        with btn_col2:
+            has_data = bool(uploaded_imgs or st.session_state.get("esxi_parsed_descriptions"))
+            if st.button("🗑️ Clear All", key="btn_clear_topo_data", type="secondary", disabled=not has_data, use_container_width=True):
+                st.session_state["topo_uploader_key_ver"] += 1
+                for key_to_del in ["esxi_parsed_descriptions", "esxi_preview_df", "esxi_extracted_variables"]:
+                    st.session_state.pop(key_to_del, None)
+                st.rerun()
 
         # 2️⃣ Step 2: Preview & Review Topology Data (Full-Width)
         st.markdown("---")
