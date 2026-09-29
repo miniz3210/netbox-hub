@@ -836,7 +836,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     bio.size = len(file_bytes)
                     st.session_state["unified_screenshots"].append(bio)
                 st.session_state["esxi_upload_counter"] += 1
-                st.rerun()
 
         with col_up2:
             st.markdown("**📋 Or Paste from Clipboard (Ctrl+V)**")
@@ -909,13 +908,14 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 pasted_file.size = len(img_bytes)
                 st.session_state["unified_screenshots"].append(pasted_file)
                 st.session_state["esxi_paste_counter"] += 1
-                st.rerun()
             except Exception as e:
                 st.warning(f"Failed to process pasted image: {e}")
 
+        st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
         btn_col1, btn_col2 = st.columns([3, 1])
         with btn_col1:
-            if uploaded_imgs and st.button("🚀 Analyze Topology & Auto-Populate", key="btn_analyze_esxi_img", type="primary", use_container_width=True):
+            has_imgs = bool(uploaded_imgs)
+            if st.button("🚀 Analyze Topology & Auto-Populate", key="btn_analyze_hypervisor_img", type="primary", disabled=not has_imgs, use_container_width=True):
                 if not _is_vision_capable_model(active_model):
                     st.error(f"❌ Selected model [{active_model}] does not support Image/Vision analysis. Please select a vision-capable model (e.g. gpt-4o, gpt-5.6-luna, claude-3-5-sonnet) from the left sidebar.")
                 else:
@@ -931,7 +931,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         with btn_col2:
             has_data = bool(uploaded_imgs or st.session_state.get("esxi_parsed_descriptions"))
             if st.button("🗑️ Clear All", key="btn_clear_topo_data", type="secondary", disabled=not has_data, use_container_width=True):
-                st.session_state["topo_uploader_key_ver"] += 1
+                st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
                 for key_to_del in ["esxi_parsed_descriptions", "esxi_preview_df", "esxi_extracted_variables"]:
                     st.session_state.pop(key_to_del, None)
                 st.rerun()
