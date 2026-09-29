@@ -1887,7 +1887,8 @@ def render_standards_tab(active_model):
                 success_key = f"vars_scope_{s_key}_saved"
                 if st.session_state.get(success_key):
                     st.success(f"✅ {title.split(' ')[1].title()} Variables saved & applied!")
-                    del st.session_state[success_key]
+                    # Clear notification flag safely for next run without dropping current render
+                    st.session_state[success_key] = False
 
                 if scope_items:
                     c_h1, c_h2, c_h3, c_h4, c_h5, c_h6 = st.columns(VARIABLE_COLS_OPTIMIZED, vertical_alignment="center")
@@ -1934,17 +1935,15 @@ def render_standards_tab(active_model):
                 col_save, col_rst = st.columns([4, 1])
                 with col_save:
                     if st.button(f"💾 Save & Apply Changes", key=f"save_scope_{s_key}", type="primary", width="stretch"):
-                        _persist_variables(current_rules, all_edited_vars)
                         st.session_state[f"vars_scope_{s_key}_saved"] = True
-                        st.rerun()
+                        _persist_variables(current_rules, all_edited_vars)
                 with col_rst:
                     if st.button("🔄 Reset Scope", key=f"reset_scope_{s_key}", type="secondary", width="stretch"):
                         from config.naming_rules import PATTERN_VARIABLES
                         default_scope_vars = {k: v for k, v in PATTERN_VARIABLES.items() if v.get("scope") == s_key}
                         all_edited_vars.update(default_scope_vars)
-                        _persist_variables(current_rules, all_edited_vars)
                         st.session_state[f"vars_scope_{s_key}_saved"] = True
-                        st.rerun()
+                        _persist_variables(current_rules, all_edited_vars)
 
                 # 2. Bottom Inline Add Row (Seamless table extension matching Preset style)
                 with st.form(key=f"var_add_form_{s_key}", clear_on_submit=True):
