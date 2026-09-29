@@ -1047,13 +1047,44 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
             st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
 
+            # --- Dynamic Token Bag Inspector (Discovers all OCR keys, e.g. for Proxmox/KVM) ---
+            raw_token_dict = {}
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                for k, v in r.items():
+                    if v is not None and not str(v).lower() in ["nan", "none", ""]:
+                        norm_k = re.sub(r"[^a-zA-Z0-9]+", "_", str(k).strip().lower()).strip("_")
+                        if norm_k:
+                            raw_token_dict.setdefault(norm_k, set()).add(str(v).strip())
+
+            with st.expander("🔍 OCR Raw Token Dictionary (Platform-Agnostic Variable Bag)", expanded=False):
+                st.caption("All extracted tokens discovered from the uploaded topology. These keys are immediately available in Step 4 patterns and can be synced to Standards.")
+                tok_cols = st.columns(3)
+                for idx, (t_name, t_vals) in enumerate(sorted(raw_token_dict.items())):
+                    col_target = tok_cols[idx % 3]
+                    sample_vals = ", ".join(list(t_vals)[:3])
+                    sync_key = f"btn_sync_tok_{t_name}"
+                    with col_target:
+                        if st.button(f"🔗 Sync <{t_name}>", key=sync_key, help=f"Pre-fill sync form with <{t_name}> = {sample_vals}", width='stretch'):
+                            st.session_state[f"esxi_sync_tok_name"] = t_name
+                            sample_val_list = list(t_vals)
+                            st.session_state[f"esxi_sync_tok_val"] = sample_val_list[0] if sample_val_list else ""
+                            st.rerun()
+                        st.markdown(f"""
+                        <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 8px 10px; margin-bottom: 4px; margin-top: 4px;">
+                            <div style="font-family: monospace; font-weight: 600; color: #38bdf8; font-size: 0.85rem;">&lt;{t_name}&gt;</div>
+                            <div style="color: #94a3b8; font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{sample_vals}">e.g. {sample_vals}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
             # ➕ Add / Update Variable with persistent Standards sync
             st.markdown("**➕ Add / Update Variable (Sync to Standards)**")
             vcol1, vcol2, vcol3 = st.columns([1.5, 2.5, 1.2])
             with vcol1:
-                sync_tok_name = st.text_input("Variable Token", placeholder="e.g. vlan_id", key="esxi_sync_tok_name").strip().lower()
+                sync_tok_name = st.text_input("Variable Token", placeholder="e.g. bridge, vlan_id", key="esxi_sync_tok_name").strip().lower()
             with vcol2:
-                sync_tok_val = st.text_input("Value / Default", placeholder="e.g. 100", key="esxi_sync_tok_val").strip()
+                sync_tok_val = st.text_input("Value / Default", placeholder="e.g. vmbr0, 100", key="esxi_sync_tok_val").strip()
             with vcol3:
                 st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
                 if st.button("💾 Sync Variable", key="btn_sync_tok_standards", width='stretch'):
@@ -1062,12 +1093,13 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         norm_token = re.sub(r"[^a-z0-9_]", "", sync_tok_name)
                         if "pattern_variables" not in naming_rules:
                             naming_rules["pattern_variables"] = {}
+                        existing_scope = naming_rules.get("scope", "esxi")
                         naming_rules["pattern_variables"][norm_token] = {
                             "label": norm_token.replace("_", " ").title(),
                             "placeholder": f"e.g. {sync_tok_val or norm_token}",
                             "default": sync_tok_val,
                             "optional": False,
-                            "scope": "esxi"
+                            "scope": "hypervisor"
                         }
                         save_naming_rules(naming_rules, source="Variable Inspector Sync")
                         st.session_state["naming_rules"] = naming_rules.copy()
