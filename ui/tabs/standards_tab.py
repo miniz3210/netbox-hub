@@ -748,6 +748,91 @@ def _save_presets(rules: dict, section: str = "presets", section_label: str = "P
     st.rerun()
 
 
+def _save_csv_schemas(rules: dict) -> None:
+    save_naming_rules(rules, source="CSV Schemas Manager")
+    st.session_state["naming_rules"] = rules.copy()
+    st.session_state["card_saved_banner"] = {"section": "csv_schemas", "msg": "✅ NetBox Bulk Import CSV Schemas saved & applied!", "time": time.time()}
+    _clear_session_state_prefixes("csv_sch_")
+    st.rerun()
+
+def _reset_csv_schemas(rules: dict) -> None:
+    from config.naming_rules import DEFAULT_CSV_SCHEMAS
+    rules["csv_schemas"] = copy.deepcopy(DEFAULT_CSV_SCHEMAS)
+    save_naming_rules(rules, source="CSV Schemas Reset")
+    st.session_state["naming_rules"] = rules.copy()
+    st.session_state["card_saved_banner"] = {"section": "csv_schemas", "msg": "✅ NetBox Bulk Import CSV Schemas reset to defaults!", "time": time.time()}
+    _clear_session_state_prefixes("csv_sch_")
+    st.rerun()
+
+def _render_csv_schemas_editor(rules: dict) -> None:
+    from config.naming_rules import get_csv_schemas
+    schemas = get_csv_schemas(rules)
+
+    with st.expander("📊 NetBox Bulk Import CSV Schemas", expanded=False):
+        _check_and_render_banner("csv_schemas")
+        st.caption("Customize headers and dynamic cell templates for the 4 offline NetBox bulk import CSVs (Site, VLAN Group, VLANs, Prefixes). Supports Universal Context tokens like `<site>`, `<vid>`, `<prefix>`, `<role>`, etc.")
+
+        schema_meta = [
+            ("import_site", "🏢 Import Site CSV Schema", "Headers and row template for creating dcim.site"),
+            ("import_vlan_group", "🌐 Import VLAN Group CSV Schema", "Headers and row template for creating ipam.vlangroup"),
+            ("import_vlans", "🏷️ Import VLANs CSV Schema", "Headers and row template for creating ipam.vlan"),
+            ("import_prefixes", "📦 Import Prefixes CSV Schema", "Headers and row template for member prefixes and supernet container"),
+        ]
+
+        edited_schemas = copy.deepcopy(schemas)
+        nonce = st.session_state.get("standards_nonce", 0)
+
+        for s_key, s_title, s_desc in schema_meta:
+            s_data = schemas.get(s_key, {})
+            with st.container(border=True):
+                st.markdown(f"##### {s_title}")
+                st.caption(s_desc)
+
+                headers_str = ", ".join(s_data.get("headers", []))
+                row_tpl_str = ", ".join(s_data.get("row_template", []))
+
+                new_headers = st.text_input(
+                    "CSV Headers (Comma-separated)",
+                    value=headers_str,
+                    key=f"csv_sch_{nonce}_{s_key}_headers",
+                    help="Column names appearing in row 1 of the generated CSV."
+                )
+
+                new_row_tpl = st.text_input(
+                    "Row Template (Comma-separated tokens)",
+                    value=row_tpl_str,
+                    key=f"csv_sch_{nonce}_{s_key}_row",
+                    help="Values for each record row. Use <token> for dynamic replacement."
+                )
+
+                parsed_headers = [h.strip() for h in new_headers.split(",") if h.strip()]
+                parsed_row = [c.strip() for c in new_row_tpl.split(",") if c.strip()]
+
+                edited_schemas[s_key] = {
+                    "headers": parsed_headers,
+                    "row_template": parsed_row
+                }
+
+                if s_key == "import_prefixes":
+                    sup_tpl_str = ", ".join(s_data.get("supernet_template", []))
+                    new_sup_tpl = st.text_input(
+                        "Supernet Container Template (Comma-separated)",
+                        value=sup_tpl_str,
+                        key=f"csv_sch_{nonce}_{s_key}_sup",
+                        help="Template for the top-level site supernet container row."
+                    )
+                    parsed_sup = [c.strip() for c in new_sup_tpl.split(",") if c.strip()]
+                    edited_schemas[s_key]["supernet_template"] = parsed_sup
+
+        col_save, col_reset = st.columns(2)
+        with col_save:
+            if st.button("💾 Save CSV Schemas", key="csv_schemas_save", type="primary", width="stretch"):
+                rules["csv_schemas"] = edited_schemas
+                _save_csv_schemas(rules)
+        with col_reset:
+            if st.button("🔄 Reset Schemas to Defaults", key="csv_schemas_reset", width="stretch"):
+                _reset_csv_schemas(rules)
+
 def _save_vlan_desc_mappings(rules: dict, section: str = "vlan_desc_mappings", section_label: str = "VLAN Description Mappings") -> None:
     save_naming_rules(rules, source="VLAN Description Mappings Manager")
     st.session_state["naming_rules"] = rules.copy()
@@ -1793,6 +1878,8 @@ def render_standards_tab(active_model):
             with st.expander("🛠️ Manage Syntax Auto-Correction Rules", expanded=False):
                 _check_and_render_banner("auto_correction")
                 _render_auto_correction_manager(active_model)
+
+            _render_csv_schemas_editor(current_rules)
 
             with st.expander("📋 NetBox Server & Hardware YAML Guidelines", expanded=False):
                 _check_and_render_banner("yaml_guidelines")
