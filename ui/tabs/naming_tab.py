@@ -854,6 +854,39 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 results = analyze_esxi_topology_screenshot(uploaded_imgs, naming_rules, active_model)
                 st.session_state["esxi_parsed_descriptions"] = results
                 st.success("Successfully analyzed topology and generated NetBox descriptions!")
+
+                # --- Vision-to-Variable Auto-Fill Loop ---
+                # Extract first detected values to populate the interactive generator
+                detected_vmnic = ""
+                detected_vswitch = ""
+                detected_purpose = ""
+                for row in results:
+                    if not isinstance(row, dict):
+                        continue
+                    if not detected_vmnic:
+                        iface = str(row.get("Interface", "")).strip()
+                        m_vmnic = re.search(r"vmnic\d+", iface, re.I)
+                        if m_vmnic:
+                            detected_vmnic = m_vmnic.group(0).lower()
+                    if not detected_vswitch:
+                        desc = str(row.get("Description", "")).strip()
+                        m_vsw = re.search(r"vSwitch\d+", desc, re.I)
+                        if m_vsw:
+                            detected_vswitch = m_vsw.group(0)
+                    if not detected_purpose:
+                        desc = str(row.get("Description", "")).strip()
+                        for kw in ["Management Network", "vMotion", "Storage", "VM Network", "iSCSI"]:
+                            if kw.lower() in desc.lower():
+                                detected_purpose = kw
+                                break
+                if detected_vmnic:
+                    st.session_state["esxi_gen_vmnic"] = detected_vmnic
+                if detected_vswitch:
+                    st.session_state["esxi_gen_vswitch"] = detected_vswitch
+                if detected_purpose:
+                    st.session_state["esxi_gen_purpose"] = detected_purpose
+
+                st.markdown("#### 📋 Extracted Network Topology")
             except Exception as e:
                 st.error(f"Vision analysis failed: {str(e)}")
 
@@ -1120,7 +1153,14 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
     order = (naming_rules.get("token_order") or {}).get(pkey)
     # Dynamically render widgets for ALL tokens in template (handles new tokens automatically)
-    values = render_token_widgets(curr_pattern, variables, f"esxi_{selected_code}", custom_order=order)
+    gen_defaults = {}
+    if st.session_state.get("esxi_gen_vmnic"):
+        gen_defaults["vmnic"] = st.session_state["esxi_gen_vmnic"]
+    if st.session_state.get("esxi_gen_vswitch"):
+        gen_defaults["v_switch"] = st.session_state["esxi_gen_vswitch"]
+    if st.session_state.get("esxi_gen_purpose"):
+        gen_defaults["purpose"] = st.session_state["esxi_gen_purpose"]
+    values = render_token_widgets(curr_pattern, variables, f"esxi_{selected_code}", defaults=gen_defaults, custom_order=order)
 
     # All dynamic values and templates are automatically normalized via zero-hardcode pipeline
     out = render_dynamic_pattern(curr_pattern, values, variables)
