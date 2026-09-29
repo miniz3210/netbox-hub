@@ -774,23 +774,19 @@ def render_ipam_tab(active_model: str):
 
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("**1. Import Site (`dcim.site`)**")
-        st.caption("📍 NetBox Path: **Organization → Sites → Import**")
+        st.markdown("**1. Import Site (`dcim.site`)**", help="📍 NetBox Path: Organization → Sites → Import")
         st.code(csv_site, language="csv")
 
-        st.markdown("**3. Import VLANs (`ipam.vlan`)**", help="Exports VLANs with allocated IP subnets. Unassigned presets are filtered out.")
-        st.caption("📍 NetBox Path: **IPAM → VLANs → Import**")
+        st.markdown("**3. Import VLANs (`ipam.vlan`)**", help="📍 NetBox Path: IPAM → VLANs → Import\n\nExports VLANs with allocated IP subnets. Unassigned presets are filtered out.")
         st.code(csv_vlans, language="csv")
 
     with c2:
-        st.markdown("**2. Import VLAN Group (`ipam.vlangroup`)**")
-        st.caption("📍 NetBox Path: **IPAM → VLAN Groups → Import**")
+        st.markdown("**2. Import VLAN Group (`ipam.vlangroup`)**", help="📍 NetBox Path: IPAM → VLAN Groups → Import")
         st.code(csv_group, language="csv")
 
         prefix_title, prefix_option = st.columns([2.2, 1.8])
         with prefix_title:
-            st.markdown("**4. Import Prefixes (`ipam.prefix`)**")
-        st.caption("📍 NetBox Path: **IPAM → Prefixes → Import**")
+            st.markdown("**4. Import Prefixes (`ipam.prefix`)**", help="📍 NetBox Path: IPAM → Prefixes → Import")
         with prefix_option:
             st.checkbox(
                 "Include site subnet in Prefixes CSV",
