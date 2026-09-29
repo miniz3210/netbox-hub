@@ -114,9 +114,13 @@ def healthcheck_ai(selected_model: str) -> Tuple[bool, int, str]:
     Args:
         selected_model: The model id to healthcheck (e.g. ``"openai/gpt-4o-mini"``).
     """
+    import requests as _requests
     start = time.time()
     try:
         call_ai("ping", selected_model, timeout=6)
+    except _requests.exceptions.Timeout:
+        latency = round((time.time() - start) * 1000)
+        return False, latency, "Timeout after 6s"
     except AIProviderError as exc:
         latency = round((time.time() - start) * 1000)
         return False, latency, str(exc)
@@ -127,15 +131,16 @@ def healthcheck_ai(selected_model: str) -> Tuple[bool, int, str]:
     return True, latency, f"Connected ({latency}ms)"
 
 
-def ping_model(model_name: str, timeout: int = 5) -> Tuple[bool, int, str]:
+def ping_model(model_name: str, timeout: int = 6) -> Tuple[bool, int, str]:
     """Run a lightweight pre-flight healthcheck against a single model.
 
-    Sends the smallest possible chat payload (one token) with a tight timeout so the
-    check is quick and cheap. Returns ``(ok, latency_ms, message)``.
+    Sends the smallest possible chat payload (one token) with a strict
+    ``timeout=6`` bound so the check is quick and cheap. Returns
+    ``(ok, latency_ms, message)``.
 
     Args:
         model_name: The model id to ping (e.g. ``"openai/gpt-4o-mini"``).
-        timeout: Seconds to wait before failing. Kept short (3-5s) on purpose.
+        timeout: Seconds to wait before failing. Defaults to 6s.
     """
     base = OPENROUTER_BASE_URL.rstrip("/")
     endpoint = f"{base}/chat/completions" if base.endswith("/v1") else f"{base}/v1/chat/completions"

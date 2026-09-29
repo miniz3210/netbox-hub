@@ -50,6 +50,58 @@ DEFAULT_NAMING_PATTERNS = {
     "vlan_name_pattern": "<role>",
 }
 
+# Canonical hypervisor-scoped variable names used for seeding and re-scoping.
+HYPERVISOR_VARIABLE_NAMES = [
+    "vmnic", "v_switch", "purpose", "pg_network", "port_group",
+    "active_vmnics", "standby_vmnics", "vmk", "switch_zone",
+]
+
+def ensure_hypervisor_variables(rules: dict) -> None:
+    """Ensure the 9 canonical hypervisor-scoped pattern variables exist.
+
+    - Variables from older files still keyed under ``scope == 'esxi'`` are
+      migrated to ``'hypervisor'`` so the standards UI buckets stay consistent.
+    - Any of the canonical 9 tokens missing from the registry is backfilled
+      with its factory-default metadata from ``PATTERN_VARIABLES`` (label,
+      placeholder, optional flag). Existing user values that don't conflict
+      (default / placeholder) are preserved.
+    """
+    variables = rules.get("pattern_variables")
+    if not isinstance(variables, dict):
+        return
+    # 1) Migrate legacy 'esxi' scope entries to 'hypervisor'.
+    for meta in variables.values():
+        if isinstance(meta, dict) and meta.get("scope") == "esxi":
+            meta["scope"] = "hypervisor"
+    # 2) Ensure every canonical hypervisor token is present & scoped.
+    for name in HYPERVISOR_VARIABLE_NAMES:
+        default = PATTERN_VARIABLES.get(name)
+        if default is None:
+            continue
+        existing = variables.get(name)
+        if not isinstance(existing, dict):
+            variables[name] = dict(default)
+            continue
+        existing["scope"] = "hypervisor"
+        for key, val in default.items():
+            if key not in existing or not existing[key]:
+                existing[key] = val
+
+
+def _needs_hypervisor_migration(raw: dict) -> bool:
+    """Detect whether the on-disk rule set needs an automatic scope migration."""
+    pvars = raw.get("pattern_variables")
+    if not isinstance(pvars, dict):
+        return False
+    for meta in pvars.values():
+        if isinstance(meta, dict) and meta.get("scope") == "esxi":
+            return True
+    for name in HYPERVISOR_VARIABLE_NAMES:
+        if name not in pvars:
+            return True
+    return False
+
+
 PATTERN_VARIABLES = {
     # 1. Global & Shared Scope
     "site": {"label": "Site / Branch Name", "placeholder": "e.g. Bristol, AGE, NYC", "scope": "shared"},
@@ -92,15 +144,16 @@ PATTERN_VARIABLES = {
     "site_prefix": {"label": "Site Prefix (Short Code)", "placeholder": "e.g. age, nyc, lon, syd", "scope": "naming"},
     "vm_site": {"label": "Site Prefix / Country & Site", "placeholder": "e.g. age, usnyc, uklon", "scope": "naming"},
 
-    # 4. ESXi Virtualization & Networking Scope
-    "vmnic": {"label": "vmnic Name", "placeholder": "vmnic", "default": "vmnic", "scope": "esxi"},
-    "v_switch": {"label": "vSwitch Name", "placeholder": "vSwitch", "default": "vSwitch", "scope": "esxi"},
-    "purpose": {"label": "Purpose / Service", "placeholder": "e.g. Management, vMotion, Storage", "scope": "esxi"},
-    "pg_network": {"label": "Network Name", "placeholder": "e.g. VM Network", "scope": "esxi"},
-    "port_group": {"label": "Port Group / vSwitch", "placeholder": "e.g. vSwitch0", "default": "vSwitch", "scope": "esxi"},
-    "active_vmnics": {"label": "Active vmnics", "placeholder": "e.g. vmnic0, vmnic1", "default": "vmnic", "scope": "esxi"},
-    "standby_vmnics": {"label": "Standby vmnics (Optional)", "placeholder": "e.g. vmnic2", "scope": "esxi"},
-    "vmk": {"label": "vmk Name", "placeholder": "vmk", "default": "vmk", "scope": "esxi"},
+    # 4. Hypervisor Virtualization & Networking Scope
+    "vmnic": {"label": "vmnic Name", "placeholder": "vmnic", "default": "vmnic", "scope": "hypervisor"},
+    "v_switch": {"label": "vSwitch Name", "placeholder": "vSwitch", "default": "vSwitch", "scope": "hypervisor"},
+    "purpose": {"label": "Purpose / Service", "placeholder": "e.g. Management, vMotion, Storage", "scope": "hypervisor"},
+    "pg_network": {"label": "Network Name", "placeholder": "e.g. VM Network", "scope": "hypervisor"},
+    "port_group": {"label": "Port Group / vSwitch", "placeholder": "e.g. vSwitch0", "default": "vSwitch", "scope": "hypervisor"},
+    "active_vmnics": {"label": "Active vmnics", "placeholder": "e.g. vmnic0, vmnic1", "default": "vmnic", "scope": "hypervisor"},
+    "standby_vmnics": {"label": "Standby vmnics (Optional)", "placeholder": "e.g. vmnic2", "scope": "hypervisor"},
+    "vmk": {"label": "vmk Name", "placeholder": "vmk", "default": "vmk", "scope": "hypervisor"},
+    "switch_zone": {"label": "Switch Zone / Network Zone", "placeholder": "e.g. DMZ, Production, Management", "scope": "hypervisor"},
 }
 
 def get_grouped_pattern_variables(rules: dict) -> dict:
@@ -138,11 +191,11 @@ def get_grouped_pattern_variables(rules: dict) -> dict:
             scope = "shared"
             if any(k in token for k in ["vlan", "prefix", "subnet", "vid", "scope"]):
                 scope = "ipam"
-            elif any(k in token for k in ["vmnic", "switch", "vmk", "purpose", "pg_"]):
-                scope = "esxi"
-            elif any(k in token for k in ["device", "port", "seq", "stack", "vendor", "zone"]):
+            elif any(k in token for k in ["vmnic", "switch", "vmk", "purpose", "pg_", "zone"]):
+                scope = "hypervisor"
+            elif any(k in token for k in ["device", "port", "seq", "stack", "vendor"]):
                 scope = "naming"
-                
+
             vars_dict[token] = {
                 "label": token.replace("_", " ").title(),
                 "placeholder": f"e.g. {token}",
@@ -155,7 +208,7 @@ def get_grouped_pattern_variables(rules: dict) -> dict:
         "shared": {},
         "ipam": {},
         "naming": {},
-        "esxi": {}
+        "hypervisor": {}
     }
 
     for name, meta in vars_dict.items():
@@ -625,6 +678,10 @@ def _normalize_rules(raw: dict) -> dict:
                 normalized_to[str(k)] = [x for x in v.split(",") if x]
         if normalized_to:
             merged["token_order"] = normalized_to
+
+    # Auto-migrate legacy 'esxi' scope → 'hypervisor' and seed the 9 canonical
+    # hypervisor variables when they are absent.
+    ensure_hypervisor_variables(merged)
     return merged
 
 
@@ -924,6 +981,14 @@ def load_naming_rules() -> Dict[str, str]:
     _migrate_and_persist()
     rules = _load_rules_dict_from_file()
     normalized = _normalize_rules(rules if rules else DEFAULT_NAMING_PATTERNS.copy())
+
+    # Auto-persist scope migrations so legacy 'esxi' scopes and missing
+    # hypervisor defaults land on disk on first load.
+    if rules and _needs_hypervisor_migration(rules):
+        try:
+            save_naming_rules(normalized, source="Hypervisor scope migration")
+        except Exception:
+            pass
 
     if hasattr(st, "session_state"):
         st.session_state["_cached_naming_rules"] = normalized

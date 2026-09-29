@@ -912,40 +912,41 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 st.warning(f"Failed to process pasted image: {e}")
 
         st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
-        btn_col1, btn_col2, btn_col3, _ = st.columns([2.2, 1.2, 1.2, 3.4])
+        btn_col1, btn_col2, _ = st.columns([2.2, 1.2, 6.6])
+        topo_is_analyzing = st.session_state.get("topo_is_analyzing", False)
         with btn_col1:
-            has_imgs = bool(uploaded_imgs)
-            start_analyze = st.button("🚀 Analyze Topology & Auto-Populate", key="btn_analyze_hypervisor_img", type="primary", disabled=not has_imgs)
+            if topo_is_analyzing:
+                if st.button("🛑 Cancel Analysis", key="btn_cancel_hypervisor_analysis", type="primary", width='stretch'):
+                    st.session_state["topo_is_analyzing"] = False
+                    st.info("Analysis cancelled — UI re-enabled.")
+                    st.rerun()
+            else:
+                has_imgs = bool(uploaded_imgs)
+                start_analyze = st.button("🚀 Analyze Topology & Auto-Populate", key="btn_analyze_hypervisor_img", type="primary", disabled=not has_imgs, width='stretch')
         with btn_col2:
-            stop_analyze = st.button("🛑 Stop", key="btn_stop_hypervisor_analysis", type="secondary")
-            if stop_analyze:
-                st.session_state["topo_is_analyzing"] = False
-                st.info("Analysis stopped by user.")
-                st.stop()
-        with btn_col3:
             has_data = bool(uploaded_imgs or st.session_state.get("hypervisor_parsed_descriptions"))
-            if st.button("🗑️ Clear All", key="btn_clear_topo_data", type="secondary", disabled=not has_data):
+            if st.button("🗑️ Clear All", key="btn_clear_topo_data", type="secondary", disabled=not has_data, width='stretch'):
                 st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
                 for key_to_del in ["hypervisor_parsed_descriptions", "hypervisor_preview_df", "hypervisor_extracted_variables", "topo_is_analyzing"]:
                     st.session_state.pop(key_to_del, None)
                 st.rerun()
 
-        if start_analyze:
+        if not topo_is_analyzing and start_analyze:
             if not _is_vision_capable_model(active_model):
                 st.error(f"❌ Selected model [{active_model}] does not support Image/Vision analysis. Please select a vision-capable model (e.g. gpt-4o, gpt-5.6-luna, claude-3-5-sonnet) from the left sidebar.")
             else:
                 st.session_state["topo_is_analyzing"] = True
-                with st.spinner(f"Analyzing topology with AI Vision ({active_model})..."):
-                    try:
+                try:
+                    with st.spinner(f"Analyzing topology with AI Vision ({active_model})..."):
                         from core.ai_assistant import analyze_hypervisor_topology_screenshot
                         results = analyze_hypervisor_topology_screenshot(uploaded_imgs, naming_rules, active_model)
                         st.session_state["hypervisor_parsed_descriptions"] = results
-                        st.session_state["topo_is_analyzing"] = False
                         st.success("Successfully analyzed topology and generated NetBox descriptions!")
-                        st.rerun()
-                    except Exception as e:
-                        st.session_state["topo_is_analyzing"] = False
-                        st.error(f"Vision analysis failed: {str(e)}")
+                except Exception as e:
+                    st.error(f"Vision analysis failed: {str(e)}")
+                finally:
+                    st.session_state["topo_is_analyzing"] = False
+                    st.rerun()
 
         # 2️⃣ Step 2: Preview & Review Topology Data (Full-Width)
         st.markdown("---")
@@ -1111,23 +1112,21 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             with vcol3:
                 st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
                 if st.button("💾 Sync Variable", key="btn_sync_var_standards", width='stretch'):
-                    target_scope = "hypervisor"
                     if sync_tok_name:
                         from config.naming_rules import save_naming_rules
                         norm_token = re.sub(r"[^a-z0-9_]", "", sync_tok_name)
-                        if "pattern_variables" not in naming_rules:
-                            naming_rules["pattern_variables"] = {}
-                        existing_scope = naming_rules.get("scope", "hypervisor")
+                        if "pattern_variables" not in naming_rules or not isinstance(naming_rules.get("pattern_variables"), dict):
+                            naming_rules.setdefault("pattern_variables", {})
                         naming_rules["pattern_variables"][norm_token] = {
                             "label": norm_token.replace("_", " ").title(),
                             "placeholder": f"e.g. {sync_tok_val or norm_token}",
                             "default": sync_tok_val,
                             "optional": False,
-                            "scope": "hypervisor"
+                            "scope": "hypervisor",
                         }
                         save_naming_rules(naming_rules, source="Variable Inspector Sync")
                         st.session_state["naming_rules"] = naming_rules.copy()
-                        st.success(f"Variable <{norm_token}> saved & synced to Standards!")
+                        st.success(f"Variable <{norm_token}> saved & synced to Standards (hypervisor scope)!")
                         st.rerun()
                     else:
                         st.warning("Please enter a token name.")

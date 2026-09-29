@@ -539,52 +539,51 @@
       "label": "vmnic Name",
       "placeholder": "vmnic",
       "default": "vmnic",
-      "scope": "esxi"
+      "scope": "hypervisor"
     },
     "v_switch": {
       "label": "vSwitch Name",
       "placeholder": "vSwitch",
       "default": "vSwitch",
-      "scope": "esxi"
+      "scope": "hypervisor"
     },
     "purpose": {
       "label": "Purpose / Service",
       "placeholder": "e.g. Management, vMotion, Storage",
-      "scope": "esxi"
+      "scope": "hypervisor"
     },
     "pg_network": {
       "label": "Network Name",
       "placeholder": "e.g. VM Network",
-      "scope": "esxi"
+      "scope": "hypervisor"
     },
     "port_group": {
       "label": "Port Group / vSwitch",
       "placeholder": "e.g. vSwitch0",
       "default": "vSwitch",
-      "scope": "esxi"
+      "scope": "hypervisor"
     },
     "active_vmnics": {
       "label": "Active vmnics",
       "placeholder": "e.g. vmnic0, vmnic1",
       "default": "vmnic",
-      "scope": "esxi"
+      "scope": "hypervisor"
     },
     "standby_vmnics": {
       "label": "Standby vmnics (Optional)",
       "placeholder": "e.g. vmnic2",
-      "scope": "esxi"
+      "scope": "hypervisor"
     },
     "vmk": {
       "label": "vmk Name",
       "placeholder": "vmk",
       "default": "vmk",
-      "scope": "esxi"
+      "scope": "hypervisor"
     },
     "switch_zone": {
-      "label": "Switch Zone",
-      "placeholder": "e.g. switch_zone",
-      "scope": "esxi",
-      "optional": true
+      "label": "Switch Zone / Network Zone",
+      "placeholder": "e.g. DMZ, Production, Management",
+      "scope": "hypervisor"
     }
   },
   "site_code_rules": {

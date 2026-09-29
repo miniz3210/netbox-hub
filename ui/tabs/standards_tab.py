@@ -1845,17 +1845,6 @@ def render_standards_tab(active_model):
     current_rules = load_naming_rules()
     st.session_state["naming_rules"] = current_rules
 
-    # Auto-migrate legacy 'esxi' scope to 'hypervisor' and clean up
-    if "pattern_variables" in current_rules:
-        pvars = current_rules["pattern_variables"]
-        if "esxi" in pvars:
-            if "hypervisor" not in pvars or not isinstance(pvars["hypervisor"], list):
-                pvars["hypervisor"] = []
-            existing_tokens = {item.get("token") for item in pvars["hypervisor"] if isinstance(item, dict)}
-            for old_item in pvars.pop("esxi", []):
-                if isinstance(old_item, dict) and old_item.get("token") not in existing_tokens:
-                    pvars["hypervisor"].append(old_item)
-
     tab_edit, tab_vars, tab_history = st.tabs(["📝 Edit Standards", "📘 Pattern Variables Reference", "📜 Change History"])
     
     with tab_edit:
