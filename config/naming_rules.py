@@ -673,6 +673,18 @@ def get_esxi_network_presets(rules: dict) -> list:
     return _normalize_presets(raw, ESXI_NETWORK_PRESETS)
 
 
+def get_hardware_slot_mappings(rules: dict) -> dict:
+    """Return hardware slot mappings keyed by vmnic index.
+
+    Reads ``hardware_slot_mappings`` from the rules dict (e.g. ``{"0": "PCIe1/Port0"}``).
+    Falls back to an empty dict when not configured.
+    """
+    raw = rules.get("hardware_slot_mappings")
+    if isinstance(raw, dict) and raw:
+        return {str(k): str(v) for k, v in raw.items()}
+    return {}
+
+
 def get_vlan_description_mappings(rules: dict) -> dict:
     """Return the VLAN Description mappings (Role -> Description) from a rules dict.
 
