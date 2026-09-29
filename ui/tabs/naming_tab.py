@@ -707,77 +707,77 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
     st.subheader("ESXi Network Description Formatter", help="Format standardized ESXi physical uplinks, port groups, and VMkernel adapter descriptions.")
 
     # --- SECTION 1: 🛠️ INTERACTIVE SINGLE ITEM GENERATOR ---
-    st.markdown("---")
-    st.subheader("🛠️ Interactive Single Item Generator", help="Generate individual ESXi network descriptions using token-based patterns. Presets are configured in the Standards Tab.")
+    with st.expander("🛠️ Interactive Single Item Generator", expanded=False):
+        st.caption("Generate individual ESXi network descriptions using token-based patterns. Presets are configured in the Standards Tab.")
 
-    presets = naming_rules.get("esxi_network_presets", [])
-    if not presets:
-        presets = [
-            {"code": "Uplink", "label": "Physical Uplink", "pattern": "<vmnic> - <v_switch> <purpose> <status>"},
-            {"code": "PortGroup", "label": "Port Group", "pattern": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)"},
-            {"code": "VMkernel", "label": "VMkernel", "pattern": "<purpose> (<v_switch>)"},
-        ]
+        presets = naming_rules.get("esxi_network_presets", [])
+        if not presets:
+            presets = [
+                {"code": "Uplink", "label": "Physical Uplink", "pattern": "<vmnic> - <v_switch> <purpose> <status>"},
+                {"code": "PortGroup", "label": "Port Group", "pattern": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)"},
+                {"code": "VMkernel", "label": "VMkernel", "pattern": "<purpose> (<v_switch>)"},
+            ]
 
-    preset_codes = [p["code"] for p in presets]
-    preset_map = {p["code"]: p for p in presets}
+        preset_codes = [p["code"] for p in presets]
+        preset_map = {p["code"]: p for p in presets}
 
-    selected_code = st.radio(
-        "ESXi Preset Type",
-        options=preset_codes,
-        format_func=lambda c: c,
-        horizontal=True,
-        label_visibility="collapsed",
-        key="esxi_net_preset_radio",
-    )
+        selected_code = st.radio(
+            "ESXi Preset Type",
+            options=preset_codes,
+            format_func=lambda c: c,
+            horizontal=True,
+            label_visibility="collapsed",
+            key="esxi_net_preset_radio",
+        )
 
-    if selected_code:
-        label = preset_map.get(selected_code, {}).get("label", "")
-        st.caption(f"ℹ️ **{selected_code}**: {label}")
+        if selected_code:
+            label = preset_map.get(selected_code, {}).get("label", "")
+            st.caption(f"ℹ️ **{selected_code}**: {label}")
 
-    sel_preset = preset_map.get(selected_code, presets[0]) if presets else {}
-    patterns = naming_rules.get("naming_patterns", {})
-    pkey = sel_preset.get("pattern_key", f"esxinet_{str(selected_code).lower()}")
+        sel_preset = preset_map.get(selected_code, presets[0]) if presets else {}
+        patterns = naming_rules.get("naming_patterns", {})
+        pkey = sel_preset.get("pattern_key", f"esxinet_{str(selected_code).lower()}")
 
-    curr_pattern = (
-        patterns.get(pkey)
-        or patterns.get(f"esxinet_{str(selected_code).lower()}")
-        or patterns.get(f"esxi_{str(selected_code).lower()}")
-        or sel_preset.get("pattern_template")
-        or sel_preset.get("pattern")
-        or ""
-    )
+        curr_pattern = (
+            patterns.get(pkey)
+            or patterns.get(f"esxinet_{str(selected_code).lower()}")
+            or patterns.get(f"esxi_{str(selected_code).lower()}")
+            or sel_preset.get("pattern_template")
+            or sel_preset.get("pattern")
+            or ""
+        )
 
-    variables = get_pattern_variables(naming_rules)
+        variables = get_pattern_variables(naming_rules)
 
-    if _edit_toggle(pkey):
-        render_edit_mode_ui(pkey, curr_pattern, variables)
-        st.stop()
-        return
+        if _edit_toggle(pkey):
+            render_edit_mode_ui(pkey, curr_pattern, variables)
+            st.stop()
+            return
 
-    order = (naming_rules.get("token_order") or {}).get(pkey)
-    # Dynamically render widgets for ALL tokens in template (handles new tokens automatically)
-    values = render_token_widgets(curr_pattern, variables, f"esxi_{selected_code}", custom_order=order)
+        order = (naming_rules.get("token_order") or {}).get(pkey)
+        # Dynamically render widgets for ALL tokens in template (handles new tokens automatically)
+        values = render_token_widgets(curr_pattern, variables, f"esxi_{selected_code}", custom_order=order)
 
-    # All dynamic values and templates are automatically normalized via zero-hardcode pipeline
-    out = render_dynamic_pattern(curr_pattern, values, variables)
+        # All dynamic values and templates are automatically normalized via zero-hardcode pipeline
+        out = render_dynamic_pattern(curr_pattern, values, variables)
 
-    st.session_state["esxi_generated_desc"] = out
-    st.caption("Generated ESXi Description:")
-    st.code(out, language="text")
+        st.session_state["esxi_generated_desc"] = out
+        st.caption("Generated ESXi Description:")
+        st.code(out, language="text")
 
-    if st.button("AI Verify ESXi Description", key="esxi_ai_verify_btn"):
-        st.info("Verified against ESXi naming standards.")
+        if st.button("AI Verify ESXi Description", key="esxi_ai_verify_btn"):
+            st.info("Verified against ESXi naming standards.")
 
     # --- SECTION 2: 📸 SCREENSHOT OCR PIPELINE (4-STEP WORKFLOW) ---
-    st.markdown("---")
-    st.subheader("📸 Screenshot OCR Pipeline", help="4-step workflow to analyze ESXi topology screenshots and generate bulk NetBox descriptions.")
+    with st.expander("📸 Screenshot OCR Pipeline (4-Step Workflow)", expanded=True):
+        st.caption("4-step workflow to analyze ESXi topology screenshots and generate bulk NetBox descriptions.")
 
-    # 1️⃣ Step 1: Upload Screenshots
-    st.markdown("##### 1️⃣ Upload ESXi Topology Screenshots")
-    st.caption("Upload screenshots of Virtual Switches, Physical Adapters, or VMkernel Adapters from vSphere / ESXi Host Client.")
+        # 1️⃣ Step 1: Upload Screenshots & Analyze
+        st.markdown("##### 1️⃣ Upload ESXi Topology Screenshots")
+        st.caption("Upload screenshots of Virtual Switches, Physical Adapters, or VMkernel Adapters from vSphere / ESXi Host Client.")
 
-    with st.expander("📸 Screenshot Guidelines (Virtual Switches Topology)", expanded=False):
-        st.markdown("""
+        with st.expander("📸 Screenshot Guidelines (Virtual Switches Topology)", expanded=False):
+            st.markdown("""
 **Recommended Capture Location:**
 
 1. **Access**: vCenter or ESXi Host Client.
@@ -792,92 +792,94 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
 > ⚠️ **Manual Verification Required:** ESXi topology views do not explicitly display Active vs. Standby status. Please verify in ESXi: click **EDIT** beside the vSwitch ➜ go to **Teaming and failover** ➜ check **Failover order** (Active vs Standby adapters) before committing to NetBox.
             """
-        )
+            )
 
-    col_up1, col_up2 = st.columns([1, 1])
+        col_up1, col_up2 = st.columns([1, 1])
 
-    # Initialize unified screenshot store and counters
-    if "unified_screenshots" not in st.session_state:
-        st.session_state["unified_screenshots"] = []
-    if "esxi_upload_counter" not in st.session_state:
-        st.session_state["esxi_upload_counter"] = 0
-    if "esxi_paste_counter" not in st.session_state:
-        st.session_state["esxi_paste_counter"] = 0
+        # Initialize unified screenshot store and counters
+        if "unified_screenshots" not in st.session_state:
+            st.session_state["unified_screenshots"] = []
+        if "esxi_upload_counter" not in st.session_state:
+            st.session_state["esxi_upload_counter"] = 0
+        if "esxi_paste_counter" not in st.session_state:
+            st.session_state["esxi_paste_counter"] = 0
 
-    with col_up1:
-        uploader_key = f"esxi_file_uploader_{st.session_state['esxi_upload_counter']}"
-        raw_uploaded = st.file_uploader(
-            "Upload Screenshots (Drag & Drop)",
-            type=["png", "jpg", "jpeg"],
-            accept_multiple_files=True,
-            key=uploader_key,
-            help="Upload Virtual Switches topology and/or Physical Adapters (expanded '>>' for MAC & CDP).",
-        )
-        # Ingest uploaded files immediately and reset uploader widget so it stays clean
-        if raw_uploaded:
-            import io
-            for uf in raw_uploaded:
-                file_bytes = uf.read()
-                bio = io.BytesIO(file_bytes)
-                bio.name = uf.name
-                bio.type = uf.type
-                bio.size = len(file_bytes)
-                st.session_state["unified_screenshots"].append(bio)
-            st.session_state["esxi_upload_counter"] += 1
-            st.rerun()
+        with col_up1:
+            uploader_key = f"esxi_file_uploader_{st.session_state['esxi_upload_counter']}"
+            raw_uploaded = st.file_uploader(
+                "Upload Screenshots (Drag & Drop)",
+                type=["png", "jpg", "jpeg"],
+                accept_multiple_files=True,
+                key=uploader_key,
+                help="Upload Virtual Switches topology and/or Physical Adapters (expanded '>>' for MAC & CDP).",
+            )
+            # Ingest uploaded files immediately and reset uploader widget so it stays clean
+            if raw_uploaded:
+                import io
+                for uf in raw_uploaded:
+                    file_bytes = uf.read()
+                    bio = io.BytesIO(file_bytes)
+                    bio.name = uf.name
+                    bio.type = uf.type
+                    bio.size = len(file_bytes)
+                    st.session_state["unified_screenshots"].append(bio)
+                st.session_state["esxi_upload_counter"] += 1
+                st.rerun()
 
-    with col_up2:
-        st.markdown("**📋 Or Paste from Clipboard (Ctrl+V)**")
-        paste_box_key = f"esxi_paste_input_{st.session_state['esxi_paste_counter']}"
-        pasted_data = st.text_input(
-            "Paste Area",
-            placeholder="Click here and press Ctrl+V",
-            key=paste_box_key,
-            label_visibility="collapsed",
-            help="Focus this box and press Ctrl+V.",
-        )
-        # Persistent delegated paste listener across remounts
-        import streamlit.components.v1 as _components
-        _components.html(
-            """
-            <script>
-            const parentDoc = window.parent.document;
-            if (!window.parent._esxiPasteDelegated) {
-                window.parent._esxiPasteDelegated = true;
-                parentDoc.addEventListener('paste', function(e) {
-                    const target = e.target;
-                    if (!target || target.getAttribute('aria-label') !== 'Paste Area') return;
-                    const items = (e.clipboardData || window.clipboardData).items;
-                    for (let i = 0; i < items.length; i++) {
-                        if (items[i].type.indexOf('image') !== -1) {
-                            const blob = items[i].getAsFile();
-                            const reader = new FileReader();
-                            reader.onload = function(event) {
-                                const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-                                nativeSetter.call(target, event.target.result);
-                                target.dispatchEvent(new Event('input', { bubbles: true }));
-                                target.dispatchEvent(new KeyboardEvent('keydown', {
-                                    bubbles: true,
-                                    cancelable: true,
-                                    key: 'Enter',
-                                    code: 'Enter',
-                                    keyCode: 13,
-                                    which: 13
-                                }));
-                                target.dispatchEvent(new Event('change', { bubbles: true }));
-                            };
-                            reader.readAsDataURL(blob);
-                            e.preventDefault();
-                            break;
+        with col_up2:
+            st.markdown("**📋 Or Paste from Clipboard (Ctrl+V)**")
+            paste_box_key = f"esxi_paste_input_{st.session_state['esxi_paste_counter']}"
+            pasted_data = st.text_input(
+                "Paste Area",
+                placeholder="Click here and press Ctrl+V",
+                key=paste_box_key,
+                label_visibility="collapsed",
+                help="Focus this box and press Ctrl+V.",
+            )
+            # Persistent delegated paste listener across remounts
+            import streamlit.components.v1 as _components
+            _components.html(
+                """
+                <script>
+                const parentDoc = window.parent.document;
+                if (!window.parent._esxiPasteDelegated) {
+                    window.parent._esxiPasteDelegated = true;
+                    parentDoc.addEventListener('paste', function(e) {
+                        const target = e.target;
+                        if (!target || target.getAttribute('aria-label') !== 'Paste Area') return;
+                        const items = (e.clipboardData || window.clipboardData).items;
+                        for (let i = 0; i < items.length; i++) {
+                            if (items[i].type.indexOf('image') !== -1) {
+                                const blob = items[i].getAsFile();
+                                const reader = new FileReader();
+                                reader.onload = function(event) {
+                                    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                                    nativeSetter.call(target, event.target.result);
+                                    target.dispatchEvent(new Event('input', { bubbles: true }));
+                                    target.dispatchEvent(new KeyboardEvent('keydown', {
+                                        bubbles: true,
+                                        cancelable: true,
+                                        key: 'Enter',
+                                        code: 'Enter',
+                                        keyCode: 13,
+                                        which: 13
+                                    }));
+                                    target.dispatchEvent(new Event('change', { bubbles: true }));
+                                };
+                                reader.readAsDataURL(blob);
+                                e.preventDefault();
+                                break;
+                            }
                         }
-                    }
-                });
-            }
-            </script>
-            """,
-            height=0,
-            width=0,
-        )
+                    });
+                }
+                </script>
+                """,
+                height=0,
+                width=0,
+            )
+
+        # --- END OF 2-COLUMN INPUT LAYOUT (col_up1, col_up2) ---
 
         # Set unified list as uploaded_imgs for preview and analysis (unconditional init)
         uploaded_imgs = st.session_state["unified_screenshots"]
@@ -899,73 +901,145 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             except Exception as e:
                 st.warning(f"Failed to process pasted image: {e}")
 
-    if st.button("🚀 Analyze Topology & Auto-Populate", key="btn_analyze_esxi_img", type="primary"):
-        with st.spinner("Analyzing topology with AI Vision..."):
-            try:
-                from core.ai_assistant import analyze_esxi_topology_screenshot
-                results = analyze_esxi_topology_screenshot(uploaded_imgs, naming_rules, active_model)
-                st.session_state["esxi_parsed_descriptions"] = results
-                st.success("Successfully analyzed topology and generated NetBox descriptions!")
-            except Exception as e:
-                st.error(f"Vision analysis failed: {str(e)}")
+        if uploaded_imgs and st.button("🚀 Analyze Topology & Auto-Populate", key="btn_analyze_esxi_img", type="primary"):
+            with st.spinner("Analyzing topology with AI Vision..."):
+                try:
+                    from core.ai_assistant import analyze_esxi_topology_screenshot
+                    results = analyze_esxi_topology_screenshot(uploaded_imgs, naming_rules, active_model)
+                    st.session_state["esxi_parsed_descriptions"] = results
+                    st.success("Successfully analyzed topology and generated NetBox descriptions!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Vision analysis failed: {str(e)}")
 
-    # 2️⃣ Step 2: Preview & Review Topology Data
-    st.markdown("---")
-    st.markdown("##### 2️⃣ Preview & Check Topology Data")
-    if "unified_screenshots" in st.session_state and st.session_state["unified_screenshots"]:
-        with st.expander(f"🔍 Preview Uploaded Screenshots ({len(st.session_state['unified_screenshots'])} file(s))", expanded=False):
-            preview_cols = st.columns(min(len(st.session_state["unified_screenshots"]), 4))
-            remove_idx = None
-            for img_idx, img_item in enumerate(st.session_state["unified_screenshots"]):
-                with preview_cols[img_idx % len(preview_cols)]:
-                    img_title = getattr(img_item, "name", f"Screenshot #{img_idx + 1}")
-                    st.caption(f"#{img_idx + 1}: {img_title}")
-                    st.image(img_item, width="stretch")
-                    if st.button("✖ Remove", key=f"unified_remove_btn_{img_idx}"):
-                        remove_idx = img_idx
-            if remove_idx is not None:
-                st.session_state["unified_screenshots"].pop(remove_idx)
-                st.rerun()
+        # 2️⃣ Step 2: Preview & Review Topology Data (Full-Width)
+        st.markdown("---")
+        st.markdown("##### 2️⃣ Preview & Check Topology Data")
+        if "unified_screenshots" in st.session_state and st.session_state["unified_screenshots"]:
+            with st.expander(f"🔍 Preview Uploaded Screenshots ({len(st.session_state['unified_screenshots'])} file(s))", expanded=False):
+                preview_cols = st.columns(min(len(st.session_state["unified_screenshots"]), 4))
+                remove_idx = None
+                for img_idx, img_item in enumerate(st.session_state["unified_screenshots"]):
+                    with preview_cols[img_idx % len(preview_cols)]:
+                        img_title = getattr(img_item, "name", f"Screenshot #{img_idx + 1}")
+                        st.caption(f"#{img_idx + 1}: {img_title}")
+                        st.image(img_item, width="stretch")
+                        if st.button("✖ Remove", key=f"unified_remove_btn_{img_idx}"):
+                            remove_idx = img_idx
+                if remove_idx is not None:
+                    st.session_state["unified_screenshots"].pop(remove_idx)
+                    st.rerun()
 
-    if "esxi_parsed_descriptions" in st.session_state and st.session_state["esxi_parsed_descriptions"]:
-        st.caption("Review and edit parsed topology directly below. Batch text updates reactively in real time.")
-        edited_descriptions = st.data_editor(
-            st.session_state["esxi_parsed_descriptions"],
-            use_container_width=True,
-            num_rows="dynamic",
-            key="esxi_topology_editor"
-        )
-        st.session_state["esxi_parsed_descriptions"] = edited_descriptions
+        if "esxi_parsed_descriptions" in st.session_state and st.session_state["esxi_parsed_descriptions"]:
+            st.caption("Review and edit parsed topology directly below. Batch text updates reactively in real time.")
+            edited_descriptions = st.data_editor(
+                st.session_state["esxi_parsed_descriptions"],
+                use_container_width=True,
+                num_rows="dynamic",
+                key="esxi_topology_editor"
+            )
+            st.session_state["esxi_parsed_descriptions"] = edited_descriptions
+        else:
+            st.info("⚪ No topology data analyzed yet. Upload screenshot(s) and click analyze above.")
 
-    # 3️⃣ Step 3: Extracted Variables Inspector
-    st.markdown("---")
-    st.markdown("##### 3️⃣ Extracted Variables Inspector")
-    if "esxi_parsed_descriptions" in st.session_state and st.session_state["esxi_parsed_descriptions"]:
-        rows = edited_descriptions if "edited_descriptions" in dir() else st.session_state["esxi_parsed_descriptions"]
-        if isinstance(rows, list) and rows:
-            vmnics = sorted(list(set(r.get("vmnic", "") for r in rows if r.get("vmnic"))))
-            vswitches = sorted(list(set(r.get("vswitch", r.get("vSwitch", "")) for r in rows if r.get("vswitch", r.get("vSwitch", "")))))
-            purposes = sorted(list(set(r.get("purpose", "") for r in rows if r.get("purpose"))))
+        # 3️⃣ Step 3: Extracted Variables Inspector (Full-Width & Strict Type-Aware Filtering)
+        st.markdown("---")
+        st.markdown("##### 3️⃣ Extracted Variables Inspector")
+        if "esxi_parsed_descriptions" in st.session_state and st.session_state["esxi_parsed_descriptions"]:
+            rows = st.session_state["esxi_parsed_descriptions"]
+
+            extracted_vmnics = set()
+            extracted_vswitches = set()
+            extracted_purposes = set()
+
+            last_seen_switch = ""
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                row_type = str(r.get("Type", "")).strip()
+
+                # Robust switch detection with forward-filling
+                sw = str(r.get("vSwitch") or r.get("vswitch") or r.get("VSwitch") or r.get("Switch") or "").strip()
+                if not sw:
+                    desc_str = str(r.get("Description", ""))
+                    m_sw = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*)\b", desc_str)
+                    if m_sw:
+                        sw = m_sw.group(1)
+                if sw:
+                    last_seen_switch = sw
+                    extracted_vswitches.add(sw)
+                elif last_seen_switch:
+                    extracted_vswitches.add(last_seen_switch)
+
+                # Strict vmnic extraction (only physical uplinks or genuine NIC names)
+                raw_iface = str(r.get("Interface / vmnic") or r.get("Interface") or r.get("vmnic") or r.get("NIC") or "").strip()
+                if row_type == "Uplink" or re.search(r"^(vmnic|eno|ens|enp|eth)\d+", raw_iface, re.IGNORECASE):
+                    m_nic = re.search(r"\b(vmnic\d+|eno\w+|ens\w+|enp\w+|eth\d+)\b", raw_iface, re.IGNORECASE)
+                    if m_nic:
+                        extracted_vmnics.add(m_nic.group(1))
+
+                # Strict purpose extraction (only PortGroups & VMkernels)
+                raw_purp = str(r.get("Role / PortGroup") or r.get("Purpose") or r.get("Service") or r.get("PortGroup") or "").strip()
+                if not raw_purp and row_type in ["PortGroup", "VMkernel"]:
+                    raw_purp = raw_iface
+                if raw_purp:
+                    clean_purp = re.sub(r"(?i)\s+(network|active uplink|standby uplink)$", "", raw_purp).strip()
+                    clean_purp = re.sub(r"\s*\([^)]*\)", "", clean_purp).strip()
+                    if clean_purp and not re.match(r"^(vmnic\d+|vSwitch\w*)$", clean_purp, re.IGNORECASE):
+                        extracted_purposes.add(clean_purp)
+
+            vmnics = sorted(list(extracted_vmnics))
+            vswitches = sorted(list(extracted_vswitches))
+            purposes = sorted(list(extracted_purposes))
 
             from config.naming_rules import get_hardware_slot_mappings
             slot_map = get_hardware_slot_mappings(naming_rules)
-            slots = [slot_map.get(re.sub(r"\D", "", v), "PCIe") for v in vmnics]
+            slots = sorted(list(set(slot_map.get(re.sub(r"\D", "", v), f"Slot:{v}") for v in vmnics if v)))
 
             c1, c2, c3, c4 = st.columns(4)
             with c1:
                 st.markdown("**`<vmnic>`**")
-                st.code("\n".join(vmnics) or "None", language="text")
+                st.code("\n".join(vmnics) if vmnics else "None", language="text")
             with c2:
                 st.markdown("**`<v_switch>`**")
-                st.code("\n".join(vswitches) or "None", language="text")
+                st.code("\n".join(vswitches) if vswitches else "None", language="text")
             with c3:
                 st.markdown("**`<slot>`**")
-                st.code("\n".join(slots) or "None", language="text")
+                st.code("\n".join(slots) if slots else "None", language="text")
             with c4:
                 st.markdown("**`<purpose>`**")
-                st.code("\n".join(purposes) or "None", language="text")
-    else:
-        st.info("⚪ No topology data analyzed yet. Upload screenshots and click analyze above.")
+                st.code("\n".join(purposes) if purposes else "None", language="text")
+
+            # ➕ Add / Update Variable with persistent Standards sync
+            st.markdown("**➕ Add / Update Variable (Sync to Standards)**")
+            vcol1, vcol2, vcol3 = st.columns([1.5, 2.5, 1.2])
+            with vcol1:
+                sync_tok_name = st.text_input("Variable Token", placeholder="e.g. vlan_id", key="esxi_sync_tok_name").strip().lower()
+            with vcol2:
+                sync_tok_val = st.text_input("Value / Default", placeholder="e.g. 100", key="esxi_sync_tok_val").strip()
+            with vcol3:
+                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                if st.button("💾 Sync Variable", key="btn_sync_tok_standards", width='stretch'):
+                    if sync_tok_name:
+                        from config.naming_rules import save_naming_rules
+                        norm_token = re.sub(r"[^a-z0-9_]", "", sync_tok_name)
+                        if "pattern_variables" not in naming_rules:
+                            naming_rules["pattern_variables"] = {}
+                        naming_rules["pattern_variables"][norm_token] = {
+                            "label": norm_token.replace("_", " ").title(),
+                            "placeholder": f"e.g. {sync_tok_val or norm_token}",
+                            "default": sync_tok_val,
+                            "optional": False,
+                            "scope": "esxi"
+                        }
+                        save_naming_rules(naming_rules, source="Variable Inspector Sync")
+                        st.session_state["naming_rules"] = naming_rules.copy()
+                        st.success(f"Variable <{norm_token}> saved & synced to Standards!")
+                        st.rerun()
+                    else:
+                        st.warning("Please enter a token name.")
+        else:
+            st.caption("Tokens will be listed here after analyzing topology screenshots.")
 
     # 4️⃣ Step 4: NetBox Descriptions (Ready-to-Copy)
     st.markdown("---")
