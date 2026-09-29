@@ -1924,7 +1924,19 @@ def render_standards_tab(active_model):
                             "scope": s_key
                         }
 
-                # Inline Add Row per Scope Card
+                # 1. Action Row: Save & Reset
+                col_save, col_rst = st.columns([4, 1])
+                with col_save:
+                    if st.button(f"💾 Save & Apply Changes", key=f"save_scope_{s_key}", type="primary", width="stretch"):
+                        _persist_variables(current_rules, all_edited_vars)
+                with col_rst:
+                    if st.button("🔄 Reset Scope", key=f"reset_scope_{s_key}", type="secondary", width="stretch"):
+                        from config.naming_rules import PATTERN_VARIABLES
+                        default_scope_vars = {k: v for k, v in PATTERN_VARIABLES.items() if v.get("scope") == s_key}
+                        all_edited_vars.update(default_scope_vars)
+                        _persist_variables(current_rules, all_edited_vars)
+
+                # 2. Bottom Inline Add Row (Seamless table extension matching Preset style)
                 with st.form(key=f"var_add_form_{s_key}", clear_on_submit=True):
                     ca1, ca2, ca3, ca4, ca5, ca6 = st.columns(VARIABLE_COLS_OPTIMIZED, vertical_alignment="center")
                     with ca1:
@@ -1935,11 +1947,11 @@ def render_standards_tab(active_model):
                     with ca3:
                         new_ph = st.text_input("New Placeholder", value="", placeholder="e.g. Tier-1, Tier-2", key=f"vnew_{s_key}_ph", label_visibility="collapsed").strip()
                     with ca4:
-                        new_df = st.text_input("Default", value="", placeholder="Tier-1", key=f"vnew_{s_key}_df", label_visibility="collapsed")
+                        new_df = st.text_input("Default", value="", placeholder="", key=f"vnew_{s_key}_df", label_visibility="collapsed")
                     with ca5:
-                        new_opt = st.checkbox("Optional", value=True, key=f"vnew_{s_key}_opt", label_visibility="collapsed")
+                        new_opt = st.checkbox("Optional", value=False, key=f"vnew_{s_key}_opt", label_visibility="collapsed")
                     with ca6:
-                        add_tok = st.form_submit_button("➕", width='stretch', help=f"Add variable to {title}")
+                        add_tok = st.form_submit_button("➕ Add", width='stretch', help=f"Add variable to {title}")
 
                     if add_tok:
                         if new_name:
@@ -1954,13 +1966,6 @@ def render_standards_tab(active_model):
                             return
                         else:
                             st.warning("⚠️ Enter a token name to add.")
-
-                # Save button directly inside this Scoped Card
-                if st.button(f"💾 Save {title.split(' ')[1].title()} Variables", key=f"save_scope_{s_key}", type="primary", width="stretch"):
-                    _persist_variables(current_rules, all_edited_vars)
-
-                st.markdown("---")
-                st.caption(f"➕ Add a new variable token to {title.split(' ')[1].title()}:")
 
         # Bottom Global Reset Option
         with st.container(border=True):
