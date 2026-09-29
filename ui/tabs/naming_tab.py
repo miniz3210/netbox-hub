@@ -875,7 +875,7 @@ def _render_esxi_pipeline(active_model: str, rules: dict) -> None:
         st.info("Generated descriptions will appear here once topology analysis completes.")
 
     with st.expander("📝 Interactive Single Item Generator", expanded=False):
-        _render_esxi_token_generator(naming_rules)
+        _render_esxi_token_generator(rules)
 
 
 def _render_esxi_token_generator(rules: dict) -> None:
