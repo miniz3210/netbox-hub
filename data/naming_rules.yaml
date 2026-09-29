@@ -539,51 +539,64 @@
       "label": "vmnic Name",
       "placeholder": "vmnic",
       "default": "vmnic",
-      "scope": "hypervisor"
+      "scope": "hypervisor",
+      "optional": false
     },
     "v_switch": {
       "label": "vSwitch Name",
       "placeholder": "vSwitch",
       "default": "vSwitch",
-      "scope": "hypervisor"
+      "scope": "hypervisor",
+      "optional": false
     },
     "purpose": {
       "label": "Purpose / Service",
       "placeholder": "e.g. Management, vMotion, Storage",
-      "scope": "hypervisor"
+      "scope": "hypervisor",
+      "default": "",
+      "optional": false
     },
     "pg_network": {
       "label": "Network Name",
       "placeholder": "e.g. VM Network",
-      "scope": "hypervisor"
+      "scope": "hypervisor",
+      "default": "",
+      "optional": false
     },
     "port_group": {
       "label": "Port Group / vSwitch",
       "placeholder": "e.g. vSwitch0",
       "default": "vSwitch",
-      "scope": "hypervisor"
+      "scope": "hypervisor",
+      "optional": false
     },
     "active_vmnics": {
       "label": "Active vmnics",
       "placeholder": "e.g. vmnic0, vmnic1",
       "default": "vmnic",
-      "scope": "hypervisor"
+      "scope": "hypervisor",
+      "optional": false
     },
     "standby_vmnics": {
       "label": "Standby vmnics (Optional)",
       "placeholder": "e.g. vmnic2",
-      "scope": "hypervisor"
+      "scope": "hypervisor",
+      "default": "",
+      "optional": false
     },
     "vmk": {
       "label": "vmk Name",
       "placeholder": "vmk",
       "default": "vmk",
-      "scope": "hypervisor"
+      "scope": "hypervisor",
+      "optional": false
     },
     "switch_zone": {
       "label": "Switch Zone / Network Zone",
       "placeholder": "e.g. DMZ, Production, Management",
-      "scope": "hypervisor"
+      "scope": "hypervisor",
+      "default": "",
+      "optional": false
     }
   },
   "site_code_rules": {

@@ -1101,6 +1101,9 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         if norm_k:
                             raw_token_dict.setdefault(norm_k, set()).add(str(v).strip())
 
+            existing_vars = get_pattern_variables(naming_rules)
+            existing_token_names = set(existing_vars.keys())
+
             with st.expander("🔍 OCR Raw Token Dictionary (Platform-Agnostic Variable Bag)", expanded=False):
                 st.caption("All extracted tokens discovered from the uploaded topology. These keys are immediately available in Step 4 patterns and can be synced to Standards.")
                 tok_cols = st.columns(3)
@@ -1108,15 +1111,34 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     col_target = tok_cols[idx % 3]
                     sample_vals = ", ".join(list(t_vals)[:3])
                     sync_key = f"btn_sync_tok_{t_name}"
+                    is_existing = t_name in existing_token_names
                     with col_target:
-                        if st.button(f"🔗 Sync <{t_name}>", key=sync_key, help=f"Pre-fill sync form with <{t_name}> = {sample_vals}", width='stretch'):
-                            st.session_state[f"esxi_sync_tok_name"] = t_name
-                            sample_val_list = list(t_vals)
-                            st.session_state[f"esxi_sync_tok_val"] = sample_val_list[0] if sample_val_list else ""
-                            st.rerun()
+                        if is_existing:
+                            st.button(f"✅ <{t_name}> (In Standards)", key=sync_key, disabled=True, width='stretch')
+                        else:
+                            if st.button(f"🔗 Sync <{t_name}>", key=sync_key, help=f"Sync <{t_name}> to Hypervisor Standards with default value: {sample_vals}", width='stretch'):
+                                from config.naming_rules import save_naming_rules
+                                norm_token = re.sub(r"[^a-z0-9_]", "", t_name)
+                                if "pattern_variables" not in naming_rules or not isinstance(naming_rules.get("pattern_variables"), dict):
+                                    naming_rules.setdefault("pattern_variables", {})
+                                sample_val_list = list(t_vals)
+                                default_val = sample_val_list[0] if sample_val_list else ""
+                                naming_rules["pattern_variables"][norm_token] = {
+                                    "label": norm_token.replace("_", " ").title(),
+                                    "placeholder": f"e.g. {default_val or norm_token}",
+                                    "default": default_val,
+                                    "optional": False,
+                                    "scope": "hypervisor",
+                                }
+                                save_naming_rules(naming_rules, source="Variable Inspector Sync")
+                                st.session_state["naming_rules"] = naming_rules.copy()
+                                st.success(f"✅ Successfully synced '{t_name}' to Hypervisor Standards!")
+                                st.rerun()
+                        border_color = "#22c55e" if is_existing else "rgba(255,255,255,0.08)"
+                        title_color = "#22c55e" if is_existing else "#38bdf8"
                         st.markdown(f"""
-                        <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 8px 10px; margin-bottom: 4px; margin-top: 4px;">
-                            <div style="font-family: monospace; font-weight: 600; color: #38bdf8; font-size: 0.85rem;">&lt;{t_name}&gt;</div>
+                        <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid {border_color}; border-radius: 6px; padding: 8px 10px; margin-bottom: 4px; margin-top: 4px;">
+                            <div style="font-family: monospace; font-weight: 600; color: {title_color}; font-size: 0.85rem;">&lt;{t_name}&gt;</div>
                             <div style="color: #94a3b8; font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{sample_vals}">e.g. {sample_vals}</div>
                         </div>
                         """, unsafe_allow_html=True)
