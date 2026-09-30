@@ -812,6 +812,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             st.session_state["esxi_paste_counter"] = 0
         if "topo_uploader_key_ver" not in st.session_state:
             st.session_state["topo_uploader_key_ver"] = 0
+        if "paste_input_ver" not in st.session_state:
+            st.session_state["paste_input_ver"] = 0
 
         with col_up1:
             uploader_key = f"hypervisor_topo_file_uploader_{st.session_state['topo_uploader_key_ver']}"
@@ -837,56 +839,44 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 st.session_state["esxi_upload_counter"] += 1
 
         with col_up2:
-            st.markdown("**📋 Paste from Clipboard (Ctrl+V)**")
-
-            # Hidden bridge input — completely invisible; only the paste zone below is shown.
-            st.text_input(
-                "esxi_paste_hidden_bridge",
-                key="esxi_paste_hidden_bridge",
+            st.markdown("**📋 Or Paste from Clipboard (Ctrl+V)**")
+            paste_box_key = f"esxi_paste_input_{st.session_state['paste_input_ver']}"
+            pasted_data = st.text_input(
+                "Paste Area",
+                placeholder="Click here and press Ctrl+V",
+                key=paste_box_key,
                 label_visibility="collapsed",
+                help="Focus this box and press Ctrl+V.",
             )
-            st.markdown(
+            # Persistent delegated paste listener across remounts
+            import streamlit.components.v1 as _components
+            _components.html(
                 """
-                <style>
-                input[aria-label="esxi_paste_hidden_bridge"] {
-                    display: none !important;
-                }
-                </style>
-                """,
-                unsafe_allow_html=True,
-            )
-
-            # Single clean paste zone
-            st.html(
-                """
-                <div id="esxi-clipboard-zone"
-                     style="width:100%;height:80px;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);border:2px dashed #475569;border-radius:10px;
-                            display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;
-                            transition:all 0.2s ease;"
-                     tabindex="0">
-                    <span style="font-size:20px;margin-bottom:4px;">📋</span>
-                    <span style="font-size:13px;color:#94a3b8;font-weight:500;">Click here then press Ctrl+V to paste</span>
-                    <span style="font-size:11px;color:#64748b;margin-top:2px;">Images will be added to your topology queue</span>
-                </div>
                 <script>
-                (function() {
-                    const zone = document.getElementById('esxi-clipboard-zone');
-                    if (!zone) return;
-                    zone.addEventListener('paste', function(e) {
+                const parentDoc = window.parent.document;
+                if (!window.parent._esxiPasteDelegated) {
+                    window.parent._esxiPasteDelegated = true;
+                    parentDoc.addEventListener('paste', function(e) {
+                        const target = e.target;
+                        if (!target || target.getAttribute('aria-label') !== 'Paste Area') return;
                         const items = (e.clipboardData || window.clipboardData).items;
                         for (let i = 0; i < items.length; i++) {
                             if (items[i].type.indexOf('image') !== -1) {
                                 const blob = items[i].getAsFile();
                                 const reader = new FileReader();
                                 reader.onload = function(event) {
-                                    const dataUrl = event.target.result;
-                                    const el = document.querySelector('input[aria-label="esxi_paste_hidden_bridge"]');
-                                    if (el) {
-                                        const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-                                        nativeSetter.call(el, dataUrl);
-                                        el.dispatchEvent(new Event('input', { bubbles: true }));
-                                        el.dispatchEvent(new Event('change', { bubbles: true }));
-                                    }
+                                    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                                    nativeSetter.call(target, event.target.result);
+                                    target.dispatchEvent(new Event('input', { bubbles: true }));
+                                    target.dispatchEvent(new KeyboardEvent('keydown', {
+                                        bubbles: true,
+                                        cancelable: true,
+                                        key: 'Enter',
+                                        code: 'Enter',
+                                        keyCode: 13,
+                                        which: 13
+                                    }));
+                                    target.dispatchEvent(new Event('change', { bubbles: true }));
                                 };
                                 reader.readAsDataURL(blob);
                                 e.preventDefault();
@@ -894,23 +884,18 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                             }
                         }
                     });
-                    zone.addEventListener('mouseover', function() {
-                        this.style.borderColor = '#38bdf8';
-                        this.style.boxShadow = '0 0 12px rgba(56,189,248,0.3)';
-                    });
-                    zone.addEventListener('mouseout', function() {
-                        this.style.borderColor = '#475569';
-                        this.style.boxShadow = 'none';
-                    });
-                })();
+                }
                 </script>
                 """,
+                height=0,
+                width=0,
             )
 
         # --- END OF 2-COLUMN INPUT LAYOUT (col_up1, col_up2) ---
 
         def _clear_all_topology_state():
             st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
+            st.session_state.pop("paste_input_ver", None)
             for k in ["topo_uploaded_imgs", "pasted_clipboard_imgs", "hypervisor_parsed_descriptions",
                       "hypervisor_preview_df", "hypervisor_extracted_variables", "topo_is_analyzing"]:
                 st.session_state.pop(k, None)
@@ -930,7 +915,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             return deduped
 
         # Transient clipboard ingestion
-        pasted_data = st.session_state.get("esxi_paste_hidden_bridge", "")
         if pasted_data and pasted_data.startswith("data:image"):
             import base64 as _b64, io as _io
             try:
@@ -941,11 +925,9 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 pasted_file.name = f"clipboard_screenshot_{idx}.png"
                 pasted_file.type = "image/png"
                 pasted_file.size = len(img_bytes)
-                existing = list(st.session_state.get("pasted_clipboard_imgs") or [])
-                existing.append(pasted_file)
-                st.session_state["pasted_clipboard_imgs"] = existing
+                st.session_state["pasted_clipboard_imgs"] = [pasted_file]
                 st.session_state["esxi_paste_counter"] += 1
-                st.session_state["esxi_paste_hidden_bridge"] = ""
+                st.session_state["paste_input_ver"] = st.session_state.get("paste_input_ver", 0) + 1
                 st.rerun()
             except Exception as e:
                 st.warning(f"Failed to process pasted image: {e}")
