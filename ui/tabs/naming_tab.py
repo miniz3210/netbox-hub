@@ -812,8 +812,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             st.session_state["esxi_paste_counter"] = 0
         if "topo_uploader_key_ver" not in st.session_state:
             st.session_state["topo_uploader_key_ver"] = 0
-        if "paste_input_ver" not in st.session_state:
-            st.session_state["paste_input_ver"] = 0
 
         with col_up1:
             uploader_key = f"hypervisor_topo_file_uploader_{st.session_state['topo_uploader_key_ver']}"
@@ -839,23 +837,36 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 st.session_state["esxi_upload_counter"] += 1
 
         with col_up2:
-            st.markdown("**📋 Or Paste from Clipboard (Ctrl+V)**")
-            paste_box_key = f"esxi_paste_input_{st.session_state['paste_input_ver']}"
-            pasted_data = st.text_input(
-                "Paste Area",
-                placeholder="Click here and press Ctrl+V",
-                key=paste_box_key,
+            st.markdown("**📋 Paste from Clipboard (Ctrl+V)**")
+
+            # Hidden bridge input — completely invisible; only the paste zone below is shown.
+            st.text_input(
+                "esxi_paste_hidden_bridge",
+                key="esxi_paste_hidden_bridge",
                 label_visibility="collapsed",
-                help="Focus this box and press Ctrl+V.",
             )
-            # Self-contained paste listener within the iframe
+            st.markdown(
+                """
+                <style>
+                input[aria-label="esxi_paste_hidden_bridge"] {
+                    display: none !important;
+                }
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            # Single clean paste zone
             st.html(
                 """
                 <div id="esxi-clipboard-zone"
-                     style="width:100%;height:40px;background:#f0f2f6;border:2px dashed #aaa;border-radius:6px;
-                            display:flex;align-items:center;justify-content:center;cursor:text;font-size:13px;color:#666;"
+                     style="width:100%;height:80px;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);border:2px dashed #475569;border-radius:10px;
+                            display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;
+                            transition:all 0.2s ease;"
                      tabindex="0">
-                    Click here then press Ctrl+V to paste
+                    <span style="font-size:20px;margin-bottom:4px;">📋</span>
+                    <span style="font-size:13px;color:#94a3b8;font-weight:500;">Click here then press Ctrl+V to paste</span>
+                    <span style="font-size:11px;color:#64748b;margin-top:2px;">Images will be added to your topology queue</span>
                 </div>
                 <script>
                 (function() {
@@ -868,34 +879,13 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                                 const blob = items[i].getAsFile();
                                 const reader = new FileReader();
                                 reader.onload = function(event) {
-                                    // Find the associated Streamlit text input
-                                    const inputs = document.querySelectorAll('input[type="text"]');
-                                    let target = null;
-                                    for (const inp of inputs) {
-                                        if (inp.closest('.stTextInput') || inp.getAttribute('data-testid') === 'stTextInput') {
-                                            target = inp;
-                                            break;
-                                        }
-                                    }
-                                    if (!target) {
-                                        // Fallback: use the first text input in the column
-                                        const col = zone.closest('[data-testid="stColumn"]') || zone.parentElement;
-                                        const allInputs = col.querySelectorAll('input[type="text"]');
-                                        if (allInputs.length > 0) target = allInputs[allInputs.length - 1];
-                                    }
-                                    if (target) {
+                                    const dataUrl = event.target.result;
+                                    const el = window.parent.document.querySelector('input[aria-label="esxi_paste_hidden_bridge"]');
+                                    if (el) {
                                         const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-                                        nativeSetter.call(target, event.target.result);
-                                        target.dispatchEvent(new Event('input', { bubbles: true }));
-                                        target.dispatchEvent(new KeyboardEvent('keydown', {
-                                            bubbles: true,
-                                            cancelable: true,
-                                            key: 'Enter',
-                                            code: 'Enter',
-                                            keyCode: 13,
-                                            which: 13
-                                        }));
-                                        target.dispatchEvent(new Event('change', { bubbles: true }));
+                                        nativeSetter.call(el, dataUrl);
+                                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                                        el.dispatchEvent(new Event('change', { bubbles: true }));
                                     }
                                 };
                                 reader.readAsDataURL(blob);
@@ -904,13 +894,13 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                             }
                         }
                     });
-                    zone.addEventListener('focus', function() {
-                        zone.style.borderColor = '#1f77b4';
-                        zone.style.background = '#e8f4fc';
+                    zone.addEventListener('mouseover', function() {
+                        this.style.borderColor = '#38bdf8';
+                        this.style.boxShadow = '0 0 12px rgba(56,189,248,0.3)';
                     });
-                    zone.addEventListener('blur', function() {
-                        zone.style.borderColor = '#aaa';
-                        zone.style.background = '#f0f2f6';
+                    zone.addEventListener('mouseout', function() {
+                        this.style.borderColor = '#475569';
+                        this.style.boxShadow = 'none';
                     });
                 })();
                 </script>
@@ -921,7 +911,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
         def _clear_all_topology_state():
             st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
-            st.session_state.pop("paste_input_ver", None)
             for k in ["topo_uploaded_imgs", "pasted_clipboard_imgs", "hypervisor_parsed_descriptions",
                       "hypervisor_preview_df", "hypervisor_extracted_variables", "topo_is_analyzing"]:
                 st.session_state.pop(k, None)
@@ -955,7 +944,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 existing.append(pasted_file)
                 st.session_state["pasted_clipboard_imgs"] = existing
                 st.session_state["esxi_paste_counter"] += 1
-                st.session_state["paste_input_ver"] = st.session_state.get("paste_input_ver", 0) + 1
+                st.session_state["esxi_paste_hidden_bridge"] = ""
                 st.rerun()
             except Exception as e:
                 st.warning(f"Failed to process pasted image: {e}")
