@@ -22,6 +22,7 @@ This solves problems like:
 """
 
 import json
+import logging
 from typing import Dict, List, Any, Optional
 from core.backup_manager import search_backup_records, get_backup_records_by_type
 
@@ -159,10 +160,9 @@ def infer_vms_from_host(host_name: str, host_data: Dict[str, Any]) -> List[Dict[
                         vms.append(vm)
     
     except Exception as e:
-        import traceback
-        print(f"DEBUG: Error in infer_vms_from_host: {e}")
-        print(traceback.format_exc())
-    
+        logger = logging.getLogger(__name__)
+        logger.debug("Error in infer_vms_from_host: %s", e, exc_info=True)
+
     return vms
 
 

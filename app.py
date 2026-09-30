@@ -8,7 +8,6 @@ import logging
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import streamlit as st
-from dotenv import load_dotenv
 
 from config.constants import APP_VERSION, APP_NAME
 from core.catalog import get_repo_catalog
@@ -23,8 +22,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-
-load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,

@@ -1144,6 +1144,28 @@ def export_rules_as_prompt(rules: Dict[str, str]) -> str:
         f"- <{name}>: {meta.get('label', name)}"
         for name, meta in variables.items()
     )
+
+    _pv = rules.get("pattern_variables") if isinstance(rules.get("pattern_variables"), dict) else {}
+    _shared = _pv.get("shared") if isinstance(_pv.get("shared"), dict) else {}
+
+    def _safe_get(d, *keys, default=""):
+        """Safely traverse nested dicts with defaults at every level."""
+        cur = d
+        for k in keys:
+            if not isinstance(cur, dict):
+                return default
+            cur = cur.get(k)
+            if cur is None:
+                return default
+        if isinstance(cur, dict):
+            return cur.get("placeholder", default)
+        return str(cur) if cur else default
+
+    corp_domain_it_val = _safe_get(_shared, "corp_domain_it", default=".example.corp")
+    corp_domain_ot_primary_val = _safe_get(_shared, "corp_domain_ot_primary", default=".example.ot")
+    corp_domain_ot_secondary_val = _safe_get(_shared, "corp_domain_ot_secondary", default=".example.ot")
+    corp_domain_local_val = _safe_get(_shared, "corp_domain_local", default=".corp.local")
+
     return f"""# INFRASTRUCTURE & NAMING CONVENTIONS STANDARD (AUTOMATION GRADE)
 
 1. Network & Security Devices:
@@ -1164,9 +1186,9 @@ def export_rules_as_prompt(rules: Dict[str, str]) -> str:
 
 3. Hypervisors & Virtual Machines:
 - ESXi Hypervisor Hostname: {p.get('esxi_host', '')}
-  * IT / Corporate ESXi Domain: {rules.get("pattern_variables", {}).get("shared", {}).get("corp_domain_it", {}).get("placeholder", ".example.corp")} (e.g. host001{rules.get("pattern_variables", {}).get("shared", {}).get("corp_domain_it", {}).get("placeholder", ".example.corp")})
-  * OT / Industrial Cluster Domain: {rules.get("pattern_variables", {}).get("shared", {}).get("corp_domain_ot_primary", {}).get("placeholder", ".example.ot")} / {rules.get("pattern_variables", {}).get("shared", {}).get("corp_domain_ot_secondary", {}).get("placeholder", ".example.ot")} (e.g. host001{rules.get("pattern_variables", {}).get("shared", {}).get("corp_domain_ot_primary", {}).get("placeholder", ".example.ot")})
-  * Branch / Standalone: {rules.get("pattern_variables", {}).get("shared", {}).get("corp_domain_local", {}).get("placeholder", ".corp.local")} or shortname (no FQDN)
+  * IT / Corporate ESXi Domain: {corp_domain_it_val} (e.g. host001{corp_domain_it_val})
+  * OT / Industrial Cluster Domain: {corp_domain_ot_primary_val} / {corp_domain_ot_secondary_val} (e.g. host001{corp_domain_ot_primary_val})
+  * Branch / Standalone: {corp_domain_local_val} or shortname (no FQDN)
 - Virtual Machine (VM) Hostname: {p.get('vm_host', '')}
 
 4. ESXi Network Descriptions:

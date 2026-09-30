@@ -542,7 +542,7 @@ def render_ipam_tab(active_model: str):
     display_site_name = format_branch_display(site_name)
 
     # 3. Preset Selection & Allocation Editor
-    st.markdown("---")
+    st.divider()
     c_title, c_preset_container = st.columns([2.3, 1.5])
     with c_title:
         st.markdown("##### 📊 Subnet Allocation & Live Status (✏️ Click any cell to edit)")
@@ -761,7 +761,7 @@ def render_ipam_tab(active_model: str):
     )
 
     # 4. NetBox Bulk-Import CSV Copy Cards & Scope ID Notification
-    st.markdown("---")
+    st.divider()
     st.markdown("### 📋 NetBox Bulk-Import CSV Generators")
 
     if not scope_id:

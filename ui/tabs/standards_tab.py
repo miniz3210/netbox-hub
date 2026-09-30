@@ -2056,7 +2056,7 @@ def render_standards_tab(active_model):
                 for key, pat in patterns_now.items():
                     st.markdown(f"**{key}:** `{pat}`")
 
-        st.markdown("---")
+        st.divider()
         st.caption("All variables defined here automatically power input boxes and template resolution across Naming, IPAM, and CSV generators.")
     
     with tab_history:
@@ -2077,7 +2077,7 @@ def render_standards_tab(active_model):
                     st.success("✅ History cleared!")
                     st.rerun()
             
-            st.markdown("---")
+            st.divider()
             
             for idx, entry in enumerate(history):
                 timestamp = entry.get("timestamp", "Unknown")

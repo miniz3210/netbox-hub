@@ -176,7 +176,7 @@ def render_azure_tab(active_model=None):
         if saved_upload:
             st.markdown(f"**DB Status:** `Source CSV`")
         
-        st.markdown("---")
+        st.divider()
         
         # Instructions section
         with st.expander("📋 How to Export Azure VMs", expanded=False):
@@ -227,7 +227,7 @@ def render_azure_tab(active_model=None):
             5. Upload the CSV file using the uploader below.
             """)
         
-        st.markdown("---")
+        st.divider()
         
         # Show saved CSV info
         if saved_upload:

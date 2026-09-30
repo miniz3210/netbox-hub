@@ -332,6 +332,38 @@
       "scope": "shared",
       "optional": false
     },
+    "corp_domain_it": {
+      "label": "IT / Corporate ESXi Domain",
+      "placeholder": ".eswine.adds",
+      "required": true,
+      "scope": "shared",
+      "default": "",
+      "optional": false
+    },
+    "corp_domain_ot_primary": {
+      "label": "OT Primary Cluster Domain",
+      "placeholder": ".eswines.ot",
+      "required": true,
+      "scope": "shared",
+      "default": "",
+      "optional": false
+    },
+    "corp_domain_ot_secondary": {
+      "label": "OT Secondary Cluster Domain",
+      "placeholder": ".eswine.ot",
+      "required": true,
+      "scope": "shared",
+      "default": "",
+      "optional": false
+    },
+    "corp_domain_local": {
+      "label": "Branch / Local Domain",
+      "placeholder": ".corp.local",
+      "required": true,
+      "scope": "shared",
+      "default": "",
+      "optional": false
+    },
     "vid": {
       "label": "VLAN ID",
       "placeholder": "e.g. 100, 300",

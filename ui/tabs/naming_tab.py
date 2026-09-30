@@ -464,7 +464,7 @@ def render_naming_tab(active_model):
     global_site = ""
     if "Network & Security" in naming_cat or "Hosts & Virtual Machines" in naming_cat:
         global_site = _site_code_assistant_compact(naming_rules, "global")
-    st.markdown("---")
+    st.divider()
 
     if "Network & Security" in naming_cat:
         _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, variables, global_site)
@@ -970,7 +970,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     st.rerun()
 
         # 2️⃣ Step 2: Preview & Review Topology Data (Full-Width)
-        st.markdown("---")
+        st.divider()
         st.markdown("##### 2️⃣ Preview & Check Topology Data")
         if uploaded_imgs:
             with st.expander(f"🔍 Preview Uploaded Screenshots ({len(uploaded_imgs)} file(s))", expanded=False):
@@ -1003,7 +1003,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             st.info("⚪ No topology data analyzed yet. Upload screenshot(s) and click analyze above.")
 
         # 3️⃣ Step 3: Extracted Variables Inspector (Full-Width & Clean Filtering)
-        st.markdown("---")
+        st.divider()
         st.markdown("##### 3️⃣ Extracted Variables Inspector")
         if "hypervisor_parsed_descriptions" in st.session_state and st.session_state["hypervisor_parsed_descriptions"]:
             rows = st.session_state["hypervisor_parsed_descriptions"]
@@ -1196,7 +1196,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             st.caption("Tokens will be listed here after analyzing topology screenshots.")
 
         # 4️⃣ Step 4: NetBox Descriptions (Ready-to-Copy)
-        st.markdown("---")
+        st.divider()
         st.markdown("##### 4️⃣ NetBox Descriptions (Ready-to-Copy)")
         if "hypervisor_parsed_descriptions" in st.session_state and st.session_state["hypervisor_parsed_descriptions"]:
             st.markdown("###### 📋 Generated NetBox Interface Descriptions (Editable)")

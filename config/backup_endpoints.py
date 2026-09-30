@@ -9,6 +9,7 @@ or the minimal backup script is updated, this module automatically reflects
 those changes without manual updates.
 """
 
+import logging
 import re
 from pathlib import Path
 from typing import Dict, List, TypedDict, Set
@@ -61,7 +62,7 @@ def _parse_essential_endpoints_from_script() -> Set[str]:
     except Exception as e:
         # If script can't be read, return empty set
         # This ensures the app doesn't crash if the file is missing
-        print(f"Warning: Could not parse essential endpoints from script: {e}")
+        logging.getLogger(__name__).warning("Could not parse essential endpoints from script: %s", e)
         return set()
 
 

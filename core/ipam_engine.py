@@ -1,6 +1,11 @@
 import ipaddress
 import re
 from typing import List, Dict, Any, Optional
+
+_SLUGIFY_WHITESPACE = re.compile(r'[\s_]+')
+_SLUGIFY_NON_ALPHANUM = re.compile(r'[^a-z0-9-]')
+_CIDR_DOT_NOTATION = re.compile(r'^((?:\d{1,3}\.){3}\d{1,3})\.(\d{1,2})$')
+
 from core.db_manager import lookup_vlan_description_from_db
 
 ROLE_TO_DESC_MAP = {
@@ -146,8 +151,8 @@ def slugify(text: str) -> str:
     if not text:
         return ""
     text = text.lower().strip()
-    text = re.sub(r'[\s_]+', '-', text)
-    text = re.sub(r'[^a-z0-9-]', '', text)
+    text = _SLUGIFY_WHITESPACE.sub('-', text)
+    text = _SLUGIFY_NON_ALPHANUM.sub('', text)
     return text.strip('-')
 
 def format_branch_display(name: str) -> str:
@@ -189,7 +194,7 @@ def sanitize_cidr(cidr_raw: str) -> str:
     if not cidr_raw:
         return ""
     s = str(cidr_raw).strip()
-    match = re.match(r'^((?:\d{1,3}\.){3}\d{1,3})\.(\d{1,2})$', s)
+    match = _CIDR_DOT_NOTATION.match(s)
     if match:
         return f"{match.group(1)}/{match.group(2)}"
     return s
@@ -477,6 +482,9 @@ def generate_netbox_vlans_csv(site_name: str, rows: List[Dict[str, Any]], rules:
     headers = schema.get("headers", ["vid", "name", "status", "site", "group", "description", "role"])
     row_tpl = schema.get("row_template", ["<vid>", "\"<vlan_name>\"", "active", "\"<site>\"", "\"<vlan_group>\"", "\"<vlan_desc>\"", "\"<role>\""])
 
+    if not rows:
+        return "\n".join(headers)
+
     global_ctx = _get_global_ipam_context(site_name, "")
     lines = [",".join(headers)]
 
@@ -520,6 +528,12 @@ def generate_netbox_prefixes_csv(
     headers = schema.get("headers", ["prefix", "status", "scope_type", "scope_id", "vlan_group", "vlan", "role", "description"])
     row_tpl = schema.get("row_template", ["\"<prefix>\"", "active", "\"<scope_type>\"", "<scope_id>", "\"<vlan_group>\"", "<vid>", "\"<role>\"", "\"<prefix_desc>\""])
     sup_tpl = schema.get("supernet_template", ["\"<site_supernet>\"", "active", "\"<scope_type>\"", "<scope_id>", "\"<vlan_group>\"", "", "", "\"<supernet_desc>\""])
+
+    if not rows and not include_site_subnet:
+        return "\n".join(headers)
+    if not rows:
+        # Still need to return headers even if no rows but include_site_subnet is True
+        pass
 
     global_ctx = _get_global_ipam_context(site_name, scope_id, supernet_str)
     lines = [",".join(headers)]

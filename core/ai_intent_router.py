@@ -14,9 +14,9 @@ Performance target: Pass 1 must remain <1000 tokens for 112+ endpoints
 
 import json
 import re
-from typing import Dict, List, Any, Set
+from typing import Dict, List, Any
 from dataclasses import dataclass
-from config.backup_endpoints import NETBOX_ENDPOINTS, get_all_endpoints
+from config.backup_endpoints import get_all_endpoints
 
 
 @dataclass

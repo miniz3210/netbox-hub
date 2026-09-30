@@ -10,7 +10,7 @@ routing system that only queries relevant endpoints.
 
 import time
 from typing import Dict, List, Any, Optional
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 
 from core.ai_intent_router import classify_intent, IntentRouting, estimate_pass1_tokens
 from core.backup_manager import (
