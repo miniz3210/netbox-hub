@@ -1521,7 +1521,10 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         # Determine header based on type
                         if row_type == "Uplink":
                             hw_slot = _resolve_hw_slot(iface, user_slot_map=user_slot_map, ocr_slot_map=ocr_slot_map)
-                            row_vals["slot"] = hw_slot if hw_slot != iface else ""
+                            # Extract the bare NIC token from the (possibly polluted) Interface value.
+                            m_pure = re.search(r"\b(vmnic\d+|eno\w+|ens\w+|enp\w+|eth\d+)\b", iface, re.IGNORECASE)
+                            pure_iface = m_pure.group(1) if m_pure else iface
+                            row_vals["slot"] = hw_slot if hw_slot != pure_iface else ""
                             uplink_header_tpl = (
                                 _patterns.get("esxinet_uplink_header")
                                 or _patterns.get("esxi_uplink_header")
@@ -1530,15 +1533,15 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                             if uplink_header_tpl and row_vals.get("slot"):
                                 header_iface = render_dynamic_pattern(uplink_header_tpl, row_vals, pattern_vars)
                             elif row_vals.get("slot"):
-                                header_iface = f"{row_vals['slot']} ({iface}):"
+                                header_iface = f"{row_vals['slot']} ({pure_iface}):"
                             else:
-                                header_iface = f"{iface}:"
+                                header_iface = f"{pure_iface}:"
                             header_iface = re.sub(r"\s*\(\s*\)", "", header_iface)
                             header_iface = re.sub(r"\s+\(", " (", header_iface)
                             header_iface = re.sub(r"\)(\s*\([^)]*\))*", ")", header_iface)
                             header_iface = re.sub(r"\s{2,}", " ", header_iface).strip()
-                            if header_iface == f"{iface} ({iface}):":
-                                header_iface = f"{iface}:"
+                            if header_iface == f"{pure_iface} ({pure_iface}):":
+                                header_iface = f"{pure_iface}:"
                         elif row_type == "PortGroup":
                             clean_iface = re.sub(r"^(PGroup-|PG-)", "", iface).strip()
                             header_iface = f"PG-{clean_iface}:"

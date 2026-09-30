@@ -9,6 +9,7 @@ interface descriptions for physical uplinks, port groups and VMkernel adapters.
 import base64
 import json
 import logging
+import re
 import requests
 
 from config.settings import OPENROUTER_BASE_URL, OPENROUTER_API_KEY
@@ -45,24 +46,25 @@ When analyzing 'Physical adapters' properties or screenshots:
  3. If a friendly PCIe/Card label is visible (e.g. 'PCIe 1 / Port 1', 'Slot 2'), normalize to 'PCIeX/PortY' or 'CardX/PortY'. Otherwise, store the normalized PCI identifier: 'PCI:08:00.1' or '08:00.1'.
  4. Cross-reference every vmnic/physical adapter item with its slot value and ALWAYS populate the 'Slot' key in the output JSON dictionary (e.g. Slot: 'PCI:08:00.1'). Never leave 'Slot' blank when a Location or PCI address is visible.
 
-Naming rules per type:
+Naming rules per type (these apply to the **Description** field ONLY):
 
-- Physical Uplink:
+- Physical Uplink Description:
   `<vmnicX> - <vSwitch> <Purpose> Active Uplink`
   or
   `<vmnicX> - <vSwitch> <Purpose> Standby Uplink`
-- Port Group:
+- Port Group Description:
   `<vSwitch> (<vmnicX> Active / <vmnicY> Standby)`
-- VMkernel:
+- VMkernel Description:
   `<Purpose> (<vSwitch>)`
 
-Internal / Isolated vSwitches (vSwitches with NO physical network adapters, e.g. \
-"PR Spain Fuenmayor VLab"):
-- Uplink: `None`
-- Port Group description: `<vSwitch> (Internal Only / No Uplink)`
-- Do NOT output empty parentheses like `( / )`.
+Each Uplink description MUST infer its primary purpose from the PortGroups / VMkernels connected to the same vSwitch (e.g. Management, iSCSI, vMotion, VM Traffic). The Description format MUST strictly be: '<vmnic> - <vSwitch> <Purpose> Active Uplink' (or Standby Uplink).
 
-Each Uplink description MUST infer its primary purpose from the PortGroups / VMkernels connected to the same vSwitch (e.g. Management, iSCSI, vMotion, VM Traffic). Format MUST strictly be: '<vmnic> - <vSwitch> <Purpose> Active Uplink' (or Standby Uplink).
+**CRITICAL: Interface vs Description separation**
+The "Interface" field MUST contain ONLY the bare, pure identifier — NEVER the full generated description string:
+- For Uplinks (`Type: "Uplink"`): Interface MUST be the bare adapter name only (e.g., "vmnic0", "vmnic4"). Never include the switch name, purpose, or role in the Interface field.
+- For PortGroups (`Type: "PortGroup"`): Interface MUST be the Port Group name only (e.g., "Management Network", "VM Network", "iSCSI01").
+- For VMkernels (`Type: "VMkernel"`): Interface MUST be the kernel adapter name only (e.g., "vmk0", "vmk1").
+- The generated naming standard description string belongs ONLY in the "Description" field.
 
 Return ONLY a raw JSON array (no markdown fences). Each element is an object with exactly \
 these keys:
@@ -192,7 +194,8 @@ def analyze_hypervisor_topology_screenshot(images, naming_rules: dict, active_mo
     content = choices[0].get("message", {}).get("content") or ""
 
     parsed = _parse_content(content)
-    return [r for r in (_row(x) for x in parsed) if r is not None]
+    sanitized = [_sanitize_row(r) for r in (_row(x) for x in parsed) if r is not None]
+    return _deduplicate_rows(sanitized)
 
 
 # Backward compatibility alias
@@ -259,3 +262,49 @@ def _row(item: dict) -> dict:
         "Details": str(item.get("detail") or "").strip(),
         "NetBox Description": str(item.get("description") or "").strip(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Sanitization & deduplication
+# ---------------------------------------------------------------------------
+
+# Token patterns that signal a "pure" Interface value for each Type.
+_IFACE_TOKEN_RE = re.compile(
+    r"\b(vmnic\d+|eno\w+|ens\w+|enp\w+|eth\d+|vmk\d+|vSwitch\w*|DSwitch\w*)\b",
+    re.IGNORECASE,
+)
+
+
+def _sanitize_row(row: dict) -> dict:
+    """Extract a bare identifier from the Interface field and clean surrounding noise."""
+    iface = str(row.get("Interface") or "").strip()
+    itype = str(row.get("Type") or "").strip()
+
+    # If the Interface already looks clean (single token, no dashes/spaces beyond the token), keep it.
+    # Otherwise try to extract the leading token from a polluted description string.
+    m = _IFACE_TOKEN_RE.match(iface)
+    if m and not any(c in iface for c in ["-", " ", "/", "("]):
+        row["Interface"] = m.group(1)
+    elif m:
+        row["Interface"] = m.group(1)
+
+    # Trim trailing parenthesized clauses that leaked from descriptions.
+    row["Interface"] = re.sub(r"\s*\([^)]*\)\s*$", "", row["Interface"]).strip()
+    row["Description"] = str(row.get("Description") or "").strip()
+    row["IP Address"] = str(row.get("IP Address") or "").strip()
+    row["Slot"] = str(row.get("Slot") or "").strip()
+    return row
+
+
+def _deduplicate_rows(rows: list) -> list:
+    """Keep only the first occurrence of each (Interface, Type) pair."""
+    seen = set()
+    out = []
+    for r in rows:
+        iface = str(r.get("Interface") or "").strip().lower()
+        itype = str(r.get("Type") or "").strip()
+        key = (iface, itype)
+        if key not in seen and iface:
+            seen.add(key)
+            out.append(r)
+    return out
