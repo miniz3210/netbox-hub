@@ -886,8 +886,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 }
                 </script>
                 """,
-                height=0,
-                width=0,
             )
 
         # --- END OF 2-COLUMN INPUT LAYOUT (col_up1, col_up2) ---
