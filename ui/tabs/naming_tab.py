@@ -84,6 +84,8 @@ def _build_ocr_slot_map(rows):
     for r in rows or []:
         if not isinstance(r, dict):
             continue
+
+        # Collect candidate nic names from all string values in the row.
         nic = ""
         for key in ("Interface / vmnic", "Interface", "vmnic", "NIC", "Name"):
             val = r.get(key)
@@ -92,8 +94,20 @@ def _build_ocr_slot_map(rows):
                 if m:
                     nic = m.group(1)
                     break
+
+        # Fallback: scan every string value for a vmnic-like token.
+        if not nic:
+            for v in r.values():
+                if not isinstance(v, str):
+                    continue
+                m = re.search(r"\b(vmnic\d+|eno\w+|ens\w+|enp\w+|eth\d+)\b", v, re.IGNORECASE)
+                if m:
+                    nic = m.group(1)
+                    break
+
         if not nic:
             continue
+
         slot = ""
         # Prefer an explicit slot column (Slot, PCI/PCIe, Port).
         for col_key in ("Slot", "PCIe Slot", "PCIe", "PCI", "Port", "slot", "pcie_slot", "pcie", "pci", "port"):
@@ -101,15 +115,17 @@ def _build_ocr_slot_map(rows):
             if v is not None and str(v).strip() and str(v).strip().lower() not in ("nan", "none"):
                 slot = str(v).strip()
                 break
-        # Fallback: scan all string values for a PCIe/Port style pattern.
+
+        # Broader fallback: scan ALL string values (including Description) for PCIe/Port patterns.
         if not slot:
             for v in r.values():
                 if not isinstance(v, str):
                     continue
-                m_slot = re.search(r"(?i)\b(PCIe\s*\d+\s*/\s*Port\s*\d+|\bPCIe\d+\b|\bPort\s*\d+\b|\bSlot\s*\d+\b)\b", v)
+                m_slot = re.search(r"(?i)\b(PCIe\s*\d+\s*/\s*Port\s*\d+|\bPCIe\s*\d+\b|\bPort\s*\d+\b|\bSlot\s*\d+\b)\b", v)
                 if m_slot:
                     slot = re.sub(r"\s+", "", m_slot.group(1))
                     break
+
         if slot:
             ocr[nic] = slot
             digits = re.sub(r"\D", "", nic)
@@ -1337,23 +1353,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     # Safely resolve dynamic variables dictionary from naming_rules
                     pattern_vars = _naming_rules.get("variables", {}) if isinstance(_naming_rules, dict) else {}
 
-                    # Robust switch extraction (also from Description when row keys are missing)
-                    resolved_vs = (
-                        vs
-                        or str(row.get("vSwitch", "")).strip()
-                        or str(row.get("v_switch", "")).strip()
-                        or str(row.get("Switch", "")).strip()
-                        or str(row.get("vswitch", "")).strip()
-                    )
-
-                    # Robust purpose extraction without trailing "network"
-                    raw_purpose = str(row.get("Service") or row.get("Purpose") or (desc.split("(")[0] if "(" in desc else desc)).strip()
-                    clean_svc = re.sub(r"(?i)\s+network$", "", raw_purpose).strip()
-
-                    # Extract active and standby vmnics
-                    act_nics = str(row.get("Active") or row.get("Active_vmnics") or "").strip()
-                    stb_nics = str(row.get("Standby") or row.get("Standby_vmnics") or "").strip()
-
                     # 1. Base Universal Token Bag: dynamically ingest all row keys/values
                     row_vals = {}
                     for k, v in row.items():
@@ -1361,8 +1360,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                             norm_k = re.sub(r"[^a-zA-Z0-9]+", "_", str(k).strip().lower()).strip("_")
                             row_vals[norm_k] = str(v).strip()
 
-                    # 2. Canonical Aliases & Intelligent Derivations
-                    # Switch normalization
+                    # 2. Switch normalization
                     resolved_vs = (
                         row_vals.get("vswitch") or
                         row_vals.get("v_switch") or
@@ -1370,23 +1368,19 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         vs or ""
                     )
                     if not resolved_vs and desc:
-                        m_vs = re.search(r"\b(vSwitch\w*)\b", desc)
+                        m_vs = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*)\b", desc)
                         if m_vs:
                             resolved_vs = m_vs.group(1)
                     row_vals["vswitch"] = resolved_vs
                     row_vals["v_switch"] = resolved_vs
 
-                    # Interface normalization
+                    # 3. Interface normalization
                     norm_iface = str(iface or row_vals.get("interface") or "").strip()
                     row_vals["vmnic"] = norm_iface
                     row_vals["interface"] = norm_iface
 
-                    # Purpose / Service normalization (PRESERVE "Network" suffixes intact)
-                    raw_purpose = (
-                        row_vals.get("purpose") or
-                        row_vals.get("service") or
-                        ""
-                    )
+                    # 4. Purpose / Service normalization
+                    raw_purpose = row_vals.get("purpose") or row_vals.get("service") or ""
                     if not raw_purpose and desc:
                         if row_type == "Uplink":
                             parts = desc.split("-")
@@ -1395,48 +1389,73 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                                 raw_purpose = re.sub(r"(Active Uplink|Standby Uplink)$", "", raw_purpose).strip()
                         else:
                             raw_purpose = desc.split("(")[0].strip()
+                            raw_purpose = re.sub(r"\s*\[.*?\]$", "", raw_purpose).strip()
                     clean_purpose = re.sub(r"(?i)\s+(active uplink|standby uplink)$", "", raw_purpose).strip()
                     row_vals["purpose"] = clean_purpose
                     row_vals["service"] = clean_purpose
 
-                    # Uplink active/standby mapping (parse from Description when row fields are empty).
+                    # 5. Active / Standby vmnics — parse from row fields AND Description.
+                    #    Handles (X Active / Y Standby), [X Active / Y Standby], and bare text.
                     act_vmnics = row_vals.get("active") or row_vals.get("active_vmnics") or ""
                     stb_vmnics = row_vals.get("standby") or row_vals.get("standby_vmnics") or ""
-                    if (not act_vmnics or not stb_vmnics) and desc:
+                    if desc and (not act_vmnics or not stb_vmnics):
+                        # Try (...) pattern first
                         m_as = re.search(r"\((.*?)\s+Active\s*/\s*(.*?)\s+Standby\)", desc)
-                        if m_as:
+                        if not m_as:
+                            # Try [...] pattern
+                            m_as = re.search(r"\[(.*?)\s+Active\s*/\s*(.*?)\s+Standby\]", desc)
+                        if not m_as:
+                            # Try standalone "vmnicX Active" and "vmnicY Standby" tokens
+                            m_act = re.search(r"\b(vmnic\d+)\s+Active", desc)
+                            m_stb = re.search(r"\b(vmnic\d+)\s+Standby", desc)
+                            if m_act and not act_vmnics:
+                                act_vmnics = m_act.group(1)
+                            if m_stb and not stb_vmnics:
+                                stb_vmnics = m_stb.group(1)
+                        else:
                             if not act_vmnics:
                                 act_vmnics = m_as.group(1).strip()
                             if not stb_vmnics:
                                 stb_vmnics = m_as.group(2).strip()
                     row_vals["active_vmnics"] = act_vmnics
                     row_vals["standby_vmnics"] = stb_vmnics
+                    # Alias <active> -> active_vmnics, <standby> -> standby_vmnics
+                    row_vals["active"] = act_vmnics
+                    row_vals["standby"] = stb_vmnics
 
-                    # Status / Role
+                    # 6. <port_group> alias: use portgroup name when applicable, else switch name.
+                    if row_type == "PortGroup":
+                        pg_name = norm_iface or row_vals.get("portgroup") or row_vals.get("port_group") or resolved_vs
+                    else:
+                        pg_name = resolved_vs
+                    row_vals["port_group"] = pg_name
+
+                    # 7. <pg_network> alias for portgroup/network naming patterns.
+                    row_vals["pg_network"] = norm_iface or clean_purpose or resolved_vs
+
+                    # 8. Status / Role
                     status_val = row_vals.get("role") or row_vals.get("status") or "Active Uplink"
                     row_vals["status"] = status_val
                     row_vals["role"] = status_val
 
-                    # 3. Dynamic Pattern Resolution via Universal Engine
+                    # 9. Dynamic Pattern Resolution via Universal Engine
                     if row_type == "VMkernel":
                         rendered = render_dynamic_pattern(vmk_tpl, row_vals, pattern_vars)
                     elif row_type == "PortGroup":
                         rendered = render_dynamic_pattern(pg_tpl, row_vals, pattern_vars)
-                        # Final safety net: remove any residual empty Active/Standby bracket.
-                        rendered = re.sub(r"\([^)]*?(?:\s*)\bActive\b\s*/.{0,}?\bStandby\b\s*\)", "", rendered)
                     elif row_type == "Uplink":
                         rendered = render_dynamic_pattern(uplink_tpl, row_vals, pattern_vars)
                     else:
                         rendered = desc or ""
 
-                    # 4. Clean formatting: eliminate leftover tokens and collapse spaces
+                    # 10. Clean formatting: eliminate leftover tokens and collapse spaces
                     rendered = re.sub(r"\([^)]*<[^>]+>[^)]*\)", "", rendered)
                     rendered = re.sub(r"<[^>]+>", "", rendered)
                     rendered = re.sub(r"\(\s*[/_-]*\s*\)", "", rendered)
                     rendered = re.sub(r"\s*-\s*$", "", rendered)
                     rendered = re.sub(r"\s{2,}", " ", rendered).strip()
 
-                    # 5. Dynamic Interface Header Resolution
+                    # 11. Dynamic Interface Header Resolution
                     header_iface = iface
                     if row_type == "Uplink":
                         # Embed hardware slot in physical interface header for NetBox cross-check
