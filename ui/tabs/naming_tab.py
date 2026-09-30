@@ -1350,9 +1350,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     ip = row.get("IP Address", "")
                     row_type = row.get("Type", "")
 
-                    # Safely resolve dynamic variables dictionary from naming_rules
-                    pattern_vars = _naming_rules.get("variables", {}) if isinstance(_naming_rules, dict) else {}
-
                     # 1. Base Universal Token Bag: dynamically ingest all row keys/values
                     row_vals = {}
                     for k, v in row.items():
@@ -1455,25 +1452,61 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     rendered = re.sub(r"\s*-\s*$", "", rendered)
                     rendered = re.sub(r"\s{2,}", " ", rendered).strip()
 
-                    # 11. Dynamic Interface Header Resolution
+                    # 11. Dynamic Interface Header Resolution (zero hardcoded prefixes)
                     header_iface = iface
                     if row_type == "Uplink":
-                        # Embed hardware slot in physical interface header for NetBox cross-check
-                        hw_slot = _resolve_hw_slot(
-                            iface, user_slot_map=user_slot_map, ocr_slot_map=ocr_slot_map
-                        )
-                        header_iface = f"{hw_slot} ({iface})"
+                        # Resolve uplink header via Standards preset or dynamic fallback
+                        header_tpl = None
+                        for preset in raw_esxi_presets:
+                            if not isinstance(preset, dict):
+                                continue
+                            p_pattern = str(
+                                preset.get("pattern", "") or preset.get("pattern_template", "")
+                            ).lower()
+                            if any(tok in p_pattern for tok in ("vmnic", "<interface>", "uplink")):
+                                header_tpl = preset.get("pattern", "") or preset.get("pattern_template", "")
+                                break
+                        if not header_tpl:
+                            header_tpl = (
+                                _patterns.get("esxinet_uplink_header")
+                                or _patterns.get("esxi_uplink_header")
+                            )
+                        if header_tpl:
+                            header_vals = dict(row_vals)
+                            hw_slot = _resolve_hw_slot(
+                                iface, user_slot_map=user_slot_map, ocr_slot_map=ocr_slot_map
+                            )
+                            header_vals["slot"] = hw_slot
+                            header_vals["interface"] = iface
+                            header_vals["vmnic"] = iface
+                            rendered_header = render_dynamic_pattern(header_tpl, header_vals, pattern_vars)
+                            rendered_header = re.sub(r"<[^>]+>", "", rendered_header).strip()
+                            if rendered_header:
+                                header_iface = rendered_header
+                        else:
+                            hw_slot = _resolve_hw_slot(
+                                iface, user_slot_map=user_slot_map, ocr_slot_map=ocr_slot_map
+                            )
+                            header_iface = f"{hw_slot} ({iface})"
                     elif row_type == "PortGroup":
+                        # Resolve portgroup header via Standards preset (pattern-driven, no hardcoded codes)
                         name_tpl = None
                         for preset in raw_esxi_presets:
                             if not isinstance(preset, dict):
                                 continue
-                            p_code = str(preset.get("code", "")).strip().lower()
-                            if p_code in ["portgroup_name", "pg_name", "portgroup"]:
+                            p_pattern = str(
+                                preset.get("pattern", "") or preset.get("pattern_template", "")
+                            ).lower()
+                            if any(tok in p_pattern for tok in ("pg_network", "network", "portgroup", "name")):
                                 name_tpl = preset.get("pattern", "") or preset.get("pattern_template", "")
                                 break
                         if not name_tpl:
-                            name_tpl = _patterns.get("esxinet_pg_name") or _patterns.get("esxi_pg_name") or "PG-<network>"
+                            name_tpl = (
+                                _patterns.get("esxinet_pg_name")
+                                or _patterns.get("esxi_pg_name")
+                            )
+                        if not name_tpl:
+                            name_tpl = "<pg_network>"
 
                         name_vals = dict(row_vals)
                         name_vals["pg_network"] = iface
