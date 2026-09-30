@@ -36,8 +36,8 @@ DEFAULT_NAMING_PATTERNS = {
 
 # Canonical hypervisor-scoped variable names used for seeding and re-scoping.
 HYPERVISOR_VARIABLE_NAMES = [
-    "vmnic", "v_switch", "purpose", "pg_network", "port_group",
-    "active_vmnics", "standby_vmnics", "vmk", "switch_zone",
+    "vmnic", "v_switch", "purpose", "port_group", "interface",
+    "active_vmnics", "standby_vmnics", "vmk", "switch_zone", "slot",
 ]
 
 def ensure_hypervisor_variables(rules: dict) -> None:
@@ -136,8 +136,10 @@ PATTERN_VARIABLES = {
     "vmnic": {"label": "vmnic Name", "placeholder": "vmnic", "default": "vmnic", "scope": "hypervisor"},
     "v_switch": {"label": "vSwitch Name", "placeholder": "vSwitch", "default": "vSwitch", "scope": "hypervisor"},
     "purpose": {"label": "Purpose / Service", "placeholder": "e.g. Management, vMotion, Storage", "scope": "hypervisor"},
-    "pg_network": {"label": "Network Name", "placeholder": "e.g. VM Network", "scope": "hypervisor"},
+    "pg_network": {"label": "Network Name (Deprecated, use interface)", "placeholder": "e.g. VM Network", "scope": "hypervisor"},
     "port_group": {"label": "Port Group / vSwitch", "placeholder": "e.g. vSwitch0", "default": "vSwitch", "scope": "hypervisor"},
+    "interface": {"label": "Interface / Port Group Name", "placeholder": "e.g. vmnic0, PG-VMDK", "default": "vmnic", "scope": "hypervisor"},
+    "slot": {"label": "Hardware / PCIe Slot", "placeholder": "e.g. PCIe1, Port1", "scope": "hypervisor"},
     "active_vmnics": {"label": "Active vmnics", "placeholder": "e.g. vmnic0, vmnic1", "default": "vmnic", "scope": "hypervisor"},
     "standby_vmnics": {"label": "Standby vmnics (Optional)", "placeholder": "e.g. vmnic2", "scope": "hypervisor"},
     "vmk": {"label": "vmk Name", "placeholder": "vmk", "default": "vmk", "scope": "hypervisor"},
