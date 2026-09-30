@@ -39,10 +39,11 @@ Apply the NetBox standard naming rules below strictly:
 3. Port Group names must follow the standard format configured in the naming rule presets below (e.g. a `PG-` prefix when the configured pattern requires it).
 4. Always pair each uplink with its respective vSwitch before listing that vSwitch's Port Groups and VMkernel adapters.
 
-When analyzing screenshots containing 'Physical adapters' or adapter listings:
-- Extract the hardware slot / location (e.g. 'PCIe 1 / Port 1', 'PCIe 2 / Port 2', 'OCP 3 / Port 1', 'Slot 1').
-- Normalize the slot to standard format: 'PCIeX/PortY' or 'OCP3/PortY' (strip internal spaces around slashes).
-- Include 'Slot' as a dedicated key in each returned adapter item dictionary.
+When analyzing 'Physical adapters' properties or screenshots:
+ 1. Locate the 'Location' field (e.g. 'PCI 0000:08:00.1', 'PCI 0000:5b:00.0').
+ 2. Extract the PCI BDF address (e.g. '08:00.1', '5b:00.0') as the raw hardware location.
+ 3. If a friendly PCIe/Card label is visible (e.g. 'PCIe 1 / Port 1', 'Slot 2'), normalize to 'PCIeX/PortY' or 'CardX/PortY'. Otherwise, store the normalized PCI identifier: 'PCI:08:00.1' or '08:00.1'.
+ 4. Cross-reference every vmnic/physical adapter item with its slot value and ALWAYS populate the 'Slot' key in the output JSON dictionary (e.g. Slot: 'PCI:08:00.1'). Never leave 'Slot' blank when a Location or PCI address is visible.
 
 Naming rules per type:
 
@@ -67,7 +68,7 @@ Return ONLY a raw JSON array (no markdown fences). Each element is an object wit
 these keys:
 {"Interface": "...", "Type": "Uplink"|"PortGroup"|"VMkernel", \
 "Description": "the final NetBox interface description string", "IP Address": "...", \
-"Slot": "normalized hardware slot like PCIe1/Port1 or empty string"}
+"Slot": "normalized hardware slot like PCI:08:00.1 or PCIe1/Port1 or empty string"}
 
 Populate "IP Address" only for VMkernel adapters where visible, otherwise "".
 

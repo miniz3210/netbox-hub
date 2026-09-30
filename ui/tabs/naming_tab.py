@@ -79,7 +79,27 @@ def apply_case(text: str, mode: str) -> str:
     return text.upper() if mode == "UPPERCASE" else text.lower()
 
 
-def _build_ocr_slot_map(rows):
+def _normalize_slot(raw, user_slot_map=None):
+    """Normalize a raw hardware slot value into a platform-agnostic label."""
+    text = str(raw).strip()
+    m_pci = re.search(r"PCI\s*(?:0000:)?([0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-9a-fA-F])", text)
+    if not m_pci:
+        m_pci = re.search(r"\b([0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-9a-fA-F])\b", text)
+    if m_pci:
+        pci_slot = f"PCI:{m_pci.group(1).lower()}"
+        if user_slot_map and pci_slot in user_slot_map:
+            return user_slot_map[pci_slot]
+        return pci_slot
+    m_pcie = re.search(r"PCIe\s*(\d+)\s*/\s*Port\s*(\d+)", text, re.IGNORECASE)
+    if m_pcie:
+        return f"PCIe{m_pcie.group(1)}/Port{m_pcie.group(2)}"
+    m_card = re.search(r"Card\s*(\d+)\s*/\s*Port\s*(\d+)", text, re.IGNORECASE)
+    if m_card:
+        return f"Card{m_card.group(1)}/Port{m_card.group(2)}"
+    return re.sub(r"\s+", "", text)
+
+
+def _build_ocr_slot_map(rows, user_slot_map=None):
     """Build a dict mapping vmnic-like names to hardware slots found in parsed OCR rows."""
     ocr = {}
     for r in rows or []:
@@ -110,26 +130,27 @@ def _build_ocr_slot_map(rows):
             continue
 
         slot = ""
-        # Prefer an explicit slot column (Slot, PCI/PCIe, Port).
-        for col_key in ("Slot", "slot", "PCIe", "PCIe Slot"):
+        # Prefer an explicit slot column (Slot, slot, PCIe, Location).
+        for col_key in ("Slot", "slot", "PCIe", "Location"):
             v = r.get(col_key)
             if v is not None and str(v).strip() and str(v).strip().lower() not in ("nan", "none"):
                 slot = str(v).strip()
                 break
 
-        # Broader fallback: scan ALL string values (including Description) for PCIe/Port patterns.
+        # Broader fallback: scan ALL string values (including Description) for slot patterns.
         if not slot:
             for v in r.values():
                 if not isinstance(v, str):
                     continue
-                m_slot = re.search(r"(?i)\b(PCIe\s*\d+\s*/\s*Port\s*\d+|Card\s*\d+\s*/\s*Port\s*\d+|OCP\s*\d+\s*/\s*Port\s*\d+|\bPCIe\s*\d+\b|\bCard\s*\d+\b|\bOCP\s*\d+\b|\bPort\s*\d+\b|\bSlot\s*\d+\b)\b", v)
+                m_slot = re.search(r"(?i)\b(PCI\s*(?:0000:)?[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-9a-fA-F]|PCIe\s*\d+\s*/\s*Port\s*\d+|Card\s*\d+\s*/\s*Port\s*\d+|OCP\s*\d+\s*/\s*Port\s*\d+|\bPCIe\s*\d+\b|\bCard\s*\d+\b|\bOCP\s*\d+\b|\bPort\s*\d+\b|\bSlot\s*\d+\b)\b", v)
                 if m_slot:
-                    slot = re.sub(r"\s+", "", m_slot.group(1))
+                    slot = m_slot.group(1)
                     break
 
-        # Normalize OCR-extracted slot: strip spaces around slashes for clean output.
+        # Normalize OCR-extracted slot: PCI BDF -> 'PCI:bb:dd.f', PCIe/Card -> 'PCIeX/PortY',
+        # and legacy labels (OCP/Port/Slot) stripped of internal whitespace.
         if slot:
-            slot = re.sub(r"\s*/\s*", "/", slot)
+            slot = _normalize_slot(slot, user_slot_map)
 
         if slot:
             ocr[nic] = slot
@@ -140,19 +161,20 @@ def _build_ocr_slot_map(rows):
 
 
 def _resolve_hw_slot(nic_name, user_slot_map=None, ocr_slot_map=None):
-    """Resolve a hardware slot label: OCR first, then Standards YAML, then the bare name."""
+    """Resolve a hardware slot label: Standards YAML override first, then OCR /
+    AI Vision, then the bare interface name."""
     clean_name = str(nic_name).strip()
     digits = re.sub(r"\D", "", clean_name)
-    if ocr_slot_map:
-        if clean_name in ocr_slot_map:
-            return ocr_slot_map[clean_name]
-        if digits in ocr_slot_map:
-            return ocr_slot_map[digits]
     if user_slot_map:
         if clean_name in user_slot_map:
             return user_slot_map[clean_name]
         if digits in user_slot_map:
             return user_slot_map[digits]
+    if ocr_slot_map:
+        if clean_name in ocr_slot_map:
+            return ocr_slot_map[clean_name]
+        if digits in ocr_slot_map:
+            return ocr_slot_map[digits]
     return clean_name
 
 
@@ -1164,7 +1186,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                                 r["Slot"] = nic_to_slot[nic]
 
             user_slot_map = get_hardware_slot_mappings(naming_rules)
-            ocr_slot_map = _build_ocr_slot_map(rows)
+            ocr_slot_map = _build_ocr_slot_map(rows, user_slot_map)
 
             slots = sorted(list(set(ocr_slot_map.values())))
 
@@ -1344,7 +1366,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
             from config.naming_rules import get_hardware_slot_mappings
             user_slot_map = get_hardware_slot_mappings(_naming_rules)
-            ocr_slot_map = _build_ocr_slot_map(rows)
+            ocr_slot_map = _build_ocr_slot_map(rows, user_slot_map)
             pattern_vars = _naming_rules.get("variables", {}) or {}
             # Make active_vmnics/standby_vmnics optional so empty teaming sides are stripped cleanly.
             for _tok in ("active_vmnics", "standby_vmnics"):
@@ -1507,16 +1529,14 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                             )
                             if uplink_header_tpl and row_vals.get("slot"):
                                 header_iface = render_dynamic_pattern(uplink_header_tpl, row_vals, pattern_vars)
+                            elif row_vals.get("slot"):
+                                header_iface = f"{row_vals['slot']} ({iface}):"
                             else:
-                                header_iface = f"{row_vals.get('slot') or iface} ({iface}):"
+                                header_iface = f"{iface}:"
                             header_iface = re.sub(r"\s*\(\s*\)", "", header_iface)
                             header_iface = re.sub(r"\s+\(", " (", header_iface)
                             header_iface = re.sub(r"\)(\s*\([^)]*\))*", ")", header_iface)
                             header_iface = re.sub(r"\s{2,}", " ", header_iface).strip()
-                            if header_iface.endswith(":"):
-                                pass
-                            elif not any(header_iface.endswith(c) for c in ":)"):
-                                pass
                             if header_iface == f"{iface} ({iface}):":
                                 header_iface = f"{iface}:"
                         elif row_type == "PortGroup":
