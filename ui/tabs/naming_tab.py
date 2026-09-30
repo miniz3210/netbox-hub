@@ -1306,11 +1306,12 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 or esxi_presets.get("PortGroup", {}).get("pattern")
                 or "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)"
             )
+            vmk_preset = esxi_presets.get("VMkernel", {})
+            vmk_pattern_key = vmk_preset.get("pattern_key", "esxi_vmkernel")
             vmk_tpl = (
-                _patterns.get("esxinet_vmkernel")
+                _patterns.get(vmk_pattern_key)
                 or _patterns.get("esxi_vmkernel")
-                or esxi_presets.get("VMkernel", {}).get("pattern_template")
-                or esxi_presets.get("VMkernel", {}).get("pattern")
+                or _patterns.get("esxinet_vmkernel")
                 or "<purpose> (<v_switch>)"
             )
 
@@ -1494,12 +1495,18 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         for preset in raw_esxi_presets:
                             if not isinstance(preset, dict):
                                 continue
+                            # Match ONLY header/naming presets that target <pg_network>
+                            # Exclude description presets (they use <port_group> and contain [ or active_vmnics)
                             p_pattern = str(
                                 preset.get("pattern", "") or preset.get("pattern_template", "")
                             ).lower()
-                            if any(tok in p_pattern for tok in ("pg_network", "network", "portgroup", "name")):
-                                name_tpl = preset.get("pattern", "") or preset.get("pattern_template", "")
-                                break
+                            if "<pg_network>" not in p_pattern:
+                                continue
+                            # Skip description-type patterns (contain '[' or 'active_vmnics')
+                            if "[" in p_pattern or "active_vmnics" in p_pattern:
+                                continue
+                            name_tpl = preset.get("pattern", "") or preset.get("pattern_template", "")
+                            break
                         if not name_tpl:
                             name_tpl = (
                                 _patterns.get("esxinet_pg_name")
@@ -1509,10 +1516,12 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                             name_tpl = "<pg_network>"
 
                         name_vals = dict(row_vals)
-                        name_vals["pg_network"] = iface
-                        name_vals["network"] = iface
-                        name_vals["name"] = iface
-                        name_vals["portgroup_name"] = iface
+                        # Strip existing PGroup-/PG- prefix from iface to avoid double prefix
+                        clean_iface = re.sub(r"^(PGroup-|PG-)", "", str(iface)).strip()
+                        name_vals["pg_network"] = clean_iface
+                        name_vals["network"] = clean_iface
+                        name_vals["name"] = clean_iface
+                        name_vals["portgroup_name"] = clean_iface
                         rendered_name = render_dynamic_pattern(name_tpl, name_vals, pattern_vars)
                         rendered_name = re.sub(r"<[^>]+>", "", rendered_name).strip()
                         if rendered_name:
