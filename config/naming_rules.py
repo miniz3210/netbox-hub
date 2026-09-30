@@ -998,8 +998,6 @@ def _delta_item_key(item) -> object:
             if v not in (None, ""):
                 return ("__key__", str(v))
         try:
-import os
-import json
             return ("__json__", json.dumps(item, sort_keys=True))
         except (TypeError, ValueError):
             pass
