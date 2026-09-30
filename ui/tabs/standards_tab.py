@@ -71,12 +71,12 @@ def _check_and_render_banner(section_id: str, msg_template: str = "", duration_s
                 """
                 <style>
                 @keyframes autoDismissFade {
-                    0% { opacity: 1; max-height: 100px; margin-bottom: 1rem; }
-                    80% { opacity: 1; max-height: 100px; margin-bottom: 1rem; }
-                    100% { opacity: 0; max-height: 0; margin-bottom: 0; padding-top: 0; padding-bottom: 0; display: none; }
+                    0% { opacity: 1; max-height: 120px; margin-bottom: 1rem; }
+                    75% { opacity: 1; max-height: 120px; margin-bottom: 1rem; }
+                    100% { opacity: 0; max-height: 0; margin-bottom: 0; padding-top: 0; padding-bottom: 0; overflow: hidden; display: none; }
                 }
-                div[data-testid="stNotification"] {
-                    animation: autoDismissFade 10s forwards;
+                div[data-testid="stAlert"], div[data-baseweb="notification"] {
+                    animation: autoDismissFade 10s forwards !important;
                 }
                 </style>
                 """,
@@ -204,12 +204,16 @@ def validate_regex_replacement(pattern_str: str, replacement_str: str) -> tuple:
     return True, ""
 
 
-def _persist_variables(rules: dict, variables: dict) -> None:
+def _persist_variables(rules: dict, variables: dict, section_key: str = "shared") -> None:
     rules["pattern_variables"] = variables
     save_naming_rules(rules, source="Variable Manager")
     st.session_state["naming_rules"] = rules.copy()
     st.session_state["variables_saved"] = True
-    st.session_state["card_saved_banner"] = {"section": "vars_shared", "msg": "✅ Pattern Variables saved & applied!", "ts": time.time()}
+    st.session_state["card_saved_banner"] = {
+        "section": f"vars_{section_key}",
+        "msg": f"✅ {section_key.title()} Variables saved & applied!",
+        "ts": time.time()
+    }
     st.rerun()
 
 
@@ -1984,7 +1988,7 @@ def render_standards_tab(active_model):
                         with c6:
                             if _render_centered_del_btn(f"vscope_del_{s_key}_{name}", f"Delete <{name}>"):
                                 all_edited_vars.pop(name, None)
-                                _persist_variables(current_rules, all_edited_vars)
+                                _persist_variables(current_rules, all_edited_vars, section_key=s_key)
                                 return
 
                         all_edited_vars[name] = {
@@ -1999,15 +2003,14 @@ def render_standards_tab(active_model):
                 col_save, col_rst = st.columns([4, 1])
                 with col_save:
                     if st.button(f"💾 Save & Apply Changes", key=f"save_scope_{s_key}", type="primary", width="stretch"):
-                        st.session_state["card_saved_banner"] = {"section": f"vars_{s_key}", "msg": f"✅ {s_key.title()} Variables saved & applied!", "ts": time.time()}
-                        _persist_variables(current_rules, all_edited_vars)
+                        _persist_variables(current_rules, all_edited_vars, section_key=s_key)
                 with col_rst:
                     if st.button("🔄 Reset Scope", key=f"reset_scope_{s_key}", type="secondary", width="stretch"):
                         from config.naming_rules import PATTERN_VARIABLES
                         default_scope_vars = {k: v for k, v in PATTERN_VARIABLES.items() if v.get("scope") == s_key}
                         all_edited_vars.update(default_scope_vars)
                         st.session_state["card_saved_banner"] = {"section": f"vars_{s_key}", "msg": f"✅ {s_key.title()} Variables reset to defaults!", "ts": time.time()}
-                        _persist_variables(current_rules, all_edited_vars)
+                        _persist_variables(current_rules, all_edited_vars, section_key=s_key)
 
                 # 2. Bottom Inline Add Row (Seamless table extension matching Preset style)
                 with st.form(key=f"var_add_form_{s_key}", clear_on_submit=True):
@@ -2035,7 +2038,7 @@ def render_standards_tab(active_model):
                                 "optional": bool(new_opt),
                                 "scope": s_key
                             }
-                            _persist_variables(current_rules, all_edited_vars)
+                            _persist_variables(current_rules, all_edited_vars, section_key=s_key)
                             return
                         else:
                             st.warning("⚠️ Enter a token name to add.")
