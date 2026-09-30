@@ -880,7 +880,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                                 const reader = new FileReader();
                                 reader.onload = function(event) {
                                     const dataUrl = event.target.result;
-                                    const el = window.parent.document.querySelector('input[aria-label="esxi_paste_hidden_bridge"]');
+                                    const el = document.querySelector('input[aria-label="esxi_paste_hidden_bridge"]');
                                     if (el) {
                                         const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
                                         nativeSetter.call(el, dataUrl);
