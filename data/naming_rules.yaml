@@ -760,8 +760,6 @@
         "\"<scope_type>\"",
         "<scope_id>",
         "\"<vlan_group>\"",
-        "",
-        "",
         "\"<supernet_desc>\""
       ]
     }

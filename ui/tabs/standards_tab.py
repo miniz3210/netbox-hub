@@ -58,12 +58,7 @@ def _clear_session_state_prefixes(*prefixes: str) -> None:
 
 
 def _check_and_render_banner(section_id: str, msg_template: str = "", duration_sec: int = 10) -> bool:
-    """Check session state for a banner matching *section_id* and render it if still valid.
-
-    Returns True when a banner was rendered (and consumed from state), False otherwise.
-    The banner expires after *duration_sec* seconds based on the stored timestamp.
-    Expired banners are removed from session state so they do not linger forever.
-    """
+    """Check session state for a banner matching *section_id* and render it if still valid."""
     banner_data = st.session_state.get("card_saved_banner")
     if not banner_data or banner_data.get("section") != section_id:
         return False
@@ -72,6 +67,21 @@ def _check_and_render_banner(section_id: str, msg_template: str = "", duration_s
     if elapsed <= duration_sec:
         msg = banner_data.get("msg", msg_template)
         if msg:
+            st.markdown(
+                """
+                <style>
+                @keyframes autoDismissFade {
+                    0% { opacity: 1; max-height: 100px; margin-bottom: 1rem; }
+                    80% { opacity: 1; max-height: 100px; margin-bottom: 1rem; }
+                    100% { opacity: 0; max-height: 0; margin-bottom: 0; padding-top: 0; padding-bottom: 0; display: none; }
+                }
+                div[data-testid="stNotification"] {
+                    animation: autoDismissFade 10s forwards;
+                }
+                </style>
+                """,
+                unsafe_allow_html=True
+            )
             st.success(msg)
         st.session_state.pop("card_saved_banner", None)
         return True
@@ -199,6 +209,7 @@ def _persist_variables(rules: dict, variables: dict) -> None:
     save_naming_rules(rules, source="Variable Manager")
     st.session_state["naming_rules"] = rules.copy()
     st.session_state["variables_saved"] = True
+    st.session_state["card_saved_banner"] = {"section": "vars_shared", "msg": "✅ Pattern Variables saved & applied!", "ts": time.time()}
     st.rerun()
 
 

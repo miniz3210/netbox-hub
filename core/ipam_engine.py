@@ -410,7 +410,7 @@ def render_csv_cell(template: str, context: Dict[str, Any]) -> str:
         return ""
     result = template
     for key, val in context.items():
-        val_str = str(val) if val is not None else ""
+        val_str = str(val).replace('"', '""') if val is not None else ""
         result = result.replace(f"<{key}>", val_str)
     return result
 
