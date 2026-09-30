@@ -139,7 +139,7 @@ PATTERN_VARIABLES = {
     "pg_network": {"label": "Network Name (Deprecated, use interface)", "placeholder": "e.g. VM Network", "scope": "hypervisor"},
     "port_group": {"label": "Port Group / vSwitch", "placeholder": "e.g. vSwitch0", "default": "vSwitch", "scope": "hypervisor"},
     "interface": {"label": "Interface / Port Group Name", "placeholder": "e.g. vmnic0, PG-VMDK", "default": "vmnic", "scope": "hypervisor"},
-    "slot": {"label": "Hardware / PCIe Slot", "placeholder": "e.g. PCIe1, Port1", "scope": "hypervisor"},
+    "slot": {"label": "Hardware Slot / Port", "placeholder": "e.g. PCIe1/Port1, Card1/Port1", "optional": True, "scope": "hypervisor"},
     "active_vmnics": {"label": "Active vmnics", "placeholder": "e.g. vmnic0, vmnic1", "default": "vmnic", "scope": "hypervisor"},
     "standby_vmnics": {"label": "Standby vmnics (Optional)", "placeholder": "e.g. vmnic2", "scope": "hypervisor"},
     "vmk": {"label": "vmk Name", "placeholder": "vmk", "default": "vmk", "scope": "hypervisor"},

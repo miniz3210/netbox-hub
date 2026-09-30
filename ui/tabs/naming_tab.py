@@ -122,7 +122,7 @@ def _build_ocr_slot_map(rows):
             for v in r.values():
                 if not isinstance(v, str):
                     continue
-                m_slot = re.search(r"(?i)\b(PCIe\s*\d+\s*/\s*Port\s*\d+|\bPCIe\s*\d+\b|\bPort\s*\d+\b|\bSlot\s*\d+\b)\b", v)
+                m_slot = re.search(r"(?i)\b(PCIe\s*\d+\s*/\s*Port\s*\d+|Card\s*\d+\s*/\s*Port\s*\d+|OCP\s*\d+\s*/\s*Port\s*\d+|\bPCIe\s*\d+\b|\bCard\s*\d+\b|\bOCP\s*\d+\b|\bPort\s*\d+\b|\bSlot\s*\d+\b)\b", v)
                 if m_slot:
                     slot = re.sub(r"\s+", "", m_slot.group(1))
                     break
@@ -1166,10 +1166,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             user_slot_map = get_hardware_slot_mappings(naming_rules)
             ocr_slot_map = _build_ocr_slot_map(rows)
 
-            slots = sorted(list(set(
-                _resolve_hw_slot(v, user_slot_map=user_slot_map, ocr_slot_map=ocr_slot_map)
-                for v in vmnics if v
-            )))
+            slots = sorted(list(set(ocr_slot_map.values())))
 
             # Render styled Badge Cards matching NetBox Hub dark glass theme
             def _render_pill_card(title, items, color="#38bdf8"):
@@ -1502,7 +1499,26 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         # Determine header based on type
                         if row_type == "Uplink":
                             hw_slot = _resolve_hw_slot(iface, user_slot_map=user_slot_map, ocr_slot_map=ocr_slot_map)
-                            header_iface = f"{hw_slot} ({iface}):"
+                            row_vals["slot"] = hw_slot if hw_slot != iface else ""
+                            uplink_header_tpl = (
+                                _patterns.get("esxinet_uplink_header")
+                                or _patterns.get("esxi_uplink_header")
+                                or None
+                            )
+                            if uplink_header_tpl and row_vals.get("slot"):
+                                header_iface = render_dynamic_pattern(uplink_header_tpl, row_vals, pattern_vars)
+                            else:
+                                header_iface = f"{row_vals.get('slot') or iface} ({iface}):"
+                            header_iface = re.sub(r"\s*\(\s*\)", "", header_iface)
+                            header_iface = re.sub(r"\s+\(", " (", header_iface)
+                            header_iface = re.sub(r"\)(\s*\([^)]*\))*", ")", header_iface)
+                            header_iface = re.sub(r"\s{2,}", " ", header_iface).strip()
+                            if header_iface.endswith(":"):
+                                pass
+                            elif not any(header_iface.endswith(c) for c in ":)"):
+                                pass
+                            if header_iface == f"{iface} ({iface}):":
+                                header_iface = f"{iface}:"
                         elif row_type == "PortGroup":
                             clean_iface = re.sub(r"^(PGroup-|PG-)", "", iface).strip()
                             header_iface = f"PG-{clean_iface}:"
