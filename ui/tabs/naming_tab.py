@@ -1405,16 +1405,16 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         row_type = row.get("Type", "")
 
                         # FIX: Prioritize existing description if non-empty
+                        # Build row_vals from row (always available for header rendering)
+                        row_vals = {}
+                        for k, v in row.items():
+                            if v is not None and not str(v).lower() in ["nan", "none"]:
+                                norm_k = re.sub(r"[^a-zA-Z0-9]+", "_", str(k).strip().lower()).strip("_")
+                                row_vals[norm_k] = str(v).strip()
+
                         if desc:
                             rendered = desc
                         else:
-                            # Build row_vals from row
-                            row_vals = {}
-                            for k, v in row.items():
-                                if v is not None and not str(v).lower() in ["nan", "none"]:
-                                    norm_k = re.sub(r"[^a-zA-Z0-9]+", "_", str(k).strip().lower()).strip("_")
-                                    row_vals[norm_k] = str(v).strip()
-
                             # Resolve vSwitch
                             resolved_vs = (
                                 row_vals.get("vswitch") or
