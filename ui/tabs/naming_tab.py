@@ -925,7 +925,9 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 pasted_file.name = f"clipboard_screenshot_{idx}.png"
                 pasted_file.type = "image/png"
                 pasted_file.size = len(img_bytes)
-                st.session_state["pasted_clipboard_imgs"] = [pasted_file]
+                existing_pasted = list(st.session_state.get("pasted_clipboard_imgs") or [])
+                existing_pasted.append(pasted_file)
+                st.session_state["pasted_clipboard_imgs"] = existing_pasted
                 st.session_state["esxi_paste_counter"] += 1
                 st.session_state["paste_input_ver"] = st.session_state.get("paste_input_ver", 0) + 1
                 st.rerun()
