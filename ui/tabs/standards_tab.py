@@ -364,8 +364,6 @@ def _render_auto_correction_manager(active_model: str) -> None:
 
     _render_site_code_mapping_manager(key_prefix="ac_scm")
 
-    st.markdown("---")
-
 
 def _render_ipam_role_mapping_manager(active_model: str) -> None:
     rules = load_naming_rules()

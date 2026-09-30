@@ -5,22 +5,6 @@ from typing import Dict, List
 from datetime import datetime
 from config.constants import RULES_FILE, RULES_HISTORY_FILE, MAX_HISTORY_ENTRIES
 
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except Exception:
-    pass
-
-DOMAIN_DEFAULTS = {
-    "CORP_DOMAIN_IT": ".example.corp",
-    "CORP_DOMAIN_OT_PRIMARY": ".example.ot",
-    "CORP_DOMAIN_OT_SECONDARY": ".example.ot",
-    "CORP_DOMAIN_LOCAL": ".corp.local",
-}
-
-def _env_domain(key: str) -> str:
-    return os.getenv(key, DOMAIN_DEFAULTS.get(key, "")).strip()
-
 DEFAULT_NAMING_PATTERNS = {
     "branch_switch": "SW<country><state><site><zone><seq>-<stack_id>",
     "branch_stack": "VS<country><state><site><seq>-<stack_id>",
@@ -110,6 +94,10 @@ PATTERN_VARIABLES = {
     "state": {"label": "State / Region (Optional)", "placeholder": "e.g. NY, CA, TX, NSW", "scope": "shared"},
     "domain": {"label": "Domain Name (FQDN Suffix)", "placeholder": "e.g. corp.example.com, internal.net", "scope": "shared"},
     "status": {"label": "Object Status", "placeholder": "active / planned", "default": "active", "scope": "shared"},
+    "corp_domain_it": {"label": "IT / Corporate ESXi Domain", "placeholder": ".example.corp", "required": True, "scope": "shared"},
+    "corp_domain_ot_primary": {"label": "OT Primary Cluster Domain", "placeholder": ".example.ot", "required": True, "scope": "shared"},
+    "corp_domain_ot_secondary": {"label": "OT Secondary Cluster Domain", "placeholder": ".example.ot", "required": True, "scope": "shared"},
+    "corp_domain_local": {"label": "Branch / Local Domain", "placeholder": ".corp.local", "required": True, "scope": "shared"},
 
     # 2. IPAM & Subnet Scope
     "vid": {"label": "VLAN ID", "placeholder": "e.g. 100, 300", "scope": "ipam"},
@@ -502,32 +490,11 @@ def _migrate_and_persist():
             f.flush()
             os.fsync(f.fileno())
 
-DOMAIN_ENV_KEYS = (
-    "CORP_DOMAIN_IT",
-    "CORP_DOMAIN_OT_PRIMARY",
-    "CORP_DOMAIN_OT_SECONDARY",
-    "CORP_DOMAIN_LOCAL",
-)
-
 def _is_str(value) -> bool:
     return isinstance(value, str)
 
-def _substitute_env(value: str) -> str:
-    """Expand ${VAR} placeholders in a rule value using os.path.expandvars.
-
-    Falls back to the generic placeholder domain when the environment variable is not set,
-    so templates always render something usable rather than empty text.
-    """
-    result = os.path.expandvars(value)
-    # expandvars leaves unknown ${NAME} unchanged when the var is undefined; replace any
-    # remaining references to our documented domain vars with the generic fallback.
-    for key in DOMAIN_ENV_KEYS:
-        if f"${{{key}}}" in result:
-            result = result.replace(f"${{{key}}}", DOMAIN_DEFAULTS.get(key, ""))
-    return result
-
 def _load_rules_dict_from_file() -> dict:
-    """Read the rules file as JSON and apply environment variable substitution."""
+    """Read the rules file as JSON."""
     if not os.path.exists(RULES_FILE):
         return {}
     try:
@@ -537,18 +504,7 @@ def _load_rules_dict_from_file() -> dict:
         return {}
     if not isinstance(raw, dict):
         return {}
-    normalized = {}
-    for k, v in raw.items():
-        if isinstance(v, dict):
-            normalized[str(k)] = {
-                str(ik): (_substitute_env(str(iv)) if _is_str(iv) else iv)
-                for ik, iv in v.items()
-            }
-        elif _is_str(v):
-            normalized[str(k)] = _substitute_env(v)
-        else:
-            normalized[str(k)] = v
-    return normalized
+    return dict(raw)
 
 
 def _split_legacy_device_patterns(patterns: dict) -> dict:
@@ -1042,7 +998,8 @@ def _delta_item_key(item) -> object:
             if v not in (None, ""):
                 return ("__key__", str(v))
         try:
-            import json
+import os
+import json
             return ("__json__", json.dumps(item, sort_keys=True))
         except (TypeError, ValueError):
             pass
@@ -1209,9 +1166,9 @@ def export_rules_as_prompt(rules: Dict[str, str]) -> str:
 
 3. Hypervisors & Virtual Machines:
 - ESXi Hypervisor Hostname: {p.get('esxi_host', '')}
-  * IT / Corporate ESXi Domain: {_env_domain('CORP_DOMAIN_IT')} (e.g. host001{_env_domain('CORP_DOMAIN_IT')})
-  * OT / Industrial Cluster Domain: {_env_domain('CORP_DOMAIN_OT_PRIMARY')} / {_env_domain('CORP_DOMAIN_OT_SECONDARY')} (e.g. host001{_env_domain('CORP_DOMAIN_OT_PRIMARY')})
-  * Branch / Standalone: {_env_domain('CORP_DOMAIN_LOCAL')} or shortname (no FQDN)
+  * IT / Corporate ESXi Domain: {rules.get("pattern_variables", {}).get("shared", {}).get("corp_domain_it", {}).get("placeholder", ".example.corp")} (e.g. host001{rules.get("pattern_variables", {}).get("shared", {}).get("corp_domain_it", {}).get("placeholder", ".example.corp")})
+  * OT / Industrial Cluster Domain: {rules.get("pattern_variables", {}).get("shared", {}).get("corp_domain_ot_primary", {}).get("placeholder", ".example.ot")} / {rules.get("pattern_variables", {}).get("shared", {}).get("corp_domain_ot_secondary", {}).get("placeholder", ".example.ot")} (e.g. host001{rules.get("pattern_variables", {}).get("shared", {}).get("corp_domain_ot_primary", {}).get("placeholder", ".example.ot")})
+  * Branch / Standalone: {rules.get("pattern_variables", {}).get("shared", {}).get("corp_domain_local", {}).get("placeholder", ".corp.local")} or shortname (no FQDN)
 - Virtual Machine (VM) Hostname: {p.get('vm_host', '')}
 
 4. ESXi Network Descriptions:
