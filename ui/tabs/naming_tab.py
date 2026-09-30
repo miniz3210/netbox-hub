@@ -930,6 +930,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             return deduped
 
         # Transient clipboard ingestion
+        pasted_data = st.session_state.get("esxi_paste_hidden_bridge", "")
         if pasted_data and pasted_data.startswith("data:image"):
             import base64 as _b64, io as _io
             try:
