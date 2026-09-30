@@ -848,34 +848,55 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 label_visibility="collapsed",
                 help="Focus this box and press Ctrl+V.",
             )
-            # Persistent delegated paste listener across remounts
+            # Self-contained paste listener within the iframe
             st.html(
                 """
+                <div id="esxi-clipboard-zone"
+                     style="width:100%;height:40px;background:#f0f2f6;border:2px dashed #aaa;border-radius:6px;
+                            display:flex;align-items:center;justify-content:center;cursor:text;font-size:13px;color:#666;"
+                     tabindex="0">
+                    Click here then press Ctrl+V to paste
+                </div>
                 <script>
-                const parentDoc = window.parent.document;
-                if (!window.parent._esxiPasteDelegated) {
-                    window.parent._esxiPasteDelegated = true;
-                    parentDoc.addEventListener('paste', function(e) {
-                        const target = e.target;
-                        if (!target || target.getAttribute('aria-label') !== 'Paste Area') return;
+                (function() {
+                    const zone = document.getElementById('esxi-clipboard-zone');
+                    if (!zone) return;
+                    zone.addEventListener('paste', function(e) {
                         const items = (e.clipboardData || window.clipboardData).items;
                         for (let i = 0; i < items.length; i++) {
                             if (items[i].type.indexOf('image') !== -1) {
                                 const blob = items[i].getAsFile();
                                 const reader = new FileReader();
                                 reader.onload = function(event) {
-                                    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-                                    nativeSetter.call(target, event.target.result);
-                                    target.dispatchEvent(new Event('input', { bubbles: true }));
-                                    target.dispatchEvent(new KeyboardEvent('keydown', {
-                                        bubbles: true,
-                                        cancelable: true,
-                                        key: 'Enter',
-                                        code: 'Enter',
-                                        keyCode: 13,
-                                        which: 13
-                                    }));
-                                    target.dispatchEvent(new Event('change', { bubbles: true }));
+                                    // Find the associated Streamlit text input
+                                    const inputs = document.querySelectorAll('input[type="text"]');
+                                    let target = null;
+                                    for (const inp of inputs) {
+                                        if (inp.closest('.stTextInput') || inp.getAttribute('data-testid') === 'stTextInput') {
+                                            target = inp;
+                                            break;
+                                        }
+                                    }
+                                    if (!target) {
+                                        // Fallback: use the first text input in the column
+                                        const col = zone.closest('[data-testid="stColumn"]') || zone.parentElement;
+                                        const allInputs = col.querySelectorAll('input[type="text"]');
+                                        if (allInputs.length > 0) target = allInputs[allInputs.length - 1];
+                                    }
+                                    if (target) {
+                                        const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                                        nativeSetter.call(target, event.target.result);
+                                        target.dispatchEvent(new Event('input', { bubbles: true }));
+                                        target.dispatchEvent(new KeyboardEvent('keydown', {
+                                            bubbles: true,
+                                            cancelable: true,
+                                            key: 'Enter',
+                                            code: 'Enter',
+                                            keyCode: 13,
+                                            which: 13
+                                        }));
+                                        target.dispatchEvent(new Event('change', { bubbles: true }));
+                                    }
                                 };
                                 reader.readAsDataURL(blob);
                                 e.preventDefault();
@@ -883,7 +904,15 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                             }
                         }
                     });
-                }
+                    zone.addEventListener('focus', function() {
+                        zone.style.borderColor = '#1f77b4';
+                        zone.style.background = '#e8f4fc';
+                    });
+                    zone.addEventListener('blur', function() {
+                        zone.style.borderColor = '#aaa';
+                        zone.style.background = '#f0f2f6';
+                    });
+                })();
                 </script>
                 """,
             )
