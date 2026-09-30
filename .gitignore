@@ -1,6 +1,7 @@
 *.pyc
 .env
 .venv/
+.vscode/
 .vscode/.kilo/
 __pycache__/
 archive/
