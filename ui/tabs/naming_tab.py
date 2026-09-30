@@ -111,7 +111,7 @@ def _build_ocr_slot_map(rows):
 
         slot = ""
         # Prefer an explicit slot column (Slot, PCI/PCIe, Port).
-        for col_key in ("Slot", "PCIe Slot", "PCIe", "PCI", "Port", "slot", "pcie_slot", "pcie", "pci", "port"):
+        for col_key in ("Slot", "slot", "PCIe", "PCIe Slot"):
             v = r.get(col_key)
             if v is not None and str(v).strip() and str(v).strip().lower() not in ("nan", "none"):
                 slot = str(v).strip()
@@ -126,6 +126,10 @@ def _build_ocr_slot_map(rows):
                 if m_slot:
                     slot = re.sub(r"\s+", "", m_slot.group(1))
                     break
+
+        # Normalize OCR-extracted slot: strip spaces around slashes for clean output.
+        if slot:
+            slot = re.sub(r"\s*/\s*", "/", slot)
 
         if slot:
             ocr[nic] = slot
@@ -1127,6 +1131,38 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
             # Hardware slot resolution: OCR (AI vision) first, then Standards YAML, then bare name.
             from config.naming_rules import get_hardware_slot_mappings
+            # Backfill Slot into Uplink rows by matching against Physical Adapter slot records.
+            if "Slot" not in rows[0] or not any(r.get("Slot") for r in rows):
+                adapter_rows = [r for r in rows if r.get("Type") == "PhysicalAdapter"]
+                nic_to_slot = {}
+                for ar in adapter_rows:
+                    ar_nic = ""
+                    for k in ("Interface / vmnic", "Interface", "vmnic", "NIC", "Name"):
+                        v = ar.get(k)
+                        if v is not None and not str(v).lower() in ["nan", "none"]:
+                            m = re.search(r"\b(vmnic\d+)\b", str(v), re.IGNORECASE)
+                            if m:
+                                ar_nic = m.group(1)
+                                break
+                    if not ar_nic:
+                        for v in ar.values():
+                            if isinstance(v, str):
+                                m = re.search(r"\b(vmnic\d+)\b", v, re.IGNORECASE)
+                                if m:
+                                    ar_nic = m.group(1)
+                                    break
+                    ar_slot = ar.get("Slot") or ar.get("slot") or ar.get("PCIe Slot") or ""
+                    if ar_nic and ar_slot:
+                        nic_to_slot[ar_nic] = str(ar_slot).strip()
+                for r in rows:
+                    if r.get("Type") == "Uplink":
+                        iface = str(r.get("Interface") or "").strip()
+                        m = re.search(r"\b(vmnic\d+)\b", iface, re.IGNORECASE)
+                        if m:
+                            nic = m.group(1)
+                            if nic in nic_to_slot and not r.get("Slot"):
+                                r["Slot"] = nic_to_slot[nic]
+
             user_slot_map = get_hardware_slot_mappings(naming_rules)
             ocr_slot_map = _build_ocr_slot_map(rows)
 

@@ -39,6 +39,11 @@ Apply the NetBox standard naming rules below strictly:
 3. Port Group names must follow the standard format configured in the naming rule presets below (e.g. a `PG-` prefix when the configured pattern requires it).
 4. Always pair each uplink with its respective vSwitch before listing that vSwitch's Port Groups and VMkernel adapters.
 
+When analyzing screenshots containing 'Physical adapters' or adapter listings:
+- Extract the hardware slot / location (e.g. 'PCIe 1 / Port 1', 'PCIe 2 / Port 2', 'OCP 3 / Port 1', 'Slot 1').
+- Normalize the slot to standard format: 'PCIeX/PortY' or 'OCP3/PortY' (strip internal spaces around slashes).
+- Include 'Slot' as a dedicated key in each returned adapter item dictionary.
+
 Naming rules per type:
 
 - Physical Uplink:
@@ -56,13 +61,13 @@ Internal / Isolated vSwitches (vSwitches with NO physical network adapters, e.g.
 - Port Group description: `<vSwitch> (Internal Only / No Uplink)`
 - Do NOT output empty parentheses like `( / )`.
 
-Determine whether a link is "Active" or "Standby" by detecting its speed: 10 Gbps links \
-are Active, 1 Gbps (or otherwise slower/redundant) links are Standby.
+Each Uplink description MUST infer its primary purpose from the PortGroups / VMkernels connected to the same vSwitch (e.g. Management, iSCSI, vMotion, VM Traffic). Format MUST strictly be: '<vmnic> - <vSwitch> <Purpose> Active Uplink' (or Standby Uplink).
 
 Return ONLY a raw JSON array (no markdown fences). Each element is an object with exactly \
 these keys:
 {"Interface": "...", "Type": "Uplink"|"PortGroup"|"VMkernel", \
-"Description": "the final NetBox interface description string", "IP Address": "..."}
+"Description": "the final NetBox interface description string", "IP Address": "...", \
+"Slot": "normalized hardware slot like PCIe1/Port1 or empty string"}
 
 Populate "IP Address" only for VMkernel adapters where visible, otherwise "".
 
@@ -244,6 +249,7 @@ def _row(item: dict) -> dict:
             "Type": itype,
             "Description": desc,
             "IP Address": str(item.get("IP Address") or item.get("detail") or "").strip(),
+            "Slot": str(item.get("Slot") or item.get("slot") or "").strip(),
         }
     return {
         "Type": itype,
