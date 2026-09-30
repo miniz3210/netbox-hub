@@ -1,3 +1,4 @@
+import re
 import streamlit as st
 from utils.formatters import normalize_port_shortname
 from utils.pattern_formatter import apply_pattern
@@ -349,8 +350,6 @@ def render_compact_toolbar(active_model):
     st.session_state["auto_correct"] = bool(auto_correct)
 
 
-import re
-
 from config.naming_rules import get_naming_patterns, get_pattern_variables, load_naming_rules
 
 
@@ -513,8 +512,7 @@ def render_naming_tab(active_model):
     st.subheader("🏷️ Standardized Infrastructure Naming Generator", help="Generate and validate standardized hostnames and interface descriptions. All preset-driven patterns are configured in the Standards Tab.")
     st.caption("Generate and validate standardized hostnames for network devices, servers, VMs, and ESXi configurations using AI-powered naming conventions aligned with your NetBox inventory data.")
 
-    naming_rules = load_naming_rules()
-    SSM.set_naming_rules(naming_rules)
+    naming_rules = SSM.get_naming_rules(load_naming_rules())
     naming_patterns = get_naming_patterns(naming_rules)
     variables = get_pattern_variables(naming_rules)
     render_compact_toolbar(active_model)
@@ -998,9 +996,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 pasted_file.name = f"clipboard_screenshot_{idx}.png"
                 pasted_file.type = "image/png"
                 pasted_file.size = len(img_bytes)
-                existing_pasted = list(st.session_state.get("pasted_clipboard_imgs") or [])
-                existing_pasted.append(pasted_file)
-                st.session_state["pasted_clipboard_imgs"] = existing_pasted
+                st.session_state["pasted_clipboard_imgs"] = [pasted_file]
                 st.session_state["esxi_paste_counter"] += 1
                 st.session_state["paste_input_ver"] = st.session_state.get("paste_input_ver", 0) + 1
                 st.rerun()
@@ -1306,12 +1302,11 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 or esxi_presets.get("PortGroup", {}).get("pattern")
                 or "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)"
             )
-            vmk_preset = esxi_presets.get("VMkernel", {})
-            vmk_pattern_key = vmk_preset.get("pattern_key", "esxi_vmkernel")
             vmk_tpl = (
-                _patterns.get(vmk_pattern_key)
+                _patterns.get("esxinet_vmkernel")
                 or _patterns.get("esxi_vmkernel")
-                or _patterns.get("esxinet_vmkernel")
+                or esxi_presets.get("VMkernel", {}).get("pattern_template")
+                or esxi_presets.get("VMkernel", {}).get("pattern")
                 or "<purpose> (<v_switch>)"
             )
 

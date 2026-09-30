@@ -16,9 +16,9 @@
   "vm_host": "<country><site><role><seq>",
   "esxi_uplink": "<vmnic> - <v_switch> <purpose> <status>",
   "esxi_portgroup_name": "PG-<pg_network>",
-  "esxi_portgroup": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
+  "esxi_portgroup": "<port_group> [<active_vmnics> Active / <standby_vmnics> Standby]",
   "esxi_vmkernel_name": "<vmk>",
-  "esxi_vmkernel": "<purpose> - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
+  "esxi_vmkernel": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
   "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
   "iface_switch_zone": "<switch_zone>_<port>",
   "host_vm_proxmox": "<site_prefix>pve<seq>.<domain>",
@@ -33,12 +33,18 @@
   "esxi_vswitch": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
   "esxinet_pgname": "PG-<pg_network>",
   "esxi_pgname": "PG-<pg_network>",
-  "esxinet_pg_name": "PGroup-<pg_network>",
-  "esxi_pg_name": "PGroup-<pg_network>",
+  "esxinet_pg_name": "PG-<pg_network>",
+  "esxi_pg_name": "PG-<pg_network>",
   "host_vm_proxmox_x_x": "<site_prefix><role_esx><seq>.<domain>",
   "branch_san": "san<country><state><site><zone><seq>",
   "branch_san_x": "SAN<country><state><site><seq>",
   "vlan_name_pattern": "<role>",
+  "esxinet_pg_net": "PG-<pg_network>",
+  "esxi_pg_net": "PG-<pg_network>",
+  "esxinet_pg_net_x": "PG123-<pg_network>",
+  "esxi_pg_net_x": "PGTest123-<pg_network>",
+  "esxinet_pgnet": "PG123-<pg_network>",
+  "esxi_pgnet": "PG123-<pg_network>",
   "custom_patterns": [],
   "device_presets": [
     {
@@ -157,27 +163,27 @@
   "esxi_network_presets": [
     {
       "code": "Uplink",
-      "label": "PCIeX/PortX",
+      "label": "Physical Uplink",
       "pattern_key": "esxi_uplink",
       "description": "vmnic Uplink Interface"
     },
     {
-      "code": "PG_Name",
-      "label": "PG-VM Network",
-      "pattern_key": "esxinet_pg_name",
-      "description": ""
-    },
-    {
       "code": "PortGroup",
-      "label": "VM Network",
+      "label": "Port Group",
       "pattern_key": "esxi_portgroup",
       "description": "Standard / Distributed Port Group"
     },
     {
       "code": "VMkernel",
-      "label": "vmk",
+      "label": "VMkernel",
       "pattern_key": "esxi_vmkernel",
       "description": "VMkernel Management / vMotion / Storage"
+    },
+    {
+      "code": "PGNet",
+      "label": "PG-Network",
+      "pattern_key": "esxinet_pgnet",
+      "description": ""
     }
   ],
   "vlan_presets": {
@@ -265,9 +271,9 @@
     "vm_host": "<country><site><role><seq>",
     "esxi_uplink": "<vmnic> - <v_switch> <purpose> <status>",
     "esxi_portgroup_name": "PG-<pg_network>",
-    "esxi_portgroup": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
+    "esxi_portgroup": "<port_group> [<active_vmnics> Active / <standby_vmnics> Standby]",
     "esxi_vmkernel_name": "<vmk>",
-    "esxi_vmkernel": "<purpose> - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
+    "esxi_vmkernel": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
     "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
     "iface_switch_zone": "<switch_zone>_<port>",
     "host_vm_proxmox": "<site_prefix>pve<seq>.<domain>",
@@ -282,12 +288,18 @@
     "esxi_vswitch": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
     "esxinet_pgname": "PG-<pg_network>",
     "esxi_pgname": "PG-<pg_network>",
-    "esxinet_pg_name": "PGroup-<pg_network>",
-    "esxi_pg_name": "PGroup-<pg_network>",
+    "esxinet_pg_name": "PG-<pg_network>",
+    "esxi_pg_name": "PG-<pg_network>",
     "host_vm_proxmox_x_x": "<site_prefix><role_esx><seq>.<domain>",
     "branch_san": "san<country><state><site><zone><seq>",
     "branch_san_x": "SAN<country><state><site><seq>",
-    "vlan_name_pattern": "<role>"
+    "vlan_name_pattern": "<role>",
+    "esxinet_pg_net": "PG-<pg_network>",
+    "esxi_pg_net": "PG-<pg_network>",
+    "esxinet_pg_net_x": "PG123-<pg_network>",
+    "esxi_pg_net_x": "PGTest123-<pg_network>",
+    "esxinet_pgnet": "PG123-<pg_network>",
+    "esxi_pgnet": "PG123-<pg_network>"
   },
   "pattern_variables": {
     "site": {
@@ -571,64 +583,51 @@
       "label": "vmnic Name",
       "placeholder": "vmnic",
       "default": "vmnic",
-      "scope": "hypervisor",
-      "optional": false
+      "scope": "hypervisor"
     },
     "v_switch": {
       "label": "vSwitch Name",
       "placeholder": "vSwitch",
       "default": "vSwitch",
-      "scope": "hypervisor",
-      "optional": false
+      "scope": "hypervisor"
     },
     "purpose": {
       "label": "Purpose / Service",
       "placeholder": "e.g. Management, vMotion, Storage",
-      "scope": "hypervisor",
-      "default": "",
-      "optional": false
+      "scope": "hypervisor"
     },
     "pg_network": {
       "label": "Network Name",
       "placeholder": "e.g. VM Network",
-      "scope": "hypervisor",
-      "default": "",
-      "optional": false
+      "scope": "hypervisor"
     },
     "port_group": {
       "label": "Port Group / vSwitch",
       "placeholder": "e.g. vSwitch0",
       "default": "vSwitch",
-      "scope": "hypervisor",
-      "optional": false
+      "scope": "hypervisor"
     },
     "active_vmnics": {
       "label": "Active vmnics",
       "placeholder": "e.g. vmnic0, vmnic1",
       "default": "vmnic",
-      "scope": "hypervisor",
-      "optional": false
+      "scope": "hypervisor"
     },
     "standby_vmnics": {
       "label": "Standby vmnics (Optional)",
       "placeholder": "e.g. vmnic2",
-      "scope": "hypervisor",
-      "default": "",
-      "optional": false
+      "scope": "hypervisor"
     },
     "vmk": {
       "label": "vmk Name",
       "placeholder": "vmk",
       "default": "vmk",
-      "scope": "hypervisor",
-      "optional": false
+      "scope": "hypervisor"
     },
     "switch_zone": {
       "label": "Switch Zone / Network Zone",
       "placeholder": "e.g. DMZ, Production, Management",
-      "scope": "hypervisor",
-      "default": "",
-      "optional": false
+      "scope": "hypervisor"
     }
   },
   "site_code_rules": {
