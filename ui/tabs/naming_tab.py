@@ -78,6 +78,63 @@ def apply_case(text: str, mode: str) -> str:
     return text.upper() if mode == "UPPERCASE" else text.lower()
 
 
+def _build_ocr_slot_map(rows):
+    """Build a dict mapping vmnic-like names to hardware slots found in parsed OCR rows."""
+    ocr = {}
+    for r in rows or []:
+        if not isinstance(r, dict):
+            continue
+        nic = ""
+        for key in ("Interface / vmnic", "Interface", "vmnic", "NIC", "Name"):
+            val = r.get(key)
+            if val is not None and not str(val).lower() in ["nan", "none"]:
+                m = re.search(r"\b(vmnic\d+|eno\w+|ens\w+|enp\w+|eth\d+)\b", str(val), re.IGNORECASE)
+                if m:
+                    nic = m.group(1)
+                    break
+        if not nic:
+            continue
+        slot = ""
+        # Prefer an explicit slot column (Slot, PCI/PCIe, Port).
+        for col_key in ("Slot", "PCIe Slot", "PCIe", "PCI", "Port", "slot", "pcie_slot", "pcie", "pci", "port"):
+            v = r.get(col_key)
+            if v is not None and str(v).strip() and str(v).strip().lower() not in ("nan", "none"):
+                slot = str(v).strip()
+                break
+        # Fallback: scan all string values for a PCIe/Port style pattern.
+        if not slot:
+            for v in r.values():
+                if not isinstance(v, str):
+                    continue
+                m_slot = re.search(r"(?i)\b(PCIe\s*\d+\s*/\s*Port\s*\d+|\bPCIe\d+\b|\bPort\s*\d+\b|\bSlot\s*\d+\b)\b", v)
+                if m_slot:
+                    slot = re.sub(r"\s+", "", m_slot.group(1))
+                    break
+        if slot:
+            ocr[nic] = slot
+            digits = re.sub(r"\D", "", nic)
+            if digits:
+                ocr[digits] = slot
+    return ocr
+
+
+def _resolve_hw_slot(nic_name, user_slot_map=None, ocr_slot_map=None):
+    """Resolve a hardware slot label: OCR first, then Standards YAML, then the bare name."""
+    clean_name = str(nic_name).strip()
+    digits = re.sub(r"\D", "", clean_name)
+    if ocr_slot_map:
+        if clean_name in ocr_slot_map:
+            return ocr_slot_map[clean_name]
+        if digits in ocr_slot_map:
+            return ocr_slot_map[digits]
+    if user_slot_map:
+        if clean_name in user_slot_map:
+            return user_slot_map[clean_name]
+        if digits in user_slot_map:
+            return user_slot_map[digits]
+    return clean_name
+
+
 def _copy_to_clipboard(text: str):
     st.session_state["_last_copied"] = text
 
@@ -965,6 +1022,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         results = analyze_hypervisor_topology_screenshot(uploaded_imgs, naming_rules, active_model)
                         st.session_state["hypervisor_parsed_descriptions"] = results
                         st.success("Successfully analyzed topology and generated NetBox descriptions!")
+                        # Auto-clear the file uploader (new key version) while keeping the parsed data.
+                        st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
                 except Exception as e:
                     st.error(f"Vision analysis failed: {str(e)}")
                 finally:
@@ -1054,22 +1113,15 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             vswitches = sorted(list(extracted_vswitches))
             purposes = sorted(list(extracted_purposes))
 
-            # Hardware slot resolution strictly aligned with Standards (Zero Hardcode)
+            # Hardware slot resolution: OCR (AI vision) first, then Standards YAML, then bare name.
             from config.naming_rules import get_hardware_slot_mappings
             user_slot_map = get_hardware_slot_mappings(naming_rules)
+            ocr_slot_map = _build_ocr_slot_map(rows)
 
-            def _resolve_hw_slot(nic_name):
-                clean_name = str(nic_name).strip()
-                digits = re.sub(r"\D", "", clean_name)
-                # Check direct name (e.g. "vmnic1") or digit key (e.g. "1")
-                if clean_name in user_slot_map:
-                    return user_slot_map[clean_name]
-                if digits in user_slot_map:
-                    return user_slot_map[digits]
-                # Fallback strictly to interface name if not defined in Standards
-                return clean_name
-
-            slots = sorted(list(set(_resolve_hw_slot(v) for v in vmnics if v)))
+            slots = sorted(list(set(
+                _resolve_hw_slot(v, user_slot_map=user_slot_map, ocr_slot_map=ocr_slot_map)
+                for v in vmnics if v
+            )))
 
             # Render styled Badge Cards matching NetBox Hub dark glass theme
             def _render_pill_card(title, items, color="#38bdf8"):
@@ -1246,6 +1298,17 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 or "<purpose> (<v_switch>)"
             )
 
+            from config.naming_rules import get_hardware_slot_mappings
+            user_slot_map = get_hardware_slot_mappings(_naming_rules)
+            ocr_slot_map = _build_ocr_slot_map(rows)
+            pattern_vars = _naming_rules.get("variables", {}) or {}
+            # Make active_vmnics/standby_vmnics optional so empty teaming sides are stripped cleanly.
+            for _tok in ("active_vmnics", "standby_vmnics"):
+                meta = pattern_vars.get(_tok, {})
+                if isinstance(meta, dict):
+                    meta.setdefault("optional", True)
+                else:
+                    pattern_vars[_tok] = {"optional": True}
             groups = {}
             for row in rows:
                 if not isinstance(row, dict):
@@ -1274,7 +1337,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     # Safely resolve dynamic variables dictionary from naming_rules
                     pattern_vars = _naming_rules.get("variables", {}) if isinstance(_naming_rules, dict) else {}
 
-                    # Robust switch extraction
+                    # Robust switch extraction (also from Description when row keys are missing)
                     resolved_vs = (
                         vs
                         or str(row.get("vSwitch", "")).strip()
@@ -1336,9 +1399,16 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     row_vals["purpose"] = clean_purpose
                     row_vals["service"] = clean_purpose
 
-                    # Uplink active/standby mapping
+                    # Uplink active/standby mapping (parse from Description when row fields are empty).
                     act_vmnics = row_vals.get("active") or row_vals.get("active_vmnics") or ""
                     stb_vmnics = row_vals.get("standby") or row_vals.get("standby_vmnics") or ""
+                    if (not act_vmnics or not stb_vmnics) and desc:
+                        m_as = re.search(r"\((.*?)\s+Active\s*/\s*(.*?)\s+Standby\)", desc)
+                        if m_as:
+                            if not act_vmnics:
+                                act_vmnics = m_as.group(1).strip()
+                            if not stb_vmnics:
+                                stb_vmnics = m_as.group(2).strip()
                     row_vals["active_vmnics"] = act_vmnics
                     row_vals["standby_vmnics"] = stb_vmnics
 
@@ -1352,6 +1422,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         rendered = render_dynamic_pattern(vmk_tpl, row_vals, pattern_vars)
                     elif row_type == "PortGroup":
                         rendered = render_dynamic_pattern(pg_tpl, row_vals, pattern_vars)
+                        # Final safety net: remove any residual empty Active/Standby bracket.
+                        rendered = re.sub(r"\([^)]*?(?:\s*)\bActive\b\s*/.{0,}?\bStandby\b\s*\)", "", rendered)
                     elif row_type == "Uplink":
                         rendered = render_dynamic_pattern(uplink_tpl, row_vals, pattern_vars)
                     else:
@@ -1368,7 +1440,9 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     header_iface = iface
                     if row_type == "Uplink":
                         # Embed hardware slot in physical interface header for NetBox cross-check
-                        hw_slot = _resolve_hw_slot(iface)
+                        hw_slot = _resolve_hw_slot(
+                            iface, user_slot_map=user_slot_map, ocr_slot_map=ocr_slot_map
+                        )
                         header_iface = f"{hw_slot} ({iface})"
                     elif row_type == "PortGroup":
                         name_tpl = None
