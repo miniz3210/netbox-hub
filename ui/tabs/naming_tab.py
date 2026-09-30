@@ -441,7 +441,7 @@ def render_naming_tab(active_model):
     st.caption("Generate and validate standardized hostnames for network devices, servers, VMs, and ESXi configurations using AI-powered naming conventions aligned with your NetBox inventory data.")
 
     naming_rules = load_naming_rules()
-    st.session_state["naming_rules"] = naming_rules
+    SSM.set_naming_rules(naming_rules)
     naming_patterns = get_naming_patterns(naming_rules)
     variables = get_pattern_variables(naming_rules)
     render_compact_toolbar(active_model)
@@ -624,7 +624,7 @@ def _esxi_network_presets_fn(rules, naming_patterns):
 
 
 def _asset_class_2(case_mode, active_model, naming_patterns, variables, global_site=""):
-    naming_rules = st.session_state.get("naming_rules", load_naming_rules())
+    naming_rules = SSM.get_naming_rules(load_naming_rules())
     presets = _host_vm_presets(naming_rules, naming_patterns)
 
     host_keys = [code for code, _label, key in presets if key != "vm_host"]
@@ -1152,7 +1152,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                                     "scope": "hypervisor",
                                 }
                                 save_naming_rules(naming_rules, source="Variable Inspector Sync")
-                                st.session_state["naming_rules"] = naming_rules.copy()
+                                SSM.set_naming_rules(naming_rules.copy())
                                 st.success(f"✅ Successfully synced '{t_name}' to Hypervisor Standards!")
                                 st.rerun()
                         border_color = "#22c55e" if is_existing else "rgba(255,255,255,0.08)"
@@ -1187,7 +1187,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                             "scope": "hypervisor",
                         }
                         save_naming_rules(naming_rules, source="Variable Inspector Sync")
-                        st.session_state["naming_rules"] = naming_rules.copy()
+                        SSM.set_naming_rules(naming_rules.copy())
                         st.success(f"Variable <{norm_token}> saved & synced to Standards (hypervisor scope)!")
                         st.rerun()
                     else:
@@ -1215,7 +1215,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             rows = edited_descriptions
 
             # Get patterns from session state
-            _naming_rules = st.session_state.get("naming_rules", {})
+            _naming_rules = SSM.get_naming_rules({})
             _patterns = _naming_rules.get("naming_patterns", {})
 
             # Load user-configured patterns dynamically from Standards rules

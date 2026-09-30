@@ -8,6 +8,7 @@ import streamlit as st
 from typing import Dict, List, Optional, Tuple
 
 from config.naming_rules import extract_tokens, save_naming_rules
+from core.session_manager import SessionStateManager as SSM
 from utils.formatters import (
     apply_auto_corrections,
     normalize_network_name,
@@ -110,10 +111,10 @@ def get_rules_from_session() -> Tuple[Dict, Dict, Dict]:
     """Load merged rules, patterns, and variables from session state."""
     from config.naming_rules import load_naming_rules, get_naming_patterns, get_pattern_variables
 
-    rules = st.session_state.get("naming_rules")
+    rules = SSM.get_naming_rules({})
     if not rules:
         rules = load_naming_rules()
-        st.session_state["naming_rules"] = rules
+        SSM.set_naming_rules(rules)
     patterns = get_naming_patterns(rules)
     variables = get_pattern_variables(rules)
     return rules, patterns, variables
@@ -258,7 +259,7 @@ def render_edit_mode_ui(pattern_key: str, pattern_value: str, variables: Dict):
     order_key = f"field_order_{pattern_key}"
     current_tokens = extract_tokens(edited)
 
-    rules = st.session_state.get("naming_rules", {})
+    rules = SSM.get_naming_rules({})
     saved_token_order = (rules.get("token_order") or {}).get(pattern_key, [])
 
     custom_order = st.session_state.get(order_key)
@@ -294,7 +295,7 @@ def render_edit_mode_ui(pattern_key: str, pattern_value: str, variables: Dict):
                         st.rerun()
 
     if st.button("💾 Save to Standards", key=f"nw_save_{pattern_key}", type="primary"):
-        rules = st.session_state.get("naming_rules", {})
+        rules = SSM.get_naming_rules({})
         patterns = rules.get("naming_patterns", {})
         patterns[pattern_key] = edited
         rules[pattern_key] = edited
@@ -326,7 +327,7 @@ def render_edit_mode_ui(pattern_key: str, pattern_value: str, variables: Dict):
         rules["naming_patterns"] = patterns
         if "pattern_variables" not in rules or not rules["pattern_variables"]:
             rules["pattern_variables"] = variables
-        st.session_state["naming_rules"] = rules
+        SSM.set_naming_rules(rules)
         st.session_state.pop(order_key, None)
         save_naming_rules(rules, source=f"Edit Mode: {pattern_key}")
 
@@ -346,7 +347,7 @@ def render_multi_edit_mode_ui(pattern_pairs: List[Tuple[str, str]], variables: D
 
     ``pattern_pairs`` is a list of ``(pattern_key, current_value)`` where each entry
     is rendered as an editable textarea. On save, all keys are persisted to
-    ``st.session_state["naming_rules"]`` and to the JSON file, then reruns.
+    ``SSM.set_naming_rules()`` and to the JSON file, then reruns.
 
     Labels and fallback defaults mirror the canonical Asset Class 3 patterns so the UI
     stays useful even when a *_name pattern is missing from the loaded rules.
@@ -410,7 +411,7 @@ def render_multi_edit_mode_ui(pattern_pairs: List[Tuple[str, str]], variables: D
                     st.rerun()
 
     if st.button("💾 Save to Standards", key=f"nw_save_{joiner}", type="primary"):
-        rules = st.session_state.get("naming_rules", {})
+        rules = SSM.get_naming_rules({})
         patterns = rules.get("naming_patterns", {})
         for key, val in edited_vals.items():
             patterns[key] = val
@@ -429,7 +430,7 @@ def render_multi_edit_mode_ui(pattern_pairs: List[Tuple[str, str]], variables: D
             token_order_map[key] = list(custom_order)
         rules["token_order"] = token_order_map
         rules["naming_patterns"] = patterns
-        st.session_state["naming_rules"] = rules
+        SSM.set_naming_rules(rules)
         st.session_state.pop(order_key, None)
         save_naming_rules(rules, source=f"Edit Mode: {joiner}")
         # Reset each Edit Mode flag and bump its version counter so the toggle renders a

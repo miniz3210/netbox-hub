@@ -2,6 +2,8 @@ import ipaddress
 import re
 from typing import List, Dict, Any, Optional
 
+import streamlit as st
+
 _SLUGIFY_WHITESPACE = re.compile(r'[\s_]+')
 _SLUGIFY_NON_ALPHANUM = re.compile(r'[^a-z0-9-]')
 _CIDR_DOT_NOTATION = re.compile(r'^((?:\d{1,3}\.){3}\d{1,3})\.(\d{1,2})$')
@@ -147,6 +149,7 @@ def lookup_role_description(role_str: str) -> str:
             return desc
     return clean
 
+@st.cache_data(ttl=300, show_spinner=False)
 def slugify(text: str) -> str:
     if not text:
         return ""
@@ -155,6 +158,7 @@ def slugify(text: str) -> str:
     text = _SLUGIFY_NON_ALPHANUM.sub('', text)
     return text.strip('-')
 
+@st.cache_data(ttl=300, show_spinner=False)
 def format_branch_display(name: str) -> str:
     if not name:
         return ""
@@ -163,6 +167,7 @@ def format_branch_display(name: str) -> str:
         return clean
     return " ".join([word.capitalize() for word in clean.split()])
 
+@st.cache_data(ttl=300, show_spinner=False)
 def resolve_pattern_template(template: str, site_display: str, vid, role: str, vlan_name: str) -> str:
     """Resolve a naming pattern_template into a concrete VLAN/Prefix description.
 
@@ -190,6 +195,7 @@ def resolve_pattern_template(template: str, site_display: str, vid, role: str, v
 
     return f"{site_display} {template} {vid}".strip()
 
+@st.cache_data(ttl=300, show_spinner=False)
 def sanitize_cidr(cidr_raw: str) -> str:
     if not cidr_raw:
         return ""
@@ -199,6 +205,7 @@ def sanitize_cidr(cidr_raw: str) -> str:
         return f"{match.group(1)}/{match.group(2)}"
     return s
 
+@st.cache_data(ttl=300, show_spinner=False)
 def calculate_ip_range_str(net: ipaddress.IPv4Network) -> str:
     if net.num_addresses <= 2:
         return f"{net.network_address} - {net.broadcast_address}"
@@ -206,6 +213,7 @@ def calculate_ip_range_str(net: ipaddress.IPv4Network) -> str:
     last_host = net.broadcast_address - 1
     return f"{first_host} - {last_host}"
 
+@st.cache_data(ttl=300, show_spinner=False)
 def calculate_subnet_boundary_str(net: ipaddress.IPv4Network) -> str:
     return f"{net.network_address} - {net.broadcast_address}"
 
@@ -409,6 +417,7 @@ def get_subnet_availability_analysis(
 
 # ── SCHEMA-DRIVEN BULK NETBOX CSV GENERATORS ─────────────────────────────
 
+@st.cache_data(ttl=300, show_spinner=False)
 def render_csv_cell(template: str, context: Dict[str, Any]) -> str:
     """Render a single CSV cell template using universal context substitution."""
     if not template:

@@ -2,6 +2,7 @@ import os
 import re
 from typing import Any, Dict, List, Optional
 
+import streamlit as st
 import yaml
 
 from config.constants import NETWORKING_ACRONYMS, AUTOCORRECT_RULES_FILE
@@ -234,6 +235,7 @@ def apply_auto_corrections(text: str, category: str = "vmware") -> str:
     return result
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def normalize_manufacturer_name(name: str) -> str:
     """Normalizes common manufacturer abbreviations to their canonical vendor names."""
     if not name:
@@ -269,10 +271,18 @@ def normalize_manufacturer_name(name: str) -> str:
     }
     return mapping.get(m_clean.lower(), m_clean.title() if len(m_clean) > 3 else m_clean.upper())
 
+@st.cache_data(ttl=300, show_spinner=False)
 def compute_suggested_site_code(location_name: str) -> str:
     cleaned = re.sub(r"[^a-zA-Z\s]", "", location_name).strip()
     if not cleaned:
         return "SITE"
+    words = cleaned.split()
+    if len(words) >= 2:
+        return (words[0][:2] + words[1][:2]).upper()
+    elif len(words) == 1:
+        w = words[0]
+        return w[:4].upper() if len(w) >= 4 else w.upper()
+    return "SITE"
     words = cleaned.split()
     if len(words) >= 2:
         return (words[0][:2] + words[1][:2]).upper()
@@ -338,6 +348,7 @@ def normalize_vmnic_list(names: str) -> str:
     return ", ".join(parts)
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def to_title_case_preserve_acronyms(text: str) -> str:
     """
     Convert text to Title Case while preserving standard networking acronyms.
@@ -368,6 +379,7 @@ def to_title_case_preserve_acronyms(text: str) -> str:
     return "".join(result)
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def format_role_description(role: str, description: str = "") -> tuple:
     """
     Format role and description to Title Case while preserving networking acronyms.
@@ -378,6 +390,7 @@ def format_role_description(role: str, description: str = "") -> tuple:
     return formatted_role, formatted_desc
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def normalize_network_name(name: str) -> str:
     """
     Normalize network/port group names to proper capitalization.

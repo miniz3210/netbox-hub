@@ -24,11 +24,9 @@ def build_inventory_context_for_ai(category: str, site_filter: str = "") -> str:
 def verify_and_suggest_with_ai(user_input_text: str, model_name: str, asset_type: str = "General Asset", category_key: str = "device", site_filter: str = "") -> str:
     # Load naming rules from session state if available (updated by Standards tab), otherwise from file
     import streamlit as st
-    if "naming_rules" in st.session_state:
-        naming_rules = st.session_state["naming_rules"]
-        naming_context = export_rules_as_prompt(naming_rules)
-    else:
-        naming_context = export_rules_as_prompt(load_naming_rules())
+    from core.session_manager import SessionStateManager as SSM
+    naming_rules = SSM.get_naming_rules(load_naming_rules())
+    naming_context = export_rules_as_prompt(naming_rules)
     
     inventory_context = build_inventory_context_for_ai(category_key, site_filter=site_filter)
 

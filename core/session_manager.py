@@ -51,10 +51,17 @@ class SessionStateManager:
         if default is None:
             default = {}
         return st.session_state.get("naming_rules", default)
-    
+
     @staticmethod
     def set_naming_rules(value: dict) -> None:
         st.session_state["naming_rules"] = value
+
+    @staticmethod
+    def refresh_naming_rules() -> dict:
+        from config.naming_rules import load_naming_rules
+        rules = load_naming_rules()
+        st.session_state["naming_rules"] = rules
+        return rules
     
     @staticmethod
     def get_naming_rules_loaded(default: bool = False) -> bool:

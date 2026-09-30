@@ -19,6 +19,7 @@ from config.naming_rules import (
     get_ipam_role_mappings, DEFAULT_IPAM_ROLE_MAPPINGS,
 )
 from core.naming_engine import generate_naming_pattern, generate_autocorrect_rule
+from core.session_manager import SessionStateManager as SSM
 from utils.formatters import (
     load_auto_corrections, save_auto_corrections, reset_auto_corrections,
 )
@@ -207,7 +208,7 @@ def validate_regex_replacement(pattern_str: str, replacement_str: str) -> tuple:
 def _persist_variables(rules: dict, variables: dict, section_key: str = "shared") -> None:
     rules["pattern_variables"] = variables
     save_naming_rules(rules, source="Variable Manager")
-    st.session_state["naming_rules"] = rules.copy()
+    SSM.set_naming_rules(rules.copy())
     st.session_state["variables_saved"] = True
     st.session_state["card_saved_banner"] = {
         "section": f"vars_{section_key}",
@@ -511,7 +512,7 @@ def _persist_ipam_role_mappings(rules: dict) -> None:
         new_val = old_rules.get("ipam_role_mappings") or []
         delta = {"ipam_role_mappings": {"old": list(old_val), "new": list(new_val)}}
     add_to_history(delta, source="IPAM Role Mapping Rules: Management UI")
-    st.session_state["naming_rules"] = load_naming_rules()
+    SSM.refresh_naming_rules()
     st.session_state["card_saved_banner"] = {"section": "auto_correction", "msg": "✅ IPAM Role Mapping Rules saved & applied!", "ts": time.time()}
     st.rerun()
 
@@ -531,7 +532,7 @@ def _reset_ipam_role_mappings() -> None:
         }}
     add_to_history(delta, source="IPAM Role Mapping Rules: Reset to Defaults")
     _clear_session_state_prefixes("ipamrole_")
-    st.session_state["naming_rules"] = load_naming_rules()
+    SSM.refresh_naming_rules()
     st.session_state["card_saved_banner"] = {"section": "auto_correction", "msg": "✅ IPAM Role Mapping Rules reset to defaults!", "ts": time.time()}
     st.rerun()
 
@@ -650,7 +651,7 @@ def _persist_site_code_mappings(rules: dict) -> None:
         delta = {"site_code_rules": {"old": dict(old_rules.get("site_code_rules") or {}),
                                     "new": dict(rules.get("site_code_rules") or {})}}
     add_to_history(delta, source="Site Code Mapping Rules: Management UI")
-    st.session_state["naming_rules"] = load_naming_rules()
+    SSM.refresh_naming_rules()
     st.session_state["card_saved_banner"] = {"section": "auto_correction", "msg": "✅ Site Code Mapping Rules saved & applied!", "ts": time.time()}
     st.rerun()
 
@@ -692,7 +693,7 @@ def _reset_site_code_mappings() -> None:
     add_to_history(delta, source="Site Code Mapping Rules: Reset to Defaults")
     _clear_session_state_prefixes("sitecode_")
     st.session_state.pop("site_code_mappings_modified", None)
-    st.session_state["naming_rules"] = load_naming_rules()
+    SSM.refresh_naming_rules()
     st.session_state["card_saved_banner"] = {"section": "auto_correction", "msg": "✅ Site Code Mapping Rules reset to defaults!", "ts": time.time()}
     st.rerun()
 
@@ -722,7 +723,7 @@ def _persist_auto_corrections(data: dict) -> None:
 
 def _save_presets(rules: dict, section: str = "presets", section_label: str = "Presets") -> None:
     save_naming_rules(rules, source="Presets Manager")
-    st.session_state["naming_rules"] = rules.copy()
+    SSM.set_naming_rules(rules.copy())
     st.session_state["card_saved_banner"] = {"section": section, "msg": f"✅ {section_label} saved & applied!", "ts": time.time()}
     st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
     # Clear all preset widget input keys while safely preserving group selections and system flags
@@ -735,7 +736,7 @@ def _save_presets(rules: dict, section: str = "presets", section_label: str = "P
 
 def _save_csv_schemas(rules: dict) -> None:
     save_naming_rules(rules, source="CSV Schemas Manager")
-    st.session_state["naming_rules"] = rules.copy()
+    SSM.set_naming_rules(rules.copy())
     st.session_state["card_saved_banner"] = {"section": "csv_schemas", "msg": "✅ NetBox Bulk Import CSV Schemas saved & applied!", "ts": time.time()}
     _clear_session_state_prefixes("csv_sch_")
     st.rerun()
@@ -744,7 +745,7 @@ def _reset_csv_schemas(rules: dict) -> None:
     from config.naming_rules import DEFAULT_CSV_SCHEMAS
     rules["csv_schemas"] = copy.deepcopy(DEFAULT_CSV_SCHEMAS)
     save_naming_rules(rules, source="CSV Schemas Reset")
-    st.session_state["naming_rules"] = rules.copy()
+    SSM.set_naming_rules(rules.copy())
     st.session_state["card_saved_banner"] = {"section": "csv_schemas", "msg": "✅ NetBox Bulk Import CSV Schemas reset to defaults!", "ts": time.time()}
     _clear_session_state_prefixes("csv_sch_")
     st.rerun()
@@ -820,7 +821,7 @@ def _render_csv_schemas_editor(rules: dict) -> None:
 
 def _save_vlan_desc_mappings(rules: dict, section: str = "vlan_desc_mappings", section_label: str = "VLAN Description Mappings") -> None:
     save_naming_rules(rules, source="VLAN Description Mappings Manager")
-    st.session_state["naming_rules"] = rules.copy()
+    SSM.set_naming_rules(rules.copy())
     st.session_state["card_saved_banner"] = {"section": section, "msg": f"✅ {section_label} saved & applied!", "ts": time.time()}
     _clear_session_state_prefixes("vlandesc_")
     st.rerun()
@@ -1237,7 +1238,7 @@ def _host_editor(rules: dict) -> None:
                 reset_patterns[pkey] = DEFAULT_NAMING_PATTERNS[pkey]
         rules["naming_patterns"] = reset_patterns
         save_naming_rules(rules, source="Hosts Type Presets: Reset to Defaults")
-        st.session_state["naming_rules"] = rules.copy()
+        SSM.set_naming_rules(rules.copy())
         st.session_state["card_saved_banner"] = {"section": "hosts", "msg": "✅ Hosts Type Presets reset to defaults!", "ts": time.time()}
         st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
         st.session_state.pop("host_preset_min_one", None)
@@ -1404,7 +1405,7 @@ def _vm_editor(rules: dict) -> None:
             vm_patterns["vm_host"] = DEFAULT_NAMING_PATTERNS["vm_host"]
         rules["naming_patterns"] = vm_patterns
         save_naming_rules(rules, source="VM Presets: Reset to Defaults")
-        st.session_state["naming_rules"] = rules.copy()
+        SSM.set_naming_rules(rules.copy())
         st.session_state["card_saved_banner"] = {"section": "vm_roles", "msg": "✅ VM Role Presets reset to defaults!", "ts": time.time()}
         st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
         _clear_session_state_prefixes("host_", "vm_", "preset_", "host_preset", "vm_preset")
@@ -1828,7 +1829,7 @@ def render_standards_tab(active_model):
     )
 
     current_rules = load_naming_rules()
-    st.session_state["naming_rules"] = current_rules
+    SSM.set_naming_rules(current_rules)
 
     tab_edit, tab_vars, tab_history = st.tabs(["📝 Edit Standards", "📘 Pattern Variables Reference", "📜 Change History"])
     
@@ -1899,7 +1900,7 @@ def render_standards_tab(active_model):
                     rules = load_naming_rules()
                     rules["netbox_server_yaml"] = yaml_text
                     save_naming_rules(rules, source="YAML Guidelines Save")
-                    st.session_state["naming_rules"] = rules.copy()
+                    SSM.set_naming_rules(rules.copy())
                     st.session_state["card_saved_banner"] = {"section": "yaml_guidelines", "msg": "✅ NetBox Server & Hardware YAML Guidelines saved & applied!", "ts": time.time()}
                     st.rerun()
             with col_reset_yaml:
@@ -1908,7 +1909,7 @@ def render_standards_tab(active_model):
                     rules = load_naming_rules()
                     rules["netbox_server_yaml"] = default_yaml
                     save_naming_rules(rules, source="YAML Guidelines Reset")
-                    st.session_state["naming_rules"] = rules.copy()
+                    SSM.set_naming_rules(rules.copy())
                     st.session_state["card_saved_banner"] = {"section": "yaml_guidelines", "msg": "✅ NetBox Server & Hardware YAML Guidelines reset to defaults!", "ts": time.time()}
                     st.rerun()
 
@@ -2120,7 +2121,7 @@ def render_standards_tab(active_model):
                             try:
                                 restored_rules = restore_from_history(idx)
                                 save_naming_rules(restored_rules, source=f"Restored from {timestamp}")
-                                st.session_state["naming_rules"] = restored_rules
+                                SSM.set_naming_rules(restored_rules)
                                 st.success(f"✅ Restored version from {timestamp}")
                                 st.rerun()
                             except Exception as e:
