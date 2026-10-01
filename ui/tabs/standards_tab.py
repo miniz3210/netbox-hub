@@ -1518,10 +1518,7 @@ def _render_hardware_slot_mappings_editor(rules: dict) -> None:
             st.markdown("#### 🖧 HARDWARE SLOT MAPPINGS (PCIe / SLOT)")
         with col_t2:
             slots = dict(get_hardware_slot_mappings(rules))
-            st.markdown(
-                f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(slots)} mappings</span></div>",
-                unsafe_allow_html=True,
-            )
+            st.markdown(f'<div style="float:right; background:#2b313e; padding:2px 8px; border-radius:4px; font-size:0.85em; color:#fff;">{len(slots)} mappings</div>', unsafe_allow_html=True)
         st.caption("Map interface/NIC names (vmnic, eno, enp, eth) to physical hardware slots (PCIeX/PortY, CardX/PortY). Platform-agnostic.")
         # Explicit column headers for Hardware Slot Mappings
         h_col_nic, h_col_slot, h_col_act = st.columns(SLOT_MAPPINGS_COLS, vertical_alignment="center")
