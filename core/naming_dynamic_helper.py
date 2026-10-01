@@ -166,8 +166,8 @@ def render_token_widgets(
         val = st.text_input(
             label=label,
             value="",
-            placeholder=placeholder or (f"e.g. {default_val}" if default_val else ""),
-            key=key,
+            placeholder=ph or (f"e.g. {default_display}" if default_display else ""),
+            key=wk,
             label_visibility="collapsed",
         ).strip()
 

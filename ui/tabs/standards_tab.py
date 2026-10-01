@@ -567,7 +567,7 @@ def _render_site_code_mapping_manager(key_prefix: str = "std_scm") -> None:
         updated = {}
         pending_delete = None
         for idx, (pat, code) in enumerate(items):
-            col_p, col_r, col_del = st.columns([4.0, 5.0, 1.2], vertical_alignment="center")
+            col_p, col_r, col_act = st.columns([4.0, 5.0, 1.2], vertical_alignment="center")
             with col_p:
                 np_ = st.text_input(
                     "Original Pattern", value=pat, key=f"{key_prefix}_sitecode_{idx}_p",
@@ -578,9 +578,33 @@ def _render_site_code_mapping_manager(key_prefix: str = "std_scm") -> None:
                     "Replacement", value=code, key=f"{key_prefix}_sitecode_{idx}_r",
                     label_visibility="collapsed",
                 )
-            with col_del:
-                if _render_centered_del_btn(f"{key_prefix}_sitecode_{idx}_del", "Delete this mapping"):
-                    pending_delete = idx
+            with col_act:
+                b_up, b_dn, b_del = st.columns([1, 1, 1], vertical_alignment="center")
+                with b_up:
+                    if idx > 0 and st.button("⬆", key=f"{key_prefix}_sitecode_{idx}_up", help="Move up"):
+                        items[idx], items[idx - 1] = items[idx - 1], items[idx]
+                        st.session_state["site_code_mappings_modified"] = dict(items)
+                        rules = load_naming_rules()
+                        sr = get_site_code_rules(rules)
+                        final = dict(rules)
+                        final["site_code_rules"] = dict(sr)
+                        final["site_code_rules"]["exact_mappings"] = dict(items)
+                        _persist_site_code_mappings(final)
+                        return
+                with b_dn:
+                    if idx < len(items) - 1 and st.button("⬇", key=f"{key_prefix}_sitecode_{idx}_dn", help="Move down"):
+                        items[idx], items[idx + 1] = items[idx + 1], items[idx]
+                        st.session_state["site_code_mappings_modified"] = dict(items)
+                        rules = load_naming_rules()
+                        sr = get_site_code_rules(rules)
+                        final = dict(rules)
+                        final["site_code_rules"] = dict(sr)
+                        final["site_code_rules"]["exact_mappings"] = dict(items)
+                        _persist_site_code_mappings(final)
+                        return
+                with b_del:
+                    if _render_centered_del_btn(f"{key_prefix}_sitecode_{idx}_del", "Delete this mapping"):
+                        pending_delete = idx
 
             if pending_delete == idx:
                 key_to_del = pat.strip().lower()
@@ -1559,7 +1583,7 @@ def _render_vlan_description_mappings_editor(rules: dict) -> None:
         updated = {}
 
         for idx, (role, desc) in enumerate(items):
-            col_role, col_desc, col_del = st.columns(VLAND_MAPPINGS_COLS, vertical_alignment="center")
+            col_role, col_desc, col_act = st.columns(VLAND_MAPPINGS_COLS, vertical_alignment="center")
             with col_role:
                 nrole = st.text_input(
                     "Role", value=role, key=f"vlandesc_{idx}_role",
@@ -1570,13 +1594,33 @@ def _render_vlan_description_mappings_editor(rules: dict) -> None:
                     "VLAN Description", value=desc, key=f"vlandesc_{idx}_desc",
                     label_visibility="collapsed",
                 )
-            with col_del:
-                if _render_centered_del_btn(f"vlandesc_{idx}_del", "Delete this mapping"):
-                    new_mappings = {r: d for i, (r, d) in enumerate(items) if i != idx}
-                    rules_to_save = dict(rules)
-                    rules_to_save["vlan_description_mappings"] = new_mappings
-                    _save_vlan_desc_mappings(rules_to_save)
-                    return
+            with col_act:
+                b_up, b_dn, b_del = st.columns([1, 1, 1], vertical_alignment="center")
+                with b_up:
+                    if idx > 0 and st.button("⬆", key=f"vlandesc_{idx}_up", help="Move up"):
+                        items[idx], items[idx - 1] = items[idx - 1], items[idx]
+                        rules_to_save = dict(rules)
+                        rules_to_save["vlan_description_mappings"] = dict(items)
+                        save_naming_rules(rules_to_save, source="VLAN Desc: Reorder")
+                        SSM.set_naming_rules(rules_to_save.copy())
+                        SSM.refresh_naming_rules()
+                        st.rerun()
+                with b_dn:
+                    if idx < len(items) - 1 and st.button("⬇", key=f"vlandesc_{idx}_dn", help="Move down"):
+                        items[idx], items[idx + 1] = items[idx + 1], items[idx]
+                        rules_to_save = dict(rules)
+                        rules_to_save["vlan_description_mappings"] = dict(items)
+                        save_naming_rules(rules_to_save, source="VLAN Desc: Reorder")
+                        SSM.set_naming_rules(rules_to_save.copy())
+                        SSM.refresh_naming_rules()
+                        st.rerun()
+                with b_del:
+                    if _render_centered_del_btn(f"vlandesc_{idx}_del", "Delete mapping"):
+                        new_mappings = {r: d for i, (r, d) in enumerate(items) if i != idx}
+                        rules_to_save = dict(rules)
+                        rules_to_save["vlan_description_mappings"] = new_mappings
+                        _save_vlan_desc_mappings(rules_to_save)
+                        return
 
             role_key = nrole.strip()
             if role_key:
