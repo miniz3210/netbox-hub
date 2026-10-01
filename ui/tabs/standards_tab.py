@@ -1560,14 +1560,14 @@ def _render_hardware_slot_mappings_editor(rules: dict) -> None:
 
         col_save, col_reset = st.columns([1.2, 1.0])
         with col_save:
-            if st.button("💾 Save & Apply Slot Mappings", key="hwslot_save", type="primary", width="stretch"):
+            if st.button("💾 Save & Apply Changes", key="hwslot_save", type="primary", width="stretch"):
                 current_full_rules = load_naming_rules()
                 current_full_rules["hardware_slot_mappings"] = dict(updated)
                 save_naming_rules(current_full_rules, source="Slot Mappings: Save")
                 SSM.set_naming_rules(current_full_rules.copy())
                 SSM.refresh_naming_rules()
                 st.session_state.pop("hardware_slot_mappings_modified", None)
-                st.session_state["card_saved_banner"] = {"section": "slot_mappings", "msg": "✅ Hardware Slot Mappings saved & applied to disk!", "ts": time.time()}
+                st.session_state["card_saved_banner"] = {"section": "slot_mappings", "msg": "✅ Hardware Slot Mappings saved & applied!", "ts": time.time()}
                 st.rerun()
         with col_reset:
             if st.button("🔄 Reset Slot Mappings", key="hwslot_reset", width="stretch"):

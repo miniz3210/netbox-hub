@@ -1432,27 +1432,21 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         row_vals["vswitch"] = resolved_vs
                         row_vals["v_switch"] = resolved_vs
 
-                        # Interface normalization - always populate both
+                        # Preserve all extracted fields directly without destructive wiping or artificial fallbacks
                         norm_iface = iface or row_vals.get("interface") or ""
                         row_vals["interface"] = norm_iface
                         row_vals["port_group"] = norm_iface
                         row_vals["vmnic"] = norm_iface
 
-                        # Purpose normalization - platform-agnostic topology inheritance (No Hardcode)
-                        iface = str(row.get("Interface", "")).strip()
+                        # Standardize purpose lookup across OCR keys while preserving logical names
                         raw_purpose = (
                             row_vals.get("purpose")
-                            or row_vals.get("service")
                             or row_vals.get("role_portgroup")
+                            or row_vals.get("service")
                             or row_vals.get("portgroup")
                             or row_vals.get("port_group")
                             or ""
                         )
-
-                        # Keep purpose clean: if it matches interface or is empty, leave blank for clean contraction
-                        if raw_purpose and raw_purpose.lower() == iface.lower():
-                            raw_purpose = ""
-
                         row_vals["purpose"] = str(raw_purpose).strip()
                         row_vals["service"] = str(raw_purpose).strip()
 
