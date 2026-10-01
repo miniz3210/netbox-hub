@@ -153,10 +153,15 @@ def render_token_widgets(
         if is_optional:
             default_val = "" if not meta.get("default") else meta.get("default", "")
         opt_mark = " (Optional)" if is_optional else ""
-        # Render inline label with copyable lightbulb badge (selectable & right-click copyable)
+        # Render inline label with unselectable lightbulb prefix and cleanly copyable value
         hint_badge = ""
         if default_val and not str(default_val).startswith("<"):
-            hint_badge = f' <span style="display:inline-block; margin-left:6px; padding:1px 6px; font-size:0.82em; background-color:#2b313e; color:#ffdd57; border-radius:4px; user-select:all; -webkit-user-select:all;" title="Default value (Right-click to copy)">💡 {default_val}</span>'
+            hint_badge = (
+                f' <span style="display:inline-flex; align-items:center; margin-left:6px; padding:1px 6px; font-size:0.82em; background-color:#2b313e; border-radius:4px;" title="Default value (Right-click to copy)">'
+                f'<span style="user-select:none; -webkit-user-select:none; color:#ffdd57; margin-right:4px;">💡:</span>'
+                f'<code style="background:transparent; color:#e0e0e0; padding:0; user-select:all; -webkit-user-select:all; font-weight:bold;">{default_val}</code>'
+                f'</span>'
+            )
 
         st.markdown(
             f'<div style="font-size:0.9em; font-weight:500; margin-bottom:4px; user-select:text;">{label}{hint_badge}</div>',

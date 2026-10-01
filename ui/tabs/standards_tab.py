@@ -37,6 +37,53 @@ VARIABLE_COLS = [1.5, 2.5, 2.5, 1.5, 0.9, 0.45, 0.45, 0.45]
 # Auto-Correction rule columns: Original Pattern, Replacement, Description, Action.
 AUTOCORRECT_COLS = [3.5, 3.0, 4.0, 1.0]
 
+def _render_preset_row_actions(
+    idx: int,
+    total: int,
+    items: list,
+    key_prefix: str,
+    on_reorder=None,
+    on_delete=None,
+    swap_key: str = None,
+) -> None:
+    """Render Up / Down / Delete buttons matching the preset table style.
+
+    ``on_reorder(new_items)`` is called when a reorder is requested.
+    ``on_delete(del_idx)`` is called when delete is requested (caller handles pending).
+    If ``swap_key`` is given, reorders are deferred via session state (preserving
+    inline edits) instead of firing ``on_reorder`` immediately.
+    """
+    col_up, col_down, col_del = st.columns(PRESET_ACTION_COLS)
+    with col_up:
+        if idx > 0:
+            if st.button("⬆️", key=f"{key_prefix}_{idx}_up", help="Move up"):
+                if swap_key:
+                    st.session_state[swap_key] = (idx, idx - 1)
+                    st.rerun()
+                elif on_reorder:
+                    new_items = list(items)
+                    new_items[idx], new_items[idx - 1] = new_items[idx - 1], new_items[idx]
+                    on_reorder(new_items)
+        else:
+            st.empty()
+    with col_down:
+        if idx < total - 1:
+            if st.button("⬇️", key=f"{key_prefix}_{idx}_dn", help="Move down"):
+                if swap_key:
+                    st.session_state[swap_key] = (idx, idx + 1)
+                    st.rerun()
+                elif on_reorder:
+                    new_items = list(items)
+                    new_items[idx], new_items[idx + 1] = new_items[idx + 1], new_items[idx]
+                    on_reorder(new_items)
+        else:
+            st.empty()
+    with col_del:
+        if on_delete is not None:
+            if st.button("🗑️", key=f"{key_prefix}_{idx}_del", help="Delete this entry"):
+                on_delete(idx)
+
+
 def _normalize_var_name(raw: str) -> str:
     return re.sub(r"[^a-z0-9_]", "", raw.strip().lower().replace(" ", "_"))
 
@@ -1595,32 +1642,27 @@ def _render_vlan_description_mappings_editor(rules: dict) -> None:
                     label_visibility="collapsed",
                 )
             with col_act:
-                b_up, b_dn, b_del = st.columns([1, 1, 1], vertical_alignment="center")
-                with b_up:
-                    if idx > 0 and st.button("⬆", key=f"vlandesc_{idx}_up", help="Move up"):
-                        items[idx], items[idx - 1] = items[idx - 1], items[idx]
-                        rules_to_save = dict(rules)
-                        rules_to_save["vlan_description_mappings"] = dict(items)
-                        save_naming_rules(rules_to_save, source="VLAN Desc: Reorder")
-                        SSM.set_naming_rules(rules_to_save.copy())
-                        SSM.refresh_naming_rules()
+                _render_preset_row_actions(
+                    idx=idx,
+                    total=len(items),
+                    items=items,
+                    key_prefix="vlandesc",
+                    on_reorder=lambda new_items: (
+                        rules_to_save := dict(rules),
+                        rules_to_save.update({"vlan_description_mappings": dict(new_items)}),
+                        save_naming_rules(rules_to_save, source="VLAN Desc: Reorder"),
+                        SSM.set_naming_rules(rules_to_save.copy()),
+                        SSM.refresh_naming_rules(),
                         st.rerun()
-                with b_dn:
-                    if idx < len(items) - 1 and st.button("⬇", key=f"vlandesc_{idx}_dn", help="Move down"):
-                        items[idx], items[idx + 1] = items[idx + 1], items[idx]
-                        rules_to_save = dict(rules)
-                        rules_to_save["vlan_description_mappings"] = dict(items)
-                        save_naming_rules(rules_to_save, source="VLAN Desc: Reorder")
-                        SSM.set_naming_rules(rules_to_save.copy())
-                        SSM.refresh_naming_rules()
-                        st.rerun()
-                with b_del:
-                    if _render_centered_del_btn(f"vlandesc_{idx}_del", "Delete mapping"):
-                        new_mappings = {r: d for i, (r, d) in enumerate(items) if i != idx}
-                        rules_to_save = dict(rules)
-                        rules_to_save["vlan_description_mappings"] = new_mappings
-                        _save_vlan_desc_mappings(rules_to_save)
-                        return
+                    ),
+                    on_delete=lambda del_idx: (
+                        new_mappings := {r: d for i, (r, d) in enumerate(items) if i != del_idx},
+                        rules_to_save := dict(rules),
+                        rules_to_save.update({"vlan_description_mappings": new_mappings}),
+                        _save_vlan_desc_mappings(rules_to_save),
+                        None
+                    )
+                )
 
             role_key = nrole.strip()
             if role_key:
