@@ -141,14 +141,14 @@ def render_token_widgets(
         hint_badge = ""
         if default_val and not str(default_val).startswith("<"):
             hint_badge = (
-                f' <span style="display:inline-flex; align-items:center; margin-left:8px; padding:2px 8px; font-size:0.95rem; background-color:#2b313e; border:1px solid rgba(255,221,87,0.3); border-radius:5px;" title="Default value (Right-click to copy)">'
-                f'<span style="user-select:none; -webkit-user-select:none; color:#ffdd57; font-size:1.05rem; margin-right:5px;">💡:</span>'
-                f'<code style="background:transparent; color:#ffd000; padding:0; user-select:all; -webkit-user-select:all; font-weight:bold; font-size:0.95rem;">{default_val}</code>'
+                f' <span style="display:inline-flex; align-items:center; margin-left:6px;" title="Default value (Right-click to copy)">'
+                f'<span style="user-select:none; -webkit-user-select:none; color:#ffdd57; font-size:0.85rem; margin-right:3px;">💡:</span>'
+                f'<code style="background:transparent; color:#ffdd57; padding:0; user-select:all; -webkit-user-select:all; font-weight:600; font-size:0.82rem;">{default_val}</code>'
                 f'</span>'
             )
 
         st.markdown(
-            f'<div style="font-size:0.95rem; font-weight:600; margin-bottom:4px; user-select:text;">{label}{hint_badge}</div>',
+            f'<div style="font-size:0.90rem; font-weight:500; margin-bottom:4px; user-select:text;">{label}{hint_badge}</div>',
             unsafe_allow_html=True,
         )
 

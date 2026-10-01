@@ -884,12 +884,12 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         if st.button("AI Verify ESXi Description", key="esxi_ai_verify_btn"):
             st.info("Verified against ESXi naming standards.")
 
-    # --- SECTION 2: 📸 SCREENSHOT OCR PIPELINE (4-STEP WORKFLOW) ---
-    with st.expander("📸 Screenshot OCR Pipeline (4-Step Workflow)", expanded=False):
-        st.caption("4-step workflow to analyze Hypervisor topology screenshots and generate bulk NetBox descriptions.")
+    # --- SECTION 2: 📸 SCREENSHOT OCR PIPELINE (3-STEP WORKFLOW) ---
+    with st.expander("📸 Screenshot OCR Pipeline (3-Step Workflow)", expanded=False):
+        st.caption("3-step streamlined workflow to analyze Hypervisor topology screenshots, inspect variables, and generate bulk NetBox descriptions.")
 
-        # 1️⃣ Step 1: Upload Screenshots & Analyze
-        st.markdown("##### 1️⃣ Upload Hypervisor Topology Screenshots")
+        # 1️⃣ Step 1: Upload Screenshots & Verify
+        st.markdown("##### 1️⃣ Upload Hypervisor Topology Screenshots & Verify")
         st.caption("Upload screenshots of Virtual Switches, Physical Adapters, Bridges, or VMkernel/Management Adapters from Hypervisor Host Client (vSphere/ESXi, Proxmox VE, KVM).")
 
         with st.expander("📸 Screenshot Guidelines (Virtual Switches Topology)", expanded=False):
@@ -912,7 +912,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
         col_up1, col_up2 = st.columns([1, 1])
 
-        # Initialize counters (images are derived transiently, not stored persistently)
         if "esxi_upload_counter" not in st.session_state:
             st.session_state["esxi_upload_counter"] = 0
         if "esxi_paste_counter" not in st.session_state:
@@ -1021,18 +1020,20 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     deduped.append(item)
             return deduped
 
-        # Transient clipboard ingestion
+        # Cumulative clipboard ingestion (APPEND instead of overwrite)
         if pasted_data and pasted_data.startswith("data:image"):
             import base64 as _b64, io as _io
             try:
                 header, encoded = pasted_data.split(",", 1)
                 img_bytes = _b64.b64decode(encoded)
                 pasted_file = _io.BytesIO(img_bytes)
-                idx = len(st.session_state.get("pasted_clipboard_imgs") or []) + 1
+                current_pasted = list(st.session_state.get("pasted_clipboard_imgs") or [])
+                idx = len(current_pasted) + 1
                 pasted_file.name = f"clipboard_screenshot_{idx}.png"
                 pasted_file.type = "image/png"
                 pasted_file.size = len(img_bytes)
-                st.session_state["pasted_clipboard_imgs"] = [pasted_file]
+                current_pasted.append(pasted_file)
+                st.session_state["pasted_clipboard_imgs"] = current_pasted
                 st.session_state["esxi_paste_counter"] += 1
                 st.session_state["paste_input_ver"] = st.session_state.get("paste_input_ver", 0) + 1
                 st.rerun()
@@ -1040,6 +1041,29 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 st.warning(f"Failed to process pasted image: {e}")
 
         uploaded_imgs = _derive_active_topology_images()
+
+        # Immediate preview directly above Action Buttons
+        if uploaded_imgs:
+            with st.expander(f"🔍 Preview Staged Screenshots ({len(uploaded_imgs)} file(s))", expanded=True):
+                preview_cols = st.columns(min(len(uploaded_imgs), 4))
+                remove_key = None
+                for img_idx, img_item in enumerate(uploaded_imgs):
+                    with preview_cols[img_idx % len(preview_cols)]:
+                        img_title = getattr(img_item, "name", f"Screenshot #{img_idx + 1}")
+                        st.caption(f"#{img_idx + 1}: {img_title}")
+                        st.image(img_item, width="stretch")
+                        if st.button("✖ Remove", key=f"unified_remove_btn_{img_idx}"):
+                            remove_key = (getattr(img_item, "name", None), getattr(img_item, "size", None))
+                if remove_key is not None:
+                    st.session_state["topo_uploaded_imgs"] = [
+                        img for img in (st.session_state.get("topo_uploaded_imgs") or [])
+                        if (getattr(img, "name", None), getattr(img, "size", None)) != remove_key
+                    ]
+                    st.session_state["pasted_clipboard_imgs"] = [
+                        img for img in (st.session_state.get("pasted_clipboard_imgs") or [])
+                        if (getattr(img, "name", None), getattr(img, "size", None)) != remove_key
+                    ]
+                    st.rerun()
 
         st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
         btn_col1, btn_col2, _ = st.columns([2.2, 1.2, 6.6])
@@ -1061,7 +1085,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
         if not topo_is_analyzing and start_analyze:
             if not _is_vision_capable_model(active_model):
-                st.error(f"❌ Selected model [{active_model}] does not support Image/Vision analysis. Please select a vision-capable model (e.g. gpt-4o, gpt-5.6-luna, claude-3-5-sonnet) from the left sidebar.")
+                st.error(f"❌ Selected model [{active_model}] does not support Image/Vision analysis. Please select a vision-capable model from the left sidebar.")
             else:
                 st.session_state["topo_is_analyzing"] = True
                 try:
@@ -1070,7 +1094,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         results = analyze_hypervisor_topology_screenshot(uploaded_imgs, naming_rules, active_model)
                         st.session_state["hypervisor_parsed_descriptions"] = results
                         st.success("Successfully analyzed topology and generated NetBox descriptions!")
-                        # Auto-clear the file uploader (new key version) while keeping the parsed data.
                         st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
                 except Exception as e:
                     st.error(f"Vision analysis failed: {str(e)}")
@@ -1078,42 +1101,9 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     st.session_state["topo_is_analyzing"] = False
                     st.rerun()
 
-        # 2️⃣ Step 2: Preview & Review Topology Data (Full-Width)
+        # 2️⃣ Step 2: Extracted Variables Inspector (Full-Width & Clean Filtering)
         st.divider()
-        st.markdown("##### 2️⃣ Preview & Check Topology Data")
-        if uploaded_imgs:
-            with st.expander(f"🔍 Preview Uploaded Screenshots ({len(uploaded_imgs)} file(s))", expanded=False):
-                preview_cols = st.columns(min(len(uploaded_imgs), 4))
-                remove_idx = None
-                for img_idx, img_item in enumerate(uploaded_imgs):
-                    with preview_cols[img_idx % len(preview_cols)]:
-                        img_title = getattr(img_item, "name", f"Screenshot #{img_idx + 1}")
-                        st.caption(f"#{img_idx + 1}: {img_title}")
-                        st.image(img_item, width="stretch")
-                        if st.button("✖ Remove", key=f"unified_remove_btn_{img_idx}"):
-                            remove_idx = img_idx
-                if remove_idx is not None:
-                    st.session_state["topo_uploaded_imgs"] = [
-                        img for i, img in enumerate(st.session_state.get("topo_uploaded_imgs") or [])
-                        if i != remove_idx
-                    ]
-                    st.rerun()
-
-        if "hypervisor_parsed_descriptions" in st.session_state and st.session_state["hypervisor_parsed_descriptions"]:
-            st.caption("Review and edit parsed topology directly below. Batch text updates reactively in real time.")
-            edited_descriptions = st.data_editor(
-                st.session_state["hypervisor_parsed_descriptions"],
-                width='stretch',
-                num_rows="dynamic",
-                key="esxi_topology_editor"
-            )
-            st.session_state["hypervisor_parsed_descriptions"] = edited_descriptions
-        else:
-            st.info("⚪ No topology data analyzed yet. Upload screenshot(s) and click analyze above.")
-
-        # 3️⃣ Step 3: Extracted Variables Inspector (Full-Width & Clean Filtering)
-        st.divider()
-        st.markdown("##### 3️⃣ Extracted Variables Inspector")
+        st.markdown("##### 2️⃣ Extracted Variables Inspector")
         if "hypervisor_parsed_descriptions" in st.session_state and st.session_state["hypervisor_parsed_descriptions"]:
             rows = st.session_state["hypervisor_parsed_descriptions"]
 
@@ -1325,9 +1315,9 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         else:
             st.caption("Tokens will be listed here after analyzing topology screenshots.")
 
-        # 4️⃣ Step 4: NetBox Descriptions (Ready-to-Copy)
+        # 3️⃣ Step 3: NetBox Descriptions & Review (Ready-to-Copy)
         st.divider()
-        st.markdown("##### 4️⃣ NetBox Descriptions (Ready-to-Copy)")
+        st.markdown("##### 3️⃣ NetBox Descriptions & Review (Ready-to-Copy)")
         if "hypervisor_parsed_descriptions" in st.session_state and st.session_state["hypervisor_parsed_descriptions"]:
             st.markdown("###### 📋 Generated NetBox Interface Descriptions (Editable)")
             st.caption("Review and edit parsed topology directly below. Batch text updates reactively in real time.")
