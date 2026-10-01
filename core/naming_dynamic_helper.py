@@ -82,6 +82,14 @@ def render_dynamic_pattern(pattern: str, values: Dict[str, str], variables: Dict
     # 2. Strip empty optional clauses and substitute values
     cleaned = remove_empty_optional_tokens(pattern, processed_values, variables)
     rendered = _substitute_values(cleaned, processed_values)
+    # Zero-hardcode, platform-agnostic token clean-strip:
+    # 1. Clean dangling hyphens/dashes before empty positions: e.g. " - " with nothing after -> ""
+    rendered = re.sub(r'\s*-\s*(?=$|\s*-)', '', rendered)
+    # 2. Clean leading/trailing standalone hyphens
+    rendered = re.sub(r'^\s*-\s*', '', rendered)
+    rendered = re.sub(r'\s*-\s*$', '', rendered)
+    # 3. Collapse multiple spaces and trim
+    rendered = re.sub(r'\s+', ' ', rendered).strip()
     final_output = _normalize_delimiters(rendered)
 
     # 3. Apply all active correction categories to the entire rendered string

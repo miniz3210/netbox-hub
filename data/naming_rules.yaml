@@ -14,7 +14,7 @@
   "firewall_interface": "<role_zone>_<vlan_id>",
   "esxi_host": "<site_prefix><role_esx><seq>.<domain>",
   "vm_host": "<country><site><role><seq>",
-  "esxi_uplink": "<slot> - <v_switch> <purpose> <uplink_role>",
+  "esxi_uplink": "<vmnic> - <v_switch> <purpose> <uplink_role>",
   "esxi_portgroup_name": "PG-<pg_network>",
   "esxi_portgroup": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
   "esxi_vmkernel_name": "<vmk>",
@@ -25,7 +25,7 @@
   "host_vm_proxmox_x": "<site_prefix><role_esx><seq>.<domain>",
   "esxinet_vswitch": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
   "esxinet_host": "<site_prefix><role_esx><seq>.<domain>",
-  "esxinet_uplink": "<slot> - <v_switch> <purpose> <uplink_role>",
+  "esxinet_uplink": "<vmnic> - <v_switch> <purpose> <uplink_role>",
   "esxinet_portgroup_name": "PG-<pg_network>",
   "esxinet_portgroup": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
   "esxinet_vmkernel_name": "<vmk>",
@@ -271,7 +271,7 @@
     "firewall_interface": "<role_zone>_<vlan_id>",
     "esxi_host": "<site_prefix><role_esx><seq>.<domain>",
     "vm_host": "<country><site><role><seq>",
-    "esxi_uplink": "<slot> - <v_switch> <purpose> <uplink_role>",
+    "esxi_uplink": "<vmnic> - <v_switch> <purpose> <uplink_role>",
     "esxi_portgroup_name": "PG-<pg_network>",
     "esxi_portgroup": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
     "esxi_vmkernel_name": "<vmk>",
@@ -282,7 +282,7 @@
     "host_vm_proxmox_x": "<site_prefix><role_esx><seq>.<domain>",
     "esxinet_vswitch": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
     "esxinet_host": "<site_prefix><role_esx><seq>.<domain>",
-    "esxinet_uplink": "<slot> - <v_switch> <purpose> <uplink_role>",
+    "esxinet_uplink": "<vmnic> - <v_switch> <purpose> <uplink_role>",
     "esxinet_portgroup_name": "PG-<pg_network>",
     "esxinet_portgroup": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
     "esxinet_vmkernel_name": "<vmk>",
@@ -592,15 +592,15 @@
     },
     "v_switch": {
       "label": "vSwitch Name",
-      "placeholder": "vSwitch",
-      "default": "",
+      "placeholder": "vSwitchX",
+      "default": "vSwitch",
       "scope": "hypervisor",
       "optional": false
     },
     "purpose": {
       "label": "Purpose / Service",
       "placeholder": "e.g. Management, vMotion, Storage",
-      "default": "",
+      "default": "Management, vMotion",
       "scope": "hypervisor",
       "optional": false
     },
@@ -762,6 +762,14 @@
       "enabled": true
     }
   ],
+  "hardware_slot_mappings": {
+    "vmnic1": "PCIe1/Port1",
+    "vmnic2": "PCIe1/Port2",
+    "vmnic3": "PCIe2/Port1",
+    "vmnic4": "PCIe2/Port2",
+    "vmnic5": "PCIe3/Port1",
+    "vmnic6": "PCIe3/Port2"
+  },
   "csv_schemas": {
     "import_site": {
       "headers": [
