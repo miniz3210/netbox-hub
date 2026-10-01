@@ -1461,6 +1461,15 @@ def _render_hardware_slot_mappings_editor(rules: dict) -> None:
                 unsafe_allow_html=True,
             )
         st.caption("Map interface/NIC names (vmnic, eno, enp, eth) to physical hardware slots (PCIeX/PortY, CardX/PortY). Platform-agnostic.")
+        # Explicit column headers for Hardware Slot Mappings
+        h_col_nic, h_col_slot, h_col_act = st.columns(SLOT_MAPPINGS_COLS, vertical_alignment="center")
+        with h_col_nic:
+            st.markdown("**Interface / NIC Identifier**")
+        with h_col_slot:
+            st.markdown("**Physical Hardware Slot**")
+        with h_col_act:
+            pass
+
         items = list(slots.items())
         updated = {}
         pending_delete = None

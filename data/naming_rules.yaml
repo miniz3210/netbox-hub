@@ -586,7 +586,7 @@
     "vmnic": {
       "label": "vmnic Name",
       "placeholder": "vmnic",
-      "default": "",
+      "default": "vmnic",
       "scope": "hypervisor",
       "optional": false
     },

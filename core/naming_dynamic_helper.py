@@ -153,17 +153,22 @@ def render_token_widgets(
         if is_optional:
             default_val = "" if not meta.get("default") else meta.get("default", "")
         opt_mark = " (Optional)" if is_optional else ""
-        tooltip_parts = []
-        default_display = default_val if default_val and not str(default_val).startswith("<") else None
-        if default_display:
-            tooltip_parts.append(f"Default: {default_display}")
-        field_help = " | ".join(tooltip_parts) if tooltip_parts else None
-        values[token] = st.text_input(
-            label=f"{label}{opt_mark}",
+        # Render inline label with copyable lightbulb badge (selectable & right-click copyable)
+        hint_badge = ""
+        if default_val and not str(default_val).startswith("<"):
+            hint_badge = f' <span style="display:inline-block; margin-left:6px; padding:1px 6px; font-size:0.82em; background-color:#2b313e; color:#ffdd57; border-radius:4px; user-select:all; -webkit-user-select:all;" title="Default value (Right-click to copy)">💡 {default_val}</span>'
+
+        st.markdown(
+            f'<div style="font-size:0.9em; font-weight:500; margin-bottom:4px; user-select:text;">{label}{hint_badge}</div>',
+            unsafe_allow_html=True,
+        )
+
+        val = st.text_input(
+            label=label,
             value="",
-            placeholder=ph or (f"e.g. {default_display}" if default_display else ""),
-            key=wk,
-            help=field_help,
+            placeholder=placeholder or (f"e.g. {default_val}" if default_val else ""),
+            key=key,
+            label_visibility="collapsed",
         ).strip()
 
     for token, (label, ph, default) in (extra_inputs or {}).items():
@@ -174,13 +179,17 @@ def render_token_widgets(
             if default_display:
                 tooltip_parts.append(f"Default: {default_display}")
             field_help = " | ".join(tooltip_parts) if tooltip_parts else None
-            values[token] = st.text_input(
-                label=label,
-                value="",
-                placeholder=ph or (f"e.g. {default_display}" if default_display else ""),
-                key=wk,
-                help=field_help,
-            ).strip()
+        st.markdown(
+            f'<div style="font-size:0.9em; font-weight:500; margin-bottom:4px; user-select:text;">{label}</div>',
+            unsafe_allow_html=True,
+        )
+        values[token] = st.text_input(
+            label=label,
+            value="",
+            placeholder=ph or (f"e.g. {default_display}" if default_display else ""),
+            key=wk,
+            label_visibility="collapsed",
+        ).strip()
 
     return values
 
