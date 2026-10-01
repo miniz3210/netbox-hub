@@ -625,6 +625,13 @@ def _normalize_rules(raw: dict) -> dict:
     elif isinstance(raw.get("ipam_role_mappings"), list):
         merged["ipam_role_mappings"] = raw["ipam_role_mappings"]
 
+    if isinstance(raw.get("hardware_slot_mappings"), dict):
+        merged["hardware_slot_mappings"] = raw["hardware_slot_mappings"]
+    elif isinstance(raw.get("hardware_slot_mappings"), {}):
+        merged["hardware_slot_mappings"] = {}
+    else:
+        merged["hardware_slot_mappings"] = {}
+
     merged["csv_schemas"] = get_csv_schemas(raw)
 
     if isinstance(raw.get("token_order"), dict):
@@ -688,7 +695,7 @@ def get_esxi_network_presets(rules: dict) -> list:
     return _normalize_presets(raw, ESXI_NETWORK_PRESETS)
 
 
-def get_hardware_slot_mappings(rules: dict) -> dict:
+def get_hardware_slot_mappings(rules: dict = None) -> dict:
     """Return the hardware-slot mapping dict from a rules dict.
 
     Keys are vmnic bare numbers (str) such as ``"0"`` or ``"1"``; values are
@@ -696,9 +703,11 @@ def get_hardware_slot_mappings(rules: dict) -> dict:
     ``hardware_slot_mappings`` key in the YAML; falls back to an empty dict
     when absent so every caller sees a clean mapping with no surprises.
     """
-    raw = rules.get("hardware_slot_mappings")
-    if isinstance(raw, dict) and raw:
-        return {str(k): str(v) for k, v in raw.items()}
+    if rules is None:
+        rules = load_naming_rules()
+    val = rules.get("hardware_slot_mappings")
+    if isinstance(val, dict):
+        return val
     return {}
 
 
