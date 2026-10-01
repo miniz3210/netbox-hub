@@ -1645,11 +1645,12 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 if isinstance(r, dict)
                 for iface in [str(r.get("Interface") or r.get("interface") or "")]
             )
-            bulk_text = (
-                "# NOTE:\n"
-                f"{'# - Slot Mappings: Not detected in screenshots. Provide physical adapter details to populate.\n' if not _has_slots else ''}"
-                "# - Uplink / Bond Role: Verify active/standby or bonding modes in hypervisor networking settings.\n\n"
-            ) + "\n\n".join(blocks).strip()
+            note_header = "# NOTE:\n"
+            if not _has_slots:
+                note_header += "# - Slot Mappings: Not detected in screenshots. Provide physical adapter details to populate.\n"
+            note_header += "# - Uplink / Bond Role: Verify active/standby or bonding modes in hypervisor networking settings.\n\n"
+            joined_blocks = "\n\n".join(blocks).strip()
+            bulk_text = note_header + joined_blocks
             st.code(bulk_text, language="text")
 
             uplink_lines = []

@@ -2033,7 +2033,7 @@ def render_standards_tab(active_model):
             _preset_type_editor("esxi_network", get_esxi_network_presets(current_rules), current_rules, prefix="esxinet",
                                 card_title="☁️ HYPERVISOR NETWORK DESCRIPTION PRESETS",
                                 card_caption="Manage Hypervisor interface descriptions (Uplink, PortGroup, Bridge, VMkernel/Management). Quick Copy dynamically renders from these templates.",
-                                section="esxi", section_label="ESXi Virtualization & Networking")
+                                 section="esxi", section_label="Hypervisor Virtualization & Networking")
             st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
             _render_hardware_slot_mappings_editor(current_rules)
 
