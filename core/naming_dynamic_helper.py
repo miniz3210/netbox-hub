@@ -149,15 +149,38 @@ def render_token_widgets(
         meta = variables.get(token, {})
         meta = meta if isinstance(meta, dict) else {}
         is_optional = meta.get("optional")
-        initial = defaults.get(token, meta.get("default", ""))
+        default_val = defaults.get(token, meta.get("default", ""))
         if is_optional:
-            initial = "" if not meta.get("default") else meta.get("default", "")
-        values[token] = st.text_input(label, value=initial, placeholder=ph, key=wk).strip()
+            default_val = "" if not meta.get("default") else meta.get("default", "")
+        opt_mark = " (Optional)" if is_optional else ""
+        tooltip_parts = []
+        default_display = default_val if default_val and not str(default_val).startswith("<") else None
+        if default_display:
+            tooltip_parts.append(f"Default: {default_display}")
+        field_help = " | ".join(tooltip_parts) if tooltip_parts else None
+        values[token] = st.text_input(
+            label=f"{label}{opt_mark}",
+            value="",
+            placeholder=ph or (f"e.g. {default_display}" if default_display else ""),
+            key=wk,
+            help=field_help,
+        ).strip()
 
     for token, (label, ph, default) in (extra_inputs or {}).items():
         if token not in values:
             wk = f"{prefix}__{token}"
-            values[token] = st.text_input(label, value=default, placeholder=ph, key=wk).strip()
+            tooltip_parts = []
+            default_display = default if default and not str(default).startswith("<") else None
+            if default_display:
+                tooltip_parts.append(f"Default: {default_display}")
+            field_help = " | ".join(tooltip_parts) if tooltip_parts else None
+            values[token] = st.text_input(
+                label=label,
+                value="",
+                placeholder=ph or (f"e.g. {default_display}" if default_display else ""),
+                key=wk,
+                help=field_help,
+            ).strip()
 
     return values
 

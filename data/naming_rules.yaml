@@ -586,77 +586,79 @@
     "vmnic": {
       "label": "vmnic Name",
       "placeholder": "vmnic",
-      "default": "vmnic",
+      "default": "",
       "scope": "hypervisor",
       "optional": false
     },
     "v_switch": {
       "label": "vSwitch Name",
       "placeholder": "vSwitch",
-      "default": "vSwitch",
+      "default": "",
       "scope": "hypervisor",
       "optional": false
     },
     "purpose": {
       "label": "Purpose / Service",
       "placeholder": "e.g. Management, vMotion, Storage",
-      "scope": "hypervisor",
       "default": "",
+      "scope": "hypervisor",
       "optional": false
-    },
-    "pg_network": {
-      "label": "Network Name (Deprecated, use interface)",
-      "placeholder": "e.g. VM Network",
-      "scope": "hypervisor"
     },
     "port_group": {
       "label": "Port Group / vSwitch",
       "placeholder": "e.g. vSwitch0",
-      "default": "vSwitch",
+      "default": "",
       "scope": "hypervisor",
       "optional": false
     },
     "interface": {
       "label": "Interface / Port Group Name",
       "placeholder": "e.g. vmnic0, PG-VMDK",
-      "default": "vmnic",
+      "default": "",
       "scope": "hypervisor",
       "optional": false
     },
     "slot": {
       "label": "Hardware / PCIe Slot",
       "placeholder": "e.g. PCIe1, Port1",
+      "default": "",
       "optional": true,
-      "scope": "hypervisor",
-      "default": ""
+      "scope": "hypervisor"
     },
     "active_vmnics": {
       "label": "Active vmnics",
       "placeholder": "e.g. vmnic0, vmnic1",
-      "default": "vmnic",
-      "scope": "hypervisor",
-      "optional": true
+      "default": "",
+      "optional": true,
+      "scope": "hypervisor"
     },
     "standby_vmnics": {
       "label": "Standby vmnics (Optional)",
       "placeholder": "e.g. vmnic2",
-      "scope": "hypervisor",
       "default": "",
-      "optional": true
+      "optional": true,
+      "scope": "hypervisor"
     },
     "vmk": {
       "label": "vmk Name",
       "placeholder": "vmk",
-      "default": "vmk",
+      "default": "",
       "scope": "hypervisor",
       "optional": false
     },
     "switch_zone": {
       "label": "Switch Zone / Network Zone",
       "placeholder": "e.g. DMZ, Production, Management",
-      "scope": "hypervisor",
       "default": "",
+      "scope": "hypervisor",
       "optional": false
+    },
+    "uplink_role": {
+      "label": "Uplink Role / Status",
+      "placeholder": "Active Uplink / Standby Uplink",
+      "default": "",
+      "optional": true,
+      "scope": "hypervisor"
     },
     "description": {
       "label": "Description",
@@ -665,9 +667,9 @@
       "optional": true,
       "scope": "shared"
     },
-    "uplink_role": {
-      "label": "Uplink Role / Status",
-      "placeholder": "Active Uplink / Standby Uplink",
+    "pg_network": {
+      "label": "Network Name (Deprecated, use interface)",
+      "placeholder": "e.g. VM Network",
       "default": "",
       "optional": false,
       "scope": "hypervisor"

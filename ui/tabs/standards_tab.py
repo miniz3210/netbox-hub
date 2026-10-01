@@ -31,7 +31,7 @@ PRESET_COLS = [1.0, 2.2, 7.5, 1.4]
 # Action cell sub-columns: Up, Down, Delete (equal thirds, right-aligned).
 PRESET_ACTION_COLS = [1, 1, 1]
 # VLAN allocation preset columns: VID, Role, Action (group-level patterns shown above).
-PRESET_VLAN_COLS = [1.0, 4.0, 1.2]
+PRESET_VLAN_COLS = [1.5, 7.3, 1.2]
 # Manage Pattern Variables columns: Name, Label, Placeholder, Auto-Fill, Optional, Up, Down, Delete.
 VARIABLE_COLS = [1.5, 2.5, 2.5, 1.5, 0.9, 0.45, 0.45, 0.45]
 # Auto-Correction rule columns: Original Pattern, Replacement, Description, Action.
@@ -555,7 +555,7 @@ def _render_site_code_mapping_manager(key_prefix: str = "std_scm") -> None:
             sr = get_site_code_rules(rules)
             exact = dict(sr.get("exact_mappings") or {})
 
-        m_col_p, m_col_r, m_col_del = st.columns([4.0, 3.5, 1.0], vertical_alignment="center")
+        m_col_p, m_col_r, m_col_del = st.columns([4.0, 5.0, 1.2], vertical_alignment="center")
         with m_col_p:
             st.markdown("**Original Pattern (City / Location)**")
         with m_col_r:
@@ -567,7 +567,7 @@ def _render_site_code_mapping_manager(key_prefix: str = "std_scm") -> None:
         updated = {}
         pending_delete = None
         for idx, (pat, code) in enumerate(items):
-            col_p, col_r, col_del = st.columns([4.0, 3.5, 1.0], vertical_alignment="center")
+            col_p, col_r, col_del = st.columns([4.0, 5.0, 1.2], vertical_alignment="center")
             with col_p:
                 np_ = st.text_input(
                     "Original Pattern", value=pat, key=f"{key_prefix}_sitecode_{idx}_p",
@@ -614,7 +614,7 @@ def _render_site_code_mapping_manager(key_prefix: str = "std_scm") -> None:
                 _reset_site_code_mappings()
 
         with st.form(key=f"{key_prefix}_sitecode_add_form", clear_on_submit=True):
-            col_city, col_code, col_add = st.columns([4.0, 3.5, 1.0], vertical_alignment="center")
+            col_city, col_code, col_add = st.columns([4.0, 5.0, 1.2], vertical_alignment="center")
             with col_city:
                 new_p = st.text_input(
                     "New City / Location", value="", key=f"{key_prefix}_sitecode_new_p",
@@ -1443,12 +1443,9 @@ def _vm_editor(rules: dict) -> None:
         _save_presets(rules, section="vm_roles", section_label="VM Role Presets")
 
 
-# Column widths for the VLAN Description Mappings editor: Role, Description, Action.
-VLAND_MAPPINGS_COLS = [3.2, 4.8, 1.0]
-
-
-# Column widths for the Hardware Slot Mappings editor: NIC, Slot, Action.
-SLOT_MAPPINGS_COLS = [3.5, 4.5, 1.0]
+# Standardized 3-column ratio for Key-Value mappings: Key, Value, Action
+VLAND_MAPPINGS_COLS = [4.0, 5.0, 1.2]
+SLOT_MAPPINGS_COLS = [4.0, 5.0, 1.2]
 
 def _render_hardware_slot_mappings_editor(rules: dict) -> None:
     from config.naming_rules import get_hardware_slot_mappings
@@ -1523,6 +1520,7 @@ def _render_hardware_slot_mappings_editor(rules: dict) -> None:
                 save_naming_rules(rules_to_save, source="Slot Mappings: Add")
                 SSM.set_naming_rules(rules_to_save.copy())
                 SSM.refresh_naming_rules()
+                _clear_session_state_prefixes("hwslot_")
                 st.session_state["card_saved_banner"] = {"section": "slot_mappings", "msg": f"✅ Added mapping {new_nic} -> {new_slot}!", "ts": time.time()}
                 st.rerun()
 
