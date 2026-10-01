@@ -1331,7 +1331,17 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             )
             st.session_state["hypervisor_parsed_descriptions"] = edited_descriptions
 
-            st.markdown("###### 📋 Quick Copy for NetBox (Batch Text)")
+            col_qc_title, col_qc_btn = st.columns([3.5, 1.0], vertical_alignment="center")
+            with col_qc_title:
+                st.markdown("###### 📋 Quick Copy for NetBox (Batch Text)")
+            with col_qc_btn:
+                if st.button("🔄 Refresh", key="btn_refresh_quick_copy", width='stretch', help="Re-render Quick Copy using the latest standards and patterns without re-running OCR"):
+                    from config.naming_rules import load_naming_rules
+                    fresh_rules = load_naming_rules()
+                    SSM.set_naming_rules(fresh_rules.copy())
+                    SSM.refresh_naming_rules()
+                    st.toast("✅ Refreshed with latest standards!")
+                    st.rerun()
             rows = edited_descriptions
 
             # Get patterns from session state
@@ -1490,6 +1500,20 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                                     act_vmnics = m_act.group(1)
                                 if m_stb and not stb_vmnics:
                                     stb_vmnics = m_stb.group(1)
+
+                        # Propagate vswitch uplinks to PortGroup teaming tokens
+                        if row_type == "PortGroup" and not act_vmnics:
+                            bucket = vswitch_uplinks.get(resolved_vs)
+                            if bucket:
+                                if bucket["active"] and bucket["standby"]:
+                                    act_vmnics = ", ".join(bucket["active"])
+                                    stb_vmnics = ", ".join(bucket["standby"])
+                                elif len(bucket["active"]) > 1 and not bucket["standby"]:
+                                    act_vmnics = bucket["active"][0]
+                                    stb_vmnics = ", ".join(bucket["active"][1:])
+                                elif bucket["active"]:
+                                    act_vmnics = ", ".join(bucket["active"])
+
                         row_vals["active_vmnics"] = act_vmnics
                         row_vals["standby_vmnics"] = stb_vmnics
                         row_vals["active"] = act_vmnics
@@ -1574,6 +1598,31 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         else:
                             lines.append(f"{header_iface}\n{rendered}\n")
                 return "\n".join(lines)
+
+            # Build vswitch uplinks map from Uplink rows for PortGroup teaming propagation
+            vswitch_uplinks = {}
+            for u_row in uplink_rows:
+                u_vs = (u_row.get("vswitch") or u_row.get("v_switch") or "").strip()
+                if not u_vs:
+                    m_u = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*|bond\w*|ovs-br\w*|[A-Za-z0-9_\-]+-SW\w*)\b", str(u_row.get("Description", "")))
+                    if m_u:
+                        u_vs = m_u.group(1)
+                if not u_vs:
+                    continue
+
+                u_iface = str(u_row.get("Interface") or u_row.get("vmnic") or "").strip()
+                m_nic = re.search(r"\b([a-zA-Z0-9_\-\.]+)\b", u_iface)
+                nic_name = m_nic.group(1) if m_nic else u_iface
+
+                u_desc = str(u_row.get("Description") or "")
+                u_role = str(u_row.get("Role") or u_row.get("Status") or "")
+                is_standby = bool(re.search(r"(?i)\bstandby\b", f"{u_desc} {u_role}"))
+
+                bucket = vswitch_uplinks.setdefault(u_vs, {"active": [], "standby": []})
+                if is_standby:
+                    bucket["standby"].append(nic_name)
+                else:
+                    bucket["active"].append(nic_name)
 
             blocks = []
             if uplink_rows:
