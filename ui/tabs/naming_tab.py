@@ -1362,22 +1362,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             pg_rows = [r for r in rows if r.get("Type") == "PortGroup"]
             vmk_rows = [r for r in rows if r.get("Type") == "VMkernel"]
 
-            # Zero-hardcode: build purpose map from PortGroup topology for VMkernel resolution
-            switch_pg_purpose_map = {}
-            for r in pg_rows:
-                vs = (r.get("vswitch") or r.get("v_switch") or r.get("vSwitch") or "").strip()
-                if not vs:
-                    desc = str(r.get("Description", ""))
-                    m = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*|bond\w*|ovs-br\w*|[A-Za-z0-9_\-]+-SW\w*)\b", desc)
-                    if m:
-                        vs = m.group(1)
-                if vs:
-                    purpose = (
-                        str(r.get("Role / PortGroup") or r.get("Purpose") or r.get("service") or r.get("portgroup") or r.get("Interface") or "").strip()
-                    )
-                    if purpose and vs not in switch_pg_purpose_map:
-                        switch_pg_purpose_map[vs] = purpose
-
             def _group_by_vswitch(rlist):
                 """Group rows by vSwitch, extracting from description if needed."""
                 groups = {}
@@ -1465,15 +1449,9 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                             or ""
                         )
 
-                        # Topology Metamodel: Logic endpoints without purpose inherit from the same switch's PortGroups
-                        if (not raw_purpose or raw_purpose == iface):
-                            same_sw_pgs = [
-                                str(r.get("Role / PortGroup") or r.get("Interface") or "").strip()
-                                for r in items
-                                if r.get("Type") == "PortGroup" and str(r.get("Role / PortGroup") or r.get("Interface") or "").strip()
-                            ]
-                            if same_sw_pgs:
-                                raw_purpose = same_sw_pgs[0]
+                        # Keep purpose clean: if it matches interface or is empty, leave blank for clean contraction
+                        if raw_purpose and raw_purpose.lower() == iface.lower():
+                            raw_purpose = ""
 
                         row_vals["purpose"] = str(raw_purpose).strip()
                         row_vals["service"] = str(raw_purpose).strip()
@@ -1543,67 +1521,30 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         rendered = re.sub(r"\s*-\s*$", "", rendered)
                         rendered = re.sub(r"\s{2,}", " ", rendered).strip()
 
-                        # Fallback: keep the raw description when the template
-                        # evaluation yields nothing useful (empty or bare switch).
-                        if (not rendered or rendered == resolved_vs) and desc:
-                            rendered = desc
+                        # Auto-correction hook
+                        if st.session_state.get("auto_correct", True):
+                            from utils.formatters import apply_auto_corrections
+                            rendered = apply_auto_corrections(rendered, "vmware")
 
                         # Determine header based on type
                         if row_type == "Uplink":
                             hw_slot = _resolve_hw_slot(iface, user_slot_map=user_slot_map, ocr_slot_map=ocr_slot_map)
-                            # Extract the bare NIC token from the (possibly polluted) Interface value.
                             m_pure = re.search(r"\b(vmnic\d+|eno\w+|ens\w+|enp\w+|eth\d+)\b", iface, re.IGNORECASE)
                             pure_iface = m_pure.group(1) if m_pure else iface
                             row_vals["slot"] = hw_slot if hw_slot != pure_iface else ""
-                            uplink_header_tpl = (
-                                _patterns.get("esxinet_uplink_header")
-                                or _patterns.get("esxi_uplink_header")
-                                or None
-                            )
-                            if uplink_header_tpl and row_vals.get("slot"):
-                                header_iface = render_dynamic_pattern(uplink_header_tpl, row_vals, pattern_vars)
-                            elif row_vals.get("slot"):
+                            if row_vals.get("slot"):
                                 header_iface = f"{row_vals['slot']} ({pure_iface}):"
                             else:
-                                header_iface = f"{pure_iface}:"
-                            header_iface = re.sub(r"\s*\(\s*\)", "", header_iface)
-                            header_iface = re.sub(r"\s+\(", " (", header_iface)
-                            header_iface = re.sub(r"\)(\s*\([^)]*\))*", ")", header_iface)
-                            header_iface = re.sub(r"\s{2,}", " ", header_iface).strip()
-                            if header_iface == f"{pure_iface} ({pure_iface}):":
-                                header_iface = f"{pure_iface}:"
+                                header_iface = f"({pure_iface}):"
+                            lines.append(f"{header_iface}\n{rendered}\n")
                         elif row_type == "PortGroup":
                             clean_iface = iface.strip()
-                            pg_header_tpl = (
-                                _patterns.get("esxinet_portgroup_header")
-                                or _patterns.get("esxi_portgroup_header")
-                                or _patterns.get("portgroup_prefix")
-                                or None
-                            )
-                            if pg_header_tpl:
-                                header_iface = render_dynamic_pattern(pg_header_tpl, row_vals, pattern_vars)
-                                header_iface = re.sub(r"\s*\(\s*\)", "", header_iface)
-                                header_iface = re.sub(r"\s{2,}", " ", header_iface).strip()
-                                if not header_iface:
-                                    header_iface = f"{clean_iface}:"
-                            else:
-                                header_iface = f"{clean_iface}:"
+                            lines.append(f"{clean_iface}:\n{rendered}\n")
                         elif row_type == "VMkernel":
-                            # Zero-hardcode: dynamically inherit matching PortGroup name from switch topology
-                            effective_purp = row_vals.get("purpose", "")
-                            resolved_vs = row_vals.get("vswitch", "")
-                            if (not effective_purp or effective_purp.lower() == iface.lower()) and resolved_vs in switch_pg_purpose_map:
-                                effective_purp = switch_pg_purpose_map[resolved_vs]
-                            prefix = effective_purp if effective_purp else iface
-                            header_iface = f"{prefix}:"
+                            # 100% Template-driven output without hardcoded outer headers or forced IP appending
+                            lines.append(f"{rendered}\n")
                         else:
-                            header_iface = f"{iface}:"
-
-                        # Append with IP if present
-                        if ip and ip.strip():
-                            lines.append(f"{header_iface}\n{rendered} (IP: {ip})\n")
-                        else:
-                            lines.append(f"{header_iface}\n{rendered}\n")
+                            lines.append(f"{iface}:\n{rendered}\n")
                 return "\n".join(lines)
 
             # Build vswitch uplinks map from Uplink rows for PortGroup teaming propagation
@@ -1639,8 +1580,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             if vmk_rows:
                 blocks.append(_format_block(vmk_rows, "VMkernels"))
 
-            _has_slots = any(
-                bool(r.get("slot")) and str(r.get("slot", "")).strip() not in ("None", "", iface)
+            _has_slots = bool(ocr_slot_map) or any(
+                bool(r.get("Slot") or r.get("slot")) and str(r.get("Slot") or r.get("slot")).strip() not in ("None", "", iface)
                 for r in rows
                 if isinstance(r, dict)
                 for iface in [str(r.get("Interface") or r.get("interface") or "")]
@@ -1653,24 +1594,10 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             bulk_text = note_header + joined_blocks
             st.code(bulk_text, language="text")
 
-            uplink_lines = []
-            for r in edited_descriptions:
-                vm = r.get("vmnic", "")
-                vsw = r.get("vswitch", r.get("vSwitch", ""))
-                purp = r.get("purpose", "")
-                stat = r.get("status", "")
-                # Zero-hardcode: filter out purpose if it duplicates interface name
-                tokens = [vm, "-", vsw]
-                if purp and purp.lower() != vm.lower():
-                    tokens.append(purp)
-                if stat:
-                    tokens.append(stat)
-                uplink_lines.append(" ".join(tokens).strip())
-
             st.download_button(
                 "📥 Download Generated Descriptions (.txt)",
-                "\n".join(uplink_lines).encode("utf-8"),
-                file_name="esxi-netbox-descriptions.txt",
+                bulk_text.encode("utf-8"),
+                file_name="netbox-descriptions.txt",
                 mime="text/plain",
                 key="dl_esxi_descriptions_pipe"
             )
