@@ -1639,9 +1639,15 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             if vmk_rows:
                 blocks.append(_format_block(vmk_rows, "VMkernels"))
 
+            _has_slots = any(
+                bool(r.get("slot")) and str(r.get("slot", "")).strip() not in ("None", "", iface)
+                for r in rows
+                if isinstance(r, dict)
+                for iface in [str(r.get("Interface") or r.get("interface") or "")]
+            )
             bulk_text = (
                 "# NOTE:\n"
-                "# - Slot Mappings: Not detected in screenshots. Provide physical adapter details to populate.\n"
+                f"{'# - Slot Mappings: Not detected in screenshots. Provide physical adapter details to populate.\n' if not _has_slots else ''}"
                 "# - Uplink / Bond Role: Verify active/standby or bonding modes in hypervisor networking settings.\n\n"
             ) + "\n\n".join(blocks).strip()
             st.code(bulk_text, language="text")
