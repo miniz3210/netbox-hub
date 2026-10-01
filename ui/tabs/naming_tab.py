@@ -1467,24 +1467,17 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         row_vals["vmnic"] = norm_iface
 
                         # Purpose normalization - preserve raw purpose exactly
-                        raw_purpose = row_vals.get("purpose") or row_vals.get("service") or ""
-                        if not raw_purpose and desc:
-                            if row_type == "Uplink":
-                                parts = desc.split("-")
-                                if len(parts) >= 2:
-                                    raw_purpose = re.sub(r"^(vSwitch\w*|Active Uplink|Standby Uplink)\s*", "", parts[-1].strip())
-                                    raw_purpose = re.sub(r"(Active Uplink|Standby Uplink)$", "", raw_purpose).strip()
-                            else:
-                                raw_purpose = desc.split("(")[0].strip()
-                                raw_purpose = re.sub(r"\s*\[.*?\]$", "", raw_purpose).strip()
-                        if not raw_purpose:
-                            raw_purpose = row_vals.get("port_group") or iface
-                        row_vals["purpose"] = raw_purpose
-                        row_vals["service"] = raw_purpose
-                        if row_type == "VMkernel" and raw_purpose.strip() == "Management":
-                            if "Management Network" in row_vals.get("port_group", "") or "Management Network" in desc:
-                                row_vals["purpose"] = "Management Network"
-                                row_vals["service"] = "Management Network"
+                        iface = str(row.get("Interface", "")).strip()
+                        raw_purpose = (
+                            row_vals.get("purpose")
+                            or row_vals.get("service")
+                            or row_vals.get("role_portgroup")
+                            or row_vals.get("portgroup")
+                            or row_vals.get("port_group")
+                            or iface
+                        )
+                        row_vals["purpose"] = str(raw_purpose).strip()
+                        row_vals["service"] = str(raw_purpose).strip()
 
                         # Active/Standby teaming extraction (platform-agnostic tokens)
                         act_vmnics = row_vals.get("active") or row_vals.get("active_vmnics") or ""
@@ -1540,17 +1533,13 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         else:
                             rendered = ""
 
-                        # Clean formatting - 3 high-performance passes
+                        # Clean formatting - structural pipeline only (no keyword matches)
                         rendered = re.sub(r"<[^>]+>", "", rendered)
                         rendered = re.sub(r"\s*/\s*", " / ", rendered)
                         rendered = re.sub(r"\s*/\s*\)", ")", rendered)
                         rendered = re.sub(r"\(\s*/\s*", "(", rendered)
                         rendered = re.sub(r"\(\s*\)", "", rendered)
                         rendered = re.sub(r"\s*-\s*$", "", rendered)
-                        # Remove ghost teaming clause when both are absent
-                        rendered = re.sub(r"\(\s*Active\s*/\s*Standby\s*\)", "", rendered)
-                        # Remove orphan Standby when standby_vmnics was empty
-                        rendered = re.sub(r"\s*/\s*Standby\b", "", rendered)
                         rendered = re.sub(r"\s{2,}", " ", rendered).strip()
 
                         # Fallback: keep the raw description when the template
