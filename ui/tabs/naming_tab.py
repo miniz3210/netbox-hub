@@ -1093,7 +1093,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             st.caption("Review and edit parsed topology directly below. Batch text updates reactively in real time.")
             edited_descriptions = st.data_editor(
                 st.session_state["hypervisor_parsed_descriptions"],
-                use_container_width=True,
+                width='stretch',
                 num_rows="dynamic",
                 key="esxi_topology_editor"
             )
@@ -1543,7 +1543,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         rendered = re.sub(r"\(\s*/\s*", "(", rendered)
                         rendered = re.sub(r"\(\s*\)", "", rendered)
                         rendered = re.sub(r"\s*-\s*$", "", rendered)
-                        rendered = re.sub(r"\s{2,}", " ").strip()
+                        rendered = re.sub(r"\s{2,}", " ", rendered).strip()
 
                         # Fallback: keep the raw description when the template
                         # evaluation yields nothing useful (empty or bare switch).
