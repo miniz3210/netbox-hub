@@ -1196,7 +1196,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 <div style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 12px 14px; min-height: 120px;">
                     <div style="font-weight: 600; color: {color}; margin-bottom: 8px; font-size: 0.88rem; display: flex; justify-content: space-between;">
                         <span>{title}</span>
-                        <span style="background: rgba(255,255,255,0.1); padding: 1px 6px; border-radius: 10px; font-size: 0.75rem; color: #cbd5e1;">{len(items)}</span>
+                        <span style="background: rgba(255,255,255,0.1); padding: 1px 6px; border-radius: 10px; font-size: 0.88rem; font-weight: 500; color: #cbd5e1;">{len(items)}</span>
                     </div>
                     <div style="display: flex; flex-wrap: wrap; gap: 6px;">
                         {"".join([f'<span style="background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; padding: 3px 8px; font-size: 0.8rem; font-family: monospace; color: #f1f5f9;">{it}</span>' for it in items]) if items else '<span style="color: #64748b; font-size: 0.8rem;">None detected</span>'}

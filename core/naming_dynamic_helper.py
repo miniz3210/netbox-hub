@@ -52,52 +52,28 @@ def interpolate_pattern(pattern: str, values: Dict[str, str]) -> str:
 
 
 def render_dynamic_pattern(pattern: str, values: Dict[str, str], variables: Dict) -> str:
-    """Canonical render pipeline for a naming pattern.
-
-    Universally enforces optional-clause stripping, dynamic token substitution,
-    and 100% zero-hardcode auto-correction across all current and future categories.
-    """
     if not pattern:
         return ""
+    # Normalize values keys to lowercase for robust case-insensitive lookup
+    norm_vals = {str(k).strip().lower(): str(v).strip() for k, v in (values or {}).items() if v is not None}
 
-    from utils.formatters import load_auto_corrections, apply_auto_corrections
-    
-    # Check if auto-correction is globally enabled
-    auto_corr_enabled = st.session_state.get("auto_correct", True) or st.session_state.get("esxi_auto_corr", True)
-    
-    # Dynamically discover all active rule categories from YAML/cache (NO hardcoded category names)
-    all_rules = load_auto_corrections()
-    categories = list(all_rules.keys()) if isinstance(all_rules, dict) else []
+    # Replace tokens case-insensitively
+    def _repl(match):
+        tok_raw = match.group(1)
+        tok_key = tok_raw.lower()
+        val = norm_vals.get(tok_key, "")
+        return val
 
-    # 1. Apply all active correction categories to every input token value
-    processed_values = dict(values)
-    if auto_corr_enabled and categories:
-        for k, v in list(processed_values.items()):
-            if v and isinstance(v, str):
-                cur_val = v
-                for cat in categories:
-                    cur_val = apply_auto_corrections(cur_val, cat)
-                processed_values[k] = cur_val
+    result = re.sub(r"<([a-zA-Z0-9_]+)>", _repl, pattern)
 
-    # 2. Strip empty optional clauses and substitute values
-    cleaned = remove_empty_optional_tokens(pattern, processed_values, variables)
-    rendered = _substitute_values(cleaned, processed_values)
-    # Zero-hardcode, platform-agnostic token clean-strip:
-    # 1. Clean dangling hyphens/dashes before empty positions: e.g. " - " with nothing after -> ""
-    rendered = re.sub(r'\s*-\s*(?=$|\s*-)', '', rendered)
-    # 2. Clean leading/trailing standalone hyphens
-    rendered = re.sub(r'^\s*-\s*', '', rendered)
-    rendered = re.sub(r'\s*-\s*$', '', rendered)
-    # 3. Collapse multiple spaces and trim
-    rendered = re.sub(r'\s+', ' ', rendered).strip()
-    final_output = _normalize_delimiters(rendered)
-
-    # 3. Apply all active correction categories to the entire rendered string
-    if auto_corr_enabled and categories:
-        for cat in categories:
-            final_output = apply_auto_corrections(final_output, cat)
-
-    return final_output
+    # Prune dangling hyphens, extra spaces, empty brackets
+    result = re.sub(r"\s*-\s*(?=$|\s*-)", "", result)
+    result = re.sub(r"^\s*-\s*", "", result)
+    result = re.sub(r"\s*-\s*$", "", result)
+    result = re.sub(r"\(\s*\)", "", result)
+    result = re.sub(r"\[\s*\]", "", result)
+    result = re.sub(r"\s{2,}", " ", result).strip()
+    return result
 
 
 def _substitute_values(pattern: str, values: Dict[str, str]) -> str:
