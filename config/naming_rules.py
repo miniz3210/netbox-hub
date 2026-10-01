@@ -627,7 +627,7 @@ def _normalize_rules(raw: dict) -> dict:
 
     if isinstance(raw.get("hardware_slot_mappings"), dict):
         merged["hardware_slot_mappings"] = raw["hardware_slot_mappings"]
-    elif isinstance(raw.get("hardware_slot_mappings"), {}):
+    elif isinstance(raw.get("hardware_slot_mappings"), dict):
         merged["hardware_slot_mappings"] = {}
     else:
         merged["hardware_slot_mappings"] = {}
