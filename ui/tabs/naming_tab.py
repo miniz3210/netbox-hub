@@ -1438,17 +1438,28 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         row_vals["port_group"] = norm_iface
                         row_vals["vmnic"] = norm_iface
 
-                        # Standardize purpose lookup across OCR keys while preserving logical names
+                        # Extract network label / business role cleanly
                         raw_purpose = (
-                            row_vals.get("purpose")
+                            row_vals.get("network_label")
+                            or row_vals.get("purpose")
                             or row_vals.get("role_portgroup")
                             or row_vals.get("service")
                             or row_vals.get("portgroup")
                             or row_vals.get("port_group")
                             or ""
                         )
-                        row_vals["purpose"] = str(raw_purpose).strip()
-                        row_vals["service"] = str(raw_purpose).strip()
+                        clean_purp = str(raw_purpose).strip()
+
+                        # If purpose is identical to physical/virtual interface name, it is not a genuine purpose
+                        if re.match(r"^(vmnic\d+|eno\w+|ens\w+|enp\w+|eth\d+|vmk\d+)$", clean_purp, re.IGNORECASE):
+                            clean_purp = ""
+
+                        # If VMkernel purpose is empty, associate with matching switch portgroup network label
+                        if row_type == "VMkernel" and not clean_purp:
+                            clean_purp = switch_pg_purpose_map.get(resolved_vs, "")
+
+                        row_vals["purpose"] = clean_purp
+                        row_vals["service"] = clean_purp
 
                         # Active/Standby teaming extraction (platform-agnostic tokens)
                         act_vmnics = row_vals.get("active") or row_vals.get("active_vmnics") or ""
