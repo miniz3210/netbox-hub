@@ -584,6 +584,28 @@ def _reset_ipam_role_mappings() -> None:
     st.rerun()
 
 
+def _do_sitecode_reorder(new_items, key_prefix):
+    """Reorder site code mappings and persist."""
+    st.session_state["site_code_mappings_modified"] = dict(new_items)
+    rules = load_naming_rules()
+    sr = get_site_code_rules(rules)
+    final = dict(rules)
+    final["site_code_rules"] = dict(sr)
+    final["site_code_rules"]["exact_mappings"] = dict(new_items)
+    _persist_site_code_mappings(final)
+
+def _do_sitecode_delete(del_idx, key_prefix, items, exact):
+    """Delete a site code mapping and persist."""
+    key_to_del = items[del_idx][0].strip().lower()
+    exact.pop(key_to_del, None)
+    st.session_state["site_code_mappings_modified"] = dict(exact)
+    rules = load_naming_rules()
+    sr = get_site_code_rules(rules)
+    final = dict(rules)
+    final["site_code_rules"] = dict(sr)
+    final["site_code_rules"]["exact_mappings"] = dict(exact)
+    _persist_site_code_mappings(final)
+
 def _render_site_code_mapping_manager(key_prefix: str = "std_scm") -> None:
     from config.naming_rules import get_site_code_rules
 
@@ -626,46 +648,15 @@ def _render_site_code_mapping_manager(key_prefix: str = "std_scm") -> None:
                     label_visibility="collapsed",
                 )
             with col_act:
-                b_up, b_dn, b_del = st.columns([1, 1, 1], vertical_alignment="center")
-                with b_up:
-                    if idx > 0 and st.button("⬆", key=f"{key_prefix}_sitecode_{idx}_up", help="Move up"):
-                        items[idx], items[idx - 1] = items[idx - 1], items[idx]
-                        st.session_state["site_code_mappings_modified"] = dict(items)
-                        rules = load_naming_rules()
-                        sr = get_site_code_rules(rules)
-                        final = dict(rules)
-                        final["site_code_rules"] = dict(sr)
-                        final["site_code_rules"]["exact_mappings"] = dict(items)
-                        _persist_site_code_mappings(final)
-                        return
-                with b_dn:
-                    if idx < len(items) - 1 and st.button("⬇", key=f"{key_prefix}_sitecode_{idx}_dn", help="Move down"):
-                        items[idx], items[idx + 1] = items[idx + 1], items[idx]
-                        st.session_state["site_code_mappings_modified"] = dict(items)
-                        rules = load_naming_rules()
-                        sr = get_site_code_rules(rules)
-                        final = dict(rules)
-                        final["site_code_rules"] = dict(sr)
-                        final["site_code_rules"]["exact_mappings"] = dict(items)
-                        _persist_site_code_mappings(final)
-                        return
-                with b_del:
-                    if _render_centered_del_btn(f"{key_prefix}_sitecode_{idx}_del", "Delete this mapping"):
-                        pending_delete = idx
+                _render_preset_row_actions(
+                    idx=idx,
+                    total=len(items),
+                    items=items,
+                    key_prefix=f"{key_prefix}_sitecode",
+                    on_reorder=lambda new_items: (_do_sitecode_reorder(new_items, key_prefix) or None),
+                    on_delete=lambda del_idx: (_do_sitecode_delete(del_idx, key_prefix, items, exact) or None)
+                )
 
-            if pending_delete == idx:
-                key_to_del = pat.strip().lower()
-                if key_to_del in exact:
-                    del exact[key_to_del]
-                st.session_state["site_code_mappings_modified"] = dict(exact)
-                # Persist immediately after deletion (this helper reruns the app)
-                rules = load_naming_rules()
-                sr = get_site_code_rules(rules)
-                final = dict(rules)
-                final["site_code_rules"] = dict(sr)
-                final["site_code_rules"]["exact_mappings"] = dict(exact)
-                _persist_site_code_mappings(final)
-                return
             key = np_.strip().lower()
             if key:
                 updated[key] = nr_.strip().upper()

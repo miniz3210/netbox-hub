@@ -1390,6 +1390,22 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             pg_rows = [r for r in rows if r.get("Type") == "PortGroup"]
             vmk_rows = [r for r in rows if r.get("Type") == "VMkernel"]
 
+            # Zero-hardcode: build purpose map from PortGroup topology for VMkernel resolution
+            switch_pg_purpose_map = {}
+            for r in pg_rows:
+                vs = (r.get("vswitch") or r.get("v_switch") or r.get("vSwitch") or "").strip()
+                if not vs:
+                    desc = str(r.get("Description", ""))
+                    m = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*|bond\w*|ovs-br\w*|[A-Za-z0-9_\-]+-SW\w*)\b", desc)
+                    if m:
+                        vs = m.group(1)
+                if vs:
+                    purpose = (
+                        str(r.get("Role / PortGroup") or r.get("Purpose") or r.get("service") or r.get("portgroup") or r.get("Interface") or "").strip()
+                    )
+                    if purpose and vs not in switch_pg_purpose_map:
+                        switch_pg_purpose_map[vs] = purpose
+
             def _group_by_vswitch(rlist):
                 """Group rows by vSwitch, extracting from description if needed."""
                 groups = {}
@@ -1601,7 +1617,13 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                             else:
                                 header_iface = f"{clean_iface}:"
                         elif row_type == "VMkernel":
-                            header_iface = f"{iface}:"
+                            # Zero-hardcode: dynamically inherit matching PortGroup name from switch topology
+                            effective_purp = row_vals.get("purpose", "")
+                            resolved_vs = row_vals.get("vswitch", "")
+                            if (not effective_purp or effective_purp.lower() == iface.lower()) and resolved_vs in switch_pg_purpose_map:
+                                effective_purp = switch_pg_purpose_map[resolved_vs]
+                            prefix = effective_purp if effective_purp else iface
+                            header_iface = f"{prefix}:"
                         else:
                             header_iface = f"{iface}:"
 
@@ -1654,7 +1676,13 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 vsw = r.get("vswitch", r.get("vSwitch", ""))
                 purp = r.get("purpose", "")
                 stat = r.get("status", "")
-                uplink_lines.append(f"{vm} - {vsw} {purp} {stat}".strip())
+                # Zero-hardcode: filter out purpose if it duplicates interface name
+                tokens = [vm, "-", vsw]
+                if purp and purp.lower() != vm.lower():
+                    tokens.append(purp)
+                if stat:
+                    tokens.append(stat)
+                uplink_lines.append(" ".join(tokens).strip())
 
             st.download_button(
                 "📥 Download Generated Descriptions (.txt)",
