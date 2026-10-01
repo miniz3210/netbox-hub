@@ -723,7 +723,13 @@ def _persist_auto_corrections(data: dict) -> None:
 
 def _save_presets(rules: dict, section: str = "presets", section_label: str = "Presets") -> None:
     save_naming_rules(rules, source="Presets Manager")
-    SSM.set_naming_rules(rules.copy())
+    # Reload the persisted rules fresh from disk so the in-memory copy and SSM cache stay in sync
+    # with what's on disk, preventing stale-widget defaults on immediate rerender.
+    fresh = load_naming_rules()
+    rules.clear()
+    rules.update(fresh)
+    SSM.set_naming_rules(fresh.copy())
+    SSM.refresh_naming_rules()
     st.session_state["card_saved_banner"] = {"section": section, "msg": f"✅ {section_label} saved & applied!", "ts": time.time()}
     st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
     # Clear all preset widget input keys while safely preserving group selections and system flags

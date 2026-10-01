@@ -1121,7 +1121,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 sw = str(r.get("vSwitch") or r.get("vswitch") or r.get("VSwitch") or r.get("Switch") or "").strip()
                 if not sw:
                     desc_str = str(r.get("Description", ""))
-                    m_sw = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*)\b", desc_str)
+                    m_sw = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*|bond\w*|ovs-br\w*|[A-Za-z0-9_\-]+-SW\w*)\b", desc_str)
                     if m_sw:
                         sw = m_sw.group(1)
                 if sw:
@@ -1390,7 +1390,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     vs = (r.get("vSwitch") or r.get("vswitch") or r.get("VSwitch") or "").strip()
                     if not vs:
                         desc = str(r.get("Description", ""))
-                        m = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*)\b", desc)
+                        m = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*|bond\w*|ovs-br\w*|[A-Za-z0-9_\-]+-SW\w*)\b", desc)
                         if m:
                             vs = m.group(1)
                         elif not vs:
@@ -1403,7 +1403,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
             def _resolve_vswitch_from_desc(desc, row_type):
                 """Extract vSwitch from description if not in row."""
-                m = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*)\b", desc)
+                m = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*|bond\w*|ovs-br\w*|[A-Za-z0-9_\-]+-SW\w*)\b", desc)
                 if m:
                     return m.group(1)
                 return "Internal / No Uplink" if row_type == "Uplink" else "General"
@@ -1426,97 +1426,102 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         ip = str(row.get("IP Address", "") or "").strip()
                         row_type = row.get("Type", "")
 
-                        # FIX: Prioritize existing description if non-empty
-                        # Build row_vals from row (always available for header rendering)
+                        # Always extract and inject raw values into row_vals first,
+                        # including the description, so template evaluation runs
+                        # regardless of whether the user edited the description.
                         row_vals = {}
                         for k, v in row.items():
                             if v is not None and not str(v).lower() in ["nan", "none"]:
                                 norm_k = re.sub(r"[^a-zA-Z0-9]+", "_", str(k).strip().lower()).strip("_")
                                 row_vals[norm_k] = str(v).strip()
+                        row_vals["description"] = desc
 
-                        if desc:
-                            rendered = desc
-                        else:
-                            # Resolve vSwitch
-                            resolved_vs = (
-                                row_vals.get("vswitch") or
-                                row_vals.get("v_switch") or
-                                row_vals.get("switch") or
-                                vs or ""
-                            )
-                            if not resolved_vs and desc:
-                                m_vs = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*)\b", desc)
-                                if m_vs:
-                                    resolved_vs = m_vs.group(1)
-                            row_vals["vswitch"] = resolved_vs
-                            row_vals["v_switch"] = resolved_vs
+                        # Resolve vSwitch
+                        resolved_vs = (
+                            row_vals.get("vswitch") or
+                            row_vals.get("v_switch") or
+                            row_vals.get("switch") or
+                            vs or ""
+                        )
+                        if not resolved_vs and desc:
+                            m_vs = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*|bond\w*|ovs-br\w*|[A-Za-z0-9_\-]+-SW\w*)\b", desc)
+                            if m_vs:
+                                resolved_vs = m_vs.group(1)
+                        row_vals["vswitch"] = resolved_vs
+                        row_vals["v_switch"] = resolved_vs
 
-                            # Interface normalization - always populate both
-                            norm_iface = iface or row_vals.get("interface") or ""
-                            row_vals["interface"] = norm_iface
-                            row_vals["port_group"] = norm_iface
-                            row_vals["vmnic"] = norm_iface
+                        # Interface normalization - always populate both
+                        norm_iface = iface or row_vals.get("interface") or ""
+                        row_vals["interface"] = norm_iface
+                        row_vals["port_group"] = norm_iface
+                        row_vals["vmnic"] = norm_iface
 
-                            # Purpose normalization
-                            raw_purpose = row_vals.get("purpose") or row_vals.get("service") or ""
-                            if not raw_purpose and desc:
-                                if row_type == "Uplink":
-                                    parts = desc.split("-")
-                                    if len(parts) >= 2:
-                                        raw_purpose = re.sub(r"^(vSwitch\w*|Active Uplink|Standby Uplink)\s*", "", parts[-1].strip())
-                                        raw_purpose = re.sub(r"(Active Uplink|Standby Uplink)$", "", raw_purpose).strip()
-                                else:
-                                    raw_purpose = desc.split("(")[0].strip()
-                                    raw_purpose = re.sub(r"\s*\[.*?\]$", "", raw_purpose).strip()
-                            clean_purpose = re.sub(r"(?i)\s+(active uplink|standby uplink)$", "", raw_purpose).strip()
-                            row_vals["purpose"] = clean_purpose
-                            row_vals["service"] = clean_purpose
-
-                            # Active/Standby parsing
-                            act_vmnics = row_vals.get("active") or row_vals.get("active_vmnics") or ""
-                            stb_vmnics = row_vals.get("standby") or row_vals.get("standby_vmnics") or ""
-                            if desc and (not act_vmnics or not stb_vmnics):
-                                m_as = re.search(r"\((.*?)\s+Active\s*/\s*(.*?)\s+Standby\)", desc)
-                                if not m_as:
-                                    m_as = re.search(r"\[(.*?)\s+Active\s*/\s*(.*?)\s+Standby\]", desc)
-                                if not m_as:
-                                    m_act = re.search(r"\b(vmnic\d+)\s+Active", desc)
-                                    m_stb = re.search(r"\b(vmnic\d+)\s+Standby", desc)
-                                    if m_act and not act_vmnics:
-                                        act_vmnics = m_act.group(1)
-                                    if m_stb and not stb_vmnics:
-                                        stb_vmnics = m_stb.group(1)
-                                else:
-                                    if not act_vmnics:
-                                        act_vmnics = m_as.group(1).strip()
-                                    if not stb_vmnics:
-                                        stb_vmnics = m_as.group(2).strip()
-                            row_vals["active_vmnics"] = act_vmnics
-                            row_vals["standby_vmnics"] = stb_vmnics
-                            row_vals["active"] = act_vmnics
-                            row_vals["standby"] = stb_vmnics
-
-                            # Status
-                            status_val = row_vals.get("role") or row_vals.get("status") or "Active Uplink"
-                            row_vals["status"] = status_val
-                            row_vals["role"] = status_val
-
-                            # Render based on type
-                            if row_type == "VMkernel":
-                                rendered = render_dynamic_pattern(vmk_tpl, row_vals, pattern_vars)
-                            elif row_type == "PortGroup":
-                                rendered = render_dynamic_pattern(pg_tpl, row_vals, pattern_vars)
-                            elif row_type == "Uplink":
-                                rendered = render_dynamic_pattern(uplink_tpl, row_vals, pattern_vars)
+                        # Purpose normalization
+                        raw_purpose = row_vals.get("purpose") or row_vals.get("service") or ""
+                        if not raw_purpose and desc:
+                            if row_type == "Uplink":
+                                parts = desc.split("-")
+                                if len(parts) >= 2:
+                                    raw_purpose = re.sub(r"^(vSwitch\w*|Active Uplink|Standby Uplink)\s*", "", parts[-1].strip())
+                                    raw_purpose = re.sub(r"(Active Uplink|Standby Uplink)$", "", raw_purpose).strip()
                             else:
-                                rendered = ""
+                                raw_purpose = desc.split("(")[0].strip()
+                                raw_purpose = re.sub(r"\s*\[.*?\]$", "", raw_purpose).strip()
+                        clean_purpose = re.sub(r"(?i)\s+(active uplink|standby uplink)$", "", raw_purpose).strip()
+                        row_vals["purpose"] = clean_purpose
+                        row_vals["service"] = clean_purpose
 
-                            # Clean formatting
-                            rendered = re.sub(r"\([^)]*<[^>]+>[^)]*\)", "", rendered)
-                            rendered = re.sub(r"<[^>]+>", "", rendered)
-                            rendered = re.sub(r"\(\s*[/_-]*\s*\)", "", rendered)
-                            rendered = re.sub(r"\s*-\s*$", "", rendered)
-                            rendered = re.sub(r"\s{2,}", " ", rendered).strip()
+                        # Active/Standby teaming extraction (platform-agnostic tokens)
+                        act_vmnics = row_vals.get("active") or row_vals.get("active_vmnics") or ""
+                        stb_vmnics = row_vals.get("standby") or row_vals.get("standby_vmnics") or ""
+                        if not act_vmnics or not stb_vmnics:
+                            m_as = re.search(r"\((.*?)\s+Active\s*/\s*(.*?)\s+Standby\)", desc, re.IGNORECASE)
+                            if not m_as:
+                                m_as = re.search(r"\[(.*?)\s+Active\s*/\s*(.*?)\s+Standby\]", desc, re.IGNORECASE)
+                            if m_as:
+                                if not act_vmnics:
+                                    act_vmnics = m_as.group(1).strip()
+                                if not stb_vmnics:
+                                    stb_vmnics = m_as.group(2).strip()
+                            else:
+                                m_act = re.search(r"\b([a-zA-Z0-9_\-\.]+)\s+Active\b", desc, re.IGNORECASE)
+                                m_stb = re.search(r"\b([a-zA-Z0-9_\-\.]+)\s+Standby\b", desc, re.IGNORECASE)
+                                if m_act and not act_vmnics:
+                                    act_vmnics = m_act.group(1)
+                                if m_stb and not stb_vmnics:
+                                    stb_vmnics = m_stb.group(1)
+                        row_vals["active_vmnics"] = act_vmnics
+                        row_vals["standby_vmnics"] = stb_vmnics
+                        row_vals["active"] = act_vmnics
+                        row_vals["standby"] = stb_vmnics
+
+                        # Status (no forced default when status is absent)
+                        status_val = row_vals.get("role") or row_vals.get("status") or ""
+                        row_vals["status"] = status_val
+                        row_vals["role"] = status_val
+
+                        # Always evaluate the dynamic template so user edits to
+                        # descriptions are still normalized through the pipeline.
+                        if row_type == "VMkernel":
+                            rendered = render_dynamic_pattern(vmk_tpl, row_vals, pattern_vars)
+                        elif row_type == "PortGroup":
+                            rendered = render_dynamic_pattern(pg_tpl, row_vals, pattern_vars)
+                        elif row_type == "Uplink":
+                            rendered = render_dynamic_pattern(uplink_tpl, row_vals, pattern_vars)
+                        else:
+                            rendered = ""
+
+                        # Clean formatting
+                        rendered = re.sub(r"\([^)]*<[^>]+>[^)]*\)", "", rendered)
+                        rendered = re.sub(r"<[^>]+>", "", rendered)
+                        rendered = re.sub(r"\(\s*[/_-]*\s*\)", "", rendered)
+                        rendered = re.sub(r"\s*-\s*$", "", rendered)
+                        rendered = re.sub(r"\s{2,}", " ", rendered).strip()
+
+                        # Fallback: keep the raw description when the template
+                        # evaluation yields nothing useful (empty or bare switch).
+                        if (not rendered or rendered == resolved_vs) and desc:
+                            rendered = desc
 
                         # Determine header based on type
                         if row_type == "Uplink":
@@ -1543,8 +1548,21 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                             if header_iface == f"{pure_iface} ({pure_iface}):":
                                 header_iface = f"{pure_iface}:"
                         elif row_type == "PortGroup":
-                            clean_iface = re.sub(r"^(PGroup-|PG-)", "", iface).strip()
-                            header_iface = f"PG-{clean_iface}:"
+                            clean_iface = iface.strip()
+                            pg_header_tpl = (
+                                _patterns.get("esxinet_portgroup_header")
+                                or _patterns.get("esxi_portgroup_header")
+                                or _patterns.get("portgroup_prefix")
+                                or None
+                            )
+                            if pg_header_tpl:
+                                header_iface = render_dynamic_pattern(pg_header_tpl, row_vals, pattern_vars)
+                                header_iface = re.sub(r"\s*\(\s*\)", "", header_iface)
+                                header_iface = re.sub(r"\s{2,}", " ", header_iface).strip()
+                                if not header_iface:
+                                    header_iface = f"{clean_iface}:"
+                            else:
+                                header_iface = f"{clean_iface}:"
                         elif row_type == "VMkernel":
                             header_iface = f"{iface}:"
                         else:
@@ -1573,7 +1591,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 vm = r.get("vmnic", "")
                 vsw = r.get("vswitch", r.get("vSwitch", ""))
                 purp = r.get("purpose", "")
-                stat = r.get("status", "Active Uplink")
+                stat = r.get("status", "")
                 uplink_lines.append(f"{vm} - {vsw} {purp} {stat}".strip())
 
             st.download_button(
