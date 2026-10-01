@@ -1513,11 +1513,16 @@ def _render_hardware_slot_mappings_editor(rules: dict) -> None:
     from config.naming_rules import get_hardware_slot_mappings
     with st.container(border=True):
         _check_and_render_banner("slot_mappings")
+
+        if "hardware_slot_mappings_modified" in st.session_state:
+            slots = dict(st.session_state["hardware_slot_mappings_modified"])
+        else:
+            slots = dict(get_hardware_slot_mappings(rules))
+
         col_t1, col_t2 = st.columns([3, 1])
         with col_t1:
             st.markdown("#### 🖧 HARDWARE SLOT MAPPINGS (PCIe / SLOT)")
         with col_t2:
-            slots = dict(get_hardware_slot_mappings(rules))
             st.markdown(f'<div style="float:right; background:#2b313e; padding:2px 8px; border-radius:4px; font-size:0.85em; color:#fff;">{len(slots)} mappings</div>', unsafe_allow_html=True)
         st.caption("Map interface/NIC names (vmnic, eno, enp, eth) to physical hardware slots (PCIeX/PortY, CardX/PortY). Platform-agnostic.")
         # Explicit column headers for Hardware Slot Mappings
@@ -1548,10 +1553,12 @@ def _render_hardware_slot_mappings_editor(rules: dict) -> None:
                 save_naming_rules(rules_to_save, source="Slot Mappings: Delete")
                 SSM.set_naming_rules(rules_to_save.copy())
                 SSM.refresh_naming_rules()
+                st.session_state["hardware_slot_mappings_modified"] = dict(new_slots)
                 st.session_state["card_saved_banner"] = {"section": "slot_mappings", "msg": "✅ Slot mapping deleted!", "ts": time.time()}
                 st.rerun()
             if n_nic and n_slot:
                 updated[n_nic] = n_slot
+
         col_save, col_reset = st.columns([1.2, 1.0])
         with col_save:
             if st.button("💾 Save & Apply Slot Mappings", key="hwslot_save", type="primary", width="stretch"):
@@ -1560,6 +1567,7 @@ def _render_hardware_slot_mappings_editor(rules: dict) -> None:
                 save_naming_rules(rules_to_save, source="Slot Mappings: Save")
                 SSM.set_naming_rules(rules_to_save.copy())
                 SSM.refresh_naming_rules()
+                st.session_state["hardware_slot_mappings_modified"] = dict(updated)
                 st.session_state["card_saved_banner"] = {"section": "slot_mappings", "msg": "✅ Hardware Slot Mappings saved & applied!", "ts": time.time()}
                 st.rerun()
         with col_reset:
@@ -1568,6 +1576,7 @@ def _render_hardware_slot_mappings_editor(rules: dict) -> None:
                 rules_to_save["hardware_slot_mappings"] = {}
                 save_naming_rules(rules_to_save, source="Slot Mappings: Reset")
                 _clear_session_state_prefixes("hwslot_")
+                st.session_state.pop("hardware_slot_mappings_modified", None)
                 SSM.set_naming_rules(rules_to_save.copy())
                 SSM.refresh_naming_rules()
                 st.session_state["card_saved_banner"] = {"section": "slot_mappings", "msg": "✅ Hardware Slot Mappings reset!", "ts": time.time()}
@@ -1582,13 +1591,14 @@ def _render_hardware_slot_mappings_editor(rules: dict) -> None:
                 add_sub = st.form_submit_button("➕ Add", width="stretch", help="Add new slot mapping")
             if add_sub and new_nic and new_slot:
                 rules_to_save = dict(rules)
-                final_slots = dict(updated)
+                final_slots = dict(slots)
                 final_slots[new_nic] = new_slot
                 rules_to_save["hardware_slot_mappings"] = final_slots
                 save_naming_rules(rules_to_save, source="Slot Mappings: Add")
                 SSM.set_naming_rules(rules_to_save.copy())
                 SSM.refresh_naming_rules()
                 _clear_session_state_prefixes("hwslot_")
+                st.session_state["hardware_slot_mappings_modified"] = dict(final_slots)
                 st.session_state["card_saved_banner"] = {"section": "slot_mappings", "msg": f"✅ Added mapping {new_nic} -> {new_slot}!", "ts": time.time()}
                 st.rerun()
 
