@@ -1510,14 +1510,16 @@ VLAND_MAPPINGS_COLS = [4.0, 5.0, 1.2]
 SLOT_MAPPINGS_COLS = [4.0, 5.0, 1.2]
 
 def _render_hardware_slot_mappings_editor(rules: dict) -> None:
-    from config.naming_rules import get_hardware_slot_mappings
+    from config.naming_rules import get_hardware_slot_mappings, load_naming_rules
     with st.container(border=True):
         _check_and_render_banner("slot_mappings")
 
-        if "hardware_slot_mappings_modified" in st.session_state:
-            slots = dict(st.session_state["hardware_slot_mappings_modified"])
-        else:
-            slots = dict(get_hardware_slot_mappings(rules))
+        # Always read fresh from disk / rules to guarantee up-to-date state
+        current_disk_rules = load_naming_rules()
+        raw_slots = current_disk_rules.get("hardware_slot_mappings")
+        if not isinstance(raw_slots, dict):
+            raw_slots = get_hardware_slot_mappings(current_disk_rules) or {}
+        slots = dict(raw_slots)
 
         col_t1, col_t2 = st.columns([3, 1])
         with col_t1:
@@ -1591,15 +1593,15 @@ def _render_hardware_slot_mappings_editor(rules: dict) -> None:
                 add_sub = st.form_submit_button("➕ Add", width="stretch", help="Add new slot mapping")
             if add_sub and new_nic and new_slot:
                 current_full_rules = load_naming_rules()
-                existing_slots = dict(current_full_rules.get("hardware_slot_mappings", {}))
-                existing_slots[new_nic] = new_slot
+                existing_slots = dict(current_full_rules.get("hardware_slot_mappings") or {})
+                existing_slots[new_nic.strip()] = new_slot.strip()
                 current_full_rules["hardware_slot_mappings"] = existing_slots
                 save_naming_rules(current_full_rules, source="Slot Mappings: Add")
                 SSM.set_naming_rules(current_full_rules.copy())
                 SSM.refresh_naming_rules()
                 _clear_session_state_prefixes("hwslot_")
                 st.session_state.pop("hardware_slot_mappings_modified", None)
-                st.session_state["card_saved_banner"] = {"section": "slot_mappings", "msg": f"✅ Added mapping {new_nic} -> {new_slot} and saved to disk!", "ts": time.time()}
+                st.session_state["card_saved_banner"] = {"section": "slot_mappings", "msg": f"✅ Added mapping {new_nic.strip()} -> {new_slot.strip()} and saved to disk!", "ts": time.time()}
                 st.rerun()
 
 
