@@ -1274,7 +1274,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                                 }
                                 save_naming_rules(naming_rules, source="Variable Inspector Sync")
                                 SSM.set_naming_rules(naming_rules.copy())
-                                st.success(f"✅ Successfully synced '{t_name}' to Hypervisor Standards!")
+                                st.toast(f"✅ <{norm_token}> synced! Manage in Standards Tab ➔ Pattern Variables.", icon="💾")
                                 st.rerun()
                         border_color = "#22c55e" if is_existing else "rgba(255,255,255,0.08)"
                         title_color = "#22c55e" if is_existing else "#38bdf8"
@@ -1284,34 +1284,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                             <div style="color: #94a3b8; font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{sample_vals}">e.g. {sample_vals}</div>
                             """, unsafe_allow_html=True)
 
-            # ➕ Add / Update Variable with persistent Standards sync
-            st.markdown("**➕ Add / Update Variable (Sync to Standards)**")
-            vcol1, vcol2, vcol3 = st.columns([1.5, 2.5, 1.2])
-            with vcol1:
-                sync_tok_name = st.text_input("Variable Token", placeholder="e.g. bridge, vlan_id", key="esxi_sync_tok_name").strip().lower()
-            with vcol2:
-                sync_tok_val = st.text_input("Value / Default", placeholder="e.g. vmbr0, 100", key="esxi_sync_tok_val").strip()
-            with vcol3:
-                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-                if st.button("💾 Sync Variable", key="btn_sync_var_standards", width='stretch'):
-                    if sync_tok_name:
-                        from config.naming_rules import save_naming_rules
-                        norm_token = re.sub(r"[^a-z0-9_]", "", sync_tok_name)
-                        if "pattern_variables" not in naming_rules or not isinstance(naming_rules.get("pattern_variables"), dict):
-                            naming_rules.setdefault("pattern_variables", {})
-                        naming_rules["pattern_variables"][norm_token] = {
-                            "label": norm_token.replace("_", " ").title(),
-                            "placeholder": f"e.g. {sync_tok_val or norm_token}",
-                            "default": sync_tok_val,
-                            "optional": False,
-                            "scope": "hypervisor",
-                        }
-                        save_naming_rules(naming_rules, source="Variable Inspector Sync")
-                        SSM.set_naming_rules(naming_rules.copy())
-                        st.success(f"Variable <{norm_token}> saved & synced to Standards (hypervisor scope)!")
-                        st.rerun()
-                    else:
-                        st.warning("Please enter a token name.")
         else:
             st.caption("Tokens will be listed here after analyzing topology screenshots.")
 
@@ -1667,7 +1639,11 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             if vmk_rows:
                 blocks.append(_format_block(vmk_rows, "VMkernels"))
 
-            bulk_text = "# NOTE: Verify Active/Standby via ESXi: vSwitch -> EDIT -> Teaming and failover -> Failover order.\n\n" + "\n\n".join(blocks).strip()
+            bulk_text = (
+                "# NOTE:\n"
+                "# - Slot Mappings: Not detected in screenshots. Provide physical adapter details to populate.\n"
+                "# - Uplink / Bond Role: Verify active/standby or bonding modes in hypervisor networking settings.\n\n"
+            ) + "\n\n".join(blocks).strip()
             st.code(bulk_text, language="text")
 
             uplink_lines = []
