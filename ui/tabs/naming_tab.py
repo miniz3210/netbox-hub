@@ -1481,6 +1481,10 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                             raw_purpose = row_vals.get("port_group") or iface
                         row_vals["purpose"] = raw_purpose
                         row_vals["service"] = raw_purpose
+                        if row_type == "VMkernel" and raw_purpose.strip() == "Management":
+                            if "Management Network" in row_vals.get("port_group", "") or "Management Network" in desc:
+                                row_vals["purpose"] = "Management Network"
+                                row_vals["service"] = "Management Network"
 
                         # Active/Standby teaming extraction (platform-agnostic tokens)
                         act_vmnics = row_vals.get("active") or row_vals.get("active_vmnics") or ""
@@ -1502,8 +1506,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                                 if m_stb and not stb_vmnics:
                                     stb_vmnics = m_stb.group(1)
 
-                        # Propagate vswitch uplinks to PortGroup teaming tokens
-                        if row_type == "PortGroup" and not act_vmnics:
+                        # Propagate vswitch uplinks to PortGroup/VMkernel teaming tokens
+                        if row_type in ("PortGroup", "VMkernel") and not act_vmnics:
                             bucket = vswitch_uplinks.get(resolved_vs)
                             if bucket:
                                 if bucket["active"] and bucket["standby"]:
@@ -1543,6 +1547,10 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         rendered = re.sub(r"\(\s*/\s*", "(", rendered)
                         rendered = re.sub(r"\(\s*\)", "", rendered)
                         rendered = re.sub(r"\s*-\s*$", "", rendered)
+                        # Remove ghost teaming clause when both are absent
+                        rendered = re.sub(r"\(\s*Active\s*/\s*Standby\s*\)", "", rendered)
+                        # Remove orphan Standby when standby_vmnics was empty
+                        rendered = re.sub(r"\s*/\s*Standby\b", "", rendered)
                         rendered = re.sub(r"\s{2,}", " ", rendered).strip()
 
                         # Fallback: keep the raw description when the template
