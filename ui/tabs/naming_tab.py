@@ -1466,7 +1466,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         row_vals["port_group"] = norm_iface
                         row_vals["vmnic"] = norm_iface
 
-                        # Purpose normalization
+                        # Purpose normalization - preserve raw purpose exactly
                         raw_purpose = row_vals.get("purpose") or row_vals.get("service") or ""
                         if not raw_purpose and desc:
                             if row_type == "Uplink":
@@ -1477,9 +1477,10 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                             else:
                                 raw_purpose = desc.split("(")[0].strip()
                                 raw_purpose = re.sub(r"\s*\[.*?\]$", "", raw_purpose).strip()
-                        clean_purpose = re.sub(r"(?i)\s+(active uplink|standby uplink)$", "", raw_purpose).strip()
-                        row_vals["purpose"] = clean_purpose
-                        row_vals["service"] = clean_purpose
+                        if not raw_purpose:
+                            raw_purpose = row_vals.get("port_group") or iface
+                        row_vals["purpose"] = raw_purpose
+                        row_vals["service"] = raw_purpose
 
                         # Active/Standby teaming extraction (platform-agnostic tokens)
                         act_vmnics = row_vals.get("active") or row_vals.get("active_vmnics") or ""
@@ -1535,12 +1536,14 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         else:
                             rendered = ""
 
-                        # Clean formatting
-                        rendered = re.sub(r"\([^)]*<[^>]+>[^)]*\)", "", rendered)
+                        # Clean formatting - 3 high-performance passes
                         rendered = re.sub(r"<[^>]+>", "", rendered)
-                        rendered = re.sub(r"\(\s*[/_-]*\s*\)", "", rendered)
+                        rendered = re.sub(r"\s*/\s*", " / ", rendered)
+                        rendered = re.sub(r"\s*/\s*\)", ")", rendered)
+                        rendered = re.sub(r"\(\s*/\s*", "(", rendered)
+                        rendered = re.sub(r"\(\s*\)", "", rendered)
                         rendered = re.sub(r"\s*-\s*$", "", rendered)
-                        rendered = re.sub(r"\s{2,}", " ", rendered).strip()
+                        rendered = re.sub(r"\s{2,}", " ").strip()
 
                         # Fallback: keep the raw description when the template
                         # evaluation yields nothing useful (empty or bare switch).
