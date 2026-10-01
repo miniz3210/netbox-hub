@@ -864,8 +864,18 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         # Dynamically render widgets for ALL tokens in template (handles new tokens automatically)
         values = render_token_widgets(curr_pattern, variables, f"esxi_{selected_code}", custom_order=order)
 
+        # Zero-hardcode auto-correction hook
+        if st.session_state.get("auto_correct", True):
+            from utils.formatters import apply_auto_corrections
+            for k in list(values.keys()):
+                if values[k]:
+                    values[k] = apply_auto_corrections(values[k], "vmware")
+
         # All dynamic values and templates are automatically normalized via zero-hardcode pipeline
         out = render_dynamic_pattern(curr_pattern, values, variables)
+        if st.session_state.get("auto_correct", True):
+            from utils.formatters import apply_auto_corrections
+            out = apply_auto_corrections(out, "vmware")
 
         st.session_state["esxi_generated_desc"] = out
         st.caption("Generated ESXi Description:")

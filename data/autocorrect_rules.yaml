@@ -93,3 +93,7 @@ auto_corrections:
     replacement: vmk\2
     description: Normalize VMkernel adapter casing (VMKX -> vmkX)
     enabled: true
+  - pattern: (?i)\bmanagement\b
+    replacement: Management
+    description: Capitalize Management network/service
+    enabled: true
