@@ -22,7 +22,7 @@ DEFAULT_NAMING_PATTERNS = {
     "host_vm_proxmox": "<site_prefix>pve<seq>.<domain>",
     "vm_host": "<country><site><role><seq>",
     "esxi_uplink": "<vmnic> - <v_switch> <purpose> <status>",
-    "esxi_portgroup_name": "PG-<pg_network>",
+    "esxi_portgroup_name": "PG-<port_group>",
     "esxi_portgroup": "<port_group> [<active_vmnics> Active / <standby_vmnics> Standby]",
     "esxi_vmkernel_name": "<vmk>",
     "esxi_vmkernel": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
@@ -37,7 +37,7 @@ DEFAULT_NAMING_PATTERNS = {
 # Canonical hypervisor-scoped variable names used for seeding and re-scoping.
 HYPERVISOR_VARIABLE_NAMES = [
     "vmnic", "v_switch", "purpose", "port_group", "interface",
-    "active_vmnics", "standby_vmnics", "vmk", "switch_zone", "slot",
+    "active_vmnics", "standby_vmnics", "vmk", "switch_zone", "slot", "uplink_role",
 ]
 
 def ensure_hypervisor_variables(rules: dict) -> None:
@@ -133,17 +133,17 @@ PATTERN_VARIABLES = {
     "vm_site": {"label": "Site Prefix / Country & Site", "placeholder": "e.g. age, usnyc, uklon", "scope": "naming"},
 
     # 4. Hypervisor Virtualization & Networking Scope
-    "vmnic": {"label": "vmnic Name", "placeholder": "vmnic", "default": "vmnic", "scope": "hypervisor"},
-    "v_switch": {"label": "vSwitch Name", "placeholder": "vSwitch", "default": "vSwitch", "scope": "hypervisor"},
-    "purpose": {"label": "Purpose / Service", "placeholder": "e.g. Management, vMotion, Storage", "scope": "hypervisor"},
-    "pg_network": {"label": "Network Name (Deprecated, use interface)", "placeholder": "e.g. VM Network", "scope": "hypervisor"},
-    "port_group": {"label": "Port Group / vSwitch", "placeholder": "e.g. vSwitch0", "default": "vSwitch", "scope": "hypervisor"},
-    "interface": {"label": "Interface / Port Group Name", "placeholder": "e.g. vmnic0, PG-VMDK", "default": "vmnic", "scope": "hypervisor"},
-    "slot": {"label": "Hardware Slot / Port", "placeholder": "e.g. PCIe1/Port1, Card1/Port1", "optional": True, "scope": "hypervisor"},
-    "active_vmnics": {"label": "Active vmnics", "placeholder": "e.g. vmnic0, vmnic1", "default": "vmnic", "scope": "hypervisor"},
-    "standby_vmnics": {"label": "Standby vmnics (Optional)", "placeholder": "e.g. vmnic2", "scope": "hypervisor"},
-    "vmk": {"label": "vmk Name", "placeholder": "vmk", "default": "vmk", "scope": "hypervisor"},
-    "switch_zone": {"label": "Switch Zone / Network Zone", "placeholder": "e.g. DMZ, Production, Management", "scope": "hypervisor"},
+    "vmnic": {"label": "vmnic Name", "placeholder": "vmnic", "default": "", "scope": "hypervisor"},
+    "v_switch": {"label": "vSwitch Name", "placeholder": "vSwitch", "default": "", "scope": "hypervisor"},
+    "purpose": {"label": "Purpose / Service", "placeholder": "e.g. Management, vMotion, Storage", "default": "", "scope": "hypervisor"},
+    "port_group": {"label": "Port Group / vSwitch", "placeholder": "e.g. vSwitch0", "default": "", "scope": "hypervisor"},
+    "interface": {"label": "Interface / Port Group Name", "placeholder": "e.g. vmnic0, PG-VMDK", "default": "", "scope": "hypervisor"},
+    "slot": {"label": "Hardware Slot / Port", "placeholder": "e.g. PCIe1/Port1, Card1/Port1", "default": "", "optional": True, "scope": "hypervisor"},
+    "active_vmnics": {"label": "Active vmnics", "placeholder": "e.g. vmnic0, vmnic1", "default": "", "optional": True, "scope": "hypervisor"},
+    "standby_vmnics": {"label": "Standby vmnics (Optional)", "placeholder": "e.g. vmnic2", "default": "", "optional": True, "scope": "hypervisor"},
+    "vmk": {"label": "vmk Name", "placeholder": "vmk", "default": "", "scope": "hypervisor"},
+    "switch_zone": {"label": "Switch Zone / Network Zone", "placeholder": "e.g. DMZ, Production, Management", "default": "", "scope": "hypervisor"},
+    "uplink_role": {"label": "Uplink Role / Status", "placeholder": "Active Uplink / Standby Uplink", "default": "", "optional": True, "scope": "hypervisor"},
 }
 
 def get_grouped_pattern_variables(rules: dict) -> dict:

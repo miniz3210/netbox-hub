@@ -14,7 +14,7 @@
   "firewall_interface": "<role_zone>_<vlan_id>",
   "esxi_host": "<site_prefix><role_esx><seq>.<domain>",
   "vm_host": "<country><site><role><seq>",
-  "esxi_uplink": "<vmnic> - <v_switch> <purpose> <status>",
+  "esxi_uplink": "<vmnic> - <v_switch> <purpose> <uplink_role>",
   "esxi_portgroup_name": "PG-<pg_network>",
   "esxi_portgroup": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
   "esxi_vmkernel_name": "<vmk>",
@@ -25,7 +25,7 @@
   "host_vm_proxmox_x": "<site_prefix><role_esx><seq>.<domain>",
   "esxinet_vswitch": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
   "esxinet_host": "<site_prefix><role_esx><seq>.<domain>",
-  "esxinet_uplink": "<vmnic> - <v_switch> <purpose> <status>",
+  "esxinet_uplink": "<vmnic> - <v_switch> <purpose> <uplink_role>",
   "esxinet_portgroup_name": "PG-<pg_network>",
   "esxinet_portgroup": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
   "esxinet_vmkernel_name": "<vmk>",
@@ -45,6 +45,8 @@
   "esxi_pg_net_x": "PGTest123-<pg_network>",
   "esxinet_pgnet": "PG123-<pg_network>",
   "esxi_pgnet": "PG123-<pg_network>",
+  "esxinet_pg_header": "PG-<port_group>",
+  "esxi_pg_header": "PG-<port_group>",
   "custom_patterns": [],
   "device_presets": [
     {
@@ -178,6 +180,12 @@
       "label": "VMkernel",
       "pattern_key": "esxi_vmkernel",
       "description": "VMkernel Management / vMotion / Storage"
+    },
+    {
+      "code": "PG_Header",
+      "label": "PortGroup Interface Name",
+      "pattern_key": "esxinet_pg_header",
+      "description": ""
     }
   ],
   "vlan_presets": {
@@ -263,7 +271,7 @@
     "firewall_interface": "<role_zone>_<vlan_id>",
     "esxi_host": "<site_prefix><role_esx><seq>.<domain>",
     "vm_host": "<country><site><role><seq>",
-    "esxi_uplink": "<vmnic> - <v_switch> <purpose> <status>",
+    "esxi_uplink": "<vmnic> - <v_switch> <purpose> <uplink_role>",
     "esxi_portgroup_name": "PG-<pg_network>",
     "esxi_portgroup": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
     "esxi_vmkernel_name": "<vmk>",
@@ -274,7 +282,7 @@
     "host_vm_proxmox_x": "<site_prefix><role_esx><seq>.<domain>",
     "esxinet_vswitch": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
     "esxinet_host": "<site_prefix><role_esx><seq>.<domain>",
-    "esxinet_uplink": "<vmnic> - <v_switch> <purpose> <status>",
+    "esxinet_uplink": "<vmnic> - <v_switch> <purpose> <uplink_role>",
     "esxinet_portgroup_name": "PG-<pg_network>",
     "esxinet_portgroup": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
     "esxinet_vmkernel_name": "<vmk>",
@@ -293,7 +301,9 @@
     "esxinet_pg_net_x": "PG123-<pg_network>",
     "esxi_pg_net_x": "PGTest123-<pg_network>",
     "esxinet_pgnet": "PG123-<pg_network>",
-    "esxi_pgnet": "PG123-<pg_network>"
+    "esxi_pgnet": "PG123-<pg_network>",
+    "esxinet_pg_header": "PG-<port_group>",
+    "esxi_pg_header": "PG-<port_group>"
   },
   "pattern_variables": {
     "site": {
@@ -597,9 +607,7 @@
     "pg_network": {
       "label": "Network Name (Deprecated, use interface)",
       "placeholder": "e.g. VM Network",
-      "scope": "hypervisor",
-      "default": "",
-      "optional": false
+      "scope": "hypervisor"
     },
     "port_group": {
       "label": "Port Group / vSwitch",
@@ -656,6 +664,13 @@
       "default": "",
       "optional": true,
       "scope": "shared"
+    },
+    "uplink_role": {
+      "label": "Uplink Role / Status",
+      "placeholder": "Active Uplink / Standby Uplink",
+      "default": "",
+      "optional": false,
+      "scope": "hypervisor"
     }
   },
   "site_code_rules": {
@@ -841,13 +856,13 @@
       "vmnic",
       "v_switch",
       "purpose",
-      "status"
+      "uplink_role"
     ],
     "esxinet_uplink": [
       "vmnic",
       "v_switch",
       "purpose",
-      "status"
+      "uplink_role"
     ],
     "esxi_portgroup": [
       "v_switch",

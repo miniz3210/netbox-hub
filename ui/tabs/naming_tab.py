@@ -1466,7 +1466,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         row_vals["port_group"] = norm_iface
                         row_vals["vmnic"] = norm_iface
 
-                        # Purpose normalization - preserve raw purpose exactly
+                        # Purpose normalization - platform-agnostic topology inheritance (No Hardcode)
                         iface = str(row.get("Interface", "")).strip()
                         raw_purpose = (
                             row_vals.get("purpose")
@@ -1474,8 +1474,19 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                             or row_vals.get("role_portgroup")
                             or row_vals.get("portgroup")
                             or row_vals.get("port_group")
-                            or iface
+                            or ""
                         )
+
+                        # Topology Metamodel: Logic endpoints without purpose inherit from the same switch's PortGroups
+                        if (not raw_purpose or raw_purpose == iface):
+                            same_sw_pgs = [
+                                str(r.get("Role / PortGroup") or r.get("Interface") or "").strip()
+                                for r in items
+                                if r.get("Type") == "PortGroup" and str(r.get("Role / PortGroup") or r.get("Interface") or "").strip()
+                            ]
+                            if same_sw_pgs:
+                                raw_purpose = same_sw_pgs[0]
+
                         row_vals["purpose"] = str(raw_purpose).strip()
                         row_vals["service"] = str(raw_purpose).strip()
 
@@ -1517,8 +1528,9 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         row_vals["active"] = act_vmnics
                         row_vals["standby"] = stb_vmnics
 
-                        # Status (no forced default when status is absent)
-                        status_val = row_vals.get("role") or row_vals.get("status") or ""
+                        # Status & Uplink Role (support dedicated uplink_role token without global status pollution)
+                        status_val = row_vals.get("uplink_role") or row_vals.get("role") or row_vals.get("status") or ""
+                        row_vals["uplink_role"] = status_val
                         row_vals["status"] = status_val
                         row_vals["role"] = status_val
 
@@ -1533,8 +1545,9 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         else:
                             rendered = ""
 
-                        # Clean formatting - structural pipeline only (no keyword matches)
+                        # Clean formatting - structural pipeline (prunes empty brackets, orphan standby, and dangling slashes)
                         rendered = re.sub(r"<[^>]+>", "", rendered)
+                        rendered = re.sub(r"\s*/\s*Standby\)", ")", rendered)
                         rendered = re.sub(r"\s*/\s*", " / ", rendered)
                         rendered = re.sub(r"\s*/\s*\)", ")", rendered)
                         rendered = re.sub(r"\(\s*/\s*", "(", rendered)
