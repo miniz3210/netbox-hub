@@ -384,7 +384,7 @@ def parse_raw_gateway_payload(raw_text: str) -> str:
     # Strategy 3: text fallback — return the raw body unchanged
     return raw_text or ""
 
-def call_ai(prompt: str, selected_model: str, custom_system_msg: Optional[str] = None, timeout: int = 90) -> str:
+def call_ai(prompt: str, selected_model: str, custom_system_msg: Optional[str] = None, timeout: int = 90, max_tokens: int = 4096) -> str:
     rules = load_naming_rules()
     naming_context = export_rules_as_prompt(rules)
     system_msg = custom_system_msg or (
@@ -406,6 +406,7 @@ def call_ai(prompt: str, selected_model: str, custom_system_msg: Optional[str] =
     payload = {
         "model": selected_model,
         "temperature": 0.0,
+        "max_tokens": max_tokens,
         "stream": False,
         "messages": [
             {"role": "system", "content": system_msg},

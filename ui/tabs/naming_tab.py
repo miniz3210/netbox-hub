@@ -443,6 +443,9 @@ def _safe_parse_json_array(response: str) -> list:
         except _json.JSONDecodeError:
             continue
     return []
+
+
+def _is_vision_model(model_name: str) -> bool:
     """Return True if model name indicates multimodal vision support."""
     if not model_name:
         return False
@@ -1052,14 +1055,18 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 "    - Any other visible configuration attributes as distinct keys.\n\n"
                 "OCR ERROR RECOVERY:\n"
                 "    Correct obvious character substitution typos in identifiers (e.g. 'vSwitcho' -> 'vSwitch0', 'PC10000' -> 'PCI0000') using contextual clues.\n\n"
-                "Output ONLY the valid JSON array."
+                "CRITICAL: Output ONLY a valid JSON array of objects. Never include conversational explanations, preambles, reasoning, or markdown formatting outside the JSON array."
             )
             user_prompt = f"Parse this consolidated sanitized topology text:\n\n{sanitized_combined}"
-            response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt)
+            response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt, max_tokens=8192)
             progress_bar.progress(1.0, text="✅ Parsing and enriching results...")
 
             raw_items = _safe_parse_json_array(response)
-            all_parsed_items = vault.detokenize_data(raw_items)
+            clean_records = [
+                item for item in raw_items
+                if isinstance(item, dict) and not any(k in item for k in ("finish_reason", "index", "message", "role"))
+            ]
+            all_parsed_items = vault.detokenize_data(clean_records)
             if not isinstance(all_parsed_items, list):
                 all_parsed_items = []
 
