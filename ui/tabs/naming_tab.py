@@ -1028,7 +1028,16 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             combined_raw_text = "\n\n".join(combined_raw_lines).strip()
             st.session_state["latest_ocr_raw_text"] = combined_raw_text
 
-            sanitized_combined, token_map = vault.sanitize_text(combined_raw_text)
+            # Apply dynamic OCR cleaning rules from standards before AI processing
+            try:
+                from utils.formatters import apply_auto_corrections
+                cleaned_ocr_text = apply_auto_corrections(combined_raw_text, "ocr_cleaning")
+                if not cleaned_ocr_text or cleaned_ocr_text == combined_raw_text:
+                    cleaned_ocr_text = apply_auto_corrections(combined_raw_text, "vmware")
+            except Exception:
+                cleaned_ocr_text = combined_raw_text
+
+            sanitized_combined, token_map = vault.sanitize_text(cleaned_ocr_text)
             st.session_state["latest_vault_tokens"] = token_map
 
             system_prompt = (
@@ -1301,6 +1310,13 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 rendered = re.sub(r"<[^>]+>", "", rendered)
                 rendered = re.sub(r"\(\s*\)", "", rendered)
                 rendered = re.sub(r"\s{2,}", " ", rendered).strip()
+
+                # Auto-correction hook: apply interface shortening and OCR/syntax normalization
+                if st.session_state.get("auto_correct", True):
+                    from utils.formatters import apply_auto_corrections
+                    rendered = apply_auto_corrections(rendered, "port_shortening")
+                    rendered = apply_auto_corrections(rendered, "ocr_cleaning")
+                    rendered = apply_auto_corrections(rendered, "vmware")
 
                 # Fallback to interface if rendered string is completely empty
                 if not rendered:

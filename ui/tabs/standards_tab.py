@@ -280,7 +280,7 @@ def _render_auto_correction_manager(active_model: str) -> None:
     for category in categories:
         category_title = {
             "port_shortening": "🔌 Port Abbreviation Rules (Interface Shortening)",
-            "vmware": "☁️ VMware Syntax Rules",
+            "vmware": "🔍 OCR Text Cleaning & Syntax Rules",
         }.get(category, f"🛠️ Auto-Correction Rules — {category}")
         with st.expander(category_title, expanded=False):
             st.caption(
