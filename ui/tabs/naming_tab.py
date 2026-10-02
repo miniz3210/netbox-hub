@@ -915,202 +915,154 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
         col_up1, col_up2 = st.columns([1, 1])
 
-        if "esxi_upload_counter" not in st.session_state:
-            st.session_state["esxi_upload_counter"] = 0
-        if "esxi_paste_counter" not in st.session_state:
-            st.session_state["esxi_paste_counter"] = 0
-        if "topo_uploader_key_ver" not in st.session_state:
-            st.session_state["topo_uploader_key_ver"] = 0
-        if "paste_input_ver" not in st.session_state:
-            st.session_state["paste_input_ver"] = 0
+        # Initialize unified image store
+        if "staged_topology_imgs" not in st.session_state:
+            st.session_state["staged_topology_imgs"] = []
 
-        with col_up1:
-            uploader_key = f"hypervisor_topo_file_uploader_{st.session_state['topo_uploader_key_ver']}"
-            raw_uploaded = st.file_uploader(
-                "Upload Screenshots (Drag & Drop)",
-                type=["png", "jpg", "jpeg"],
-                accept_multiple_files=True,
-                key=uploader_key,
-                help="Upload one or multiple screenshots...",
-            )
-            # Transient ingestion: replace (not append) uploaded files for this run
-            if raw_uploaded:
-                import io as _io
-                stored = []
-                for uf in raw_uploaded:
+        if raw_uploaded:
+            import io as _io
+            existing_names = {getattr(f, "name", "") for f in st.session_state["staged_topology_imgs"]}
+            for uf in raw_uploaded:
+                if uf.name not in existing_names:
                     file_bytes = uf.read()
                     bio = _io.BytesIO(file_bytes)
                     bio.name = uf.name
                     bio.type = uf.type
                     bio.size = len(file_bytes)
-                    stored.append(bio)
-                st.session_state["topo_uploaded_imgs"] = stored
-                st.session_state["esxi_upload_counter"] += 1
+                    st.session_state["staged_topology_imgs"].append(bio)
 
-        with col_up2:
-            st.markdown("**📋 Or Paste from Clipboard (Ctrl+V)**")
-            paste_box_key = f"esxi_paste_input_{st.session_state['paste_input_ver']}"
-            pasted_data = st.text_input(
-                "Paste Area",
-                placeholder="Click here and press Ctrl+V",
-                key=paste_box_key,
-                label_visibility="collapsed",
-                help="Focus this box and press Ctrl+V.",
-            )
-            # Persistent delegated paste listener across remounts
-            import streamlit.components.v1 as _components
-            _components.html(
-                """
-                <script>
-                const parentDoc = window.parent.document;
-                if (!window.parent._esxiPasteDelegated) {
-                    window.parent._esxiPasteDelegated = true;
-                    parentDoc.addEventListener('paste', function(e) {
-                        const target = e.target;
-                        if (!target || target.getAttribute('aria-label') !== 'Paste Area') return;
-                        const items = (e.clipboardData || window.clipboardData).items;
-                        for (let i = 0; i < items.length; i++) {
-                            if (items[i].type.indexOf('image') !== -1) {
-                                const blob = items[i].getAsFile();
-                                const reader = new FileReader();
-                                reader.onload = function(event) {
-                                    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-                                    nativeSetter.call(target, event.target.result);
-                                    target.dispatchEvent(new Event('input', { bubbles: true }));
-                                    target.dispatchEvent(new KeyboardEvent('keydown', {
-                                        bubbles: true,
-                                        cancelable: true,
-                                        key: 'Enter',
-                                        code: 'Enter',
-                                        keyCode: 13,
-                                        which: 13
-                                    }));
-                                    target.dispatchEvent(new Event('change', { bubbles: true }));
-                                };
-                                reader.readAsDataURL(blob);
-                                e.preventDefault();
-                                break;
-                            }
+    with col_up2:
+        st.markdown("**📋 Or Paste from Clipboard (Ctrl+V)**")
+        paste_box_key = f"esxi_paste_input_{st.session_state['paste_input_ver']}"
+        pasted_data = st.text_input(
+            "Paste Area",
+            placeholder="Click here and press Ctrl+V",
+            key=paste_box_key,
+            label_visibility="collapsed",
+            help="Focus this box and press Ctrl+V.",
+        )
+        import streamlit.components.v1 as _components
+        _components.html(
+            """
+            <script>
+            const parentDoc = window.parent.document;
+            if (!window.parent._esxiPasteDelegated) {
+                window.parent._esxiPasteDelegated = true;
+                parentDoc.addEventListener('paste', function(e) {
+                    const target = e.target;
+                    if (!target || target.getAttribute('aria-label') !== 'Paste Area') return;
+                    const items = (e.clipboardData || window.clipboardData).items;
+                    for (let i = 0; i < items.length; i++) {
+                        if (items[i].type.indexOf('image') !== -1) {
+                            const blob = items[i].getAsFile();
+                            const reader = new FileReader();
+                            reader.onload = function(event) {
+                                const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                                nativeSetter.call(target, event.target.result);
+                                target.dispatchEvent(new Event('input', { bubbles: true }));
+                                target.dispatchEvent(new KeyboardEvent('keydown', {
+                                    bubbles: true,
+                                    cancelable: true,
+                                    key: 'Enter',
+                                    code: 'Enter',
+                                    keyCode: 13,
+                                    which: 13
+                                }));
+                                target.dispatchEvent(new Event('change', { bubbles: true }));
+                            };
+                            reader.readAsDataURL(blob);
+                            e.preventDefault();
+                            break;
                         }
-                    });
-                }
-                </script>
-                """,
-                height=0,
-                width=0,
-            )
+                    }
+                });
+            }
+            </script>
+            """,
+            height=0,
+            width=0,
+        )
 
-        # --- END OF 2-COLUMN INPUT LAYOUT (col_up1, col_up2) ---
+    # Ingest clipboard paste
+    if pasted_data and pasted_data.startswith("data:image"):
+        import base64 as _b64, io as _io
+        try:
+            _, encoded = pasted_data.split(",", 1)
+            img_bytes = _b64.b64decode(encoded)
+            pasted_file = _io.BytesIO(img_bytes)
+            idx = len(st.session_state["staged_topology_imgs"]) + 1
+            pasted_file.name = f"clipboard_screenshot_{idx}.png"
+            pasted_file.type = "image/png"
+            pasted_file.size = len(img_bytes)
+            st.session_state["staged_topology_imgs"].append(pasted_file)
+            st.session_state["paste_input_ver"] = st.session_state.get("paste_input_ver", 0) + 1
+            st.rerun()
+        except Exception as e:
+            st.warning(f"Failed to process pasted image: {e}")
 
-        def _clear_all_topology_state():
+    uploaded_imgs = st.session_state.get("staged_topology_imgs", [])
+
+    # Minimalist, Robust Preview & Index-Based Removal (Less is More)
+    if uploaded_imgs:
+        with st.expander(f"🔍 Preview Staged Screenshots ({len(uploaded_imgs)} file(s))", expanded=True):
+            preview_cols = st.columns(min(len(uploaded_imgs), 4))
+            del_idx = None
+            for img_idx, img_item in enumerate(uploaded_imgs):
+                with preview_cols[img_idx % len(preview_cols)]:
+                    img_title = getattr(img_item, "name", f"Screenshot #{img_idx + 1}")
+                    st.caption(f"#{img_idx + 1}: {img_title}")
+                    st.image(img_item, width="stretch")
+                    if st.button("✖ Remove", key=f"unified_remove_btn_{img_idx}"):
+                        del_idx = img_idx
+            if del_idx is not None and 0 <= del_idx < len(st.session_state["staged_topology_imgs"]):
+                st.session_state["staged_topology_imgs"].pop(del_idx)
+                st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
+                st.rerun()
+
+    st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
+    btn_col1, btn_col2, _ = st.columns([2.2, 1.2, 6.6])
+    with btn_col1:
+        start_analyze = st.button(
+            "🚀 Analyze Topology & Auto-Populate",
+            key="btn_analyze_hypervisor_img",
+            type="primary",
+            disabled=not bool(uploaded_imgs),
+            width='stretch'
+        )
+    with btn_col2:
+        if st.button("🗑️ Clear All", key="btn_clear_topo_data", type="secondary", disabled=not bool(uploaded_imgs or st.session_state.get("hypervisor_parsed_descriptions")), width='stretch'):
+            st.session_state["staged_topology_imgs"] = []
+            st.session_state.pop("hypervisor_parsed_descriptions", None)
             st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
-            st.session_state.pop("paste_input_ver", None)
-            for k in ["topo_uploaded_imgs", "pasted_clipboard_imgs", "hypervisor_parsed_descriptions",
-                      "hypervisor_preview_df", "hypervisor_extracted_variables", "topo_is_analyzing"]:
-                st.session_state.pop(k, None)
-                st.session_state[k] = [] if "imgs" in k else None
+            st.rerun()
 
-        def _derive_active_topology_images():
-            """Derive active image list purely from current-run transient inputs, deduplicated by (name, size)."""
-            uploaded = list(st.session_state.get("topo_uploaded_imgs") or [])
-            clipboard = list(st.session_state.get("pasted_clipboard_imgs") or [])
-            seen = set()
-            deduped = []
-            for item in uploaded + clipboard:
-                key = (getattr(item, "name", None), getattr(item, "size", None))
-                if key not in seen and key[0] is not None:
-                    seen.add(key)
-                    deduped.append(item)
-            return deduped
+    if start_analyze:
+        try:
+            with st.spinner("Executing 4-stage local OCR pipeline..."):
+                import json
+                from core.ai_helper import get_llm_response
+                all_raw_text = []
 
-        # Cumulative clipboard ingestion (APPEND instead of overwrite)
-        if pasted_data and pasted_data.startswith("data:image"):
-            import base64 as _b64, io as _io
-            try:
-                header, encoded = pasted_data.split(",", 1)
-                img_bytes = _b64.b64decode(encoded)
-                pasted_file = _io.BytesIO(img_bytes)
-                current_pasted = list(st.session_state.get("pasted_clipboard_imgs") or [])
-                idx = len(current_pasted) + 1
-                pasted_file.name = f"clipboard_screenshot_{idx}.png"
-                pasted_file.type = "image/png"
-                pasted_file.size = len(img_bytes)
-                current_pasted.append(pasted_file)
-                st.session_state["pasted_clipboard_imgs"] = current_pasted
-                st.session_state["esxi_paste_counter"] += 1
-                st.session_state["paste_input_ver"] = st.session_state.get("paste_input_ver", 0) + 1
-                st.rerun()
-            except Exception as e:
-                st.warning(f"Failed to process pasted image: {e}")
+                # Phase 1: Local Tesseract OCR (with strict pointer reset)
+                for img in uploaded_imgs:
+                    if hasattr(img, "seek"):
+                        img.seek(0)
+                    img_bytes = img.read() if hasattr(img, "read") else img.getvalue()
+                    if hasattr(img, "seek"):
+                        img.seek(0)
+                    ocr_res = run_local_ocr_pipeline(img_bytes)
+                    if ocr_res.get("text") and ocr_res["text"].strip():
+                        all_raw_text.append(ocr_res["text"].strip())
 
-        uploaded_imgs = _derive_active_topology_images()
-
-        # Immediate preview directly above Action Buttons
-        if uploaded_imgs:
-            with st.expander(f"🔍 Preview Staged Screenshots ({len(uploaded_imgs)} file(s))", expanded=True):
-                preview_cols = st.columns(min(len(uploaded_imgs), 4))
-                remove_key = None
-                for img_idx, img_item in enumerate(uploaded_imgs):
-                    with preview_cols[img_idx % len(preview_cols)]:
-                        img_title = getattr(img_item, "name", f"Screenshot #{img_idx + 1}")
-                        st.caption(f"#{img_idx + 1}: {img_title}")
-                        st.image(img_item, width="stretch")
-                        if st.button("✖ Remove", key=f"unified_remove_btn_{img_idx}"):
-                            remove_key = (getattr(img_item, "name", None), getattr(img_item, "size", None))
-                if remove_key is not None:
-                    st.session_state["topo_uploaded_imgs"] = [
-                        img for img in (st.session_state.get("topo_uploaded_imgs") or [])
-                        if (getattr(img, "name", None), getattr(img, "size", None)) != remove_key
-                    ]
-                    st.session_state["pasted_clipboard_imgs"] = [
-                        img for img in (st.session_state.get("pasted_clipboard_imgs") or [])
-                        if (getattr(img, "name", None), getattr(img, "size", None)) != remove_key
-                    ]
-                    st.rerun()
-
-        st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
-        btn_col1, btn_col2, _ = st.columns([2.2, 1.2, 6.6])
-        topo_is_analyzing = st.session_state.get("topo_is_analyzing", False)
-        with btn_col1:
-            if topo_is_analyzing:
-                if st.button("🛑 Cancel Analysis", key="btn_cancel_hypervisor_analysis", type="primary", width='stretch'):
-                    st.session_state["topo_is_analyzing"] = False
-                    st.info("Analysis cancelled — UI re-enabled.")
-                    st.rerun()
-            else:
-                has_imgs = bool(uploaded_imgs)
-                start_analyze = st.button("🚀 Analyze Topology & Auto-Populate", key="btn_analyze_hypervisor_img", type="primary", disabled=not has_imgs, width='stretch')
-        with btn_col2:
-            has_data = bool(uploaded_imgs or st.session_state.get("hypervisor_parsed_descriptions"))
-            if st.button("🗑️ Clear All", key="btn_clear_topo_data", type="secondary", disabled=not has_data, width='stretch'):
-                _clear_all_topology_state()
-                st.rerun()
-
-        if not topo_is_analyzing and start_analyze:
-            st.session_state["topo_is_analyzing"] = True
-            try:
-                with st.spinner("Executing 4-stage local OCR pipeline..."):
-                    import json
-                    from core.ai_helper import get_llm_response
-                    all_raw_text = []
-                    # Phase 1: Local Tesseract OCR
-                    for img in uploaded_imgs:
-                        img_bytes = img.getvalue() if hasattr(img, "getvalue") else img.read()
-                        ocr_res = run_local_ocr_pipeline(img_bytes)
-                        if ocr_res.get("text"):
-                            all_raw_text.append(ocr_res["text"])
-
-                    combined_raw = "\n".join(all_raw_text).strip()
-                    if not combined_raw:
-                        st.warning("⚠️ No text detected in screenshots. Ensure image resolution and contrast are sufficient.")
-                        st.session_state["topo_is_analyzing"] = False
-                        st.stop()
-
+                combined_raw = "\n".join(all_raw_text).strip()
+                if not combined_raw:
+                    st.warning("⚠️ No text detected by local OCR. Ensure screenshot contains legible topology labels.")
+                else:
                     # Phase 2: Local persistent sanitization
                     sanitized_text, token_map = vault.sanitize_text(combined_raw)
                     st.session_state["latest_vault_tokens"] = token_map
 
-                    # Phase 3: Text LLM semantic parsing (flat JSON only)
+                    # Phase 3: Pure JSON semantic extraction
                     system_prompt = (
                         "You are a network topology parser. Given sanitized OCR text from a hypervisor networking screen, "
                         "extract all network components into a flat JSON array of objects. "
@@ -1126,7 +1078,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     user_prompt = f"Parse this sanitized topology text:\n\n{sanitized_text}"
                     response = get_llm_response(system_prompt, user_prompt, active_model)
                     
-                    # Extract JSON array
                     m_json = re.search(r"\[\s*\{.*\}\s*\]", response, re.DOTALL)
                     json_str = m_json.group(0) if m_json else response.strip()
                     raw_parsed = json.loads(json_str)
@@ -1135,12 +1086,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     restored_parsed = vault.detokenize_data(raw_parsed)
                     st.session_state["hypervisor_parsed_descriptions"] = restored_parsed
                     st.success("Successfully processed screenshots via local OCR & sanitized LLM parsing!")
-                    st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
-            except Exception as e:
-                st.error(f"Local OCR pipeline failed: {str(e)}")
-            finally:
-                    st.session_state["topo_is_analyzing"] = False
-                    st.rerun()
+        except Exception as e:
+            st.error(f"Pipeline execution failed: {str(e)}")
 
         # 2️⃣ Step 2: Extracted Variables Inspector (Full-Width & Clean Filtering)
         st.divider()
