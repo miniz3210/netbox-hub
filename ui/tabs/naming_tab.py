@@ -1342,7 +1342,14 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
     # 3️⃣ Step 3: NetBox Descriptions & Review (Ready-to-Copy)
     st.divider()
     st.markdown("##### 3️⃣ NetBox Descriptions & Review (Ready-to-Copy)")
-    if "hypervisor_parsed_descriptions" in st.session_state and st.session_state["hypervisor_parsed_descriptions"]:
+
+    # Defensive data accessor: ensure typed row lists are always valid regardless of pipeline state.
+    parsed_records = st.session_state.get("hypervisor_parsed_descriptions") or []
+    uplink_rows = [r for r in parsed_records if r.get("Type") == "Uplink"]
+    portgroup_rows = [r for r in parsed_records if r.get("Type") == "PortGroup"]
+    vmk_rows = [r for r in parsed_records if r.get("Type") == "VMkernel"]
+
+    if parsed_records:
         st.markdown("###### 📋 Generated NetBox Interface Descriptions (Editable)")
         st.caption("Review and edit parsed topology directly below. Batch text updates reactively in real time.")
 
@@ -1410,9 +1417,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             else:
                 pattern_vars[_tok] = {"optional": True}
         # FIX: Prioritize existing descriptions and group by type first
-        uplink_rows = [r for r in rows if r.get("Type") == "Uplink"]
         pg_rows = [r for r in rows if r.get("Type") == "PortGroup"]
-        vmk_rows = [r for r in rows if r.get("Type") == "VMkernel"]
 
         def _group_by_vswitch(rlist):
             """Group rows by vSwitch, extracting from description if needed."""
@@ -1576,7 +1581,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
     blocks = []
     if uplink_rows:
         blocks.append(_format_block(uplink_rows, "Uplinks"))
-    if pg_rows:
+    if portgroup_rows:
         blocks.append(_format_block(pg_rows, "Port Groups"))
     if vmk_rows:
         blocks.append(_format_block(vmk_rows, "VMkernels"))
