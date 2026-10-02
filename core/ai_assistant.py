@@ -258,7 +258,7 @@ def _row(item: dict) -> dict:
     return {
         "Type": itype,
         "Name": str(item.get("name") or "").strip(),
-        "vSwitch": str(item.get("vswitch") or "").strip(),
+        "parent": str(item.get("vswitch") or "").strip(),
         "Details": str(item.get("detail") or "").strip(),
         "NetBox Description": str(item.get("description") or "").strip(),
     }

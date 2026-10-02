@@ -79,105 +79,6 @@ def apply_case(text: str, mode: str) -> str:
     return text.upper() if mode == "UPPERCASE" else text.lower()
 
 
-def _normalize_slot(raw, user_slot_map=None):
-    """Normalize a raw hardware slot value into a platform-agnostic label."""
-    text = str(raw).strip()
-    m_pci = re.search(r"PCI\s*(?:0000:)?([0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-9a-fA-F])", text)
-    if not m_pci:
-        m_pci = re.search(r"\b([0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-9a-fA-F])\b", text)
-    if m_pci:
-        pci_slot = f"PCI:{m_pci.group(1).lower()}"
-        if user_slot_map and pci_slot in user_slot_map:
-            return user_slot_map[pci_slot]
-        return pci_slot
-    m_pcie = re.search(r"PCIe\s*(\d+)\s*/\s*Port\s*(\d+)", text, re.IGNORECASE)
-    if m_pcie:
-        return f"PCIe{m_pcie.group(1)}/Port{m_pcie.group(2)}"
-    m_card = re.search(r"Card\s*(\d+)\s*/\s*Port\s*(\d+)", text, re.IGNORECASE)
-    if m_card:
-        return f"Card{m_card.group(1)}/Port{m_card.group(2)}"
-    return re.sub(r"\s+", "", text)
-
-
-def _build_ocr_slot_map(rows, user_slot_map=None):
-    """Build a dict mapping vmnic-like names to hardware slots found in parsed OCR rows."""
-    ocr = {}
-    for r in rows or []:
-        if not isinstance(r, dict):
-            continue
-
-        # Collect candidate nic names from all string values in the row.
-        nic = ""
-        for key in ("Interface / vmnic", "Interface", "vmnic", "NIC", "Name"):
-            val = r.get(key)
-            if val is not None and not str(val).lower() in ["nan", "none"]:
-                m = re.search(r"\b(vmnic\d+|eno\w+|ens\w+|enp\w+|eth\d+)\b", str(val), re.IGNORECASE)
-                if m:
-                    nic = m.group(1)
-                    break
-
-        # Fallback: scan every string value for a vmnic-like token.
-        if not nic:
-            for v in r.values():
-                if not isinstance(v, str):
-                    continue
-                m = re.search(r"\b(vmnic\d+|eno\w+|ens\w+|enp\w+|eth\d+)\b", v, re.IGNORECASE)
-                if m:
-                    nic = m.group(1)
-                    break
-
-        if not nic:
-            continue
-
-        slot = ""
-        # Prefer an explicit slot column (Slot, slot, PCIe, Location).
-        for col_key in ("Slot", "slot", "PCIe", "Location"):
-            v = r.get(col_key)
-            if v is not None and str(v).strip() and str(v).strip().lower() not in ("nan", "none"):
-                slot = str(v).strip()
-                break
-
-        # Broader fallback: scan ALL string values (including Description) for slot patterns.
-        if not slot:
-            for v in r.values():
-                if not isinstance(v, str):
-                    continue
-                m_slot = re.search(r"(?i)\b(PCI\s*(?:0000:)?[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-9a-fA-F]|PCIe\s*\d+\s*/\s*Port\s*\d+|Card\s*\d+\s*/\s*Port\s*\d+|OCP\s*\d+\s*/\s*Port\s*\d+|\bPCIe\s*\d+\b|\bCard\s*\d+\b|\bOCP\s*\d+\b|\bPort\s*\d+\b|\bSlot\s*\d+\b)\b", v)
-                if m_slot:
-                    slot = m_slot.group(1)
-                    break
-
-        # Normalize OCR-extracted slot: PCI BDF -> 'PCI:bb:dd.f', PCIe/Card -> 'PCIeX/PortY',
-        # and legacy labels (OCP/Port/Slot) stripped of internal whitespace.
-        if slot:
-            slot = _normalize_slot(slot, user_slot_map)
-
-        if slot:
-            ocr[nic] = slot
-            digits = re.sub(r"\D", "", nic)
-            if digits:
-                ocr[digits] = slot
-    return ocr
-
-
-def _resolve_hw_slot(nic_name, user_slot_map=None, ocr_slot_map=None):
-    """Resolve a hardware slot label: Standards YAML override first, then OCR /
-    AI Vision, then the bare interface name."""
-    clean_name = str(nic_name).strip()
-    digits = re.sub(r"\D", "", clean_name)
-    if user_slot_map:
-        if clean_name in user_slot_map:
-            return user_slot_map[clean_name]
-        if digits in user_slot_map:
-            return user_slot_map[digits]
-    if ocr_slot_map:
-        if clean_name in ocr_slot_map:
-            return ocr_slot_map[clean_name]
-        if digits in ocr_slot_map:
-            return ocr_slot_map[digits]
-    return clean_name
-
-
 def _copy_to_clipboard(text: str):
     st.session_state["_last_copied"] = text
 
@@ -847,10 +748,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         "endpoints": [r for r in parsed_records if r.get("Type") in ("Endpoint", "VMkernel", "VNIC")],
         "slot_map": {r.get("Interface"): r.get("Slot") for r in parsed_records if r.get("Slot")},
     }
-    # Unconditionally build ocr_slot_map to prevent UnboundLocalError across re-renders.
-    from config.naming_rules import get_hardware_slot_mappings
-    _user_slot_map = get_hardware_slot_mappings(naming_rules)
-    ocr_slot_map = _build_ocr_slot_map(parsed_records, _user_slot_map)
 
     # --- SECTION 1: 🛠️ INTERACTIVE SINGLE ITEM GENERATOR ---
     with st.expander("🛠️ Interactive Single Item Generator", expanded=False):
@@ -1144,11 +1041,12 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 "    * 'Physical' (Physical NICs, PCIe adapters, Host Uplinks, Bonds, Azure/OCI Base NICs)\n"
                 "    * 'LogicalNetwork' (Virtual Switches, Linux Bridges vmbr, PortGroups, Subnets, VLAN interfaces)\n"
                 "    * 'Endpoint' (Management interfaces, VMkernel vmk, Host IPs, Gateway endpoints, VIPs)\n"
-                "  - Interface: The exact interface name/identifier (e.g. vmnic0, vmk0, ens192, vmbr0, eth0)\n"
-                "  - ParentOrSwitch: The parent switch, bridge, or VNet/Subnet it belongs to (e.g. vSwitch0, vmbr0, vnet-prod), else ''\n"
-                "  - Role: Uplink or teaming role (e.g. Active, Standby, Primary, Secondary, BondMember), else ''\n"
-                "  - Purpose: Network label, service, or subnet purpose (e.g. Management Network, vMotion, Storage, Public), else ''\n"
-                "  - Slot: Physical PCIe slot location (e.g. PCI:0000:3b:00.0, PCIe1/Port1) or hardware chassis slot, else ''\n\n"
+                "  - Interface: The exact interface name/identifier (e.g. vmnic0, vmk0, ge-0/0/0, eth0)\n"
+                "  - parent: The parent switch, bridge, aggregate bundle (LAG/AE), virtual chassis, or VNet/Subnet it belongs to (e.g. vSwitch0, vmbr0, ae1, vnet-prod), else ''\n"
+                "  - Role: Uplink or teaming role (e.g. Active, Standby, Member), else ''\n"
+                "  - Purpose: Network label, service, security zone, or subnet purpose (e.g. Management, vMotion, TRUST_ZONE, Public), else ''\n"
+                "  - Slot: Physical hardware PCIe/chassis slot location (e.g. PCI:0000:3b:00.0, PCIe1/Port1, Slot 0), else ''\n\n"
+                "Correct obvious OCR character transposition errors and typos in network identifiers (e.g. confusing letter 'o'/'O' with digit '0', letter 'l'/'I' with digit '1') based on surrounding naming context.\n"
                 "CROSS-IMAGE & TABLE RECONCILIATION:\n"
                 "When physical adapter tables list hardware slot locations (e.g. Location: PCI...) for an interface\n"
                 "that is also used in a virtual switch/bridge, resolve and populate the 'Slot' field on that interface.\n"
@@ -1184,14 +1082,16 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                             if iface and not item.get("Slot"):
                                 item["Slot"] = iface_slot.get(iface, "")
 
-                # Normalize legacy key names to universal schema for backward compatibility.
+                # Normalize legacy key names to universal schema.
                 for item in all_parsed_items:
                     if not isinstance(item, dict):
                         continue
-                    if "vSwitch" in item and "ParentOrSwitch" not in item:
-                        item["ParentOrSwitch"] = item.pop("vSwitch")
-                    elif "vSwitch" in item and "ParentOrSwitch" in item and not item["ParentOrSwitch"]:
-                        item["ParentOrSwitch"] = item.pop("vSwitch")
+                    # Rename parent-related keys to unified 'parent'.
+                    for old_key in ("ParentOrSwitch", "vSwitch", "vswitch", "VSwitch"):
+                        if old_key in item and "parent" not in item:
+                            item["parent"] = item.pop(old_key)
+                        elif old_key in item and "parent" in item and not item["parent"] and item[old_key]:
+                            item["parent"] = item.pop(old_key)
                     # Normalize legacy PhysicalAdapter / Uplink type aliases to 'Physical'.
                     t = str(item.get("Type", "")).strip()
                     if t in ("PhysicalAdapter", "Uplink"):
@@ -1205,7 +1105,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     key = (
                         str(item.get("Type", "")).strip(),
                         str(item.get("Interface", "")).strip(),
-                        str(item.get("ParentOrSwitch") or item.get("vSwitch") or "").strip(),
+                        str(item.get("parent") or "").strip(),
                     )
                     if key not in seen:
                         seen.add(key)
@@ -1246,85 +1146,53 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         rows = st.session_state["hypervisor_parsed_descriptions"]
 
         extracted_vmnics = set()
-        extracted_vswitches = set()
+        extracted_parents = set()
         extracted_purposes = set()
 
-        last_seen_switch = ""
         for r in rows:
             if not isinstance(r, dict):
                 continue
             row_type = str(r.get("Type", "")).strip()
 
-            # Robust switch detection with forward-filling (support both new ParentOrSwitch and legacy vSwitch keys)
-            sw = str(r.get("ParentOrSwitch") or r.get("vSwitch") or r.get("vswitch") or r.get("VSwitch") or r.get("Switch") or "").strip()
-            if not sw:
-                desc_str = str(r.get("Description", ""))
-                m_sw = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*|bond\w*|ovs-br\w*|[A-Za-z0-9_\-]+-SW\w*)\b", desc_str)
-                if m_sw:
-                    sw = m_sw.group(1)
-            if sw:
-                last_seen_switch = sw
-                extracted_vswitches.add(sw)
-            elif last_seen_switch:
-                extracted_vswitches.add(last_seen_switch)
+            # Extract parent from universal schema field.
+            parent_val = str(r.get("parent") or "").strip()
+            if parent_val:
+                extracted_parents.add(parent_val)
 
             # Strict physical NIC extraction
-            raw_iface = str(r.get("Interface / vmnic") or r.get("Interface") or r.get("vmnic") or r.get("NIC") or "").strip()
+            raw_iface = str(r.get("Interface") or "").strip()
             if row_type in ("Physical", "Uplink") or re.search(r"^(vmnic|eno|ens|enp|eth)\d+", raw_iface, re.IGNORECASE):
                 m_nic = re.search(r"\b(vmnic\d+|eno\w+|ens\w+|enp\w+|eth\d+)\b", raw_iface, re.IGNORECASE)
                 if m_nic:
                     extracted_vmnics.add(m_nic.group(1))
 
-            # Exact Purpose extraction: preserve "Management Network", "VM Network", reject vmkX interfaces
-            raw_purp = str(r.get("Role / PortGroup") or r.get("Purpose") or r.get("Service") or r.get("PortGroup") or "").strip()
+            # Exact Purpose extraction
+            raw_purp = str(r.get("Purpose") or "").strip()
             if not raw_purp and row_type in ["LogicalNetwork", "PortGroup", "Endpoint", "VMkernel"]:
                 raw_purp = raw_iface
             if raw_purp:
                 clean_purp = re.sub(r"(?i)\s+(active uplink|standby uplink)$", "", raw_purp).strip()
                 clean_purp = re.sub(r"\s*\([^)]*\)", "", clean_purp).strip()
-                if clean_purp and not re.match(r"^(vmnic\d+|vSwitch\w*|vmk\d+)$", clean_purp, re.IGNORECASE):
+                if clean_purp and not re.match(r"^(vmnic\d+|vmbr\w*|bond\w*|ae\d+|vnet-\w+|eth\d+)$", clean_purp, re.IGNORECASE):
                     extracted_purposes.add(clean_purp)
 
         vmnics = sorted(list(extracted_vmnics))
-        vswitches = sorted(list(extracted_vswitches))
+        parents = sorted(list(extracted_parents))
         purposes = sorted(list(extracted_purposes))
 
-        # Hardware slot resolution: OCR (AI vision) first, then Standards YAML, then bare name.
-        from config.naming_rules import get_hardware_slot_mappings
-        # Backfill Slot into Physical rows by matching against adapter slot records.
-        if "Slot" not in rows[0] or not any(r.get("Slot") for r in rows):
-            adapter_rows = [r for r in rows if r.get("Type") in ("Physical", "PhysicalAdapter")]
-            nic_to_slot = {}
-            for ar in adapter_rows:
-                ar_nic = ""
-                for k in ("Interface / vmnic", "Interface", "vmnic", "NIC", "Name"):
-                    v = ar.get(k)
-                    if v is not None and not str(v).lower() in ["nan", "none"]:
-                        m = re.search(r"\b(vmnic\d+)\b", str(v), re.IGNORECASE)
-                        if m:
-                            ar_nic = m.group(1)
-                            break
-                if not ar_nic:
-                    for v in ar.values():
-                        if isinstance(v, str):
-                            m = re.search(r"\b(vmnic\d+)\b", v, re.IGNORECASE)
-                            if m:
-                                ar_nic = m.group(1)
-                                break
-                ar_slot = ar.get("Slot") or ar.get("slot") or ar.get("PCIe Slot") or ""
-                if ar_nic and ar_slot:
-                    nic_to_slot[ar_nic] = str(ar_slot).strip()
-            for r in rows:
-                if r.get("Type") in ("Physical", "Uplink"):
-                    iface = str(r.get("Interface") or "").strip()
-                    m = re.search(r"\b(vmnic\d+)\b", iface, re.IGNORECASE)
-                    if m:
-                        nic = m.group(1)
-                        if nic in nic_to_slot and not r.get("Slot"):
-                            r["Slot"] = nic_to_slot[nic]
+        # Simplified slot enrichment: pure generic interface-to-slot dictionary.
+        iface_to_slot = {
+            str(item.get("Interface")).strip(): str(item.get("Slot")).strip()
+            for item in rows
+            if isinstance(item, dict) and item.get("Interface") and item.get("Slot")
+        }
+        for item in rows:
+            if isinstance(item, dict):
+                iface = str(item.get("Interface") or "").strip()
+                if iface and iface in iface_to_slot and not item.get("Slot"):
+                    item["Slot"] = iface_to_slot[iface]
 
-        user_slot_map = get_hardware_slot_mappings(naming_rules)
-        slots = sorted(list(set(ocr_slot_map.values())))
+        slots = sorted(list(set(str(r.get("Slot", "")) for r in rows if r.get("Slot"))))
 
         # Render styled Badge Cards matching NetBox Hub dark glass theme
         def _render_pill_card(title, items, color="#38bdf8"):
@@ -1342,9 +1210,9 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
         c1, c2, c3, c4 = st.columns(4)
         with c1:
-            _render_pill_card("&lt;vmnic&gt;", vmnics, "#38bdf8")
+            _render_pill_card("&lt;interface&gt;", vmnics, "#38bdf8")
         with c2:
-            _render_pill_card("&lt;v_switch&gt;", vswitches, "#a78bfa")
+            _render_pill_card("&lt;parent&gt;", parents, "#a78bfa")
         with c3:
             _render_pill_card("&lt;slot&gt;", slots, "#34d399")
         with c4:
@@ -1355,8 +1223,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         # --- Dynamic Token Bag Inspector (Discovers all OCR keys, e.g. for Proxmox/KVM) ---
         raw_token_dict = {}
         # Inject canonical tokens into raw token dict for complete coverage
-        raw_token_dict["vmnic"] = set(vmnics)
-        raw_token_dict["v_switch"] = set(vswitches)
+        raw_token_dict["interface"] = set(vmnics)
+        raw_token_dict["parent"] = set(parents)
         raw_token_dict["slot"] = set(slots)
         raw_token_dict["purpose"] = set(purposes)
         for r in rows:
@@ -1483,8 +1351,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             or "<purpose> (<v_switch>)"
         )
 
-        from config.naming_rules import get_hardware_slot_mappings
-        user_slot_map = get_hardware_slot_mappings(_naming_rules)
         pattern_vars = _naming_rules.get("variables", {}) or {}
         # Make active_vmnics/standby_vmnics optional so empty teaming sides are stripped cleanly.
         for _tok in ("active_vmnics", "standby_vmnics"):
@@ -1495,46 +1361,26 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 pattern_vars[_tok] = {"optional": True}
         # FIX: Prioritize existing descriptions and group by type first
 
-        def _group_by_vswitch(rlist):
-            """Group rows by parent switch/bridge, extracting from description if needed."""
+        def _group_by_parent(rlist):
+            """Group rows by parent network entity (switch, bridge, bundle, VNet), else 'General'."""
             groups = {}
-            last_seen = ""
             for r in rlist:
                 if not isinstance(r, dict):
                     continue
-                vs = (r.get("ParentOrSwitch") or r.get("vSwitch") or r.get("vswitch") or r.get("VSwitch") or "").strip()
-                if not vs:
-                    desc = str(r.get("Description", ""))
-                    m = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*|bond\w*|ovs-br\w*|[A-Za-z0-9_\-]+-SW\w*)\b", desc)
-                    if m:
-                        vs = m.group(1)
-                    elif not vs:
-                        vs = "Internal / No Uplink" if r.get("Type") in ("Physical", "Uplink") else "General"
-                if not vs:
-                    vs = last_seen or "General"
-                last_seen = vs
-                groups.setdefault(vs, []).append(r)
+                parent = str(r.get("parent") or "").strip() or "General"
+                groups.setdefault(parent, []).append(r)
             return groups
 
-        def _resolve_vswitch_from_desc(desc, row_type):
-            """Extract vSwitch from description if not in row."""
-            m = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*|bond\w*|ovs-br\w*|[A-Za-z0-9_\-]+-SW\w*)\b", desc)
-            if m:
-                return m.group(1)
-            return "Internal / No Uplink" if row_type in ("Physical", "Uplink") else "General"
-
-        type_order_map = {"Physical": 0, "Uplink": 0, "LogicalNetwork": 1, "PortGroup": 1, "Endpoint": 2, "VMkernel": 2}
-
         def _format_block(rows_list, block_label):
-            """Format a block of rows grouped by vSwitch."""
-            groups = _group_by_vswitch(rows_list)
+            """Format a block of rows grouped by parent."""
+            groups = _group_by_parent(rows_list)
             lines = [f"=== {block_label} ==="]
-            for vs in sorted(groups.keys()):
+            for parent in sorted(groups.keys()):
                 items = sorted(
-                    groups[vs],
+                    groups[parent],
                     key=lambda r: (type_order_map.get(r.get("Type", ""), 3), str(r.get("Interface", ""))),
                 )
-                lines.append(f"=== {vs} ===")
+                lines.append(f"=== {parent} ===")
                 for row in items:
                     iface = str(row.get("Interface", "")).strip()
                     desc = str(row.get("Description", "")).strip()
@@ -1551,18 +1397,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                             row_vals[norm_k] = str(v).strip()
                     row_vals["description"] = desc
 
-                    # Resolve vSwitch / ParentOrSwitch
-                    resolved_vs = (
-                        row_vals.get("parentorswitch") or row_vals.get("parent_or_switch") or
-                        row_vals.get("vswitch") or row_vals.get("v_switch") or
-                        row_vals.get("switch") or vs or ""
-                    )
-                    if not resolved_vs and desc:
-                        m_vs = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*|bond\w*|ovs-br\w*|[A-Za-z0-9_\-]+-SW\w*)\b", desc)
-                        if m_vs:
-                            resolved_vs = m_vs.group(1)
-                    row_vals["vswitch"] = resolved_vs
-                    row_vals["v_switch"] = resolved_vs
+                    # Set parent from universal schema field.
+                    row_vals["parent"] = str(row.get("parent") or "").strip()
 
                     # Preserve all extracted fields directly without destructive wiping or artificial fallbacks
                     norm_iface = iface or row_vals.get("interface") or ""
@@ -1631,12 +1467,11 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
                     # Determine header based on type
                     if row_type == "Uplink":
-                        hw_slot = _resolve_hw_slot(iface, user_slot_map=user_slot_map, ocr_slot_map=ocr_slot_map)
                         m_pure = re.search(r"\b(vmnic\d+|eno\w+|ens\w+|enp\w+|eth\d+)\b", iface, re.IGNORECASE)
                         pure_iface = m_pure.group(1) if m_pure else iface
-                        row_vals["slot"] = hw_slot if hw_slot != pure_iface else ""
-                        if row_vals.get("slot"):
-                            header_iface = f"{row_vals['slot']} ({pure_iface}):"
+                        slot_val = str(row.get("Slot") or "").strip()
+                        if slot_val:
+                            header_iface = f"{slot_val} ({pure_iface}):"
                         else:
                             header_iface = f"({pure_iface}):"
                         lines.append(f"{header_iface}\n{rendered}\n")
