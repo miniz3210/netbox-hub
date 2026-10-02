@@ -994,603 +994,611 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             width=0,
         )
 
-    # Ingest clipboard paste outside of col_up2
-    if pasted_data and pasted_data.startswith("data:image"):
-        import base64 as _b64, io as _io
-        try:
-            _, encoded = pasted_data.split(",", 1)
-            img_bytes = _b64.b64decode(encoded)
-            pasted_file = _io.BytesIO(img_bytes)
-            idx = len(st.session_state["staged_topology_imgs"]) + 1
-            pasted_file.name = f"clipboard_screenshot_{idx}.png"
-            pasted_file.type = "image/png"
-            pasted_file.size = len(img_bytes)
-            st.session_state["staged_topology_imgs"].append(pasted_file)
-            st.session_state["paste_input_ver"] = st.session_state.get("paste_input_ver", 0) + 1
-            st.rerun()
-        except Exception as e:
-            st.warning(f"Failed to process pasted image: {e}")
+        # Ingest clipboard paste inside Step 1
+        if pasted_data and pasted_data.startswith("data:image"):
+            import base64 as _b64, io as _io
+            try:
+                _, encoded = pasted_data.split(",", 1)
+                img_bytes = _b64.b64decode(encoded)
+                pasted_file = _io.BytesIO(img_bytes)
+                idx = len(st.session_state["staged_topology_imgs"]) + 1
+                pasted_file.name = f"clipboard_screenshot_{idx}.png"
+                pasted_file.type = "image/png"
+                pasted_file.size = len(img_bytes)
+                st.session_state["staged_topology_imgs"].append(pasted_file)
+                st.session_state["paste_input_ver"] = st.session_state.get("paste_input_ver", 0) + 1
+                st.rerun()
+            except Exception as e:
+                st.warning(f"Failed to process pasted image: {e}")
 
-    uploaded_imgs = st.session_state.get("staged_topology_imgs", [])
+        uploaded_imgs = st.session_state.get("staged_topology_imgs", [])
 
-    # FULL-WIDTH: Preview Staged Screenshots
-    if uploaded_imgs:
-        with st.expander(f"🔍 Preview Staged Screenshots ({len(uploaded_imgs)} file(s))", expanded=True):
-            preview_cols = st.columns(min(len(uploaded_imgs), 4))
-            del_idx = None
-            for img_idx, img_item in enumerate(uploaded_imgs):
-                with preview_cols[img_idx % len(preview_cols)]:
-                    img_title = getattr(img_item, "name", f"Screenshot #{img_idx + 1}")
-                    st.caption(f"#{img_idx + 1}: {img_title}")
-                    st.image(img_item, width="stretch")
-                    if st.button("✖ Remove", key=f"unified_remove_btn_{img_idx}"):
-                        del_idx = img_idx
-            if del_idx is not None and 0 <= del_idx < len(st.session_state["staged_topology_imgs"]):
-                st.session_state["staged_topology_imgs"].pop(del_idx)
+        # Step 1: Preview Staged Screenshots
+        if uploaded_imgs:
+            with st.expander(f"🔍 Preview Staged Screenshots ({len(uploaded_imgs)} file(s))", expanded=True):
+                preview_cols = st.columns(min(len(uploaded_imgs), 4))
+                del_idx = None
+                for img_idx, img_item in enumerate(uploaded_imgs):
+                    with preview_cols[img_idx % len(preview_cols)]:
+                        img_title = getattr(img_item, "name", f"Screenshot #{img_idx + 1}")
+                        st.caption(f"#{img_idx + 1}: {img_title}")
+                        st.image(img_item, width="stretch")
+                        if st.button("✖ Remove", key=f"unified_remove_btn_{img_idx}"):
+                            del_idx = img_idx
+                if del_idx is not None and 0 <= del_idx < len(st.session_state["staged_topology_imgs"]):
+                    st.session_state["staged_topology_imgs"].pop(del_idx)
+                    st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
+                    st.rerun()
+
+        st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
+        # Step 1: Action Buttons
+        btn_col1, btn_col2, _ = st.columns([2.2, 1.2, 6.6])
+        with btn_col1:
+            start_analyze = st.button(
+                "🚀 Analyze Topology & Auto-Populate",
+                key="btn_analyze_hypervisor_img",
+                type="primary",
+                disabled=not bool(uploaded_imgs),
+                width='stretch'
+            )
+        with btn_col2:
+            if st.button("🗑️️ Clear All", key="btn_clear_topo_data", type="secondary", disabled=not bool(uploaded_imgs or st.session_state.get("hypervisor_parsed_descriptions")), width='stretch'):
+                st.session_state["staged_topology_imgs"] = []
+                st.session_state.pop("hypervisor_parsed_descriptions", None)
+                st.session_state.pop("latest_ocr_raw_text", None)
                 st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
                 st.rerun()
 
-    # FULL-WIDTH: Action Buttons
-    st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
-    btn_col1, btn_col2, _ = st.columns([2.2, 1.2, 6.6])
-    with btn_col1:
-        start_analyze = st.button(
-            "🚀 Analyze Topology & Auto-Populate",
-            key="btn_analyze_hypervisor_img",
-            type="primary",
-            disabled=not bool(uploaded_imgs),
-            width='stretch'
-        )
-    with btn_col2:
-        if st.button("🗑️️ Clear All", key="btn_clear_topo_data", type="secondary", disabled=not bool(uploaded_imgs or st.session_state.get("hypervisor_parsed_descriptions")), width='stretch'):
-            st.session_state["staged_topology_imgs"] = []
-            st.session_state.pop("hypervisor_parsed_descriptions", None)
-            st.session_state.pop("latest_ocr_raw_text", None)
-            st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
-            st.rerun()
+        # Step 1: 4-Stage Execution with Universal Image Preprocessing
+        if start_analyze:
+            try:
+                with st.spinner("Executing 4-stage local OCR pipeline..."):
+                    import json
+                    from PIL import Image, ImageEnhance
+                    import pytesseract
+                    from core.ai_client import call_ai
+                    all_raw_text = []
 
-    # FULL-WIDTH: 4-Stage Execution with PIL 2x Upscaling & PSM Configuration
-    if start_analyze:
-        try:
-            with st.spinner("Executing 4-stage local OCR pipeline..."):
-                import json
-                from PIL import Image
-                import pytesseract
-                from core.ai_client import call_ai
-                all_raw_text = []
-
-                # Phase 1: Local Tesseract OCR (Upscaling & PSM optimization)
-                for img in uploaded_imgs:
-                    if hasattr(img, "seek"):
-                        img.seek(0)
-
-                    extracted_txt = ""
-                    try:
-                        pil_img = Image.open(img).convert("L")
-                        w, h = pil_img.size
-                        pil_img = pil_img.resize((w * 2, h * 2), Image.Resampling.LANCZOS)
-                        extracted_txt = pytesseract.image_to_string(pil_img, config="--oem 3 --psm 6").strip()
-                        if not extracted_txt:
-                            extracted_txt = pytesseract.image_to_string(pil_img, config="--oem 3 --psm 11").strip()
-                    except Exception:
+                    # Phase 1: Local Tesseract OCR (contrast enhancement & sparse PSM)
+                    for img in uploaded_imgs:
                         if hasattr(img, "seek"):
                             img.seek(0)
-                        img_bytes = img.read() if hasattr(img, "read") else img.getvalue()
-                        ocr_res = run_local_ocr_pipeline(img_bytes)
-                        extracted_txt = ocr_res.get("text", "").strip()
 
-                    if hasattr(img, "seek"):
-                        img.seek(0)
+                        extracted_txt = ""
+                        try:
+                            pil_img = Image.open(img).convert("L")
+                            w, h = pil_img.size
+                            pil_img = pil_img.resize((w * 2, h * 2), Image.Resampling.LANCZOS)
+                            # Enhance contrast to cleanly isolate text from background lines
+                            enhancer = ImageEnhance.Contrast(pil_img)
+                            pil_img = enhancer.enhance(1.8)
 
-                    if extracted_txt:
-                        all_raw_text.append(extracted_txt)
+                            extracted_txt = pytesseract.image_to_string(pil_img, config="--oem 3 --psm 6").strip()
+                            if not extracted_txt:
+                                extracted_txt = pytesseract.image_to_string(pil_img, config="--oem 3 --psm 11").strip()
+                        except Exception:
+                            if hasattr(img, "seek"):
+                                img.seek(0)
+                            img_bytes = img.read() if hasattr(img, "read") else img.getvalue()
+                            ocr_res = run_local_ocr_pipeline(img_bytes)
+                            extracted_txt = ocr_res.get("text", "").strip()
 
-                combined_raw = "\n".join(all_raw_text).strip()
-                st.session_state["latest_ocr_raw_text"] = combined_raw
+                        if hasattr(img, "seek"):
+                            img.seek(0)
 
-                if not combined_raw:
-                    st.warning("⚠️ No text detected by local OCR. Ensure screenshot contains legible topology labels.")
-                else:
-                    # Phase 2: Local persistent sanitization
-                    sanitized_text, token_map = vault.sanitize_text(combined_raw)
-                    st.session_state["latest_vault_tokens"] = token_map
+                        if extracted_txt:
+                            all_raw_text.append(extracted_txt)
 
-                    # Phase 3: Pure JSON semantic extraction
-                    system_prompt = (
-                        "You are a network topology parser. Given sanitized OCR text from a hypervisor networking screen, "
-                        "extract all network components into a flat JSON array of objects. "
-                        "Each object must have these exact keys:\n"
-                        "  - Type: 'Uplink', 'PortGroup', or 'VMkernel'\n"
-                        "  - Interface: name of interface (e.g. vmnic0, vmk0, PortGroupName)\n"
-                        "  - vSwitch: virtual switch name (e.g. vSwitch0, DSwitch01)\n"
-                        "  - Role: role or status if found (e.g. Active Uplink, Standby Uplink)\n"
-                        "  - Purpose: network purpose or label (e.g. Management Network, vMotion, VM Network)\n"
-                        "  - Slot: hardware slot if mentioned (e.g. PCIe1/Port1, PCI BDF), else ''\n"
-                        "Output ONLY valid JSON array with no conversational markdown or explanation."
-                    )
-                    user_prompt = f"Parse this sanitized topology text:\n\n{sanitized_text}"
-                    response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt)
-                    
-                    m_json = re.search(r"\[\s*\{.*\}\s*\]", response, re.DOTALL)
-                    json_str = m_json.group(0) if m_json else response.strip()
-                    raw_parsed = json.loads(json_str)
+                    combined_raw = "\n".join(all_raw_text).strip()
+                    st.session_state["latest_ocr_raw_text"] = combined_raw
 
-                    # Phase 4: Local de-tokenization
-                    restored_parsed = vault.detokenize_data(raw_parsed)
-                    st.session_state["hypervisor_parsed_descriptions"] = restored_parsed
-                    st.success("Successfully processed screenshots via local OCR & sanitized LLM parsing!")
-        except Exception as e:
-            st.error(f"Pipeline execution failed: {str(e)}")
+                    if not combined_raw:
+                        st.warning("⚠️ No text detected by local OCR. Ensure screenshot contains legible topology labels.")
+                    else:
+                        # Phase 2: Local persistent sanitization
+                        sanitized_text, token_map = vault.sanitize_text(combined_raw)
+                        st.session_state["latest_vault_tokens"] = token_map
 
-    # FULL-WIDTH: Compact Raw OCR Inspector
-    if st.session_state.get("latest_ocr_raw_text"):
-        raw_txt = st.session_state["latest_ocr_raw_text"]
-        with st.expander("📄 OCR Raw Text Inspector (Click to expand)", expanded=False):
-            st.caption(f"✅ Extracted {len(raw_txt)} characters from staged screenshots")
-            st.code(raw_txt, language="text")
+                        # Phase 3: Pure JSON semantic extraction with multi-vendor heuristics
+                        system_prompt = (
+                            "You are an expert infrastructure network topology parser. Given sanitized OCR text from "
+                            "hypervisors (ESXi, Proxmox, KVM), bare-metal servers, or cloud consoles (Azure VM, Oracle OCI), "
+                            "extract all networking components into a flat JSON array of objects.\n"
+                            "The text is from OCR and may contain minor character errors; deduce intended values logically "
+                            "(e.g., extract PCI locations like 'PCI 0000:5b:00.0' or 'Location: PCI...' into Slot, "
+                            "recognize vSwitch/Bridge/VNet identifiers, and capture interface names accurately).\n"
+                            "Each object must have these exact keys:\n"
+                            "  - Type: 'Uplink', 'PortGroup', or 'VMkernel'\n"
+                            "  - Interface: name of interface (e.g. vmnic0, vmk0, nic-1)\n"
+                            "  - vSwitch: virtual switch or network name (e.g. vSwitch0, vmbr0, Subnet01)\n"
+                            "  - Role: role or status if found (e.g. Active Uplink, Standby Uplink, Secondary)\n"
+                            "  - Purpose: network purpose or label (e.g. Management Network, vMotion, VM Network)\n"
+                            "  - Slot: hardware slot or PCI location if mentioned (e.g. PCI 0000:5b:00.0, PCIe1), else ''\n"
+                            "Output ONLY valid JSON array with no conversational markdown or explanation."
+                        )
+                        user_prompt = f"Parse this sanitized topology text:\n\n{sanitized_text}"
+                        response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt)
+                        
+                        m_json = re.search(r"\[\s*\{.*\}\s*\]", response, re.DOTALL)
+                        json_str = m_json.group(0) if m_json else response.strip()
+                        raw_parsed = json.loads(json_str)
 
-        # 2️⃣ Step 2: Extracted Variables Inspector (Full-Width & Clean Filtering)
-        st.divider()
+                        # Phase 4: Local de-tokenization
+                        restored_parsed = vault.detokenize_data(raw_parsed)
+                        st.session_state["hypervisor_parsed_descriptions"] = restored_parsed
+                        st.success("Successfully processed screenshots via local OCR & sanitized LLM parsing!")
+            except Exception as e:
+                st.error(f"Pipeline execution failed: {str(e)}")
 
-        with st.expander("🔒 Local Redaction Audit (Vault Inspection)", expanded=False):
-            st.caption("Inspect and manage locally redacted tokens. Clear the vault cache below to reset all de-tokenization mappings.")
-            if st.session_state.get("latest_vault_tokens"):
-                token_items = list(st.session_state["latest_vault_tokens"].items())[:20]
-                st.code(f"Redacted tokens found: {len(token_items)}", language="text")
-                for orig, token_id in token_items:
-                    st.caption(f"- {orig} → {token_id}")
-            else:
-                st.caption("No redacted tokens in this session yet.")
-            if st.button("🧹 Clear Vault Cache", key="btn_clear_vault_cache"):
-                vault.clear_vault()
-                st.session_state.pop("latest_vault_tokens", None)
-                st.toast("✅ Vault cache cleared!")
-                st.rerun()
+        # Step 1: Compact Raw OCR Inspector
+        if st.session_state.get("latest_ocr_raw_text"):
+            raw_txt = st.session_state["latest_ocr_raw_text"]
+            with st.expander("📄 OCR Raw Text Inspector (Click to expand)", expanded=False):
+                st.caption(f"✅ Extracted {len(raw_txt)} characters from staged screenshots")
+                st.code(raw_txt, language="text")
 
-        st.markdown("##### 2️⃣ Extracted Variables Inspector")
-        if "hypervisor_parsed_descriptions" in st.session_state and st.session_state["hypervisor_parsed_descriptions"]:
-            rows = st.session_state["hypervisor_parsed_descriptions"]
+    # 2️⃣ Step 2: Extracted Variables Inspector (Full-Width & Clean Filtering)
+    st.divider()
 
-            extracted_vmnics = set()
-            extracted_vswitches = set()
-            extracted_purposes = set()
+    with st.expander("🔒 Local Redaction Audit (Vault Inspection)", expanded=False):
+        st.caption("Inspect and manage locally redacted tokens. Clear the vault cache below to reset all de-tokenization mappings.")
+        if st.session_state.get("latest_vault_tokens"):
+            token_items = list(st.session_state["latest_vault_tokens"].items())[:20]
+            st.code(f"Redacted tokens found: {len(token_items)}", language="text")
+            for orig, token_id in token_items:
+                st.caption(f"- {orig} → {token_id}")
+        else:
+            st.caption("No redacted tokens in this session yet.")
+        if st.button("🧹 Clear Vault Cache", key="btn_clear_vault_cache"):
+            vault.clear_vault()
+            st.session_state.pop("latest_vault_tokens", None)
+            st.toast("✅ Vault cache cleared!")
+            st.rerun()
 
-            last_seen_switch = ""
-            for r in rows:
-                if not isinstance(r, dict):
-                    continue
-                row_type = str(r.get("Type", "")).strip()
+    st.markdown("##### 2️⃣ Extracted Variables Inspector")
+    if "hypervisor_parsed_descriptions" in st.session_state and st.session_state["hypervisor_parsed_descriptions"]:
+        rows = st.session_state["hypervisor_parsed_descriptions"]
 
-                # Robust switch detection with forward-filling
-                sw = str(r.get("vSwitch") or r.get("vswitch") or r.get("VSwitch") or r.get("Switch") or "").strip()
-                if not sw:
-                    desc_str = str(r.get("Description", ""))
-                    m_sw = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*|bond\w*|ovs-br\w*|[A-Za-z0-9_\-]+-SW\w*)\b", desc_str)
-                    if m_sw:
-                        sw = m_sw.group(1)
-                if sw:
-                    last_seen_switch = sw
-                    extracted_vswitches.add(sw)
-                elif last_seen_switch:
-                    extracted_vswitches.add(last_seen_switch)
+        extracted_vmnics = set()
+        extracted_vswitches = set()
+        extracted_purposes = set()
 
-                # Strict physical NIC extraction
-                raw_iface = str(r.get("Interface / vmnic") or r.get("Interface") or r.get("vmnic") or r.get("NIC") or "").strip()
-                if row_type == "Uplink" or re.search(r"^(vmnic|eno|ens|enp|eth)\d+", raw_iface, re.IGNORECASE):
-                    m_nic = re.search(r"\b(vmnic\d+|eno\w+|ens\w+|enp\w+|eth\d+)\b", raw_iface, re.IGNORECASE)
-                    if m_nic:
-                        extracted_vmnics.add(m_nic.group(1))
+        last_seen_switch = ""
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            row_type = str(r.get("Type", "")).strip()
 
-                # Exact Purpose extraction: preserve "Management Network", "VM Network", reject vmkX interfaces
-                raw_purp = str(r.get("Role / PortGroup") or r.get("Purpose") or r.get("Service") or r.get("PortGroup") or "").strip()
-                if not raw_purp and row_type in ["PortGroup", "VMkernel"]:
-                    raw_purp = raw_iface
-                if raw_purp:
-                    clean_purp = re.sub(r"(?i)\s+(active uplink|standby uplink)$", "", raw_purp).strip()
-                    clean_purp = re.sub(r"\s*\([^)]*\)", "", clean_purp).strip()
-                    if clean_purp and not re.match(r"^(vmnic\d+|vSwitch\w*|vmk\d+)$", clean_purp, re.IGNORECASE):
-                        extracted_purposes.add(clean_purp)
+            # Robust switch detection with forward-filling
+            sw = str(r.get("vSwitch") or r.get("vswitch") or r.get("VSwitch") or r.get("Switch") or "").strip()
+            if not sw:
+                desc_str = str(r.get("Description", ""))
+                m_sw = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*|bond\w*|ovs-br\w*|[A-Za-z0-9_\-]+-SW\w*)\b", desc_str)
+                if m_sw:
+                    sw = m_sw.group(1)
+            if sw:
+                last_seen_switch = sw
+                extracted_vswitches.add(sw)
+            elif last_seen_switch:
+                extracted_vswitches.add(last_seen_switch)
 
-            vmnics = sorted(list(extracted_vmnics))
-            vswitches = sorted(list(extracted_vswitches))
-            purposes = sorted(list(extracted_purposes))
+            # Strict physical NIC extraction
+            raw_iface = str(r.get("Interface / vmnic") or r.get("Interface") or r.get("vmnic") or r.get("NIC") or "").strip()
+            if row_type == "Uplink" or re.search(r"^(vmnic|eno|ens|enp|eth)\d+", raw_iface, re.IGNORECASE):
+                m_nic = re.search(r"\b(vmnic\d+|eno\w+|ens\w+|enp\w+|eth\d+)\b", raw_iface, re.IGNORECASE)
+                if m_nic:
+                    extracted_vmnics.add(m_nic.group(1))
 
-            # Hardware slot resolution: OCR (AI vision) first, then Standards YAML, then bare name.
-            from config.naming_rules import get_hardware_slot_mappings
-            # Backfill Slot into Uplink rows by matching against Physical Adapter slot records.
-            if "Slot" not in rows[0] or not any(r.get("Slot") for r in rows):
-                adapter_rows = [r for r in rows if r.get("Type") == "PhysicalAdapter"]
-                nic_to_slot = {}
-                for ar in adapter_rows:
-                    ar_nic = ""
-                    for k in ("Interface / vmnic", "Interface", "vmnic", "NIC", "Name"):
-                        v = ar.get(k)
-                        if v is not None and not str(v).lower() in ["nan", "none"]:
-                            m = re.search(r"\b(vmnic\d+)\b", str(v), re.IGNORECASE)
+            # Exact Purpose extraction: preserve "Management Network", "VM Network", reject vmkX interfaces
+            raw_purp = str(r.get("Role / PortGroup") or r.get("Purpose") or r.get("Service") or r.get("PortGroup") or "").strip()
+            if not raw_purp and row_type in ["PortGroup", "VMkernel"]:
+                raw_purp = raw_iface
+            if raw_purp:
+                clean_purp = re.sub(r"(?i)\s+(active uplink|standby uplink)$", "", raw_purp).strip()
+                clean_purp = re.sub(r"\s*\([^)]*\)", "", clean_purp).strip()
+                if clean_purp and not re.match(r"^(vmnic\d+|vSwitch\w*|vmk\d+)$", clean_purp, re.IGNORECASE):
+                    extracted_purposes.add(clean_purp)
+
+        vmnics = sorted(list(extracted_vmnics))
+        vswitches = sorted(list(extracted_vswitches))
+        purposes = sorted(list(extracted_purposes))
+
+        # Hardware slot resolution: OCR (AI vision) first, then Standards YAML, then bare name.
+        from config.naming_rules import get_hardware_slot_mappings
+        # Backfill Slot into Uplink rows by matching against Physical Adapter slot records.
+        if "Slot" not in rows[0] or not any(r.get("Slot") for r in rows):
+            adapter_rows = [r for r in rows if r.get("Type") == "PhysicalAdapter"]
+            nic_to_slot = {}
+            for ar in adapter_rows:
+                ar_nic = ""
+                for k in ("Interface / vmnic", "Interface", "vmnic", "NIC", "Name"):
+                    v = ar.get(k)
+                    if v is not None and not str(v).lower() in ["nan", "none"]:
+                        m = re.search(r"\b(vmnic\d+)\b", str(v), re.IGNORECASE)
+                        if m:
+                            ar_nic = m.group(1)
+                            break
+                if not ar_nic:
+                    for v in ar.values():
+                        if isinstance(v, str):
+                            m = re.search(r"\b(vmnic\d+)\b", v, re.IGNORECASE)
                             if m:
                                 ar_nic = m.group(1)
                                 break
-                    if not ar_nic:
-                        for v in ar.values():
-                            if isinstance(v, str):
-                                m = re.search(r"\b(vmnic\d+)\b", v, re.IGNORECASE)
-                                if m:
-                                    ar_nic = m.group(1)
-                                    break
-                    ar_slot = ar.get("Slot") or ar.get("slot") or ar.get("PCIe Slot") or ""
-                    if ar_nic and ar_slot:
-                        nic_to_slot[ar_nic] = str(ar_slot).strip()
-                for r in rows:
-                    if r.get("Type") == "Uplink":
-                        iface = str(r.get("Interface") or "").strip()
-                        m = re.search(r"\b(vmnic\d+)\b", iface, re.IGNORECASE)
-                        if m:
-                            nic = m.group(1)
-                            if nic in nic_to_slot and not r.get("Slot"):
-                                r["Slot"] = nic_to_slot[nic]
-
-            user_slot_map = get_hardware_slot_mappings(naming_rules)
-            ocr_slot_map = _build_ocr_slot_map(rows, user_slot_map)
-
-            slots = sorted(list(set(ocr_slot_map.values())))
-
-            # Render styled Badge Cards matching NetBox Hub dark glass theme
-            def _render_pill_card(title, items, color="#38bdf8"):
-                st.markdown(f"""
-                <div style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 12px 14px; min-height: 120px;">
-                    <div style="font-weight: 600; color: {color}; margin-bottom: 8px; font-size: 0.88rem; display: flex; justify-content: space-between;">
-                        <span>{title}</span>
-                        <span style="background: rgba(255,255,255,0.1); padding: 1px 6px; border-radius: 10px; font-size: 0.88rem; font-weight: 500; color: #cbd5e1;">{len(items)}</span>
-                    </div>
-                    <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-                        {"".join([f'<span style="background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; padding: 3px 8px; font-size: 0.8rem; font-family: monospace; color: #f1f5f9;">{it}</span>' for it in items]) if items else '<span style="color: #64748b; font-size: 0.8rem;">None detected</span>'}
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-
-            c1, c2, c3, c4 = st.columns(4)
-            with c1:
-                _render_pill_card("&lt;vmnic&gt;", vmnics, "#38bdf8")
-            with c2:
-                _render_pill_card("&lt;v_switch&gt;", vswitches, "#a78bfa")
-            with c3:
-                _render_pill_card("&lt;slot&gt;", slots, "#34d399")
-            with c4:
-                _render_pill_card("&lt;purpose&gt;", purposes, "#f472b6")
-
-            st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
-
-            # --- Dynamic Token Bag Inspector (Discovers all OCR keys, e.g. for Proxmox/KVM) ---
-            raw_token_dict = {}
-            # Inject canonical tokens into raw token dict for complete coverage
-            raw_token_dict["vmnic"] = set(vmnics)
-            raw_token_dict["v_switch"] = set(vswitches)
-            raw_token_dict["slot"] = set(slots)
-            raw_token_dict["purpose"] = set(purposes)
+                ar_slot = ar.get("Slot") or ar.get("slot") or ar.get("PCIe Slot") or ""
+                if ar_nic and ar_slot:
+                    nic_to_slot[ar_nic] = str(ar_slot).strip()
             for r in rows:
+                if r.get("Type") == "Uplink":
+                    iface = str(r.get("Interface") or "").strip()
+                    m = re.search(r"\b(vmnic\d+)\b", iface, re.IGNORECASE)
+                    if m:
+                        nic = m.group(1)
+                        if nic in nic_to_slot and not r.get("Slot"):
+                            r["Slot"] = nic_to_slot[nic]
+
+        user_slot_map = get_hardware_slot_mappings(naming_rules)
+        ocr_slot_map = _build_ocr_slot_map(rows, user_slot_map)
+
+        slots = sorted(list(set(ocr_slot_map.values())))
+
+        # Render styled Badge Cards matching NetBox Hub dark glass theme
+        def _render_pill_card(title, items, color="#38bdf8"):
+            st.markdown(f"""
+            <div style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 12px 14px; min-height: 120px;">
+                <div style="font-weight: 600; color: {color}; margin-bottom: 8px; font-size: 0.88rem; display: flex; justify-content: space-between;">
+                    <span>{title}</span>
+                    <span style="background: rgba(255,255,255,0.1); padding: 1px 6px; border-radius: 10px; font-size: 0.88rem; font-weight: 500; color: #cbd5e1;">{len(items)}</span>
+                </div>
+                <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                    {"".join([f'<span style="background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; padding: 3px 8px; font-size: 0.8rem; font-family: monospace; color: #f1f5f9;">{it}</span>' for it in items]) if items else '<span style="color: #64748b; font-size: 0.8rem;">None detected</span>'}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            _render_pill_card("&lt;vmnic&gt;", vmnics, "#38bdf8")
+        with c2:
+            _render_pill_card("&lt;v_switch&gt;", vswitches, "#a78bfa")
+        with c3:
+            _render_pill_card("&lt;slot&gt;", slots, "#34d399")
+        with c4:
+            _render_pill_card("&lt;purpose&gt;", purposes, "#f472b6")
+
+        st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+
+        # --- Dynamic Token Bag Inspector (Discovers all OCR keys, e.g. for Proxmox/KVM) ---
+        raw_token_dict = {}
+        # Inject canonical tokens into raw token dict for complete coverage
+        raw_token_dict["vmnic"] = set(vmnics)
+        raw_token_dict["v_switch"] = set(vswitches)
+        raw_token_dict["slot"] = set(slots)
+        raw_token_dict["purpose"] = set(purposes)
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            for k, v in r.items():
+                if v is not None and not str(v).lower() in ["nan", "none", ""]:
+                    norm_k = re.sub(r"[^a-zA-Z0-9]+", "_", str(k).strip().lower()).strip("_")
+                    if norm_k:
+                        raw_token_dict.setdefault(norm_k, set()).add(str(v).strip())
+
+        existing_vars = get_pattern_variables(naming_rules)
+        # Flatten nested-by-scope pattern variables for accurate existence checks
+        existing_token_names = set()
+        if isinstance(existing_vars, dict):
+            for k, v in existing_vars.items():
+                if isinstance(v, dict) and "label" in v:
+                    existing_token_names.add(k.lower())
+                elif isinstance(v, dict):
+                    for sub_k in v.keys():
+                        existing_token_names.add(sub_k.lower())
+        # Also include flat helper
+        for k in get_pattern_variables(naming_rules).keys():
+            existing_token_names.add(str(k).lower())
+
+        with st.expander("🔍 OCR Raw Token Dictionary (Platform-Agnostic Variable Bag)", expanded=False):
+            st.caption("All extracted tokens discovered from the uploaded topology. These keys are immediately available in Step 4 patterns and can be synced to Standards.")
+            tok_cols = st.columns(3)
+            for idx, (t_name, t_vals) in enumerate(sorted(raw_token_dict.items())):
+                col_target = tok_cols[idx % 3]
+                sample_vals = ", ".join(list(t_vals)[:3])
+                sync_key = f"btn_sync_tok_{t_name}"
+                is_existing = t_name.strip("<>_").lower() in existing_token_names
+                with col_target:
+                    if is_existing:
+                        st.button(f"✅ <{t_name}> (In Standards)", key=sync_key, disabled=True, width='stretch')
+                    else:
+                        if st.button(f"🔗 Sync <{t_name}>", key=sync_key, help=f"Sync <{t_name}> to Hypervisor Standards with default value: {sample_vals}", width='stretch'):
+                            from config.naming_rules import save_naming_rules
+                            norm_token = re.sub(r"[^a-z0-9_]", "", t_name)
+                            if "pattern_variables" not in naming_rules or not isinstance(naming_rules.get("pattern_variables"), dict):
+                                naming_rules.setdefault("pattern_variables", {})
+                            sample_val_list = list(t_vals)
+                            default_val = sample_val_list[0] if sample_val_list else ""
+                            naming_rules["pattern_variables"][norm_token] = {
+                                "label": norm_token.replace("_", " ").title(),
+                                "placeholder": f"e.g. {default_val or norm_token}",
+                                "default": default_val,
+                                "optional": False,
+                                "scope": "hypervisor",
+                            }
+                            save_naming_rules(naming_rules, source="Variable Inspector Sync")
+                            SSM.set_naming_rules(naming_rules.copy())
+                            st.toast(f"✅ <{norm_token}> synced! Manage in Standards Tab ➔ Pattern Variables.", icon="💾")
+                            st.rerun()
+                    border_color = "#22c55e" if is_existing else "rgba(255,255,255,0.08)"
+                    title_color = "#22c55e" if is_existing else "#38bdf8"
+                    with st.container(border=True):
+                        st.markdown(f"""
+                        <div style="font-family: monospace; font-weight: 600; color: {title_color}; font-size: 0.85rem;">&lt;{t_name}&gt;</div>
+                        <div style="color: #94a3b8; font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{sample_vals}">e.g. {sample_vals}</div>
+                        """, unsafe_allow_html=True)
+
+    else:
+        st.caption("Tokens will be listed here after analyzing topology screenshots.")
+
+    # 3️⃣ Step 3: NetBox Descriptions & Review (Ready-to-Copy)
+    st.divider()
+    st.markdown("##### 3️⃣ NetBox Descriptions & Review (Ready-to-Copy)")
+    if "hypervisor_parsed_descriptions" in st.session_state and st.session_state["hypervisor_parsed_descriptions"]:
+        st.markdown("###### 📋 Generated NetBox Interface Descriptions (Editable)")
+        st.caption("Review and edit parsed topology directly below. Batch text updates reactively in real time.")
+
+        edited_descriptions = st.data_editor(
+            st.session_state["hypervisor_parsed_descriptions"],
+            width="stretch",
+            hide_index=True,
+            num_rows="dynamic",
+            key="esxi_vision_data_editor"
+        )
+        st.session_state["hypervisor_parsed_descriptions"] = edited_descriptions
+
+        col_qc_title, col_qc_btn = st.columns([3.5, 1.0], vertical_alignment="center")
+        with col_qc_title:
+            st.markdown("###### 📋 Quick Copy for NetBox (Batch Text)")
+        with col_qc_btn:
+            if st.button("🔄 Refresh", key="btn_refresh_quick_copy", width='stretch', help="Re-render Quick Copy using the latest standards and patterns without re-running OCR"):
+                from config.naming_rules import load_naming_rules
+                fresh_rules = load_naming_rules()
+                SSM.set_naming_rules(fresh_rules.copy())
+                SSM.refresh_naming_rules()
+                st.toast("✅ Refreshed with latest standards!")
+                st.rerun()
+        rows = edited_descriptions
+
+        # Get patterns from session state
+        _naming_rules = SSM.get_naming_rules({})
+        _patterns = _naming_rules.get("naming_patterns", {})
+
+        # Load user-configured patterns dynamically from Standards rules
+        raw_esxi_presets = _naming_rules.get("esxi_network_presets", [])
+        esxi_presets = {p["code"]: p for p in raw_esxi_presets if isinstance(p, dict)}
+
+        uplink_tpl = (
+            _patterns.get("esxinet_uplink")
+            or _patterns.get("esxi_uplink")
+            or esxi_presets.get("Uplink", {}).get("pattern_template")
+            or esxi_presets.get("Uplink", {}).get("pattern")
+            or "<vmnic> - <v_switch> <purpose> <status>"
+        )
+        pg_tpl = (
+            _patterns.get("esxinet_portgroup")
+            or _patterns.get("esxi_portgroup")
+            or esxi_presets.get("PortGroup", {}).get("pattern_template")
+            or esxi_presets.get("PortGroup", {}).get("pattern")
+            or "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)"
+        )
+        vmk_tpl = (
+            _patterns.get("esxinet_vmkernel")
+            or _patterns.get("esxi_vmkernel")
+            or esxi_presets.get("VMkernel", {}).get("pattern_template")
+            or esxi_presets.get("VMkernel", {}).get("pattern")
+            or "<purpose> (<v_switch>)"
+        )
+
+        from config.naming_rules import get_hardware_slot_mappings
+        user_slot_map = get_hardware_slot_mappings(_naming_rules)
+        ocr_slot_map = _build_ocr_slot_map(rows, user_slot_map)
+        pattern_vars = _naming_rules.get("variables", {}) or {}
+        # Make active_vmnics/standby_vmnics optional so empty teaming sides are stripped cleanly.
+        for _tok in ("active_vmnics", "standby_vmnics"):
+            meta = pattern_vars.get(_tok, {})
+            if isinstance(meta, dict):
+                meta.setdefault("optional", True)
+            else:
+                pattern_vars[_tok] = {"optional": True}
+        # FIX: Prioritize existing descriptions and group by type first
+        uplink_rows = [r for r in rows if r.get("Type") == "Uplink"]
+        pg_rows = [r for r in rows if r.get("Type") == "PortGroup"]
+        vmk_rows = [r for r in rows if r.get("Type") == "VMkernel"]
+
+        def _group_by_vswitch(rlist):
+            """Group rows by vSwitch, extracting from description if needed."""
+            groups = {}
+            last_seen = ""
+            for r in rlist:
                 if not isinstance(r, dict):
                     continue
-                for k, v in r.items():
-                    if v is not None and not str(v).lower() in ["nan", "none", ""]:
-                        norm_k = re.sub(r"[^a-zA-Z0-9]+", "_", str(k).strip().lower()).strip("_")
-                        if norm_k:
-                            raw_token_dict.setdefault(norm_k, set()).add(str(v).strip())
+                vs = (r.get("vSwitch") or r.get("vswitch") or r.get("VSwitch") or "").strip()
+                if not vs:
+                    desc = str(r.get("Description", ""))
+                    m = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*|bond\w*|ovs-br\w*|[A-Za-z0-9_\-]+-SW\w*)\b", desc)
+                    if m:
+                        vs = m.group(1)
+                    elif not vs:
+                        vs = "Internal / No Uplink" if r.get("Type") == "Uplink" else "General"
+                if not vs:
+                    vs = last_seen or "General"
+                last_seen = vs
+                groups.setdefault(vs, []).append(r)
+            return groups
 
-            existing_vars = get_pattern_variables(naming_rules)
-            # Flatten nested-by-scope pattern variables for accurate existence checks
-            existing_token_names = set()
-            if isinstance(existing_vars, dict):
-                for k, v in existing_vars.items():
-                    if isinstance(v, dict) and "label" in v:
-                        existing_token_names.add(k.lower())
-                    elif isinstance(v, dict):
-                        for sub_k in v.keys():
-                            existing_token_names.add(sub_k.lower())
-            # Also include flat helper
-            for k in get_pattern_variables(naming_rules).keys():
-                existing_token_names.add(str(k).lower())
+        def _resolve_vswitch_from_desc(desc, row_type):
+            """Extract vSwitch from description if not in row."""
+            m = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*|bond\w*|ovs-br\w*|[A-Za-z0-9_\-]+-SW\w*)\b", desc)
+            if m:
+                return m.group(1)
+            return "Internal / No Uplink" if row_type == "Uplink" else "General"
 
-            with st.expander("🔍 OCR Raw Token Dictionary (Platform-Agnostic Variable Bag)", expanded=False):
-                st.caption("All extracted tokens discovered from the uploaded topology. These keys are immediately available in Step 4 patterns and can be synced to Standards.")
-                tok_cols = st.columns(3)
-                for idx, (t_name, t_vals) in enumerate(sorted(raw_token_dict.items())):
-                    col_target = tok_cols[idx % 3]
-                    sample_vals = ", ".join(list(t_vals)[:3])
-                    sync_key = f"btn_sync_tok_{t_name}"
-                    is_existing = t_name.strip("<>_").lower() in existing_token_names
-                    with col_target:
-                        if is_existing:
-                            st.button(f"✅ <{t_name}> (In Standards)", key=sync_key, disabled=True, width='stretch')
-                        else:
-                            if st.button(f"🔗 Sync <{t_name}>", key=sync_key, help=f"Sync <{t_name}> to Hypervisor Standards with default value: {sample_vals}", width='stretch'):
-                                from config.naming_rules import save_naming_rules
-                                norm_token = re.sub(r"[^a-z0-9_]", "", t_name)
-                                if "pattern_variables" not in naming_rules or not isinstance(naming_rules.get("pattern_variables"), dict):
-                                    naming_rules.setdefault("pattern_variables", {})
-                                sample_val_list = list(t_vals)
-                                default_val = sample_val_list[0] if sample_val_list else ""
-                                naming_rules["pattern_variables"][norm_token] = {
-                                    "label": norm_token.replace("_", " ").title(),
-                                    "placeholder": f"e.g. {default_val or norm_token}",
-                                    "default": default_val,
-                                    "optional": False,
-                                    "scope": "hypervisor",
-                                }
-                                save_naming_rules(naming_rules, source="Variable Inspector Sync")
-                                SSM.set_naming_rules(naming_rules.copy())
-                                st.toast(f"✅ <{norm_token}> synced! Manage in Standards Tab ➔ Pattern Variables.", icon="💾")
-                                st.rerun()
-                        border_color = "#22c55e" if is_existing else "rgba(255,255,255,0.08)"
-                        title_color = "#22c55e" if is_existing else "#38bdf8"
-                        with st.container(border=True):
-                            st.markdown(f"""
-                            <div style="font-family: monospace; font-weight: 600; color: {title_color}; font-size: 0.85rem;">&lt;{t_name}&gt;</div>
-                            <div style="color: #94a3b8; font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{sample_vals}">e.g. {sample_vals}</div>
-                            """, unsafe_allow_html=True)
+        type_order_map = {"Uplink": 0, "PortGroup": 1, "VMkernel": 2}
 
-        else:
-            st.caption("Tokens will be listed here after analyzing topology screenshots.")
+        def _format_block(rows_list, block_label):
+            """Format a block of rows grouped by vSwitch."""
+            groups = _group_by_vswitch(rows_list)
+            lines = [f"=== {block_label} ==="]
+            for vs in sorted(groups.keys()):
+                items = sorted(
+                    groups[vs],
+                    key=lambda r: (type_order_map.get(r.get("Type", ""), 3), str(r.get("Interface", ""))),
+                )
+                lines.append(f"=== {vs} ===")
+                for row in items:
+                    iface = str(row.get("Interface", "")).strip()
+                    desc = str(row.get("Description", "")).strip()
+                    ip = str(row.get("IP Address", "") or "").strip()
+                    row_type = row.get("Type", "")
 
-        # 3️⃣ Step 3: NetBox Descriptions & Review (Ready-to-Copy)
-        st.divider()
-        st.markdown("##### 3️⃣ NetBox Descriptions & Review (Ready-to-Copy)")
-        if "hypervisor_parsed_descriptions" in st.session_state and st.session_state["hypervisor_parsed_descriptions"]:
-            st.markdown("###### 📋 Generated NetBox Interface Descriptions (Editable)")
-            st.caption("Review and edit parsed topology directly below. Batch text updates reactively in real time.")
+                    # Always extract and inject raw values into row_vals first,
+                    # including the description, so template evaluation runs
+                    # regardless of whether the user edited the description.
+                    row_vals = {}
+                    for k, v in row.items():
+                        if v is not None and not str(v).lower() in ["nan", "none"]:
+                            norm_k = re.sub(r"[^a-zA-Z0-9]+", "_", str(k).strip().lower()).strip("_")
+                            row_vals[norm_k] = str(v).strip()
+                    row_vals["description"] = desc
 
-            edited_descriptions = st.data_editor(
-                st.session_state["hypervisor_parsed_descriptions"],
-                width="stretch",
-                hide_index=True,
-                num_rows="dynamic",
-                key="esxi_vision_data_editor"
-            )
-            st.session_state["hypervisor_parsed_descriptions"] = edited_descriptions
-
-            col_qc_title, col_qc_btn = st.columns([3.5, 1.0], vertical_alignment="center")
-            with col_qc_title:
-                st.markdown("###### 📋 Quick Copy for NetBox (Batch Text)")
-            with col_qc_btn:
-                if st.button("🔄 Refresh", key="btn_refresh_quick_copy", width='stretch', help="Re-render Quick Copy using the latest standards and patterns without re-running OCR"):
-                    from config.naming_rules import load_naming_rules
-                    fresh_rules = load_naming_rules()
-                    SSM.set_naming_rules(fresh_rules.copy())
-                    SSM.refresh_naming_rules()
-                    st.toast("✅ Refreshed with latest standards!")
-                    st.rerun()
-            rows = edited_descriptions
-
-            # Get patterns from session state
-            _naming_rules = SSM.get_naming_rules({})
-            _patterns = _naming_rules.get("naming_patterns", {})
-
-            # Load user-configured patterns dynamically from Standards rules
-            raw_esxi_presets = _naming_rules.get("esxi_network_presets", [])
-            esxi_presets = {p["code"]: p for p in raw_esxi_presets if isinstance(p, dict)}
-
-            uplink_tpl = (
-                _patterns.get("esxinet_uplink")
-                or _patterns.get("esxi_uplink")
-                or esxi_presets.get("Uplink", {}).get("pattern_template")
-                or esxi_presets.get("Uplink", {}).get("pattern")
-                or "<vmnic> - <v_switch> <purpose> <status>"
-            )
-            pg_tpl = (
-                _patterns.get("esxinet_portgroup")
-                or _patterns.get("esxi_portgroup")
-                or esxi_presets.get("PortGroup", {}).get("pattern_template")
-                or esxi_presets.get("PortGroup", {}).get("pattern")
-                or "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)"
-            )
-            vmk_tpl = (
-                _patterns.get("esxinet_vmkernel")
-                or _patterns.get("esxi_vmkernel")
-                or esxi_presets.get("VMkernel", {}).get("pattern_template")
-                or esxi_presets.get("VMkernel", {}).get("pattern")
-                or "<purpose> (<v_switch>)"
-            )
-
-            from config.naming_rules import get_hardware_slot_mappings
-            user_slot_map = get_hardware_slot_mappings(_naming_rules)
-            ocr_slot_map = _build_ocr_slot_map(rows, user_slot_map)
-            pattern_vars = _naming_rules.get("variables", {}) or {}
-            # Make active_vmnics/standby_vmnics optional so empty teaming sides are stripped cleanly.
-            for _tok in ("active_vmnics", "standby_vmnics"):
-                meta = pattern_vars.get(_tok, {})
-                if isinstance(meta, dict):
-                    meta.setdefault("optional", True)
-                else:
-                    pattern_vars[_tok] = {"optional": True}
-            # FIX: Prioritize existing descriptions and group by type first
-            uplink_rows = [r for r in rows if r.get("Type") == "Uplink"]
-            pg_rows = [r for r in rows if r.get("Type") == "PortGroup"]
-            vmk_rows = [r for r in rows if r.get("Type") == "VMkernel"]
-
-            def _group_by_vswitch(rlist):
-                """Group rows by vSwitch, extracting from description if needed."""
-                groups = {}
-                last_seen = ""
-                for r in rlist:
-                    if not isinstance(r, dict):
-                        continue
-                    vs = (r.get("vSwitch") or r.get("vswitch") or r.get("VSwitch") or "").strip()
-                    if not vs:
-                        desc = str(r.get("Description", ""))
-                        m = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*|bond\w*|ovs-br\w*|[A-Za-z0-9_\-]+-SW\w*)\b", desc)
-                        if m:
-                            vs = m.group(1)
-                        elif not vs:
-                            vs = "Internal / No Uplink" if r.get("Type") == "Uplink" else "General"
-                    if not vs:
-                        vs = last_seen or "General"
-                    last_seen = vs
-                    groups.setdefault(vs, []).append(r)
-                return groups
-
-            def _resolve_vswitch_from_desc(desc, row_type):
-                """Extract vSwitch from description if not in row."""
-                m = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*|bond\w*|ovs-br\w*|[A-Za-z0-9_\-]+-SW\w*)\b", desc)
-                if m:
-                    return m.group(1)
-                return "Internal / No Uplink" if row_type == "Uplink" else "General"
-
-            type_order_map = {"Uplink": 0, "PortGroup": 1, "VMkernel": 2}
-
-            def _format_block(rows_list, block_label):
-                """Format a block of rows grouped by vSwitch."""
-                groups = _group_by_vswitch(rows_list)
-                lines = [f"=== {block_label} ==="]
-                for vs in sorted(groups.keys()):
-                    items = sorted(
-                        groups[vs],
-                        key=lambda r: (type_order_map.get(r.get("Type", ""), 3), str(r.get("Interface", ""))),
+                    # Resolve vSwitch
+                    resolved_vs = (
+                        row_vals.get("vswitch") or
+                        row_vals.get("v_switch") or
+                        row_vals.get("switch") or
+                        vs or ""
                     )
-                    lines.append(f"=== {vs} ===")
-                    for row in items:
-                        iface = str(row.get("Interface", "")).strip()
-                        desc = str(row.get("Description", "")).strip()
-                        ip = str(row.get("IP Address", "") or "").strip()
-                        row_type = row.get("Type", "")
+                    if not resolved_vs and desc:
+                        m_vs = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*|bond\w*|ovs-br\w*|[A-Za-z0-9_\-]+-SW\w*)\b", desc)
+                        if m_vs:
+                            resolved_vs = m_vs.group(1)
+                    row_vals["vswitch"] = resolved_vs
+                    row_vals["v_switch"] = resolved_vs
 
-                        # Always extract and inject raw values into row_vals first,
-                        # including the description, so template evaluation runs
-                        # regardless of whether the user edited the description.
-                        row_vals = {}
-                        for k, v in row.items():
-                            if v is not None and not str(v).lower() in ["nan", "none"]:
-                                norm_k = re.sub(r"[^a-zA-Z0-9]+", "_", str(k).strip().lower()).strip("_")
-                                row_vals[norm_k] = str(v).strip()
-                        row_vals["description"] = desc
+                    # Preserve all extracted fields directly without destructive wiping or artificial fallbacks
+                    norm_iface = iface or row_vals.get("interface") or ""
+                    row_vals["interface"] = norm_iface
+                    row_vals["port_group"] = norm_iface
+                    row_vals["vmnic"] = norm_iface
 
-                        # Resolve vSwitch
-                        resolved_vs = (
-                            row_vals.get("vswitch") or
-                            row_vals.get("v_switch") or
-                            row_vals.get("switch") or
-                            vs or ""
-                        )
-                        if not resolved_vs and desc:
-                            m_vs = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*|bond\w*|ovs-br\w*|[A-Za-z0-9_\-]+-SW\w*)\b", desc)
-                            if m_vs:
-                                resolved_vs = m_vs.group(1)
-                        row_vals["vswitch"] = resolved_vs
-                        row_vals["v_switch"] = resolved_vs
+                    # Extract network label / business role cleanly
+                    raw_purpose = (
+                        row_vals.get("network_label")
+                        or row_vals.get("purpose")
+                        or row_vals.get("role_portgroup")
+                        or row_vals.get("service")
+                        or row_vals.get("portgroup")
+                        or row_vals.get("port_group")
+                        or ""
+                    )
+                    clean_purp = str(raw_purpose).strip()
 
-                        # Preserve all extracted fields directly without destructive wiping or artificial fallbacks
-                        norm_iface = iface or row_vals.get("interface") or ""
-                        row_vals["interface"] = norm_iface
-                        row_vals["port_group"] = norm_iface
-                        row_vals["vmnic"] = norm_iface
+                    # If purpose is identical to physical/virtual interface name, it is not a genuine purpose
+                    if re.match(r"^(vmnic\d+|eno\w+|ens\w+|enp\w+|eth\d+|vmk\d+)$", clean_purp, re.IGNORECASE):
+                        clean_purp = ""
 
-                        # Extract network label / business role cleanly
-                        raw_purpose = (
-                            row_vals.get("network_label")
-                            or row_vals.get("purpose")
-                            or row_vals.get("role_portgroup")
-                            or row_vals.get("service")
-                            or row_vals.get("portgroup")
-                            or row_vals.get("port_group")
-                            or ""
-                        )
-                        clean_purp = str(raw_purpose).strip()
+                    row_vals["purpose"] = clean_purp
+                    row_vals["service"] = clean_purp
 
-                        # If purpose is identical to physical/virtual interface name, it is not a genuine purpose
-                        if re.match(r"^(vmnic\d+|eno\w+|ens\w+|enp\w+|eth\d+|vmk\d+)$", clean_purp, re.IGNORECASE):
-                            clean_purp = ""
+                    # Active/Standby teaming - use only directly extracted values, no cross-row guessing
+                    act_vmnics = row_vals.get("active") or row_vals.get("active_vmnics") or ""
+                    stb_vmnics = row_vals.get("standby") or row_vals.get("standby_vmnics") or ""
+                    row_vals["active_vmnics"] = act_vmnics
+                    row_vals["standby_vmnics"] = stb_vmnics
+                    row_vals["active"] = act_vmnics
+                    row_vals["standby"] = stb_vmnics
 
-                        row_vals["purpose"] = clean_purp
-                        row_vals["service"] = clean_purp
+                    # Status & Uplink Role (support dedicated uplink_role token without global status pollution)
+                    status_val = row_vals.get("uplink_role") or row_vals.get("role") or row_vals.get("status") or ""
+                    row_vals["uplink_role"] = status_val
+                    row_vals["status"] = status_val
+                    row_vals["role"] = status_val
 
-                        # Active/Standby teaming - use only directly extracted values, no cross-row guessing
-                        act_vmnics = row_vals.get("active") or row_vals.get("active_vmnics") or ""
-                        stb_vmnics = row_vals.get("standby") or row_vals.get("standby_vmnics") or ""
-                        row_vals["active_vmnics"] = act_vmnics
-                        row_vals["standby_vmnics"] = stb_vmnics
-                        row_vals["active"] = act_vmnics
-                        row_vals["standby"] = stb_vmnics
+                    # Always evaluate the dynamic template so user edits to
+                    # descriptions are still normalized through the pipeline.
+                    if row_type == "VMkernel":
+                        rendered = render_dynamic_pattern(vmk_tpl, row_vals, pattern_vars)
+                    elif row_type == "PortGroup":
+                        rendered = render_dynamic_pattern(pg_tpl, row_vals, pattern_vars)
+                    elif row_type == "Uplink":
+                        rendered = render_dynamic_pattern(uplink_tpl, row_vals, pattern_vars)
+                    else:
+                        rendered = ""
 
-                        # Status & Uplink Role (support dedicated uplink_role token without global status pollution)
-                        status_val = row_vals.get("uplink_role") or row_vals.get("role") or row_vals.get("status") or ""
-                        row_vals["uplink_role"] = status_val
-                        row_vals["status"] = status_val
-                        row_vals["role"] = status_val
+                    # Clean formatting - structural pipeline (prunes empty brackets, orphan standby, and dangling slashes)
+                    rendered = re.sub(r"<[^>]+>", "", rendered)
+                    rendered = re.sub(r"\s*/\s*Standby\)", ")", rendered)
+                    rendered = re.sub(r"\s*/\s*", " / ", rendered)
+                    rendered = re.sub(r"\s*/\s*\)", ")", rendered)
+                    rendered = re.sub(r"\(\s*/\s*", "(", rendered)
+                    rendered = re.sub(r"\(\s*\)", "", rendered)
+                    rendered = re.sub(r"\s*-\s*$", "", rendered)
+                    rendered = re.sub(r"\s{2,}", " ", rendered).strip()
 
-                        # Always evaluate the dynamic template so user edits to
-                        # descriptions are still normalized through the pipeline.
-                        if row_type == "VMkernel":
-                            rendered = render_dynamic_pattern(vmk_tpl, row_vals, pattern_vars)
-                        elif row_type == "PortGroup":
-                            rendered = render_dynamic_pattern(pg_tpl, row_vals, pattern_vars)
-                        elif row_type == "Uplink":
-                            rendered = render_dynamic_pattern(uplink_tpl, row_vals, pattern_vars)
+                    # Auto-correction hook
+                    if st.session_state.get("auto_correct", True):
+                        from utils.formatters import apply_auto_corrections
+                        rendered = apply_auto_corrections(rendered, "vmware")
+
+                    # Determine header based on type
+                    if row_type == "Uplink":
+                        hw_slot = _resolve_hw_slot(iface, user_slot_map=user_slot_map, ocr_slot_map=ocr_slot_map)
+                        m_pure = re.search(r"\b(vmnic\d+|eno\w+|ens\w+|enp\w+|eth\d+)\b", iface, re.IGNORECASE)
+                        pure_iface = m_pure.group(1) if m_pure else iface
+                        row_vals["slot"] = hw_slot if hw_slot != pure_iface else ""
+                        if row_vals.get("slot"):
+                            header_iface = f"{row_vals['slot']} ({pure_iface}):"
                         else:
-                            rendered = ""
+                            header_iface = f"({pure_iface}):"
+                        lines.append(f"{header_iface}\n{rendered}\n")
+                    elif row_type == "PortGroup":
+                        clean_iface = iface.strip()
+                        lines.append(f"{clean_iface}:\n{rendered}\n")
+                    elif row_type == "VMkernel":
+                        # 100% Template-driven output without hardcoded outer headers or forced IP appending
+                        lines.append(f"{rendered}\n")
+                    else:
+                        lines.append(f"{iface}:\n{rendered}\n")
+            return "\n".join(lines)
 
-                        # Clean formatting - structural pipeline (prunes empty brackets, orphan standby, and dangling slashes)
-                        rendered = re.sub(r"<[^>]+>", "", rendered)
-                        rendered = re.sub(r"\s*/\s*Standby\)", ")", rendered)
-                        rendered = re.sub(r"\s*/\s*", " / ", rendered)
-                        rendered = re.sub(r"\s*/\s*\)", ")", rendered)
-                        rendered = re.sub(r"\(\s*/\s*", "(", rendered)
-                        rendered = re.sub(r"\(\s*\)", "", rendered)
-                        rendered = re.sub(r"\s*-\s*$", "", rendered)
-                        rendered = re.sub(r"\s{2,}", " ", rendered).strip()
+    # Strictly eliminated: all cross-row heuristics and active/standby guessing logic removed.
+    # Template interpolation is strictly platform-agnostic and driven solely by extracted row tokens.
 
-                        # Auto-correction hook
-                        if st.session_state.get("auto_correct", True):
-                            from utils.formatters import apply_auto_corrections
-                            rendered = apply_auto_corrections(rendered, "vmware")
+    blocks = []
+    if uplink_rows:
+        blocks.append(_format_block(uplink_rows, "Uplinks"))
+    if pg_rows:
+        blocks.append(_format_block(pg_rows, "Port Groups"))
+    if vmk_rows:
+        blocks.append(_format_block(vmk_rows, "VMkernels"))
 
-                        # Determine header based on type
-                        if row_type == "Uplink":
-                            hw_slot = _resolve_hw_slot(iface, user_slot_map=user_slot_map, ocr_slot_map=ocr_slot_map)
-                            m_pure = re.search(r"\b(vmnic\d+|eno\w+|ens\w+|enp\w+|eth\d+)\b", iface, re.IGNORECASE)
-                            pure_iface = m_pure.group(1) if m_pure else iface
-                            row_vals["slot"] = hw_slot if hw_slot != pure_iface else ""
-                            if row_vals.get("slot"):
-                                header_iface = f"{row_vals['slot']} ({pure_iface}):"
-                            else:
-                                header_iface = f"({pure_iface}):"
-                            lines.append(f"{header_iface}\n{rendered}\n")
-                        elif row_type == "PortGroup":
-                            clean_iface = iface.strip()
-                            lines.append(f"{clean_iface}:\n{rendered}\n")
-                        elif row_type == "VMkernel":
-                            # 100% Template-driven output without hardcoded outer headers or forced IP appending
-                            lines.append(f"{rendered}\n")
-                        else:
-                            lines.append(f"{iface}:\n{rendered}\n")
-                return "\n".join(lines)
+    _has_slots = bool(ocr_slot_map) or any(
+        bool(r.get("Slot") or r.get("slot")) and str(r.get("Slot") or r.get("slot")).strip() not in ("None", "", iface)
+        for r in rows
+        if isinstance(r, dict)
+        for iface in [str(r.get("Interface") or r.get("interface") or "")]
+    )
+    note_header = "# NOTE:\n"
+    if not _has_slots:
+        note_header += "# - Slot Mappings: Not detected in screenshots. Provide physical adapter details to populate.\n"
+    note_header += "# - Uplink / Bond Role: Verify active/standby or bonding modes in hypervisor networking settings.\n\n"
+    joined_blocks = "\n\n".join(blocks).strip()
+    bulk_text = note_header + joined_blocks
+    st.code(bulk_text, language="text")
 
-        # Strictly eliminated: all cross-row heuristics and active/standby guessing logic removed.
-        # Template interpolation is strictly platform-agnostic and driven solely by extracted row tokens.
-
-            blocks = []
-            if uplink_rows:
-                blocks.append(_format_block(uplink_rows, "Uplinks"))
-            if pg_rows:
-                blocks.append(_format_block(pg_rows, "Port Groups"))
-            if vmk_rows:
-                blocks.append(_format_block(vmk_rows, "VMkernels"))
-
-            _has_slots = bool(ocr_slot_map) or any(
-                bool(r.get("Slot") or r.get("slot")) and str(r.get("Slot") or r.get("slot")).strip() not in ("None", "", iface)
-                for r in rows
-                if isinstance(r, dict)
-                for iface in [str(r.get("Interface") or r.get("interface") or "")]
-            )
-            note_header = "# NOTE:\n"
-            if not _has_slots:
-                note_header += "# - Slot Mappings: Not detected in screenshots. Provide physical adapter details to populate.\n"
-            note_header += "# - Uplink / Bond Role: Verify active/standby or bonding modes in hypervisor networking settings.\n\n"
-            joined_blocks = "\n\n".join(blocks).strip()
-            bulk_text = note_header + joined_blocks
-            st.code(bulk_text, language="text")
-
-            st.download_button(
-                "📥 Download Generated Descriptions (.txt)",
-                bulk_text.encode("utf-8"),
-                file_name="netbox-descriptions.txt",
-                mime="text/plain",
-                key="dl_esxi_descriptions_pipe"
-            )
+    st.download_button(
+        "📥 Download Generated Descriptions (.txt)",
+        bulk_text.encode("utf-8"),
+        file_name="netbox-descriptions.txt",
+        mime="text/plain",
+        key="dl_esxi_descriptions_pipe"
+    )
