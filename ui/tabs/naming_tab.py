@@ -1101,10 +1101,23 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
                 extracted_txt = ""
                 try:
-                    # Ensure stream pointer is at beginning for all file-like inputs
-                    if hasattr(img, "seek"):
+                    raw_bytes = None
+                    if hasattr(img, "getvalue"):
+                        raw_bytes = img.getvalue()
+                    elif hasattr(img, "read"):
                         img.seek(0)
-                    ocr_res = run_local_ocr_pipeline([img])
+                        raw_bytes = img.read()
+                    elif isinstance(img, (bytes, bytearray)):
+                        raw_bytes = bytes(img)
+
+                    import sys as _sys
+                    _sys.stdout.write(f"[NAMING_TAB OCR] Image index {idx} byte length: {len(raw_bytes) if raw_bytes else 0}\n")
+                    _sys.stdout.flush()
+
+                    if raw_bytes and len(raw_bytes) > 0:
+                        ocr_res = run_local_ocr_pipeline([raw_bytes])
+                    else:
+                        ocr_res = run_local_ocr_pipeline([img])
                     extracted_txt = ocr_res.get("combined_text", "").strip()
                 except Exception as exc:
                     _logger = logging.getLogger(__name__)

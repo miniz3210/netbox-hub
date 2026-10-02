@@ -47,22 +47,51 @@ class LocalOCREngine:
         self.min_confidence_threshold = min_confidence_threshold
 
     @staticmethod
-    def _load_image(image_input: Any) -> np.ndarray:
+    def _load_image(input_data: Any) -> np.ndarray:
         """Load image from bytes, file-like, PIL Image, or path and return BGR numpy array.
 
         Images narrower than _MIN_OCR_WIDTH are upscaled by _UPSCALE_FACTOR using
         bicubic interpolation so that small hypervisor UI labels are detectable
         by RapidOCR's DBNet text-line detector.
         """
-        if isinstance(image_input, (bytes, bytearray)):
-            pil_img = Image.open(io.BytesIO(image_input)).convert("RGB")
-        elif hasattr(image_input, "read"):
-            image_input.seek(0)
-            pil_img = Image.open(image_input).convert("RGB")
-        elif isinstance(image_input, Image.Image):
-            pil_img = image_input.convert("RGB")
+        import sys as _sys
+
+        img_bytes = None
+        if isinstance(input_data, (bytes, bytearray)):
+            img_bytes = bytes(input_data)
+        elif hasattr(input_data, "getvalue"):
+            try:
+                img_bytes = input_data.getvalue()
+            except Exception:
+                img_bytes = None
+        elif hasattr(input_data, "read"):
+            try:
+                input_data.seek(0)
+                img_bytes = input_data.read()
+            except Exception:
+                img_bytes = None
         else:
-            pil_img = Image.open(str(image_input)).convert("RGB")
+            # Assume path-like / string
+            try:
+                pil_img = Image.open(str(input_data)).convert("RGB")
+                img_bytes = None  # path handled directly below
+            except Exception:
+                img_bytes = None
+
+        if img_bytes is not None and len(img_bytes) == 0:
+            _sys.stdout.write("[OCR ENGINE ERROR] Received 0-byte image payload!\n")
+            _sys.stdout.flush()
+            return None
+
+        if img_bytes is not None and len(img_bytes) > 0:
+            try:
+                pil_img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+            except Exception:
+                pil_img = Image.open(str(input_data)).convert("RGB")
+        elif isinstance(input_data, Image.Image):
+            pil_img = input_data.convert("RGB")
+        else:
+            pil_img = Image.open(str(input_data)).convert("RGB")
 
         # Upscale small images before colour-space conversion so interpolation
         # operates on the larger pixel grid.
@@ -143,6 +172,9 @@ class LocalOCREngine:
         # Pass 1: standard inference
         result, _ = engine(img_bgr)
         detected_lines, all_confidences = self._parse_result(result)
+        import sys as _sys
+        _sys.stdout.write(f"[OCR ENGINE] Lines detected: {len(detected_lines)}, preview: {detected_lines[:2] if detected_lines else []}\n")
+        _sys.stdout.flush()
         _logger.debug("[OCR DEBUG] Pass 1: %d lines", len(detected_lines))
         _flush()
 
@@ -151,6 +183,9 @@ class LocalOCREngine:
             enhanced_bgr = self._enhance_contrast(img_bgr)
             result, _ = engine(enhanced_bgr)
             detected_lines, all_confidences = self._parse_result(result)
+            import sys as _sys
+            _sys.stdout.write(f"[OCR ENGINE] Lines detected (Pass 2): {len(detected_lines)}, preview: {detected_lines[:2] if detected_lines else []}\n")
+            _sys.stdout.flush()
             _logger.debug("[OCR DEBUG] Pass 2 (enhanced): %d lines", len(detected_lines))
             _flush()
 
