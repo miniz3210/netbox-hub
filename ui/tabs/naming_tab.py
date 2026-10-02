@@ -1035,22 +1035,22 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 "You are an expert infrastructure network architect and data modeling specialist.\n"
                 "Analyze the provided sanitized OCR text extracted from infrastructure topologies or management dashboards.\n\n"
                 "Extract all observed network entities into a flat JSON array of objects using strictly lowercase keys.\n\n"
-                "CORE TOPOLOGICAL ENTITIES:\n"
-                "    - parent: The parent container, virtual network, virtual switch, bridge, or interconnecting fabric. Never treat a parent container as an interface.\n"
-                "    - interface: The individual communication adapter, port, endpoint, or logical network attached to the parent.\n\n"
-                "DYNAMIC ATTRIBUTE HARVESTING & CROSS-IMAGE CORRELATION:\n"
-                "    Capture every visible parameter into its own distinct, lowercase key without inventing data. Examples:\n"
-                "    - slot: Physical hardware PCIe slot or bus address if present.\n"
-                "    - ip: Network address or CIDR prefix.\n"
-                "    - speed: Connection throughput or duplex mode.\n"
-                "    - vlan: Associated VLAN tag or identifier.\n"
-                "    - purpose: Stated functional role, service, or network designation.\n"
-                "    - remote_device: Discovered peer neighbor device identifier.\n"
-                "    - remote_port: Discovered peer neighbor interface or port.\n"
-                "    - Correlate matching interface identifiers across entries to aggregate related attributes.\n\n"
-                "OCR NORMALIZATION:\n"
-                "    Correct visible glyph misrecognitions (e.g. letter 'o' vs digit '0') using context.\n\n"
-                "CRITICAL: Output ONLY a valid JSON array of flat objects. Do not include markdown codeblocks, preambles, or explanations."
+                "MANDATORY TOPOLOGICAL KEYS (EVERY OBJECT MUST HAVE THESE):\n"
+                "    - parent: The hosting container, switch, bridge, or fabric (e.g. vSwitch0, vSwitch01, vmbr0). If the row is the switch itself, parent is ''.\n"
+                "    - interface: The exact name of the adapter, port, port group, endpoint, or network entity attached to the parent. NEVER name this key 'name'; it MUST be 'interface'.\n\n"
+                "DYNAMIC ATTRIBUTES & CROSS-SCREENSHOT CORRELATION:\n"
+                "    Extract all observable attributes into clean lowercase keys:\n"
+                "    - slot: Physical PCIe hardware slot location if visible.\n"
+                "    - ip: IP address or CIDR prefix if present.\n"
+                "    - speed: Link speed and duplex status.\n"
+                "    - vlan: VLAN tag number if present.\n"
+                "    - purpose: Service role or network label.\n"
+                "    - remote_device: Neighbor switch or platform model (e.g. from CDP/LLDP).\n"
+                "    - remote_port: Neighbor port identifier (e.g. from CDP/LLDP).\n"
+                "    - Actively propagate attributes (slot, remote_device, remote_port) across records that share the same interface name.\n\n"
+                "TYPO NORMALIZATION:\n"
+                "    Correct OCR substitutions like 'vswitcho' -> 'vSwitch0', and normalize PCI addresses.\n\n"
+                "CRITICAL: Output ONLY a valid JSON array of objects. Do not wrap in markdown fences or include explanations."
             )
             user_prompt = f"Parse this consolidated sanitized topology text:\n\n{sanitized_combined}"
             response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt, max_tokens=8192)
@@ -1288,18 +1288,28 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         output_lines = ["# NOTE:\n# Generated from active Standards templates.\n"]
         for parent in sorted(groups.keys()):
             output_lines.append(f"=== {parent} ===")
-            for row in sorted(groups[parent], key=lambda x: str(x.get("interface", ""))):
+            for row in sorted(groups[parent], key=lambda x: str(x.get("interface") or x.get("name") or "")):
                 row_vals = {str(k).strip().lower(): str(v).strip() for k, v in row.items() if v is not None}
+                # Ensure interface token is always populated via fallback aliases
+                iface = row_vals.get("interface") or row_vals.get("name") or ""
+                row_vals["interface"] = iface
+                row_vals["vmnic"] = iface
+                row_vals["v_switch"] = row_vals.get("parent", parent)
+
                 tpl = _select_best_template(row_vals)
                 rendered = render_dynamic_pattern(tpl, row_vals, pattern_vars)
                 rendered = re.sub(r"<[^>]+>", "", rendered)
                 rendered = re.sub(r"\(\s*\)", "", rendered)
                 rendered = re.sub(r"\s{2,}", " ", rendered).strip()
 
-                iface = str(row_vals.get("interface", "")).strip()
+                # Fallback to interface if rendered string is completely empty
+                if not rendered:
+                    rendered = iface
+
                 slot = str(row_vals.get("slot", "")).strip()
                 header = f"{slot} ({iface}):" if slot else f"{iface}:"
-                output_lines.append(f"{header}\n{rendered}\n")
+                if iface:
+                    output_lines.append(f"{header}\n{rendered}\n")
 
         bulk_text = "\n".join(output_lines).strip()
         st.code(bulk_text, language="text")
