@@ -1509,6 +1509,8 @@ def _vm_editor(rules: dict) -> None:
 
 # Standardized 3-column ratio for Key-Value mappings: Key, Value, Action
 VLAND_MAPPINGS_COLS = [4.0, 5.0, 1.2]
+
+def _render_vlan_description_mappings_editor(rules: dict) -> None:
     with st.expander("🏷️ VLAN Description Mappings (Role → Description)", expanded=True):
         _check_and_render_banner("vlan_desc_mappings")
 
