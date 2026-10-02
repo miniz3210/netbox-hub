@@ -746,10 +746,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
     # Unified platform-agnostic network state store: single source of truth for all typed row lists.
     parsed_records = st.session_state.get("hypervisor_parsed_descriptions") or []
     network_store = {
-        "uplinks": [r for r in parsed_records if str(r.get("type", "")).lower() in ("physical", "uplink", "nic")],
-        "networks": [r for r in parsed_records if str(r.get("type", "")).lower() in ("logicalnetwork", "portgroup", "network", "subnet")],
-        "endpoints": [r for r in parsed_records if str(r.get("type", "")).lower() in ("endpoint", "vmkernel", "vnic")],
-        "slot_map": {str(r.get("interface", "")): str(r.get("slot", "")) for r in parsed_records if r.get("slot")},
+        "records": parsed_records,
     }
 
     # --- SECTION 1: 🛠️ INTERACTIVE SINGLE ITEM GENERATOR ---
@@ -1035,28 +1032,25 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             st.session_state["latest_vault_tokens"] = token_map
 
             system_prompt = (
-                "You are an expert infrastructure network architect and NetBox data modeling specialist.\n"
-                "Analyze the provided sanitized OCR text across all hypervisor or cloud platform screenshots\n"
-                "(VMware ESXi, Proxmox VE, Linux KVM, Microsoft Azure, Oracle Cloud OCI, etc.).\n\n"
-                "Extract all networking components into a flat JSON array of objects with strictly lowercase keys.\n\n"
-                "MANDATORY CORE FIELDS:\n"
-                "    - type: 'Physical' (Physical NICs/Uplinks/Bonds), 'PortGroup' (Switches/Bridges/VLANs/PortGroups), or 'VMkernel' (Management/VMkernel/IP endpoints)\n"
-                "    - interface: Exact interface identifier (e.g. vmnic0, eth0, vmk0, Management Network)\n"
-                "    - parent: Parent switch, bridge, aggregate (LAG/AE), virtual chassis, or VNet/Subnet, else ''\n\n"
-                "DYNAMIC ATTRIBUTE EXTRACTION & CROSS-SCREENSHOT CORRELATION:\n"
-                "    Actively correlate records across multiple screenshots by interface identifier:\n"
-                "    - slot: Hardware PCIe/chassis slot location (e.g. PCI:0000:50:00.0, format as PCI0000:xx:yy.z)\n"
-                "    - ip: Interface IP address or CIDR (e.g. 10.27.177.246, <SAFE_IP_1>)\n"
-                "    - domain: Host domain / FQDN or hostname (e.g. esagexi0.eswine.adds, <SAFE_DOMAIN_1>)\n"
-                "    - speed: Interface speed / duplex (e.g. 10 Gbit/s, 10000 Full)\n"
-                "    - vlan: VLAN ID if present\n"
-                "    - purpose: Network label or role (e.g. Management Network, iSCSI, vMotion)\n"
-                "    - remote_device: Discovered CDP/LLDP neighbor device or switch model (e.g. MS350-24P)\n"
-                "    - remote_port: Discovered CDP/LLDP neighbor port (e.g. Port 20)\n"
-                "    - Any other visible configuration attributes as distinct lowercase keys.\n\n"
-                "OCR ERROR RECOVERY:\n"
-                "    Correct obvious character substitution typos in identifiers (e.g. 'vSwitcho' -> 'vSwitch0', 'PCI00005c00.1' -> 'PCI0000:5c:00.1').\n\n"
-                "CRITICAL: Output ONLY a valid JSON array of objects. Never include conversational explanations, preambles, reasoning, or markdown formatting outside the JSON array."
+                "You are an expert infrastructure network architect and data modeling specialist.\n"
+                "Analyze the provided sanitized OCR text extracted from infrastructure topologies or management dashboards.\n\n"
+                "Extract all observed network entities into a flat JSON array of objects using strictly lowercase keys.\n\n"
+                "CORE TOPOLOGICAL ENTITIES:\n"
+                "    - parent: The parent container, virtual network, virtual switch, bridge, or interconnecting fabric. Never treat a parent container as an interface.\n"
+                "    - interface: The individual communication adapter, port, endpoint, or logical network attached to the parent.\n\n"
+                "DYNAMIC ATTRIBUTE HARVESTING & CROSS-IMAGE CORRELATION:\n"
+                "    Capture every visible parameter into its own distinct, lowercase key without inventing data. Examples:\n"
+                "    - slot: Physical hardware PCIe slot or bus address if present.\n"
+                "    - ip: Network address or CIDR prefix.\n"
+                "    - speed: Connection throughput or duplex mode.\n"
+                "    - vlan: Associated VLAN tag or identifier.\n"
+                "    - purpose: Stated functional role, service, or network designation.\n"
+                "    - remote_device: Discovered peer neighbor device identifier.\n"
+                "    - remote_port: Discovered peer neighbor interface or port.\n"
+                "    - Correlate matching interface identifiers across entries to aggregate related attributes.\n\n"
+                "OCR NORMALIZATION:\n"
+                "    Correct visible glyph misrecognitions (e.g. letter 'o' vs digit '0') using context.\n\n"
+                "CRITICAL: Output ONLY a valid JSON array of flat objects. Do not include markdown codeblocks, preambles, or explanations."
             )
             user_prompt = f"Parse this consolidated sanitized topology text:\n\n{sanitized_combined}"
             response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt, max_tokens=8192)
@@ -1066,7 +1060,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             clean_records = []
             for item in raw_items:
                 if isinstance(item, dict) and not any(k in item for k in ("finish_reason", "index", "message", "role")):
-                    clean_records.append({str(k).strip().lower(): v for k, v in item.items()})
+                    clean_records.append({str(k).strip().lower(): str(v).strip() if v is not None else "" for k, v in item.items()})
 
             all_parsed_items = vault.detokenize_data(clean_records)
             if not isinstance(all_parsed_items, list):
@@ -1077,52 +1071,36 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             elif not all_parsed_items:
                 st.warning("⚠️ OCR detected text but no structured records were parsed. Check screenshot quality.")
             else:
-                normalized_items = []
+                # Correlate all non-empty attributes across records matching on interface
+                attr_bag = {}
                 for item in all_parsed_items:
                     if not isinstance(item, dict):
                         continue
-                    norm_dict = {str(k).strip().lower(): v for k, v in item.items()}
-                    t = str(norm_dict.get("type", "")).strip().lower()
-                    if t in ("physicaladapter", "uplink", "nic", "physical"):
-                        norm_dict["type"] = "Physical"
-                    elif t in ("portgroup", "logicalnetwork", "network", "subnet", "vlan"):
-                        norm_dict["type"] = "PortGroup"
-                    elif t in ("vmkernel", "endpoint", "vnic"):
-                        norm_dict["type"] = "VMkernel"
-                    else:
-                        norm_dict["type"] = norm_dict.get("type", "").capitalize() or "Physical"
-
-                    for old_k in ("parentorswitch", "vswitch", "bridge", "vnet"):
-                        if old_k in norm_dict and "parent" not in norm_dict:
-                            norm_dict["parent"] = norm_dict.pop(old_k)
-                    normalized_items.append(norm_dict)
-
-                # Cross-screenshot correlation: backfill slots and remote CDP/LLDP by interface name
-                iface_meta = {}
-                for item in normalized_items:
                     iface = str(item.get("interface") or "").strip().lower()
                     if not iface:
                         continue
-                    if iface not in iface_meta:
-                        iface_meta[iface] = {}
-                    for field in ("slot", "remote_device", "remote_port", "speed"):
-                        val = str(item.get(field) or "").strip()
-                        if val:
-                            iface_meta[iface][field] = val
+                    if iface not in attr_bag:
+                        attr_bag[iface] = {}
+                    for k, v in item.items():
+                        if k not in ("interface", "parent") and v:
+                            attr_bag[iface][k] = v
 
-                for item in normalized_items:
+                for item in all_parsed_items:
+                    if not isinstance(item, dict):
+                        continue
                     iface = str(item.get("interface") or "").strip().lower()
-                    if iface in iface_meta:
-                        for field, val in iface_meta[iface].items():
-                            if not item.get(field):
-                                item[field] = val
+                    if iface in attr_bag:
+                        for k, v in attr_bag[iface].items():
+                            if not item.get(k):
+                                item[k] = v
 
                 seen = set()
                 deduped = []
-                for item in normalized_items:
+                for item in all_parsed_items:
+                    if not isinstance(item, dict):
+                        continue
                     key = (
-                        str(item.get("type", "")).strip().lower(),
-                        str(item.get("interface", "")).strip().lower(),
+                        str(item.get("interface") or "").strip().lower(),
                         str(item.get("parent") or "").strip().lower(),
                     )
                     if key not in seen:
@@ -1130,7 +1108,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         deduped.append(item)
 
                 st.session_state["hypervisor_parsed_descriptions"] = deduped
-                st.success(f"Successfully analyzed {total_imgs} screenshots and merged {len(deduped)} unique records!")
+                st.toast(f"✅ Successfully analyzed {total_imgs} screenshots and merged {len(deduped)} unique records!", icon="🚀")
+                st.rerun()
         except Exception as e:
             import traceback
             st.error(f"Pipeline execution failed: {str(e)}")
@@ -1265,184 +1244,69 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         _patterns = _naming_rules.get("naming_patterns", {})
 
         # Load user-configured patterns dynamically from Standards rules
-        raw_esxi_presets = _naming_rules.get("esxi_network_presets", [])
-        esxi_presets = {p["code"]: p for p in raw_esxi_presets if isinstance(p, dict)}
-
-        uplink_tpl = (
-            _patterns.get("esxinet_uplink")
-            or _patterns.get("esxi_uplink")
-            or esxi_presets.get("Uplink", {}).get("pattern_template")
-            or esxi_presets.get("Uplink", {}).get("pattern")
-            or "<vmnic> - <v_switch> <purpose> <status>"
-        )
-        pg_tpl = (
-            _patterns.get("esxinet_portgroup")
-            or _patterns.get("esxi_portgroup")
-            or esxi_presets.get("PortGroup", {}).get("pattern_template")
-            or esxi_presets.get("PortGroup", {}).get("pattern")
-            or "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)"
-        )
-        vmk_tpl = (
-            _patterns.get("esxinet_vmkernel")
-            or _patterns.get("esxi_vmkernel")
-            or esxi_presets.get("VMkernel", {}).get("pattern_template")
-            or esxi_presets.get("VMkernel", {}).get("pattern")
-            or "<purpose> (<v_switch>)"
-        )
 
         pattern_vars = _naming_rules.get("variables", {}) or {}
-        # Make active_vmnics/standby_vmnics optional so empty teaming sides are stripped cleanly.
-        for _tok in ("active_vmnics", "standby_vmnics"):
-            meta = pattern_vars.get(_tok, {})
-            if isinstance(meta, dict):
-                meta.setdefault("optional", True)
-            else:
-                pattern_vars[_tok] = {"optional": True}
-        # FIX: Prioritize existing descriptions and group by type first
 
-        def _group_by_parent(rlist):
-            """Group rows by parent network entity (switch, bridge, bundle, VNet), else 'General'."""
-            groups = {}
-            for r in rlist:
-                if not isinstance(r, dict):
-                    continue
-                parent = str(r.get("parent") or "").strip() or "General"
-                groups.setdefault(parent, []).append(r)
-            return groups
-
-        def _format_block(rows_list, block_label):
-            """Format a block of rows grouped by parent."""
-            groups = _group_by_parent(rows_list)
-            lines = [f"=== {block_label} ==="]
-            for parent in sorted(groups.keys()):
-                type_order_map = {"Physical": 1, "PortGroup": 2, "VMkernel": 3}
-                items = sorted(
-                    groups[parent],
-                    key=lambda r: (type_order_map.get(str(r.get("type", "")).capitalize(), 3), str(r.get("interface", ""))),
+        # Build available pattern template library directly from standards presets
+        active_presets = _naming_rules.get("esxi_network_presets", [])
+        preset_templates = []
+        for p in active_presets:
+            if isinstance(p, dict):
+                ptpl = (
+                    _patterns.get(p.get("pattern_key", ""))
+                    or p.get("pattern_template")
+                    or p.get("pattern")
+                    or ""
                 )
-                lines.append(f"=== {parent} ===")
-                for row in items:
-                    iface = str(row.get("interface", "")).strip()
-                    desc = str(row.get("description", "")).strip()
-                    ip = str(row.get("ip", "") or row.get("ip_address", "") or "").strip()
-                    row_type = str(row.get("type", "")).strip().capitalize()
+                if ptpl:
+                    preset_templates.append((p.get("code", ""), ptpl))
 
-                    # Always extract and inject raw values into row_vals first,
-                    # including the description, so template evaluation runs
-                    # regardless of whether the user edited the description.
-                    row_vals = {}
-                    for k, v in row.items():
-                        if v is not None and not str(v).lower() in ["nan", "none"]:
-                            norm_k = re.sub(r"[^a-zA-Z0-9]+", "_", str(k).strip().lower()).strip("_")
-                            row_vals[norm_k] = str(v).strip()
-                    row_vals["description"] = desc
+        if not preset_templates:
+            preset_templates = [("Default", "<interface> - <parent> <purpose>")]
 
-                    # Set parent from universal schema field.
-                    row_vals["parent"] = str(row.get("parent") or "").strip()
+        def _select_best_template(row_dict: dict) -> str:
+            """Dynamically select the template whose tokens best match the row keys."""
+            present_keys = {k for k, v in row_dict.items() if v}
+            best_tpl = preset_templates[0][1]
+            max_matches = -1
+            for _, tpl in preset_templates:
+                tpl_tokens = set(re.findall(r"<([a-zA-Z0-9_]+)>", tpl))
+                matches = len(tpl_tokens & present_keys)
+                if matches > max_matches:
+                    max_matches = matches
+                    best_tpl = tpl
+            return best_tpl
 
-                    # Preserve all extracted fields directly without destructive wiping or artificial fallbacks
-                    norm_iface = iface or row_vals.get("interface") or ""
-                    row_vals["interface"] = norm_iface
-                    row_vals["port_group"] = norm_iface
-                    row_vals["vmnic"] = norm_iface
+        active_rows = st.session_state.get("hypervisor_parsed_descriptions") or []
+        groups = {}
+        for r in active_rows:
+            if not isinstance(r, dict):
+                continue
+            parent = str(r.get("parent") or "").strip() or "General"
+            groups.setdefault(parent, []).append(r)
 
-                    # Extract network label / business role cleanly
-                    raw_purpose = (
-                        row_vals.get("network_label")
-                        or row_vals.get("purpose")
-                        or row_vals.get("role_portgroup")
-                        or row_vals.get("service")
-                        or row_vals.get("portgroup")
-                        or row_vals.get("port_group")
-                        or ""
-                    )
-                    clean_purp = str(raw_purpose).strip()
+        output_lines = ["# NOTE:\n# Generated from active Standards templates.\n"]
+        for parent in sorted(groups.keys()):
+            output_lines.append(f"=== {parent} ===")
+            for row in sorted(groups[parent], key=lambda x: str(x.get("interface", ""))):
+                row_vals = {str(k).strip().lower(): str(v).strip() for k, v in row.items() if v is not None}
+                tpl = _select_best_template(row_vals)
+                rendered = render_dynamic_pattern(tpl, row_vals, pattern_vars)
+                rendered = re.sub(r"<[^>]+>", "", rendered)
+                rendered = re.sub(r"\(\s*\)", "", rendered)
+                rendered = re.sub(r"\s{2,}", " ", rendered).strip()
 
-                    # If purpose is identical to physical/virtual interface name, it is not a genuine purpose
-                    if re.match(r"^(vmnic\d+|eno\w+|ens\w+|enp\w+|eth\d+|vmk\d+)$", clean_purp, re.IGNORECASE):
-                        clean_purp = ""
+                iface = str(row_vals.get("interface", "")).strip()
+                slot = str(row_vals.get("slot", "")).strip()
+                header = f"{slot} ({iface}):" if slot else f"{iface}:"
+                output_lines.append(f"{header}\n{rendered}\n")
 
-                    row_vals["purpose"] = clean_purp
-                    row_vals["service"] = clean_purp
+        bulk_text = "\n".join(output_lines).strip()
+        st.code(bulk_text, language="text")
 
-                    # Active/Standby teaming - use only directly extracted values, no cross-row guessing
-                    act_vmnics = row_vals.get("active") or row_vals.get("active_vmnics") or ""
-                    stb_vmnics = row_vals.get("standby") or row_vals.get("standby_vmnics") or ""
-                    row_vals["active_vmnics"] = act_vmnics
-                    row_vals["standby_vmnics"] = stb_vmnics
-                    row_vals["active"] = act_vmnics
-                    row_vals["standby"] = stb_vmnics
-
-                    # Status & Uplink Role (support dedicated uplink_role token without global status pollution)
-                    status_val = row_vals.get("uplink_role") or row_vals.get("role") or row_vals.get("status") or ""
-                    row_vals["uplink_role"] = status_val
-                    row_vals["status"] = status_val
-                    row_vals["role"] = status_val
-
-                    # Always evaluate the dynamic template so user edits to
-                    # descriptions are still normalized through the pipeline.
-                    if row_type == "VMkernel":
-                        rendered = render_dynamic_pattern(vmk_tpl, row_vals, pattern_vars)
-                    elif row_type == "PortGroup":
-                        rendered = render_dynamic_pattern(pg_tpl, row_vals, pattern_vars)
-                    elif row_type == "Uplink":
-                        rendered = render_dynamic_pattern(uplink_tpl, row_vals, pattern_vars)
-                    else:
-                        rendered = ""
-
-                    # Clean formatting - structural pipeline (prunes empty brackets, orphan standby, and dangling slashes)
-                    rendered = re.sub(r"<[^>]+>", "", rendered)
-                    rendered = re.sub(r"\s*/\s*Standby\)", ")", rendered)
-                    rendered = re.sub(r"\s*/\s*", " / ", rendered)
-                    rendered = re.sub(r"\s*/\s*\)", ")", rendered)
-                    rendered = re.sub(r"\(\s*/\s*", "(", rendered)
-                    rendered = re.sub(r"\(\s*\)", "", rendered)
-                    rendered = re.sub(r"\s*-\s*$", "", rendered)
-                    rendered = re.sub(r"\s{2,}", " ", rendered).strip()
-
-                    # Auto-correction hook
-                    if st.session_state.get("auto_correct", True):
-                        from utils.formatters import apply_auto_corrections
-                        rendered = apply_auto_corrections(rendered, "vmware")
-
-                    # Determine header based on type
-                    if row_type in ("Uplink", "Physical"):
-                        pure_iface = iface
-                        slot_val = str(row.get("slot") or "").strip()
-                        if slot_val:
-                            header_iface = f"{slot_val} ({pure_iface}):"
-                        else:
-                            header_iface = f"({pure_iface}):"
-                        lines.append(f"{header_iface}\n{rendered}\n")
-                    elif row_type == "PortGroup":
-                        clean_iface = iface.strip()
-                        lines.append(f"{clean_iface}:\n{rendered}\n")
-                    elif row_type == "VMkernel":
-                        # 100% Template-driven output without hardcoded outer headers or forced IP appending
-                        lines.append(f"{rendered}\n")
-                    else:
-                        lines.append(f"{iface}:\n{rendered}\n")
-            return "\n".join(lines)
-
-    # Strictly eliminated: all cross-row heuristics and active/standby guessing logic removed.
-    # Template interpolation is strictly platform-agnostic and driven solely by extracted row tokens.
-
-    blocks = []
-    if network_store["uplinks"]:
-        blocks.append(_format_block(network_store["uplinks"], "Uplinks"))
-    if network_store["networks"]:
-        blocks.append(_format_block(network_store["networks"], "Port Groups"))
-    if network_store["endpoints"]:
-        blocks.append(_format_block(network_store["endpoints"], "VMkernels"))
-
-    _has_slots = bool(network_store["slot_map"]) or any(bool(r.get("Slot")) for r in parsed_records)
-    note_header = "# NOTE:\n"
-    if not _has_slots:
-        note_header += "# - Slot Mappings: Not detected in screenshots. Provide physical adapter details to populate.\n"
-    note_header += "# - Uplink / Bond Role: Verify active/standby or bonding modes in hypervisor networking settings.\n\n"
-    joined_blocks = "\n\n".join(blocks).strip()
-    bulk_text = note_header + joined_blocks
-    st.code(bulk_text, language="text")
+    else:
+        bulk_text = "# No parsed topology records. Upload screenshots and click Analyze to generate descriptions.\n"
+        st.code(bulk_text, language="text")
 
     st.download_button(
         "📥 Download Generated Descriptions (.txt)",
