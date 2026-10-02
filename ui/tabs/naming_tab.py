@@ -1044,22 +1044,25 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 "You are an expert infrastructure network architect and data modeling specialist.\n"
                 "Analyze the provided sanitized OCR text extracted from infrastructure topologies or management dashboards.\n\n"
                 "Extract all observed network entities into a flat JSON array of objects using strictly lowercase keys.\n\n"
+                "STRICT TOPOLOGICAL ENTITY RULES:\n"
+                "    1. ONLY extract endpoint interfaces, physical adapters (e.g., vmnic, eth), logical ports, or virtual interfaces (e.g., vmk, bond, port groups).\n"
+                "    2. NEVER create an interface record for the hosting switch, bridge, or container fabric itself (e.g., vSwitch, vmbr, bridge are purely container attributes, not standalone interface items).\n\n"
                 "MANDATORY TOPOLOGICAL KEYS (EVERY OBJECT MUST HAVE THESE):\n"
-                "    - parent: The hosting container, switch, bridge, or fabric (e.g. vSwitch0, vSwitch01, vmbr0). If the row is the switch itself, parent is ''.\n"
-                "    - interface: The exact name of the adapter, port, port group, endpoint, or network entity attached to the parent. NEVER name this key 'name'; it MUST be 'interface'.\n\n"
+                "    - interface: The exact identifier of the adapter, port, port group, or endpoint. NEVER name this key 'name'; it MUST be 'interface'.\n"
+                "    - parent: The identifier of the hosting container, switch, bridge, or fabric that this interface connects to. Leave as '' ONLY if the adapter is truly unassigned to any container.\n\n"
                 "DYNAMIC ATTRIBUTES & CROSS-SCREENSHOT CORRELATION:\n"
                 "    Extract all observable attributes into clean lowercase keys:\n"
                 "    - slot: Physical PCIe hardware slot location if visible.\n"
-                "    - ip: IP address or CIDR prefix if present.\n"
-                "    - speed: Link speed and duplex status.\n"
-                "    - vlan: VLAN tag number if present.\n"
-                "    - purpose: Service role or network label.\n"
-                "    - remote_device: Neighbor switch or platform model (e.g. from CDP/LLDP).\n"
-                "    - remote_port: Neighbor port identifier (e.g. from CDP/LLDP).\n"
+                "    - ip: Network address or CIDR prefix if present.\n"
+                "    - speed: Connection throughput or duplex mode.\n"
+                "    - vlan: Associated VLAN tag or identifier.\n"
+                "    - purpose: Stated functional role, service, or network designation.\n"
+                "    - remote_device: Discovered peer neighbor device identifier.\n"
+                "    - remote_port: Discovered peer neighbor interface or port.\n"
                 "    - Actively propagate attributes (slot, remote_device, remote_port) across records that share the same interface name.\n\n"
                 "TYPO NORMALIZATION:\n"
-                "    Correct OCR substitutions like 'vswitcho' -> 'vSwitch0', and normalize PCI addresses.\n\n"
-                "CRITICAL: Output ONLY a valid JSON array of objects. Do not wrap in markdown fences or include explanations."
+                "    Correct visible OCR substitutions (e.g., letter 'o' vs digit '0') and normalize PCI addresses.\n\n"
+                "CRITICAL: Output ONLY a valid JSON array of endpoint objects. Do not wrap in markdown fences or include explanations."
             )
             user_prompt = f"Parse this consolidated sanitized topology text:\n\n{sanitized_combined}"
             response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt, max_tokens=8192)
@@ -1287,12 +1290,36 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             return best_tpl
 
         active_rows = st.session_state.get("hypervisor_parsed_descriptions") or []
-        groups = {}
-        for r in active_rows:
-            if not isinstance(r, dict):
+
+        # Collect known assigned parents and interfaces
+        assigned_parents = {str(item.get("parent", "")).strip().lower() for item in active_rows if str(item.get("parent", "")).strip()}
+        known_assigned_interfaces = {
+            str(item.get("interface") or item.get("name") or "").strip().lower()
+            for item in active_rows
+            if str(item.get("parent", "")).strip()
+        }
+
+        # Filter out records where the interface itself is mistakenly a parent container,
+        # and deduplicate orphan records that already have parent assignments elsewhere
+        filtered_topology = []
+        for item in active_rows:
+            iface_id = str(item.get("interface") or item.get("name") or "").strip().lower()
+            parent_id = str(item.get("parent", "")).strip()
+
+            # Skip if an interface record is actually just the parent container itself
+            if not parent_id and iface_id in assigned_parents:
                 continue
-            parent = str(r.get("parent") or "").strip() or "General"
-            groups.setdefault(parent, []).append(r)
+
+            # Skip unassigned orphan rows if this interface is already attached to a parent
+            if not parent_id and iface_id in known_assigned_interfaces:
+                continue
+
+            filtered_topology.append(item)
+
+        groups: dict[str, list[dict]] = {}
+        for item in filtered_topology:
+            p = str(item.get("parent") or "").strip() or "General"
+            groups.setdefault(p, []).append(item)
 
         output_lines = ["# NOTE:\n# Generated from active Standards templates.\n"]
         for parent in sorted(groups.keys()):

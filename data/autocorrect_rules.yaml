@@ -97,3 +97,7 @@ auto_corrections:
     replacement: Management
     description: Capitalize Management network/service
     enabled: true
+  - pattern: (?i)\bwmn[ki]c(\d+)\b
+    replacement: vmnic\1
+    description: Normalize wmnkc/wmnic OCR typos
+    enabled: true
