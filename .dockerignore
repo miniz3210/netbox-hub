@@ -1,0 +1,32 @@
+# Git & IDE
+.git
+.gitignore
+.vscode
+.idea
+
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# Local database & sensitive data isolation (CRITICAL)
+data/*.db
+data/*.sqlite3
+data/sanitizer_vault.db
+data/netbox_hub.db
+data/*.json
+data/*.csv
+data/catalog_cache/
+*.db
+*.sqlite3
+.env
+
+# Temporary & Output artifacts
+output_yamls/
+*.zip
+*.log
+repomix-output.*
+project-prompt*
+archive/

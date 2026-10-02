@@ -11,3 +11,4 @@ pyyaml
 # google-genai
 # groq
 # openai
+pytesseract

@@ -27,7 +27,7 @@ from utils.formatters import (
 # Shared column width ratios enforced across preset table headers, all data rows,
 # and the inline "add" row so every preset table lines up identically.
 # Code, Label, Pattern Template, Action.
-PRESET_COLS = [1.0, 2.2, 7.5, 1.4]
+PRESET_COLS = [1.5, 2.5, 6.5, 1.2]
 # Action cell sub-columns: Up, Down, Delete (equal thirds, right-aligned).
 PRESET_ACTION_COLS = [1, 1, 1]
 # VLAN allocation preset columns: VID, Role, Action (group-level patterns shown above).
@@ -1024,12 +1024,12 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
                 width='stretch',
             )
 
-        # Inline Add Row (with dedicated + Add button on far right)
+        # Inline Add Row (Card UI compliant: no '+' button in Action column, Enter to submit)
         with st.form(key=f"{kind}_add_form", clear_on_submit=True):
             is_esxi = kind == "esxi_network"
             code_ph = "e.g. DSwitch" if is_esxi else "e.g. SAN"
             lbl_ph = "e.g. Distributed Switch Uplink" if is_esxi else "e.g. SAN Storage (SAN)"
-            tpl_ph = "e.g. <vmnic> - <vds_name> (<status>)" if is_esxi else "e.g. SAN<country><site><seq>"
+            tpl_ph = "e.g. <vmnic> - <v_switch> (<status>)" if is_esxi else "e.g. SAN<country><site><seq>"
             ca1, ca2, ca3, ca4 = st.columns(PRESET_COLS, vertical_alignment="center")
             with ca1:
                 new_code = st.text_input("Code", value="", placeholder=code_ph, key=f"{kind}_new_code", label_visibility="collapsed").strip()
@@ -1038,7 +1038,8 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
             with ca3:
                 new_tpl = st.text_input("Pattern Template", value="", placeholder=tpl_ph, key=f"{kind}_new_tpl", label_visibility="collapsed").strip()
             with ca4:
-                add_preset = st.form_submit_button("➕ Add", width='stretch', help="Add new preset")
+                # Action column intentionally empty per UI specification
+                add_preset = True if (new_code != "" and new_tpl != "") else False
 
     if reset_presets:
         _clear_session_state_prefixes(f"{kind}_")
@@ -1284,7 +1285,7 @@ def _host_editor(rules: dict) -> None:
             with ca3:
                 new_tpl = st.text_input("New Pattern Template", value="", placeholder="<site_prefix>hyp<seq>.<domain>", key="host_new_tpl", label_visibility="collapsed").strip()
             with ca4:
-                add_preset = st.form_submit_button("➕ Add", width='stretch', help="Add new preset")
+                add_preset = True if (new_code != "" and new_tpl != "") else False
 
     if reset:
         # Reset restores the canonical factory defaults for the host types
@@ -1457,7 +1458,7 @@ def _vm_editor(rules: dict) -> None:
             with ca3:
                 new_tpl = st.text_input("New Pattern Template", value="", key="vm_new_tpl", placeholder="<country><site><role><seq>", label_visibility="collapsed").strip()
             with ca4:
-                add_role = st.form_submit_button("➕ Add", width='stretch', help="Add new VM role")
+                add_role = True if (new_code != "" and new_label != "") else False
 
     if reset:
         # Mirror of the HOSTS reset: only the VM presets are restored, the
@@ -2202,7 +2203,7 @@ def render_standards_tab(active_model):
                     with ca5:
                         new_opt = st.checkbox("Optional", value=False, key=f"vnew_{s_key}_opt", label_visibility="collapsed")
                     with ca6:
-                        add_tok = st.form_submit_button("➕ Add", width='stretch', help=f"Add variable to {title}")
+                        add_tok = True if new_name else False
 
                     if add_tok:
                         if new_name:
