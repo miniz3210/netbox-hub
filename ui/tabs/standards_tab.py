@@ -12,7 +12,7 @@ from config.naming_rules import (
     get_pattern_variables, get_naming_patterns, get_custom_patterns,
     get_device_presets, get_interface_presets, get_host_vm_presets,
     get_vlan_presets, get_vlan_description_mappings, make_preset_key,
-    get_esxi_network_presets,
+    get_esxi_network_presets, get_site_code_rules,
     default_presets_for, DEFAULT_PRESET_KEY_FIELD, DEFAULT_NAMING_PATTERNS,
     DEFAULT_HOST_TYPE_PRESETS, DEFAULT_VM_PRESETS,
     DEFAULT_RULES, DEFAULT_VLAN_PRESETS, DEFAULT_VLAN_DESCRIPTION_MAPPINGS,
