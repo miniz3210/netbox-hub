@@ -2022,7 +2022,7 @@ def _render_parsing_presets_editor(active_model: str, rules: dict) -> None:
             "Architecture Quirks & Grouping Rules (Optional)",
             key="parsing_forge_notes",
             placeholder="e.g., Bind physical ports to Port-Channels; treat VLANs as purposes, not switches",
-            lines=12,
+            height=300,
         )
 
         col_forge1, col_forge2 = st.columns(2)
