@@ -1104,12 +1104,11 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     # Ensure stream pointer is at beginning for all file-like inputs
                     if hasattr(img, "seek"):
                         img.seek(0)
-                    elif hasattr(img, "read"):
-                        img.seek(0)
                     ocr_res = run_local_ocr_pipeline([img])
                     extracted_txt = ocr_res.get("combined_text", "").strip()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _logger = logging.getLogger(__name__)
+                    _logger.warning("OCR failed for image: %s", str(exc))
 
                 if not extracted_txt:
                     continue

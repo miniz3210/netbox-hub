@@ -9,10 +9,19 @@ the local Sanitizer Vault pipeline.
 """
 
 import io
+import logging
 import numpy as np
 from typing import List, Dict, Any, Tuple
 from PIL import Image
 from rapidocr_onnxruntime import RapidOCR
+
+try:
+    import cv2
+    HAS_CV2 = True
+except ImportError:
+    HAS_CV2 = False
+
+_logger = logging.getLogger(__name__) or logging
 
 _ocr_engine = None
 
@@ -40,18 +49,40 @@ class LocalOCREngine:
             pil_img = image_input.convert("RGB")
         else:
             pil_img = Image.open(str(image_input)).convert("RGB")
-        # Convert to BGR for OpenCV compatibility with RapidOCR
+
         rgb_np = np.array(pil_img)
-        if rgb_np.shape[-1] == 3:
-            return cv2.cvtColor(rgb_np, cv2.COLOR_RGB2BGR)
+        # Ensure contiguous memory layout for ONNX runtime compatibility
+        rgb_np = np.ascontiguousarray(rgb_np)
+
+        if rgb_np.ndim == 2:
+            # Grayscale: convert to 3-channel BGR
+            if HAS_CV2:
+                return cv2.cvtColor(rgb_np, cv2.COLOR_GRAY2BGR)
+            return np.stack([rgb_np] * 3, axis=-1)[..., ::-1]
         elif rgb_np.shape[-1] == 4:
-            # Premultiplied alpha images: convert RGBA -> RGB -> BGR
-            pil_img = Image.fromarray(rgb_np[:, :, :3])
-            return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-        return cv2.cvtColor(rgb_np, cv2.COLOR_GRAY2BGR)
+            # RGBA -> drop alpha channel -> RGB -> BGR
+            rgb_only = rgb_np[:, :, :3]
+            if HAS_CV2:
+                return cv2.cvtColor(rgb_only, cv2.COLOR_RGB2BGR)
+            return rgb_only[:, :, ::-1]
+        elif rgb_np.shape[-1] == 3:
+            if HAS_CV2:
+                return cv2.cvtColor(rgb_np, cv2.COLOR_RGB2BGR)
+            return rgb_np[:, :, ::-1]
+        # Fallback: return as-is (contiguous uint8)
+        return rgb_np
 
     def _enhance_contrast(self, img_bgr: np.ndarray) -> np.ndarray:
         """Apply CLAHE contrast enhancement for low-contrast topology labels."""
+        if not HAS_CV2:
+            # Software fallback: simple histogram equalization via PIL
+            pil_img = Image.fromarray(img_bgr[..., ::-1] if img_bgr.shape[-1] == 3 else img_bgr)
+            pil_img = ImageEnhance.Contrast(pil_img).enhance(2.0)
+            pil_img = ImageEnhance.Sharpness(pil_img).enhance(1.5)
+            arr = np.array(pil_img)
+            if arr.ndim == 2:
+                arr = np.stack([arr] * 3, axis=-1)
+            return arr
         lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
         l, a, b = cv2.split(lab)
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
@@ -71,46 +102,50 @@ class LocalOCREngine:
         # First pass: standard inference
         result, elapse_list = engine(img_bgr)
 
-        extracted_words: List[str] = []
-        confidences: List[float] = []
-        valid_lines: List[str] = []
+        detected_lines: List[str] = []
+        all_confidences: List[float] = []
 
-        if result:
-            for line in result:
-                if line and len(line) >= 2:
-                    text = line[1]
-                    conf = float(line[2]) if len(line) >= 3 and line[2] else 0.0
-                    if text and str(text).strip():
-                        extracted_words.extend(str(text).strip().split())
-                        if conf > 0:
-                            confidences.append(conf)
-                        valid_lines.append(str(text).strip())
+        if result is not None:
+            for item in result:
+                # item is [box_coords, text, confidence_float]
+                if not isinstance(item, (list, tuple)) or len(item) < 2:
+                    continue
+                text = item[1]
+                conf = item[2] if len(item) >= 3 else 0.0
+                if text and isinstance(text, str) and text.strip():
+                    detected_lines.append(text.strip())
+                    if isinstance(conf, (int, float)) and conf > 0:
+                        all_confidences.append(float(conf))
+
+        _logger.debug("[OCR DEBUG] First pass: %d lines detected", len(detected_lines))
 
         # Fallback: enhanced contrast if first pass yielded nothing
-        if not valid_lines:
+        if not detected_lines:
             enhanced_bgr = self._enhance_contrast(img_bgr)
             result, elapse_list = engine(enhanced_bgr)
-            if result:
-                for line in result:
-                    if line and len(line) >= 2:
-                        text = line[1]
-                        conf = float(line[2]) if len(line) >= 3 and line[2] else 0.0
-                        if text and str(text).strip():
-                            extracted_words.extend(str(text).strip().split())
-                            if conf > 0:
-                                confidences.append(conf)
-                            valid_lines.append(str(text).strip())
+            if result is not None:
+                for item in result:
+                    if not isinstance(item, (list, tuple)) or len(item) < 2:
+                        continue
+                    text = item[1]
+                    conf = item[2] if len(item) >= 3 else 0.0
+                    if text and isinstance(text, str) and text.strip():
+                        detected_lines.append(text.strip())
+                        if isinstance(conf, (int, float)) and conf > 0:
+                            all_confidences.append(float(conf))
+
+        _logger.debug("[OCR DEBUG] After fallback: %d lines, total text len=%d", len(detected_lines), len("\n".join(detected_lines)))
 
         avg_conf = (
-            sum(confidences) / len(confidences) if confidences else 0.0
+            sum(all_confidences) / len(all_confidences) if all_confidences else 0.0
         )
-        full_text = "\n".join(valid_lines).strip()
+        full_text = "\n".join(detected_lines).strip()
 
         return {
             "text": full_text,
             "average_confidence": round(avg_conf, 2),
-            "word_count": len(extracted_words),
-            "lines": valid_lines,
+            "word_count": len(full_text.split()),
+            "lines": detected_lines,
         }
 
     def assess_quality(
