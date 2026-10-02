@@ -1087,25 +1087,79 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 st.rerun()
 
         if not topo_is_analyzing and start_analyze:
-            if not _is_vision_capable_model(active_model):
-                st.error(f"❌ Selected model [{active_model}] does not support Image/Vision analysis. Please select a vision-capable model from the left sidebar.")
-            else:
-                st.session_state["topo_is_analyzing"] = True
-                try:
-                    with st.spinner(f"Analyzing topology with AI Vision ({active_model})..."):
-                        from core.ai_assistant import analyze_hypervisor_topology_screenshot
-                        results = analyze_hypervisor_topology_screenshot(uploaded_imgs, naming_rules, active_model)
-                        st.session_state["hypervisor_parsed_descriptions"] = results
-                        st.success("Successfully analyzed topology and generated NetBox descriptions!")
-                        st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
-                except Exception as e:
-                    st.error(f"Vision analysis failed: {str(e)}")
-                finally:
+            st.session_state["topo_is_analyzing"] = True
+            try:
+                with st.spinner("Executing 4-stage local OCR pipeline..."):
+                    import json
+                    from core.ai_helper import get_llm_response
+                    all_raw_text = []
+                    # Phase 1: Local Tesseract OCR
+                    for img in uploaded_imgs:
+                        img_bytes = img.getvalue() if hasattr(img, "getvalue") else img.read()
+                        ocr_res = run_local_ocr_pipeline(img_bytes)
+                        if ocr_res.get("text"):
+                            all_raw_text.append(ocr_res["text"])
+
+                    combined_raw = "\n".join(all_raw_text).strip()
+                    if not combined_raw:
+                        st.warning("⚠️ No text detected in screenshots. Ensure image resolution and contrast are sufficient.")
+                        st.session_state["topo_is_analyzing"] = False
+                        st.stop()
+
+                    # Phase 2: Local persistent sanitization
+                    sanitized_text, token_map = vault.sanitize_text(combined_raw)
+                    st.session_state["latest_vault_tokens"] = token_map
+
+                    # Phase 3: Text LLM semantic parsing (flat JSON only)
+                    system_prompt = (
+                        "You are a network topology parser. Given sanitized OCR text from a hypervisor networking screen, "
+                        "extract all network components into a flat JSON array of objects. "
+                        "Each object must have these exact keys:\n"
+                        "  - Type: 'Uplink', 'PortGroup', or 'VMkernel'\n"
+                        "  - Interface: name of interface (e.g. vmnic0, vmk0, PortGroupName)\n"
+                        "  - vSwitch: virtual switch name (e.g. vSwitch0, DSwitch01)\n"
+                        "  - Role: role or status if found (e.g. Active Uplink, Standby Uplink)\n"
+                        "  - Purpose: network purpose or label (e.g. Management Network, vMotion, VM Network)\n"
+                        "  - Slot: hardware slot if mentioned (e.g. PCIe1/Port1, PCI BDF), else ''\n"
+                        "Output ONLY valid JSON array with no conversational markdown or explanation."
+                    )
+                    user_prompt = f"Parse this sanitized topology text:\n\n{sanitized_text}"
+                    response = get_llm_response(system_prompt, user_prompt, active_model)
+                    
+                    # Extract JSON array
+                    m_json = re.search(r"\[\s*\{.*\}\s*\]", response, re.DOTALL)
+                    json_str = m_json.group(0) if m_json else response.strip()
+                    raw_parsed = json.loads(json_str)
+
+                    # Phase 4: Local de-tokenization
+                    restored_parsed = vault.detokenize_data(raw_parsed)
+                    st.session_state["hypervisor_parsed_descriptions"] = restored_parsed
+                    st.success("Successfully processed screenshots via local OCR & sanitized LLM parsing!")
+                    st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
+            except Exception as e:
+                st.error(f"Local OCR pipeline failed: {str(e)}")
+            finally:
                     st.session_state["topo_is_analyzing"] = False
                     st.rerun()
 
         # 2️⃣ Step 2: Extracted Variables Inspector (Full-Width & Clean Filtering)
         st.divider()
+
+        with st.expander("🔒 Local Redaction Audit (Vault Inspection)", expanded=False):
+            st.caption("Inspect and manage locally redacted tokens. Clear the vault cache below to reset all de-tokenization mappings.")
+            if st.session_state.get("latest_vault_tokens"):
+                token_items = list(st.session_state["latest_vault_tokens"].items())[:20]
+                st.code(f"Redacted tokens found: {len(token_items)}", language="text")
+                for orig, token_id in token_items:
+                    st.caption(f"- {orig} → {token_id}")
+            else:
+                st.caption("No redacted tokens in this session yet.")
+            if st.button("🧹 Clear Vault Cache", key="btn_clear_vault_cache"):
+                vault.clear_vault()
+                st.session_state.pop("latest_vault_tokens", None)
+                st.toast("✅ Vault cache cleared!")
+                st.rerun()
+
         st.markdown("##### 2️⃣ Extracted Variables Inspector")
         if "hypervisor_parsed_descriptions" in st.session_state and st.session_state["hypervisor_parsed_descriptions"]:
             rows = st.session_state["hypervisor_parsed_descriptions"]

@@ -516,16 +516,12 @@ def generate_netbox_vlans_csv(site_name: str, computed_rows: List[Dict[str, Any]
                 row_cells.append(cell)
             lines.append(",".join(row_cells))
     else:
-        # Fallback default preview row matching Site and VLAN Group behavior
+        # Fallback template preview row matching Site and VLAN Group behavior (Strict NO HARDCODE)
         row_cells = []
         for token_cell in row_tpl:
             cell = str(token_cell)
-            cell = cell.replace("<vid>", "300")
-            cell = cell.replace("<vlan_name>", "Corporate WiFi")
             cell = cell.replace("<site>", site_display)
             cell = cell.replace("<vlan_group>", group_name)
-            cell = cell.replace("<vlan_desc>", "VIN_Corp")
-            cell = cell.replace("<role>", "Corporate WiFi")
             row_cells.append(cell)
         lines.append(",".join(row_cells))
         

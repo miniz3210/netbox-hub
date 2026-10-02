@@ -600,7 +600,7 @@
     "purpose": {
       "label": "Purpose / Service",
       "placeholder": "e.g. Management, vMotion, Storage",
-      "default": "Management, vMotion",
+      "default": "Management",
       "scope": "hypervisor",
       "optional": false
     },
@@ -656,7 +656,7 @@
     "uplink_role": {
       "label": "Uplink Role / Status",
       "placeholder": "Active Uplink / Standby Uplink",
-      "default": "",
+      "default": "Active Uplink / Standby Uplink",
       "optional": true,
       "scope": "hypervisor"
     },
