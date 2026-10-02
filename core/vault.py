@@ -144,20 +144,20 @@ class SanitizerVault:
 
     def detokenize_text(self, text: str) -> str:
         """Reverse replace all synthetic tokens back to their original real values."""
-        if not text:
-            return ""
+        if not text or not isinstance(text, str):
+            return text
 
         tokens = re.findall(r"<SAFE_[A-Z0-9_]+>", text)
         if not tokens:
             return text
 
+        unique_tokens = list(dict.fromkeys(tokens))
+        placeholders = ", ".join(["?"] * len(unique_tokens))
+        query = f"SELECT token, real_value FROM vault_mappings WHERE token IN ({placeholders})"
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            placeholders = ",".join("?" for _ in tokens)
-            cursor.execute(
-                f"SELECT token, real_value FROM vault_mappings WHERE token IN ({placeholders})",
-                tuple(set(tokens)),
-            )
+            cursor.execute(query, tuple(unique_tokens))
             rows = cursor.fetchall()
             mapping = {row["token"]: row["real_value"] for row in rows}
 
