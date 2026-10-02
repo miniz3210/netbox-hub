@@ -915,25 +915,36 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
         col_up1, col_up2 = st.columns([1, 1])
 
-        # Initialize unified image store
-        if "staged_topology_imgs" not in st.session_state:
-            st.session_state["staged_topology_imgs"] = []
+        with col_up1:
+            uploader_key = f"hypervisor_topo_file_uploader_{st.session_state.get('topo_uploader_key_ver', 0)}"
+            raw_uploaded = st.file_uploader(
+                "Upload Screenshots (Drag & Drop)",
+                type=["png", "jpg", "jpeg"],
+                accept_multiple_files=True,
+                key=uploader_key,
+                help="Upload one or multiple screenshots...",
+            )
+            # Initialize unified image store
+            if "staged_topology_imgs" not in st.session_state:
+                st.session_state["staged_topology_imgs"] = []
 
-        if raw_uploaded:
-            import io as _io
-            existing_names = {getattr(f, "name", "") for f in st.session_state["staged_topology_imgs"]}
-            for uf in raw_uploaded:
-                if uf.name not in existing_names:
-                    file_bytes = uf.read()
-                    bio = _io.BytesIO(file_bytes)
-                    bio.name = uf.name
-                    bio.type = uf.type
-                    bio.size = len(file_bytes)
-                    st.session_state["staged_topology_imgs"].append(bio)
+            if raw_uploaded:
+                import io as _io
+                existing_names = {getattr(f, "name", "") for f in st.session_state["staged_topology_imgs"]}
+                for uf in raw_uploaded:
+                    if uf.name not in existing_names:
+                        file_bytes = uf.read()
+                        bio = _io.BytesIO(file_bytes)
+                        bio.name = uf.name
+                        bio.type = uf.type
+                        bio.size = len(file_bytes)
+                        st.session_state["staged_topology_imgs"].append(bio)
 
     with col_up2:
         st.markdown("**📋 Or Paste from Clipboard (Ctrl+V)**")
-        paste_box_key = f"esxi_paste_input_{st.session_state['paste_input_ver']}"
+        if "paste_input_ver" not in st.session_state:
+            st.session_state["paste_input_ver"] = 0
+        paste_box_key = f"esxi_paste_input_{st.session_state.get('paste_input_ver', 0)}"
         pasted_data = st.text_input(
             "Paste Area",
             placeholder="Click here and press Ctrl+V",
@@ -1033,6 +1044,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         if st.button("🗑️ Clear All", key="btn_clear_topo_data", type="secondary", disabled=not bool(uploaded_imgs or st.session_state.get("hypervisor_parsed_descriptions")), width='stretch'):
             st.session_state["staged_topology_imgs"] = []
             st.session_state.pop("hypervisor_parsed_descriptions", None)
+            st.session_state.pop("latest_ocr_raw_text", None)
             st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
             st.rerun()
 
@@ -1040,7 +1052,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         try:
             with st.spinner("Executing 4-stage local OCR pipeline..."):
                 import json
-                from core.ai_helper import get_llm_response
+                from core.ai_client import call_ai
                 all_raw_text = []
 
                 # Phase 1: Local Tesseract OCR (with strict pointer reset)
@@ -1055,6 +1067,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         all_raw_text.append(ocr_res["text"].strip())
 
                 combined_raw = "\n".join(all_raw_text).strip()
+                st.session_state["latest_ocr_raw_text"] = combined_raw
                 if not combined_raw:
                     st.warning("⚠️ No text detected by local OCR. Ensure screenshot contains legible topology labels.")
                 else:
@@ -1076,8 +1089,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         "Output ONLY valid JSON array with no conversational markdown or explanation."
                     )
                     user_prompt = f"Parse this sanitized topology text:\n\n{sanitized_text}"
-                    response = get_llm_response(system_prompt, user_prompt, active_model)
-                    
+                    response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt)
+
                     m_json = re.search(r"\[\s*\{.*\}\s*\]", response, re.DOTALL)
                     json_str = m_json.group(0) if m_json else response.strip()
                     raw_parsed = json.loads(json_str)
@@ -1088,6 +1101,12 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     st.success("Successfully processed screenshots via local OCR & sanitized LLM parsing!")
         except Exception as e:
             st.error(f"Pipeline execution failed: {str(e)}")
+
+    if st.session_state.get("latest_ocr_raw_text"):
+        raw_txt = st.session_state["latest_ocr_raw_text"]
+        with st.expander("📄 OCR Raw Text Inspector (Click to expand)", expanded=False):
+            st.caption(f"✅ Extracted {len(raw_txt)} characters from {len(uploaded_imgs)} screenshot(s)")
+            st.code(raw_txt, language="text")
 
         # 2️⃣ Step 2: Extracted Variables Inspector (Full-Width & Clean Filtering)
         st.divider()
