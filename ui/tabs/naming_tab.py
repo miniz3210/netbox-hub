@@ -842,9 +842,9 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
     # Unified platform-agnostic network state store: single source of truth for all typed row lists.
     parsed_records = st.session_state.get("hypervisor_parsed_descriptions") or []
     network_store = {
-        "uplinks": [r for r in parsed_records if r.get("Type") in ("Uplink", "Physical")],
-        "networks": [r for r in parsed_records if r.get("Type") in ("PortGroup", "Network", "Subnet")],
-        "endpoints": [r for r in parsed_records if r.get("Type") in ("VMkernel", "Endpoint", "VNIC")],
+        "uplinks": [r for r in parsed_records if r.get("Type") in ("Physical", "Uplink")],
+        "networks": [r for r in parsed_records if r.get("Type") in ("LogicalNetwork", "PortGroup", "Network", "Subnet")],
+        "endpoints": [r for r in parsed_records if r.get("Type") in ("Endpoint", "VMkernel", "VNIC")],
         "slot_map": {r.get("Interface"): r.get("Slot") for r in parsed_records if r.get("Slot")},
     }
     # Unconditionally build ocr_slot_map to prevent UnboundLocalError across re-renders.
@@ -1094,9 +1094,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             import pytesseract
             from core.ai_client import call_ai
             progress_bar = st.progress(0, text="Initializing topology analysis...")
-            all_parsed_items = []
-            all_raw_texts = []
             total_imgs = len(uploaded_imgs)
+            combined_raw_lines = []
 
             for idx, img in enumerate(uploaded_imgs):
                 step_label = f"Analyzing screenshot [{idx + 1}/{total_imgs}]: {getattr(img, 'name', f'Image #{idx+1}')}"
@@ -1127,44 +1126,78 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
                 if not extracted_txt:
                     continue
-                all_raw_texts.append(f"--- Screenshot {idx+1}: {getattr(img, 'name', '')} ---\n{extracted_txt}")
+                combined_raw_lines.append(f"--- Screenshot {idx+1}: {getattr(img, 'name', '')} ---\n{extracted_txt}")
 
-                sanitized_txt, token_map = vault.sanitize_text(extracted_txt)
-                st.session_state["latest_vault_tokens"] = token_map
+            progress_bar.progress(0.9, text="Sanitizing and invoking AI parser...")
+            combined_raw_text = "\n\n".join(combined_raw_lines).strip()
+            st.session_state["latest_ocr_raw_text"] = combined_raw_text
 
-                system_prompt = (
-                    "You are an expert infrastructure network topology parser. Given sanitized OCR text from "
-                    "hypervisors (ESXi, Proxmox, KVM), bare-metal servers, or cloud consoles (Azure VM, Oracle OCI), "
-                    "extract all networking components into a flat JSON array of objects.\n"
-                    "The text is from OCR and may contain minor character errors; deduce intended values logically "
-                    "(e.g., extract PCI locations like 'PCI 0000:5b:00.0' or 'Location: PCI...' into Slot, "
-                    "recognize vSwitch/Bridge/VNet identifiers, and capture interface names accurately).\n"
-                    "Each object must have these exact keys:\n"
-                    "  - Type: 'Uplink', 'PortGroup', or 'VMkernel'\n"
-                    "  - Interface: name of interface (e.g. vmnic0, vmk0, nic-1)\n"
-                    "  - vSwitch: virtual switch or network name (e.g. vSwitch0, vmbr0, Subnet01)\n"
-                    "  - Role: role or status if found (e.g. Active Uplink, Standby Uplink, Secondary)\n"
-                    "  - Purpose: network purpose or label (e.g. Management Network, vMotion, VM Network)\n"
-                    "  - Slot: hardware slot or PCI location if mentioned (e.g. PCI 0000:5b:00.0, PCIe1), else ''\n"
-                    "Output ONLY valid JSON array with no conversational markdown or explanation."
-                )
-                user_prompt = f"Parse this sanitized topology text:\n\n{sanitized_txt}"
-                response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt)
-                chunk_items = _safe_parse_json_array(response)
-                chunk_restored = vault.detokenize_data(chunk_items)
-                if isinstance(chunk_restored, list):
-                    all_parsed_items.extend(chunk_restored)
+            sanitized_combined, token_map = vault.sanitize_text(combined_raw_text)
+            st.session_state["latest_vault_tokens"] = token_map
 
-            progress_bar.progress(1.0, text=f"✅ Successfully analyzed {total_imgs} screenshots! Merging records...")
+            system_prompt = (
+                "You are an expert infrastructure network architect and NetBox data modeling specialist.\n"
+                "Analyze the provided sanitized OCR text from any hypervisor or cloud platform\n"
+                "(VMware ESXi, Proxmox VE, Linux KVM, Microsoft Azure, Oracle Cloud OCI, etc.).\n\n"
+                "First, infer the underlying Platform: ('ESXi', 'Proxmox', 'Azure', 'OCI', 'Linux', or 'Unknown').\n"
+                "Next, extract all networking components into a flat JSON array of objects using universal semantic categories:\n"
+                "  - Type:\n"
+                "    * 'Physical' (Physical NICs, PCIe adapters, Host Uplinks, Bonds, Azure/OCI Base NICs)\n"
+                "    * 'LogicalNetwork' (Virtual Switches, Linux Bridges vmbr, PortGroups, Subnets, VLAN interfaces)\n"
+                "    * 'Endpoint' (Management interfaces, VMkernel vmk, Host IPs, Gateway endpoints, VIPs)\n"
+                "  - Interface: The exact interface name/identifier (e.g. vmnic0, vmk0, ens192, vmbr0, eth0)\n"
+                "  - ParentOrSwitch: The parent switch, bridge, or VNet/Subnet it belongs to (e.g. vSwitch0, vmbr0, vnet-prod), else ''\n"
+                "  - Role: Uplink or teaming role (e.g. Active, Standby, Primary, Secondary, BondMember), else ''\n"
+                "  - Purpose: Network label, service, or subnet purpose (e.g. Management Network, vMotion, Storage, Public), else ''\n"
+                "  - Slot: Physical PCIe slot location (e.g. PCI:0000:3b:00.0, PCIe1/Port1) or hardware chassis slot, else ''\n\n"
+                "CROSS-IMAGE & TABLE RECONCILIATION:\n"
+                "When physical adapter tables list hardware slot locations (e.g. Location: PCI...) for an interface\n"
+                "that is also used in a virtual switch/bridge, resolve and populate the 'Slot' field on that interface.\n"
+                "Output ONLY the valid JSON array without conversational markdown or text wrappers."
+            )
+            user_prompt = f"Parse this consolidated sanitized topology text:\n\n{sanitized_combined}"
+            response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt)
+            progress_bar.progress(1.0, text="✅ Parsing and enriching results...")
 
-            all_raw_combined = "\n\n".join(all_raw_texts).strip()
-            st.session_state["latest_ocr_raw_text"] = all_raw_combined
+            raw_items = _safe_parse_json_array(response)
+            all_parsed_items = vault.detokenize_data(raw_items)
+            if not isinstance(all_parsed_items, list):
+                all_parsed_items = []
 
-            if not all_raw_combined:
+            if not combined_raw_text:
                 st.warning("⚠️ No text detected by local OCR. Ensure screenshot contains legible topology labels.")
             elif not all_parsed_items:
                 st.warning("⚠️ OCR detected text but no structured records were parsed. Check screenshot quality.")
             else:
+                # Slot backfill: propagate Slot values across all records sharing the same Interface.
+                iface_slot = {}
+                for item in all_parsed_items:
+                    if not isinstance(item, dict):
+                        continue
+                    slot = str(item.get("Slot") or "").strip()
+                    iface = str(item.get("Interface") or "").strip()
+                    if iface and slot:
+                        iface_slot[iface] = slot
+                if iface_slot:
+                    for item in all_parsed_items:
+                        if isinstance(item, dict):
+                            iface = str(item.get("Interface") or "").strip()
+                            if iface and not item.get("Slot"):
+                                item["Slot"] = iface_slot.get(iface, "")
+
+                # Normalize legacy key names to universal schema for backward compatibility.
+                for item in all_parsed_items:
+                    if not isinstance(item, dict):
+                        continue
+                    if "vSwitch" in item and "ParentOrSwitch" not in item:
+                        item["ParentOrSwitch"] = item.pop("vSwitch")
+                    elif "vSwitch" in item and "ParentOrSwitch" in item and not item["ParentOrSwitch"]:
+                        item["ParentOrSwitch"] = item.pop("vSwitch")
+                    # Normalize legacy PhysicalAdapter / Uplink type aliases to 'Physical'.
+                    t = str(item.get("Type", "")).strip()
+                    if t in ("PhysicalAdapter", "Uplink"):
+                        item["Type"] = "Physical"
+
                 seen = set()
                 deduped = []
                 for item in all_parsed_items:
@@ -1173,11 +1206,12 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     key = (
                         str(item.get("Type", "")).strip(),
                         str(item.get("Interface", "")).strip(),
-                        str(item.get("vSwitch", "")).strip(),
+                        str(item.get("ParentOrSwitch") or item.get("vSwitch") or "").strip(),
                     )
                     if key not in seen:
                         seen.add(key)
                         deduped.append(item)
+
                 st.session_state["hypervisor_parsed_descriptions"] = deduped
                 st.success(f"Successfully analyzed {total_imgs} screenshots and merged {len(deduped)} unique records!")
         except Exception as e:
@@ -1222,8 +1256,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 continue
             row_type = str(r.get("Type", "")).strip()
 
-            # Robust switch detection with forward-filling
-            sw = str(r.get("vSwitch") or r.get("vswitch") or r.get("VSwitch") or r.get("Switch") or "").strip()
+            # Robust switch detection with forward-filling (support both new ParentOrSwitch and legacy vSwitch keys)
+            sw = str(r.get("ParentOrSwitch") or r.get("vSwitch") or r.get("vswitch") or r.get("VSwitch") or r.get("Switch") or "").strip()
             if not sw:
                 desc_str = str(r.get("Description", ""))
                 m_sw = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*|bond\w*|ovs-br\w*|[A-Za-z0-9_\-]+-SW\w*)\b", desc_str)
@@ -1237,14 +1271,14 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
             # Strict physical NIC extraction
             raw_iface = str(r.get("Interface / vmnic") or r.get("Interface") or r.get("vmnic") or r.get("NIC") or "").strip()
-            if row_type == "Uplink" or re.search(r"^(vmnic|eno|ens|enp|eth)\d+", raw_iface, re.IGNORECASE):
+            if row_type in ("Physical", "Uplink") or re.search(r"^(vmnic|eno|ens|enp|eth)\d+", raw_iface, re.IGNORECASE):
                 m_nic = re.search(r"\b(vmnic\d+|eno\w+|ens\w+|enp\w+|eth\d+)\b", raw_iface, re.IGNORECASE)
                 if m_nic:
                     extracted_vmnics.add(m_nic.group(1))
 
             # Exact Purpose extraction: preserve "Management Network", "VM Network", reject vmkX interfaces
             raw_purp = str(r.get("Role / PortGroup") or r.get("Purpose") or r.get("Service") or r.get("PortGroup") or "").strip()
-            if not raw_purp and row_type in ["PortGroup", "VMkernel"]:
+            if not raw_purp and row_type in ["LogicalNetwork", "PortGroup", "Endpoint", "VMkernel"]:
                 raw_purp = raw_iface
             if raw_purp:
                 clean_purp = re.sub(r"(?i)\s+(active uplink|standby uplink)$", "", raw_purp).strip()
@@ -1258,9 +1292,9 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
         # Hardware slot resolution: OCR (AI vision) first, then Standards YAML, then bare name.
         from config.naming_rules import get_hardware_slot_mappings
-        # Backfill Slot into Uplink rows by matching against Physical Adapter slot records.
+        # Backfill Slot into Physical rows by matching against adapter slot records.
         if "Slot" not in rows[0] or not any(r.get("Slot") for r in rows):
-            adapter_rows = [r for r in rows if r.get("Type") == "PhysicalAdapter"]
+            adapter_rows = [r for r in rows if r.get("Type") in ("Physical", "PhysicalAdapter")]
             nic_to_slot = {}
             for ar in adapter_rows:
                 ar_nic = ""
@@ -1282,7 +1316,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 if ar_nic and ar_slot:
                     nic_to_slot[ar_nic] = str(ar_slot).strip()
             for r in rows:
-                if r.get("Type") == "Uplink":
+                if r.get("Type") in ("Physical", "Uplink"):
                     iface = str(r.get("Interface") or "").strip()
                     m = re.search(r"\b(vmnic\d+)\b", iface, re.IGNORECASE)
                     if m:
@@ -1463,20 +1497,20 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         # FIX: Prioritize existing descriptions and group by type first
 
         def _group_by_vswitch(rlist):
-            """Group rows by vSwitch, extracting from description if needed."""
+            """Group rows by parent switch/bridge, extracting from description if needed."""
             groups = {}
             last_seen = ""
             for r in rlist:
                 if not isinstance(r, dict):
                     continue
-                vs = (r.get("vSwitch") or r.get("vswitch") or r.get("VSwitch") or "").strip()
+                vs = (r.get("ParentOrSwitch") or r.get("vSwitch") or r.get("vswitch") or r.get("VSwitch") or "").strip()
                 if not vs:
                     desc = str(r.get("Description", ""))
                     m = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*|bond\w*|ovs-br\w*|[A-Za-z0-9_\-]+-SW\w*)\b", desc)
                     if m:
                         vs = m.group(1)
                     elif not vs:
-                        vs = "Internal / No Uplink" if r.get("Type") == "Uplink" else "General"
+                        vs = "Internal / No Uplink" if r.get("Type") in ("Physical", "Uplink") else "General"
                 if not vs:
                     vs = last_seen or "General"
                 last_seen = vs
@@ -1488,9 +1522,9 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             m = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*|bond\w*|ovs-br\w*|[A-Za-z0-9_\-]+-SW\w*)\b", desc)
             if m:
                 return m.group(1)
-            return "Internal / No Uplink" if row_type == "Uplink" else "General"
+            return "Internal / No Uplink" if row_type in ("Physical", "Uplink") else "General"
 
-        type_order_map = {"Uplink": 0, "PortGroup": 1, "VMkernel": 2}
+        type_order_map = {"Physical": 0, "Uplink": 0, "LogicalNetwork": 1, "PortGroup": 1, "Endpoint": 2, "VMkernel": 2}
 
         def _format_block(rows_list, block_label):
             """Format a block of rows grouped by vSwitch."""
@@ -1518,12 +1552,11 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                             row_vals[norm_k] = str(v).strip()
                     row_vals["description"] = desc
 
-                    # Resolve vSwitch
+                    # Resolve vSwitch / ParentOrSwitch
                     resolved_vs = (
-                        row_vals.get("vswitch") or
-                        row_vals.get("v_switch") or
-                        row_vals.get("switch") or
-                        vs or ""
+                        row_vals.get("parentorswitch") or row_vals.get("parent_or_switch") or
+                        row_vals.get("vswitch") or row_vals.get("v_switch") or
+                        row_vals.get("switch") or vs or ""
                     )
                     if not resolved_vs and desc:
                         m_vs = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*|bond\w*|ovs-br\w*|[A-Za-z0-9_\-]+-SW\w*)\b", desc)
