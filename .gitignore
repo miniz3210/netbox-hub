@@ -24,3 +24,6 @@ repomix-output*
 *.log
 *.jpg
 *.png
+
+*.jpg
+*.png
