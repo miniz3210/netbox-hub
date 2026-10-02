@@ -989,7 +989,9 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             label_visibility="collapsed",
             help="Focus this box and press Ctrl+V.",
         )
-        st.markdown("""
+        import streamlit.components.v1 as _components
+        _components.html(
+            """
             <script>
             const parentDoc = window.parent.document;
             if (!window.parent._esxiPasteDelegated) {
@@ -1025,7 +1027,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             }
             </script>
             """,
-            unsafe_allow_html=True,
+            height=0,
+            width=0,
         )
 
     # Ingest clipboard paste inside Step 1
@@ -1146,7 +1149,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     "Output ONLY valid JSON array with no conversational markdown or explanation."
                 )
                 user_prompt = f"Parse this sanitized topology text:\n\n{sanitized_txt}"
-                response = call_ai(user_prompt=user_prompt, active_model=active_model, custom_system_msg=system_prompt)
+                response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt)
                 chunk_items = _safe_parse_json_array(response)
                 chunk_restored = vault.detokenize_data(chunk_items)
                 if isinstance(chunk_restored, list):
