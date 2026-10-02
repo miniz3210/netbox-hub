@@ -3,6 +3,7 @@ import streamlit as st
 from utils.formatters import normalize_port_shortname
 from utils.pattern_formatter import apply_pattern
 from core.naming_engine import verify_and_suggest_with_ai
+from data.standards_manager import StandardsManager
 from datetime import datetime
 from core.db_manager import (
     save_universal_csv,
@@ -966,7 +967,23 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
     st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
     # Step 1: Action Buttons
-    btn_col1, btn_col2, _ = st.columns([2.2, 1.2, 6.6])
+    preset_sm = StandardsManager()
+    parsing_presets = preset_sm.get_parsing_presets()
+    preset_choices = [p.get("name", "") for p in parsing_presets if p.get("name")]
+    default_preset = st.session_state.get("naming_platform_preset", "General (Default)")
+    if default_preset not in preset_choices:
+        default_preset = preset_choices[0] if preset_choices else "General (Default)"
+    st.session_state["naming_platform_preset"] = default_preset
+
+    btn_col_preset, btn_col1, btn_col2, _ = st.columns([2.5, 2.2, 1.2, 2.1], vertical_alignment="center")
+    with btn_col_preset:
+        platform_preset_select = st.selectbox(
+            "Platform Preset",
+            options=preset_choices,
+            index=preset_choices.index(default_preset) if default_preset in preset_choices else 0,
+            key="naming_platform_preset_dropdown",
+            help="Select a parsing preset whose platform-specific rules are appended to the topology analysis prompt.",
+        )
     with btn_col1:
         start_analyze = st.button(
             "🚀 Analyze Topology & Auto-Populate",
@@ -1067,6 +1084,17 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 "    Correct visible OCR substitutions (e.g., letter 'o' vs digit '0') and normalize PCI addresses.\n\n"
                 "CRITICAL: Output ONLY a valid JSON array of endpoint objects. Do not wrap in markdown fences or include explanations."
             )
+
+            # Append preset instructions if applicable
+            selected_preset_name = platform_preset_select
+            preset_instructions = ""
+            if selected_preset_name:
+                for _p in parsing_presets:
+                    if _p.get("name") == selected_preset_name:
+                        preset_instructions = _p.get("instructions", "")
+                        break
+            if preset_instructions:
+                system_prompt = f"{system_prompt}\n\n{preset_instructions}".strip()
             user_prompt = f"Parse this consolidated sanitized topology text:\n\n{sanitized_combined}"
             response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt, max_tokens=8192)
             progress_bar.progress(1.0, text="✅ Parsing and enriching results...")

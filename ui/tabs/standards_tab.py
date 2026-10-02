@@ -20,9 +20,11 @@ from config.naming_rules import (
 )
 from core.naming_engine import generate_naming_pattern, generate_autocorrect_rule
 from core.session_manager import SessionStateManager as SSM
+from core.ai_client import call_ai
 from utils.formatters import (
     load_auto_corrections, save_auto_corrections, reset_auto_corrections,
 )
+from data.standards_manager import StandardsManager, DEFAULT_PARSING_PRESETS
 
 # Shared column width ratios enforced across preset table headers, all data rows,
 # and the inline "add" row so every preset table lines up identically.
@@ -1890,6 +1892,199 @@ def _vlan_presets_editor(rules: dict) -> None:
     _render_vlan_description_mappings_editor(rules)
 
 
+def _render_parsing_presets_editor(active_model: str, rules: dict) -> None:
+    """Render the Topology Parsing Presets editor + AI Prompt Forge.
+
+    Left column: add/update/delete/save platform parsing presets.
+    Right column: forge a Meta-Prompt for a new platform, either for manual
+    copying into an external AI, or auto-generate instructions via the local
+    LLM and inject the result straight back into the preset instructions box.
+    """
+    sm = StandardsManager()
+
+    presets = sm.get_parsing_presets()
+    preset_names = [p.get("name", "") for p in presets if p.get("name")]
+
+    def _preset_by_name(name: str) -> dict:
+        for p in presets:
+            if p.get("name") == name:
+                return p
+        return {"id": "", "name": name, "instructions": ""}
+
+    def _next_preset_id(names: list) -> str:
+        base = re.sub(r"[^a-z0-9]+", "_", (names[0] or "preset").lower()).strip("_") or "preset"
+        used = {p.get("id", "") for p in presets}
+        candidate = base
+        n = 2
+        while candidate in used:
+            candidate = f"{base}_{n}"
+            n += 1
+        return candidate
+
+    col_left, col_right = st.columns([1, 1], vertical_alignment="top")
+
+    with col_left:
+        st.markdown("##### 🧰 Preset Editor")
+        st.caption("Create or manage platform-specific parsing instructions injected into the topology analysis prompt in the Naming tab.")
+
+        sel_index = 0
+        sel_name = st.session_state.get("parsing_preset_selected")
+        if sel_name in preset_names:
+            sel_index = preset_names.index(sel_name)
+        preset_selector = st.selectbox(
+            "Select Preset",
+            options=preset_names,
+            index=sel_index if preset_names else 0,
+            key="parsing_preset_selector",
+            help="Choose a preset to edit, or use the name box below to create a new one.",
+        )
+        st.session_state["parsing_preset_selected"] = preset_selector
+
+        selected = _preset_by_name(preset_selector)
+        name_key = f"parsing_preset_name_{selected.get('id', 'new')}"
+        stored_name = st.session_state.get(name_key)
+        preset_name_input = st.text_input(
+            "Preset Name",
+            value=stored_name if stored_name is not None else selected.get("name", ""),
+            key=name_key,
+            placeholder="e.g. Cisco NX-OS, Proxmox VE",
+            help="Name of the selected preset, or type a new name to create a preset.",
+        )
+        inst_key = f"parsing_preset_instructions_{selected.get('id', 'new')}"
+        stored_inst = st.session_state.get(inst_key)
+        preset_instructions_input = st.text_area(
+            "Platform Parsing Instructions (English)",
+            value=stored_inst if stored_inst is not None else selected.get("instructions", ""),
+            key=inst_key,
+            height=280,
+            placeholder="e.g. [PLATFORM ARCHITECTURE: CISCO NX-OS] ...",
+            help="Platform-specific prompt instructions appended to the core topology system prompt.",
+        )
+
+        col_btn1, col_btn2, col_btn3 = st.columns(3)
+        with col_btn1:
+            add_update = st.button("➕ Add / Update Preset", key="parsing_preset_add", type="primary", width='stretch')
+        with col_btn2:
+            delete_sel = st.button("🗑️ Delete Selected Preset", key="parsing_preset_delete", width='stretch')
+        with col_btn3:
+            save_all = st.button("💾 Save & Apply Presets", key="parsing_preset_save", width='stretch')
+
+        if add_update:
+            new_name = (preset_name_input or preset_selector or "").strip()
+            if not new_name:
+                st.warning("⚠️ Enter a preset name first.")
+            else:
+                instructions = preset_instructions_input or ""
+                existing = [p for p in presets if p.get("name") == new_name]
+                if existing:
+                    existing[0]["instructions"] = instructions
+                else:
+                    presets.append({
+                        "id": _next_preset_id([new_name]),
+                        "name": new_name,
+                        "instructions": instructions,
+                    })
+                if sm.save_parsing_presets(presets):
+                    st.session_state["parsing_preset_selected"] = new_name
+                    _clear_session_state_prefixes("parsing_preset_name_", "parsing_preset_instructions_")
+                    _notify_preset_changed()
+                    st.toast(f"✅ Preset '{new_name}' saved & applied!", icon="💾")
+                    st.rerun()
+
+        if delete_sel:
+            target = (preset_name_input or preset_selector or "").strip()
+            remaining = [p for p in presets if p.get("name") != target]
+            if len(remaining) == len(presets):
+                st.warning("⚠️ Preset not found.")
+            elif not remaining:
+                st.warning("⚠️ At least one preset must remain.")
+            else:
+                if sm.save_parsing_presets(remaining):
+                    st.session_state["parsing_preset_selected"] = remaining[0].get("name", "")
+                    _clear_session_state_prefixes("parsing_preset_name_", "parsing_preset_instructions_")
+                    _notify_preset_changed()
+                    st.toast(f"🗑️ Preset '{target}' deleted!", icon="✅")
+                    st.rerun()
+
+        if save_all:
+            if sm.save_parsing_presets(presets):
+                _clear_session_state_prefixes("parsing_preset_name_", "parsing_preset_instructions_")
+                _notify_preset_changed()
+                st.toast("✅ All parsing presets saved & applied!", icon="💾")
+                st.rerun()
+
+    with col_right:
+        st.markdown("##### ⚡ AI Prompt Forge (Generate Rules for New Platforms)")
+        st.caption("Generate platform parsing rules for new topologies, either as a copyable Meta-Prompt or auto-generated by the local LLM.")
+
+        gen_platform = st.text_input(
+            "Platform / Vendor",
+            key="parsing_forge_platform",
+            placeholder="e.g. Cisco NX-OS, Proxmox VE",
+        )
+        gen_datatype = st.text_input(
+            "Data Source Type",
+            key="parsing_forge_datatype",
+            placeholder="e.g. CLI 'show interface status', Web GUI screenshots",
+        )
+        gen_notes = st.text_input(
+            "Extra Notes / Requirements",
+            key="parsing_forge_notes",
+            placeholder="e.g. Aggregate Ethernet ports to Port-Channels",
+        )
+
+        col_forge1, col_forge2 = st.columns(2)
+        with col_forge1:
+            prepare_prompt = st.button("📋 Prepare External AI Prompt", key="parsing_forge_prepare", width='stretch')
+        with col_forge2:
+            auto_generate = st.button("⚡ Auto-Generate via Local LLM", key="parsing_forge_llm", width='stretch')
+
+        meta_prompt_output = st.text_area(
+            "Generated Meta-Prompt (Copyable)",
+            key="parsing_forge_output",
+            height=280,
+            placeholder="The generated prompt will appear here for manual copying into an external AI.",
+        )
+
+        if prepare_prompt:
+            if not gen_platform.strip():
+                st.warning("⚠️ Enter a Platform / Vendor first.")
+            else:
+                meta = sm.get_meta_prompt_template(gen_platform, gen_datatype, gen_notes)
+                st.session_state["parsing_forge_output"] = meta
+                st.toast("📋 Meta-Prompt prepared! Copy it into your external AI.", icon="✅")
+
+        if auto_generate:
+            if not gen_platform.strip():
+                st.warning("⚠️ Enter a Platform / Vendor first.")
+            else:
+                try:
+                    meta = sm.get_meta_prompt_template(gen_platform, gen_datatype, gen_notes)
+                    st.session_state["parsing_forge_output"] = meta
+                    with st.spinner(f"Generating platform rules using {active_model}..."):
+                        generated = call_ai(
+                            "Generate the complete platform-specific topology parsing ruleset for the platform described below. "
+                            "Return ONLY the ruleset text (English), no commentary.",
+                            active_model,
+                            custom_system_msg=meta,
+                            max_tokens=2048,
+                        )
+                    st.session_state["parsing_forge_output"] = generated
+                    st.session_state["parsing_preset_instructions_new"] = generated
+                    st.toast("⚡ Rules generated! Review and click '➕ Add / Update Preset' to save.", icon="✅")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Auto-generation failed: {e}")
+
+        st.caption("Tip: Use '📋 Prepare External AI Prompt' to draft the prompt in ChatGPT/Claude, then paste the returned ruleset into the Preset Instructions box on the left and click '➕ Add / Update Preset'.")
+
+
+def _notify_preset_changed() -> None:
+    """Bump the cross-tab standards nonce so the Naming tab's Platform Preset
+    dropdown re-reads the latest parsing presets."""
+    st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
+
+
 def render_standards_tab(active_model):
     st.subheader("📖 Infrastructure Naming Standards Configuration")
     st.caption("Define and manage your organization's naming conventions. All patterns configured here are automatically applied in the Naming tab.")
@@ -1996,6 +2191,8 @@ def render_standards_tab(active_model):
                     st.rerun()
 
         full_prompt_text = export_rules_as_prompt(current_rules)
+        with st.expander("📋 Topology Parsing Presets (Platform Rules)", expanded=True):
+            _render_parsing_presets_editor(active_model, current_rules)
         with st.expander("📋 Export Full System Prompt for External AI", expanded=False):
             st.caption("Copy this complete prompt directly into ChatGPT, Claude, or other external AI models to enforce your organization's naming standards.")
             st.code(full_prompt_text, language="markdown")
