@@ -43,7 +43,7 @@ def get_ocr_engine() -> RapidOCR:
 
 
 class LocalOCREngine:
-    def __init__(self, min_confidence_threshold: float = 40.0):
+    def __init__(self, min_confidence_threshold: float = 0.4):
         self.min_confidence_threshold = min_confidence_threshold
 
     @staticmethod
@@ -217,14 +217,22 @@ class LocalOCREngine:
         if word_count < 3 or len(text) < 10:
             return False, "Low word count detected. Image may be unreadable or empty."
 
-        if avg_conf < self.min_confidence_threshold:
+        # Normalize confidence to percentage scale for comparison
+        conf_pct = avg_conf * 100.0 if avg_conf <= 1.0 else avg_conf
+        threshold_pct = (
+            self.min_confidence_threshold * 100.0
+            if self.min_confidence_threshold <= 1.0
+            else self.min_confidence_threshold
+        )
+
+        if conf_pct < threshold_pct:
             return (
                 False,
-                f"Low OCR confidence ({avg_conf}% < {self.min_confidence_threshold}%). "
+                f"Low OCR confidence ({round(conf_pct, 1)}% < {round(threshold_pct, 1)}%). "
                 "Image may be blurry or low contrast.",
             )
 
-        return True, f"OCR extraction passed with confidence {avg_conf}%."
+        return True, f"OCR extraction passed with confidence {round(conf_pct, 1)}%."
 
 
 def run_local_ocr_pipeline(
@@ -247,7 +255,9 @@ def run_local_ocr_pipeline(
                 errors.append(f"Image #{idx + 1}: {msg}")
             else:
                 passed_count += 1
-                aggregated_lines.append(res["text"])
+                # Defensive: always include text when non-empty, regardless of force_pass
+                if res.get("text") and len(res["text"].strip()) > 0:
+                    aggregated_lines.append(res["text"])
                 total_conf += res["average_confidence"]
         except Exception as exc:
             errors.append(f"Image #{idx + 1} processing error: {str(exc)}")
