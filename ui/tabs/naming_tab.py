@@ -1115,8 +1115,10 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
                 st.session_state["hypervisor_parsed_descriptions"] = deduped
                 st.success(f"Successfully analyzed {total_imgs} screenshots and merged {len(deduped)} unique records!")
-        except Exception as e:
-            st.error(f"Pipeline execution failed: {str(e)}")
+    except Exception as e:
+        import traceback
+        st.error(f"Pipeline execution failed: {str(e)}")
+        st.code(traceback.format_exc(), language="text")
 
     # Step 1: Compact Raw OCR Inspector
     if st.session_state.get("latest_ocr_raw_text"):
