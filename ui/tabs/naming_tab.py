@@ -815,6 +815,19 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
     vault = SanitizerVault()
     st.subheader("☁️ Hypervisor Network Description Formatter", help="Format standardized hypervisor network descriptions (VMware ESXi, Proxmox VE, Linux Bridges, etc.) matching infrastructure guidelines.")
 
+    # Unified platform-agnostic network state store: single source of truth for all typed row lists.
+    parsed_records = st.session_state.get("hypervisor_parsed_descriptions") or []
+    network_store = {
+        "uplinks": [r for r in parsed_records if r.get("Type") in ("Uplink", "Physical")],
+        "networks": [r for r in parsed_records if r.get("Type") in ("PortGroup", "Network", "Subnet")],
+        "endpoints": [r for r in parsed_records if r.get("Type") in ("VMkernel", "Endpoint", "VNIC")],
+        "slot_map": {r.get("Interface"): r.get("Slot") for r in parsed_records if r.get("Slot")},
+    }
+    # Unconditionally build ocr_slot_map to prevent UnboundLocalError across re-renders.
+    from config.naming_rules import get_hardware_slot_mappings
+    _user_slot_map = get_hardware_slot_mappings(naming_rules)
+    ocr_slot_map = _build_ocr_slot_map(parsed_records, _user_slot_map)
+
     # --- SECTION 1: 🛠️ INTERACTIVE SINGLE ITEM GENERATOR ---
     with st.expander("🛠️ Interactive Single Item Generator", expanded=False):
         st.caption("Generate individual ESXi network descriptions using token-based patterns. Presets are configured in the Standards Tab.")
@@ -994,148 +1007,148 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             width=0,
         )
 
-        # Ingest clipboard paste inside Step 1
-        if pasted_data and pasted_data.startswith("data:image"):
-            import base64 as _b64, io as _io
-            try:
-                _, encoded = pasted_data.split(",", 1)
-                img_bytes = _b64.b64decode(encoded)
-                pasted_file = _io.BytesIO(img_bytes)
-                idx = len(st.session_state["staged_topology_imgs"]) + 1
-                pasted_file.name = f"clipboard_screenshot_{idx}.png"
-                pasted_file.type = "image/png"
-                pasted_file.size = len(img_bytes)
-                st.session_state["staged_topology_imgs"].append(pasted_file)
-                st.session_state["paste_input_ver"] = st.session_state.get("paste_input_ver", 0) + 1
-                st.rerun()
-            except Exception as e:
-                st.warning(f"Failed to process pasted image: {e}")
+    # Ingest clipboard paste inside Step 1
+    if pasted_data and pasted_data.startswith("data:image"):
+        import base64 as _b64, io as _io
+        try:
+            _, encoded = pasted_data.split(",", 1)
+            img_bytes = _b64.b64decode(encoded)
+            pasted_file = _io.BytesIO(img_bytes)
+            idx = len(st.session_state["staged_topology_imgs"]) + 1
+            pasted_file.name = f"clipboard_screenshot_{idx}.png"
+            pasted_file.type = "image/png"
+            pasted_file.size = len(img_bytes)
+            st.session_state["staged_topology_imgs"].append(pasted_file)
+            st.session_state["paste_input_ver"] = st.session_state.get("paste_input_ver", 0) + 1
+            st.rerun()
+        except Exception as e:
+            st.warning(f"Failed to process pasted image: {e}")
 
-        uploaded_imgs = st.session_state.get("staged_topology_imgs", [])
+    uploaded_imgs = st.session_state.get("staged_topology_imgs", [])
 
-        # Step 1: Preview Staged Screenshots
-        if uploaded_imgs:
-            with st.expander(f"🔍 Preview Staged Screenshots ({len(uploaded_imgs)} file(s))", expanded=True):
-                preview_cols = st.columns(min(len(uploaded_imgs), 4))
-                del_idx = None
-                for img_idx, img_item in enumerate(uploaded_imgs):
-                    with preview_cols[img_idx % len(preview_cols)]:
-                        img_title = getattr(img_item, "name", f"Screenshot #{img_idx + 1}")
-                        st.caption(f"#{img_idx + 1}: {img_title}")
-                        st.image(img_item, width="stretch")
-                        if st.button("✖ Remove", key=f"unified_remove_btn_{img_idx}"):
-                            del_idx = img_idx
-                if del_idx is not None and 0 <= del_idx < len(st.session_state["staged_topology_imgs"]):
-                    st.session_state["staged_topology_imgs"].pop(del_idx)
-                    st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
-                    st.rerun()
-
-        st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
-        # Step 1: Action Buttons
-        btn_col1, btn_col2, _ = st.columns([2.2, 1.2, 6.6])
-        with btn_col1:
-            start_analyze = st.button(
-                "🚀 Analyze Topology & Auto-Populate",
-                key="btn_analyze_hypervisor_img",
-                type="primary",
-                disabled=not bool(uploaded_imgs),
-                width='stretch'
-            )
-        with btn_col2:
-            if st.button("🗑️️ Clear All", key="btn_clear_topo_data", type="secondary", disabled=not bool(uploaded_imgs or st.session_state.get("hypervisor_parsed_descriptions")), width='stretch'):
-                st.session_state["staged_topology_imgs"] = []
-                st.session_state.pop("hypervisor_parsed_descriptions", None)
-                st.session_state.pop("latest_ocr_raw_text", None)
+    # Step 1: Preview Staged Screenshots
+    if uploaded_imgs:
+        with st.expander(f"🔍 Preview Staged Screenshots ({len(uploaded_imgs)} file(s))", expanded=True):
+            preview_cols = st.columns(min(len(uploaded_imgs), 4))
+            del_idx = None
+            for img_idx, img_item in enumerate(uploaded_imgs):
+                with preview_cols[img_idx % len(preview_cols)]:
+                    img_title = getattr(img_item, "name", f"Screenshot #{img_idx + 1}")
+                    st.caption(f"#{img_idx + 1}: {img_title}")
+                    st.image(img_item, width="stretch")
+                    if st.button("✖ Remove", key=f"unified_remove_btn_{img_idx}"):
+                        del_idx = img_idx
+            if del_idx is not None and 0 <= del_idx < len(st.session_state["staged_topology_imgs"]):
+                st.session_state["staged_topology_imgs"].pop(del_idx)
                 st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
                 st.rerun()
 
-        # Step 1: 4-Stage Execution with Universal Image Preprocessing
-        if start_analyze:
-            try:
-                with st.spinner("Executing 4-stage local OCR pipeline..."):
-                    import json
-                    from PIL import Image, ImageEnhance
-                    import pytesseract
-                    from core.ai_client import call_ai
-                    all_raw_text = []
+    st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
+    # Step 1: Action Buttons
+    btn_col1, btn_col2, _ = st.columns([2.2, 1.2, 6.6])
+    with btn_col1:
+        start_analyze = st.button(
+            "🚀 Analyze Topology & Auto-Populate",
+            key="btn_analyze_hypervisor_img",
+            type="primary",
+            disabled=not bool(uploaded_imgs),
+            width='stretch'
+        )
+    with btn_col2:
+        if st.button("🗑️️ Clear All", key="btn_clear_topo_data", type="secondary", disabled=not bool(uploaded_imgs or st.session_state.get("hypervisor_parsed_descriptions")), width='stretch'):
+            st.session_state["staged_topology_imgs"] = []
+            st.session_state.pop("hypervisor_parsed_descriptions", None)
+            st.session_state.pop("latest_ocr_raw_text", None)
+            st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
+            st.rerun()
 
-                    # Phase 1: Local Tesseract OCR (contrast enhancement & sparse PSM)
-                    for img in uploaded_imgs:
+    # Step 1: 4-Stage Execution with Universal Image Preprocessing
+    if start_analyze:
+        try:
+            with st.spinner("Executing 4-stage local OCR pipeline..."):
+                import json
+                from PIL import Image, ImageEnhance
+                import pytesseract
+                from core.ai_client import call_ai
+                all_raw_text = []
+
+                # Phase 1: Local Tesseract OCR (contrast enhancement & sparse PSM)
+                for img in uploaded_imgs:
+                    if hasattr(img, "seek"):
+                        img.seek(0)
+
+                    extracted_txt = ""
+                    try:
+                        pil_img = Image.open(img).convert("L")
+                        w, h = pil_img.size
+                        pil_img = pil_img.resize((w * 2, h * 2), Image.Resampling.LANCZOS)
+                        # Enhance contrast to cleanly isolate text from background lines
+                        enhancer = ImageEnhance.Contrast(pil_img)
+                        pil_img = enhancer.enhance(1.8)
+
+                        extracted_txt = pytesseract.image_to_string(pil_img, config="--oem 3 --psm 6").strip()
+                        if not extracted_txt:
+                            extracted_txt = pytesseract.image_to_string(pil_img, config="--oem 3 --psm 11").strip()
+                    except Exception:
                         if hasattr(img, "seek"):
                             img.seek(0)
+                        img_bytes = img.read() if hasattr(img, "read") else img.getvalue()
+                        ocr_res = run_local_ocr_pipeline(img_bytes)
+                        extracted_txt = ocr_res.get("text", "").strip()
 
-                        extracted_txt = ""
-                        try:
-                            pil_img = Image.open(img).convert("L")
-                            w, h = pil_img.size
-                            pil_img = pil_img.resize((w * 2, h * 2), Image.Resampling.LANCZOS)
-                            # Enhance contrast to cleanly isolate text from background lines
-                            enhancer = ImageEnhance.Contrast(pil_img)
-                            pil_img = enhancer.enhance(1.8)
+                    if hasattr(img, "seek"):
+                        img.seek(0)
 
-                            extracted_txt = pytesseract.image_to_string(pil_img, config="--oem 3 --psm 6").strip()
-                            if not extracted_txt:
-                                extracted_txt = pytesseract.image_to_string(pil_img, config="--oem 3 --psm 11").strip()
-                        except Exception:
-                            if hasattr(img, "seek"):
-                                img.seek(0)
-                            img_bytes = img.read() if hasattr(img, "read") else img.getvalue()
-                            ocr_res = run_local_ocr_pipeline(img_bytes)
-                            extracted_txt = ocr_res.get("text", "").strip()
+                    if extracted_txt:
+                        all_raw_text.append(extracted_txt)
 
-                        if hasattr(img, "seek"):
-                            img.seek(0)
+                combined_raw = "\n".join(all_raw_text).strip()
+                st.session_state["latest_ocr_raw_text"] = combined_raw
 
-                        if extracted_txt:
-                            all_raw_text.append(extracted_txt)
+                if not combined_raw:
+                    st.warning("⚠️ No text detected by local OCR. Ensure screenshot contains legible topology labels.")
+                else:
+                    # Phase 2: Local persistent sanitization
+                    sanitized_text, token_map = vault.sanitize_text(combined_raw)
+                    st.session_state["latest_vault_tokens"] = token_map
 
-                    combined_raw = "\n".join(all_raw_text).strip()
-                    st.session_state["latest_ocr_raw_text"] = combined_raw
+                    # Phase 3: Pure JSON semantic extraction with multi-vendor heuristics
+                    system_prompt = (
+                        "You are an expert infrastructure network topology parser. Given sanitized OCR text from "
+                        "hypervisors (ESXi, Proxmox, KVM), bare-metal servers, or cloud consoles (Azure VM, Oracle OCI), "
+                        "extract all networking components into a flat JSON array of objects.\n"
+                        "The text is from OCR and may contain minor character errors; deduce intended values logically "
+                        "(e.g., extract PCI locations like 'PCI 0000:5b:00.0' or 'Location: PCI...' into Slot, "
+                        "recognize vSwitch/Bridge/VNet identifiers, and capture interface names accurately).\n"
+                        "Each object must have these exact keys:\n"
+                        "  - Type: 'Uplink', 'PortGroup', or 'VMkernel'\n"
+                        "  - Interface: name of interface (e.g. vmnic0, vmk0, nic-1)\n"
+                        "  - vSwitch: virtual switch or network name (e.g. vSwitch0, vmbr0, Subnet01)\n"
+                        "  - Role: role or status if found (e.g. Active Uplink, Standby Uplink, Secondary)\n"
+                        "  - Purpose: network purpose or label (e.g. Management Network, vMotion, VM Network)\n"
+                        "  - Slot: hardware slot or PCI location if mentioned (e.g. PCI 0000:5b:00.0, PCIe1), else ''\n"
+                        "Output ONLY valid JSON array with no conversational markdown or explanation."
+                    )
+                    user_prompt = f"Parse this sanitized topology text:\n\n{sanitized_text}"
+                    response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt)
+                    
+                    m_json = re.search(r"\[\s*\{.*\}\s*\]", response, re.DOTALL)
+                    json_str = m_json.group(0) if m_json else response.strip()
+                    raw_parsed = json.loads(json_str)
 
-                    if not combined_raw:
-                        st.warning("⚠️ No text detected by local OCR. Ensure screenshot contains legible topology labels.")
-                    else:
-                        # Phase 2: Local persistent sanitization
-                        sanitized_text, token_map = vault.sanitize_text(combined_raw)
-                        st.session_state["latest_vault_tokens"] = token_map
+                    # Phase 4: Local de-tokenization
+                    restored_parsed = vault.detokenize_data(raw_parsed)
+                    st.session_state["hypervisor_parsed_descriptions"] = restored_parsed
+                    st.success("Successfully processed screenshots via local OCR & sanitized LLM parsing!")
+        except Exception as e:
+            st.error(f"Pipeline execution failed: {str(e)}")
 
-                        # Phase 3: Pure JSON semantic extraction with multi-vendor heuristics
-                        system_prompt = (
-                            "You are an expert infrastructure network topology parser. Given sanitized OCR text from "
-                            "hypervisors (ESXi, Proxmox, KVM), bare-metal servers, or cloud consoles (Azure VM, Oracle OCI), "
-                            "extract all networking components into a flat JSON array of objects.\n"
-                            "The text is from OCR and may contain minor character errors; deduce intended values logically "
-                            "(e.g., extract PCI locations like 'PCI 0000:5b:00.0' or 'Location: PCI...' into Slot, "
-                            "recognize vSwitch/Bridge/VNet identifiers, and capture interface names accurately).\n"
-                            "Each object must have these exact keys:\n"
-                            "  - Type: 'Uplink', 'PortGroup', or 'VMkernel'\n"
-                            "  - Interface: name of interface (e.g. vmnic0, vmk0, nic-1)\n"
-                            "  - vSwitch: virtual switch or network name (e.g. vSwitch0, vmbr0, Subnet01)\n"
-                            "  - Role: role or status if found (e.g. Active Uplink, Standby Uplink, Secondary)\n"
-                            "  - Purpose: network purpose or label (e.g. Management Network, vMotion, VM Network)\n"
-                            "  - Slot: hardware slot or PCI location if mentioned (e.g. PCI 0000:5b:00.0, PCIe1), else ''\n"
-                            "Output ONLY valid JSON array with no conversational markdown or explanation."
-                        )
-                        user_prompt = f"Parse this sanitized topology text:\n\n{sanitized_text}"
-                        response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt)
-                        
-                        m_json = re.search(r"\[\s*\{.*\}\s*\]", response, re.DOTALL)
-                        json_str = m_json.group(0) if m_json else response.strip()
-                        raw_parsed = json.loads(json_str)
-
-                        # Phase 4: Local de-tokenization
-                        restored_parsed = vault.detokenize_data(raw_parsed)
-                        st.session_state["hypervisor_parsed_descriptions"] = restored_parsed
-                        st.success("Successfully processed screenshots via local OCR & sanitized LLM parsing!")
-            except Exception as e:
-                st.error(f"Pipeline execution failed: {str(e)}")
-
-        # Step 1: Compact Raw OCR Inspector
-        if st.session_state.get("latest_ocr_raw_text"):
-            raw_txt = st.session_state["latest_ocr_raw_text"]
-            with st.expander("📄 OCR Raw Text Inspector (Click to expand)", expanded=False):
-                st.caption(f"✅ Extracted {len(raw_txt)} characters from staged screenshots")
-                st.code(raw_txt, language="text")
+    # Step 1: Compact Raw OCR Inspector
+    if st.session_state.get("latest_ocr_raw_text"):
+        raw_txt = st.session_state["latest_ocr_raw_text"]
+        with st.expander("📄 OCR Raw Text Inspector (Click to expand)", expanded=False):
+            st.caption(f"✅ Extracted {len(raw_txt)} characters from staged screenshots")
+            st.code(raw_txt, language="text")
 
     # 2️⃣ Step 2: Extracted Variables Inspector (Full-Width & Clean Filtering)
     st.divider()
@@ -1238,8 +1251,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                             r["Slot"] = nic_to_slot[nic]
 
         user_slot_map = get_hardware_slot_mappings(naming_rules)
-        ocr_slot_map = _build_ocr_slot_map(rows, user_slot_map)
-
         slots = sorted(list(set(ocr_slot_map.values())))
 
         # Render styled Badge Cards matching NetBox Hub dark glass theme
@@ -1343,12 +1354,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
     st.divider()
     st.markdown("##### 3️⃣ NetBox Descriptions & Review (Ready-to-Copy)")
 
-    # Defensive data accessor: ensure typed row lists are always valid regardless of pipeline state.
-    parsed_records = st.session_state.get("hypervisor_parsed_descriptions") or []
-    uplink_rows = [r for r in parsed_records if r.get("Type") == "Uplink"]
-    portgroup_rows = [r for r in parsed_records if r.get("Type") == "PortGroup"]
-    vmk_rows = [r for r in parsed_records if r.get("Type") == "VMkernel"]
-
     if parsed_records:
         st.markdown("###### 📋 Generated NetBox Interface Descriptions (Editable)")
         st.caption("Review and edit parsed topology directly below. Batch text updates reactively in real time.")
@@ -1407,7 +1412,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
         from config.naming_rules import get_hardware_slot_mappings
         user_slot_map = get_hardware_slot_mappings(_naming_rules)
-        ocr_slot_map = _build_ocr_slot_map(rows, user_slot_map)
         pattern_vars = _naming_rules.get("variables", {}) or {}
         # Make active_vmnics/standby_vmnics optional so empty teaming sides are stripped cleanly.
         for _tok in ("active_vmnics", "standby_vmnics"):
@@ -1417,7 +1421,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             else:
                 pattern_vars[_tok] = {"optional": True}
         # FIX: Prioritize existing descriptions and group by type first
-        pg_rows = [r for r in rows if r.get("Type") == "PortGroup"]
 
         def _group_by_vswitch(rlist):
             """Group rows by vSwitch, extracting from description if needed."""
@@ -1579,19 +1582,14 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
     # Template interpolation is strictly platform-agnostic and driven solely by extracted row tokens.
 
     blocks = []
-    if uplink_rows:
-        blocks.append(_format_block(uplink_rows, "Uplinks"))
-    if portgroup_rows:
-        blocks.append(_format_block(pg_rows, "Port Groups"))
-    if vmk_rows:
-        blocks.append(_format_block(vmk_rows, "VMkernels"))
+    if network_store["uplinks"]:
+        blocks.append(_format_block(network_store["uplinks"], "Uplinks"))
+    if network_store["networks"]:
+        blocks.append(_format_block(network_store["networks"], "Port Groups"))
+    if network_store["endpoints"]:
+        blocks.append(_format_block(network_store["endpoints"], "VMkernels"))
 
-    _has_slots = bool(ocr_slot_map) or any(
-        bool(r.get("Slot") or r.get("slot")) and str(r.get("Slot") or r.get("slot")).strip() not in ("None", "", iface)
-        for r in rows
-        if isinstance(r, dict)
-        for iface in [str(r.get("Interface") or r.get("interface") or "")]
-    )
+    _has_slots = bool(network_store["slot_map"]) or any(bool(r.get("Slot")) for r in parsed_records)
     note_header = "# NOTE:\n"
     if not _has_slots:
         note_header += "# - Slot Mappings: Not detected in screenshots. Provide physical adapter details to populate.\n"
