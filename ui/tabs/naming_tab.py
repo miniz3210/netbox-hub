@@ -966,7 +966,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 st.rerun()
 
     st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
-    # Step 1: Action Buttons
+    # Step 1: Unified Action Card with Analyze & Clear Buttons
     preset_sm = StandardsManager()
     parsing_presets = preset_sm.get_parsing_presets()
     preset_choices = [p.get("name", "") for p in parsing_presets if p.get("name")]
@@ -975,30 +975,25 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         default_preset = preset_choices[0] if preset_choices else "General (Default)"
     st.session_state["naming_platform_preset"] = default_preset
 
-    btn_col_preset, btn_col1, btn_col2, _ = st.columns([2.5, 2.2, 1.2, 2.1], vertical_alignment="center")
-    with btn_col_preset:
-        platform_preset_select = st.selectbox(
-            "Platform Preset",
-            options=preset_choices,
-            index=preset_choices.index(default_preset) if default_preset in preset_choices else 0,
-            key="naming_platform_preset_dropdown",
-            help="Select a parsing preset whose platform-specific rules are appended to the topology analysis prompt.",
-        )
-    with btn_col1:
-        start_analyze = st.button(
-            "🚀 Analyze Topology & Auto-Populate",
-            key="btn_analyze_hypervisor_img",
-            type="primary",
-            disabled=not bool(uploaded_imgs),
-            width='stretch'
-        )
-    with btn_col2:
-        if st.button("🗑️️ Clear All", key="btn_clear_topo_data", type="secondary", disabled=not bool(uploaded_imgs or st.session_state.get("hypervisor_parsed_descriptions")), width='stretch'):
-            st.session_state["staged_topology_imgs"] = []
-            st.session_state.pop("hypervisor_parsed_descriptions", None)
-            st.session_state.pop("latest_ocr_raw_text", None)
-            st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
-            st.rerun()
+    with st.container(border=True):
+        st.markdown("**🚀 Actions**")
+        btn_col1, btn_col2 = st.columns([3, 1], vertical_alignment="center")
+        with btn_col1:
+            start_analyze = st.button(
+                "🚀 Analyze Topology & Auto-Populate",
+                key="btn_analyze_hypervisor_img",
+                type="primary",
+                disabled=not bool(uploaded_imgs),
+                width='stretch'
+            )
+        with btn_col2:
+            if st.button("🗑️️ Clear All", key="btn_clear_topo_data", type="secondary", disabled=not bool(uploaded_imgs or st.session_state.get("hypervisor_parsed_descriptions")), width='stretch'):
+                st.session_state["staged_topology_imgs"] = []
+                st.session_state.pop("hypervisor_parsed_descriptions", None)
+                st.session_state.pop("latest_ocr_raw_text", None)
+                st.session_state.pop("ocr_platform_detected", None)
+                st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
+                st.rerun()
 
     # Step 1: 4-Stage Execution with Universal Image Preprocessing (Map-Reduce Pipeline)
     if start_analyze:
@@ -1086,7 +1081,21 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             )
 
             # Append preset instructions if applicable
-            selected_preset_name = platform_preset_select
+            # Use manual override if set, otherwise auto-detect from OCR text
+            preset_override = st.session_state.get("ocr_preset_override", "")
+            if preset_override and preset_override != "General (Default)":
+                selected_preset_name = preset_override
+            else:
+                # Auto-detect platform from OCR text
+                ocr_text_lower = sanitized_combined.lower()
+                if 'vswitch' in ocr_text_lower or 'vmnic' in ocr_text_lower:
+                    detected_platform = "VMware ESXi"
+                elif 'vmbr' in ocr_text_lower or 'proxmox' in ocr_text_lower:
+                    detected_platform = "Proxmox VE"
+                else:
+                    detected_platform = "General (Default)"
+                st.session_state["ocr_platform_detected"] = detected_platform
+                selected_preset_name = detected_platform
             preset_instructions = ""
             if selected_preset_name:
                 for _p in parsing_presets:
@@ -1158,12 +1167,28 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             st.error(f"Pipeline execution failed: {str(e)}")
             st.code(traceback.format_exc(), language="text")
 
-    # Step 1: Compact Raw OCR Inspector
+    # Step 1: OCR Inspector with Platform Badge (Same Row)
     if st.session_state.get("latest_ocr_raw_text"):
         raw_txt = st.session_state["latest_ocr_raw_text"]
-        with st.expander("📄 OCR Raw Text Inspector (Click to expand)", expanded=False):
-            st.caption(f"✅ Extracted {len(raw_txt)} characters from staged screenshots")
-            st.code(raw_txt, language="text")
+        detected_platform = st.session_state.get("ocr_platform_detected", "Auto (Pending)")
+
+        with st.Row():
+            with st.Column(span=3):
+                with st.expander(f"📄 OCR Raw Text Inspector (Click to expand)", expanded=False):
+                    # Manual override dropdown
+                    preset_override_val = st.session_state.get("ocr_preset_override", "")
+                    override_select = st.selectbox(
+                        "Manual Platform Override (Optional)",
+                        options=["General (Default)"] + [p.get("name", "") for p in parsing_presets if p.get("name")],
+                        index=0 if not preset_override_val else 1 + [p.get("name", "") for p in parsing_presets if p.get("name")].index(preset_override_val) if preset_override_val in [p.get("name", "") for p in parsing_presets if p.get("name")] else 0,
+                        key="ocr_preset_override",
+                        help="Override auto-detected platform with a specific parsing preset.",
+                    )
+                    st.caption(f"✅ Extracted {len(raw_txt)} characters from staged screenshots")
+                    st.code(raw_txt, language="text")
+            with st.Column(span=1):
+                st.markdown(f"💡 **Platform:** `{detected_platform}`")
+                st.caption("Auto-detected from OCR token scan")
 
     # 2️⃣ Step 2: Extracted Variables Inspector (Full-Width & Clean Filtering)
     st.divider()
