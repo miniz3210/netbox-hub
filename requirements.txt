@@ -12,3 +12,5 @@ pyyaml
 # groq
 # openai
 rapidocr_onnxruntime>=1.3.0
+rapidocr_onnxruntime
+opencv-python-headless
