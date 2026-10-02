@@ -705,8 +705,7 @@
       "boston": "BOS",
       "toronto": "YYZ",
       "bristol": "BRS",
-      "age": "AGE",
-      "iceland": "ICLL"
+      "age": "AGE"
     }
   },
   "vlan_description_mappings": {

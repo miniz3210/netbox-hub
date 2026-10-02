@@ -810,6 +810,9 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables, global_s
 
 
 def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto_correct: bool = True):
+    from core.ocr_engine import run_local_ocr_pipeline
+    from core.vault import SanitizerVault
+    vault = SanitizerVault()
     st.subheader("☁️ Hypervisor Network Description Formatter", help="Format standardized hypervisor network descriptions (VMware ESXi, Proxmox VE, Linux Bridges, etc.) matching infrastructure guidelines.")
 
     # --- SECTION 1: 🛠️ INTERACTIVE SINGLE ITEM GENERATOR ---
@@ -1552,30 +1555,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                             lines.append(f"{iface}:\n{rendered}\n")
                 return "\n".join(lines)
 
-            # Build vswitch uplinks map from Uplink rows for PortGroup teaming propagation
-            vswitch_uplinks = {}
-            for u_row in uplink_rows:
-                u_vs = (u_row.get("vswitch") or u_row.get("v_switch") or "").strip()
-                if not u_vs:
-                    m_u = re.search(r"\b(vSwitch\w*|DSwitch\w*|vmbr\w*|bond\w*|ovs-br\w*|[A-Za-z0-9_\-]+-SW\w*)\b", str(u_row.get("Description", "")))
-                    if m_u:
-                        u_vs = m_u.group(1)
-                if not u_vs:
-                    continue
-
-                u_iface = str(u_row.get("Interface") or u_row.get("vmnic") or "").strip()
-                m_nic = re.search(r"\b([a-zA-Z0-9_\-\.]+)\b", u_iface)
-                nic_name = m_nic.group(1) if m_nic else u_iface
-
-                u_desc = str(u_row.get("Description") or "")
-                u_role = str(u_row.get("Role") or u_row.get("Status") or "")
-                is_standby = bool(re.search(r"(?i)\bstandby\b", f"{u_desc} {u_role}"))
-
-                bucket = vswitch_uplinks.setdefault(u_vs, {"active": [], "standby": []})
-                if is_standby:
-                    bucket["standby"].append(nic_name)
-                else:
-                    bucket["active"].append(nic_name)
+        # Strictly eliminated: all cross-row heuristics and active/standby guessing logic removed.
+        # Template interpolation is strictly platform-agnostic and driven solely by extracted row tokens.
 
             blocks = []
             if uplink_rows:
