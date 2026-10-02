@@ -10,9 +10,10 @@ the local Sanitizer Vault pipeline.
 
 import io
 import logging
+import sys
 import numpy as np
 from typing import List, Dict, Any, Tuple
-from PIL import Image
+from PIL import Image, ImageEnhance
 from rapidocr_onnxruntime import RapidOCR
 
 try:
@@ -24,6 +25,14 @@ except ImportError:
 _logger = logging.getLogger(__name__) or logging
 
 _ocr_engine = None
+
+# Minimum image width; images below this threshold are upscaled for better detection
+_MIN_OCR_WIDTH = 2000
+_UPSCALE_FACTOR = 2.0
+
+
+def _flush():
+    sys.stdout.flush()
 
 
 def get_ocr_engine() -> RapidOCR:
@@ -39,7 +48,12 @@ class LocalOCREngine:
 
     @staticmethod
     def _load_image(image_input: Any) -> np.ndarray:
-        """Load image from bytes, file-like, PIL Image, or path and return BGR numpy array."""
+        """Load image from bytes, file-like, PIL Image, or path and return BGR numpy array.
+
+        Images narrower than _MIN_OCR_WIDTH are upscaled by _UPSCALE_FACTOR using
+        bicubic interpolation so that small hypervisor UI labels are detectable
+        by RapidOCR's DBNet text-line detector.
+        """
         if isinstance(image_input, (bytes, bytearray)):
             pil_img = Image.open(io.BytesIO(image_input)).convert("RGB")
         elif hasattr(image_input, "read"):
@@ -50,17 +64,24 @@ class LocalOCREngine:
         else:
             pil_img = Image.open(str(image_input)).convert("RGB")
 
+        # Upscale small images before colour-space conversion so interpolation
+        # operates on the larger pixel grid.
+        w, h = pil_img.size
+        if w < _MIN_OCR_WIDTH:
+            new_w = int(w * _UPSCALE_FACTOR)
+            new_h = int(h * _UPSCALE_FACTOR)
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.BICUBIC)
+            _logger.debug("[OCR DEBUG] Upscaled %dx%d -> %dx%d", w, h, new_w, new_h)
+            _flush()
+
         rgb_np = np.array(pil_img)
-        # Ensure contiguous memory layout for ONNX runtime compatibility
         rgb_np = np.ascontiguousarray(rgb_np)
 
         if rgb_np.ndim == 2:
-            # Grayscale: convert to 3-channel BGR
             if HAS_CV2:
                 return cv2.cvtColor(rgb_np, cv2.COLOR_GRAY2BGR)
-            return np.stack([rgb_np] * 3, axis=-1)[..., ::-1]
+            return np.stack([rgb_np] * 3, axis=-1)
         elif rgb_np.shape[-1] == 4:
-            # RGBA -> drop alpha channel -> RGB -> BGR
             rgb_only = rgb_np[:, :, :3]
             if HAS_CV2:
                 return cv2.cvtColor(rgb_only, cv2.COLOR_RGB2BGR)
@@ -69,13 +90,11 @@ class LocalOCREngine:
             if HAS_CV2:
                 return cv2.cvtColor(rgb_np, cv2.COLOR_RGB2BGR)
             return rgb_np[:, :, ::-1]
-        # Fallback: return as-is (contiguous uint8)
         return rgb_np
 
     def _enhance_contrast(self, img_bgr: np.ndarray) -> np.ndarray:
         """Apply CLAHE contrast enhancement for low-contrast topology labels."""
         if not HAS_CV2:
-            # Software fallback: simple histogram equalization via PIL
             pil_img = Image.fromarray(img_bgr[..., ::-1] if img_bgr.shape[-1] == 3 else img_bgr)
             pil_img = ImageEnhance.Contrast(pil_img).enhance(2.0)
             pil_img = ImageEnhance.Sharpness(pil_img).enhance(1.5)
@@ -89,52 +108,51 @@ class LocalOCREngine:
         l = clahe.apply(l)
         return cv2.merge((l, a, b))
 
+    @staticmethod
+    def _parse_result(result) -> Tuple[List[str], List[float]]:
+        """Parse RapidOCR result into (lines, confidences). Handles None, nested lists."""
+        lines: List[str] = []
+        confs: List[float] = []
+        if result is None:
+            return lines, confs
+        for item in result:
+            if not isinstance(item, (list, tuple)) or len(item) < 2:
+                continue
+            text = item[1]
+            conf = item[2] if len(item) >= 3 else 0.0
+            if text and isinstance(text, str) and text.strip():
+                lines.append(text.strip())
+                if isinstance(conf, (int, float)) and conf > 0:
+                    confs.append(float(conf))
+        return lines, confs
+
     def extract_text_with_metadata(
         self, image_input: Any
     ) -> Dict[str, Any]:
         """
-        Extract text, line-level segments, and overall confidence metrics
-        using RapidOCR (ONNX runtime) with contrast-enhancement fallback.
+        Extract text using a two-pass strategy:
+          Pass 1 — standard inference on upscaled BGR image.
+          Pass 2 — CLAHE-boosted contrast on upscaled BGR image (fallback).
         """
         engine = get_ocr_engine()
         img_bgr = self._load_image(image_input)
 
-        # First pass: standard inference
-        result, elapse_list = engine(img_bgr)
-
         detected_lines: List[str] = []
         all_confidences: List[float] = []
 
-        if result is not None:
-            for item in result:
-                # item is [box_coords, text, confidence_float]
-                if not isinstance(item, (list, tuple)) or len(item) < 2:
-                    continue
-                text = item[1]
-                conf = item[2] if len(item) >= 3 else 0.0
-                if text and isinstance(text, str) and text.strip():
-                    detected_lines.append(text.strip())
-                    if isinstance(conf, (int, float)) and conf > 0:
-                        all_confidences.append(float(conf))
+        # Pass 1: standard inference
+        result, _ = engine(img_bgr)
+        detected_lines, all_confidences = self._parse_result(result)
+        _logger.debug("[OCR DEBUG] Pass 1: %d lines", len(detected_lines))
+        _flush()
 
-        _logger.debug("[OCR DEBUG] First pass: %d lines detected", len(detected_lines))
-
-        # Fallback: enhanced contrast if first pass yielded nothing
+        # Pass 2: contrast-enhanced fallback
         if not detected_lines:
             enhanced_bgr = self._enhance_contrast(img_bgr)
-            result, elapse_list = engine(enhanced_bgr)
-            if result is not None:
-                for item in result:
-                    if not isinstance(item, (list, tuple)) or len(item) < 2:
-                        continue
-                    text = item[1]
-                    conf = item[2] if len(item) >= 3 else 0.0
-                    if text and isinstance(text, str) and text.strip():
-                        detected_lines.append(text.strip())
-                        if isinstance(conf, (int, float)) and conf > 0:
-                            all_confidences.append(float(conf))
-
-        _logger.debug("[OCR DEBUG] After fallback: %d lines, total text len=%d", len(detected_lines), len("\n".join(detected_lines)))
+            result, _ = engine(enhanced_bgr)
+            detected_lines, all_confidences = self._parse_result(result)
+            _logger.debug("[OCR DEBUG] Pass 2 (enhanced): %d lines", len(detected_lines))
+            _flush()
 
         avg_conf = (
             sum(all_confidences) / len(all_confidences) if all_confidences else 0.0
