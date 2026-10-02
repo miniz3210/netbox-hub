@@ -517,7 +517,31 @@ def _interface_ref_examples(intf_code):
     return f"🟡 Default Examples — No ingested interface descriptions found matching this type.", defaults
 
 
-def _is_vision_capable_model(model_name: str) -> bool:
+def _safe_parse_json_array(response: str) -> list:
+    """Extract and parse a JSON array from LLM response, handling truncated/invalid JSON."""
+    import json as _json
+    m_json = re.search(r"\[\s*\{.*\}\s*\]", response, re.DOTALL)
+    if m_json:
+        json_str = m_json.group(0)
+    else:
+        stripped = response.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            json_str = stripped
+        else:
+            return []
+    try:
+        return _json.loads(json_str)
+    except _json.JSONDecodeError:
+        pass
+    # Attempt recovery: close unclosed brackets/braces and fix unterminated strings
+    for fix in (lambda s: s.rstrip().rstrip(",") + "\n]",
+                lambda s: s.rstrip().rstrip(",") + "\n}",
+                lambda s: s.replace("\n", " ").replace("  ", " ")):
+        try:
+            return _json.loads(fix(json_str))
+        except _json.JSONDecodeError:
+            continue
+    return []
     """Return True if model name indicates multimodal vision support."""
     if not model_name:
         return False
@@ -965,9 +989,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             label_visibility="collapsed",
             help="Focus this box and press Ctrl+V.",
         )
-        import streamlit.components.v1 as _components
-        _components.html(
-            """
+        st.markdown("""
             <script>
             const parentDoc = window.parent.document;
             if (!window.parent._esxiPasteDelegated) {
@@ -1003,8 +1025,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             }
             </script>
             """,
-            height=0,
-            width=0,
+            unsafe_allow_html=True,
         )
 
     # Ingest clipboard paste inside Step 1
@@ -1062,84 +1083,100 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
             st.rerun()
 
-    # Step 1: 4-Stage Execution with Universal Image Preprocessing
+    # Step 1: 4-Stage Execution with Universal Image Preprocessing (Map-Reduce Pipeline)
     if start_analyze:
         try:
-            with st.spinner("Executing 4-stage local OCR pipeline..."):
-                import json
-                from PIL import Image, ImageEnhance
-                import pytesseract
-                from core.ai_client import call_ai
-                all_raw_text = []
+            import json as _json
+            from PIL import Image, ImageEnhance
+            import pytesseract
+            from core.ai_client import call_ai
+            progress_bar = st.progress(0, text="Initializing topology analysis...")
+            all_parsed_items = []
+            all_raw_texts = []
+            total_imgs = len(uploaded_imgs)
 
-                # Phase 1: Local Tesseract OCR (contrast enhancement & sparse PSM)
-                for img in uploaded_imgs:
+            for idx, img in enumerate(uploaded_imgs):
+                step_label = f"Analyzing screenshot [{idx + 1}/{total_imgs}]: {getattr(img, 'name', f'Image #{idx+1}')}"
+                progress_bar.progress((idx) / total_imgs, text=step_label)
+
+                if hasattr(img, "seek"):
+                    img.seek(0)
+
+                extracted_txt = ""
+                try:
+                    pil_img = Image.open(img).convert("L")
+                    w, h = pil_img.size
+                    pil_img = pil_img.resize((w * 2, h * 2), Image.Resampling.LANCZOS)
+                    enhancer = ImageEnhance.Contrast(pil_img)
+                    pil_img = enhancer.enhance(1.8)
+                    extracted_txt = pytesseract.image_to_string(pil_img, config="--oem 3 --psm 6").strip()
+                    if not extracted_txt:
+                        extracted_txt = pytesseract.image_to_string(pil_img, config="--oem 3 --psm 11").strip()
+                except Exception:
                     if hasattr(img, "seek"):
                         img.seek(0)
+                    img_bytes = img.read() if hasattr(img, "read") else img.getvalue()
+                    ocr_res = run_local_ocr_pipeline(img_bytes)
+                    extracted_txt = ocr_res.get("text", "").strip()
 
-                    extracted_txt = ""
-                    try:
-                        pil_img = Image.open(img).convert("L")
-                        w, h = pil_img.size
-                        pil_img = pil_img.resize((w * 2, h * 2), Image.Resampling.LANCZOS)
-                        # Enhance contrast to cleanly isolate text from background lines
-                        enhancer = ImageEnhance.Contrast(pil_img)
-                        pil_img = enhancer.enhance(1.8)
+                if hasattr(img, "seek"):
+                    img.seek(0)
 
-                        extracted_txt = pytesseract.image_to_string(pil_img, config="--oem 3 --psm 6").strip()
-                        if not extracted_txt:
-                            extracted_txt = pytesseract.image_to_string(pil_img, config="--oem 3 --psm 11").strip()
-                    except Exception:
-                        if hasattr(img, "seek"):
-                            img.seek(0)
-                        img_bytes = img.read() if hasattr(img, "read") else img.getvalue()
-                        ocr_res = run_local_ocr_pipeline(img_bytes)
-                        extracted_txt = ocr_res.get("text", "").strip()
+                if not extracted_txt:
+                    continue
+                all_raw_texts.append(f"--- Screenshot {idx+1}: {getattr(img, 'name', '')} ---\n{extracted_txt}")
 
-                    if hasattr(img, "seek"):
-                        img.seek(0)
+                sanitized_txt, token_map = vault.sanitize_text(extracted_txt)
+                st.session_state["latest_vault_tokens"] = token_map
 
-                    if extracted_txt:
-                        all_raw_text.append(extracted_txt)
+                system_prompt = (
+                    "You are an expert infrastructure network topology parser. Given sanitized OCR text from "
+                    "hypervisors (ESXi, Proxmox, KVM), bare-metal servers, or cloud consoles (Azure VM, Oracle OCI), "
+                    "extract all networking components into a flat JSON array of objects.\n"
+                    "The text is from OCR and may contain minor character errors; deduce intended values logically "
+                    "(e.g., extract PCI locations like 'PCI 0000:5b:00.0' or 'Location: PCI...' into Slot, "
+                    "recognize vSwitch/Bridge/VNet identifiers, and capture interface names accurately).\n"
+                    "Each object must have these exact keys:\n"
+                    "  - Type: 'Uplink', 'PortGroup', or 'VMkernel'\n"
+                    "  - Interface: name of interface (e.g. vmnic0, vmk0, nic-1)\n"
+                    "  - vSwitch: virtual switch or network name (e.g. vSwitch0, vmbr0, Subnet01)\n"
+                    "  - Role: role or status if found (e.g. Active Uplink, Standby Uplink, Secondary)\n"
+                    "  - Purpose: network purpose or label (e.g. Management Network, vMotion, VM Network)\n"
+                    "  - Slot: hardware slot or PCI location if mentioned (e.g. PCI 0000:5b:00.0, PCIe1), else ''\n"
+                    "Output ONLY valid JSON array with no conversational markdown or explanation."
+                )
+                user_prompt = f"Parse this sanitized topology text:\n\n{sanitized_txt}"
+                response = call_ai(user_prompt=user_prompt, active_model=active_model, custom_system_msg=system_prompt)
+                chunk_items = _safe_parse_json_array(response)
+                chunk_restored = vault.detokenize_data(chunk_items)
+                if isinstance(chunk_restored, list):
+                    all_parsed_items.extend(chunk_restored)
 
-                combined_raw = "\n".join(all_raw_text).strip()
-                st.session_state["latest_ocr_raw_text"] = combined_raw
+            progress_bar.progress(1.0, text=f"✅ Successfully analyzed {total_imgs} screenshots! Merging records...")
 
-                if not combined_raw:
-                    st.warning("⚠️ No text detected by local OCR. Ensure screenshot contains legible topology labels.")
-                else:
-                    # Phase 2: Local persistent sanitization
-                    sanitized_text, token_map = vault.sanitize_text(combined_raw)
-                    st.session_state["latest_vault_tokens"] = token_map
+            all_raw_combined = "\n\n".join(all_raw_texts).strip()
+            st.session_state["latest_ocr_raw_text"] = all_raw_combined
 
-                    # Phase 3: Pure JSON semantic extraction with multi-vendor heuristics
-                    system_prompt = (
-                        "You are an expert infrastructure network topology parser. Given sanitized OCR text from "
-                        "hypervisors (ESXi, Proxmox, KVM), bare-metal servers, or cloud consoles (Azure VM, Oracle OCI), "
-                        "extract all networking components into a flat JSON array of objects.\n"
-                        "The text is from OCR and may contain minor character errors; deduce intended values logically "
-                        "(e.g., extract PCI locations like 'PCI 0000:5b:00.0' or 'Location: PCI...' into Slot, "
-                        "recognize vSwitch/Bridge/VNet identifiers, and capture interface names accurately).\n"
-                        "Each object must have these exact keys:\n"
-                        "  - Type: 'Uplink', 'PortGroup', or 'VMkernel'\n"
-                        "  - Interface: name of interface (e.g. vmnic0, vmk0, nic-1)\n"
-                        "  - vSwitch: virtual switch or network name (e.g. vSwitch0, vmbr0, Subnet01)\n"
-                        "  - Role: role or status if found (e.g. Active Uplink, Standby Uplink, Secondary)\n"
-                        "  - Purpose: network purpose or label (e.g. Management Network, vMotion, VM Network)\n"
-                        "  - Slot: hardware slot or PCI location if mentioned (e.g. PCI 0000:5b:00.0, PCIe1), else ''\n"
-                        "Output ONLY valid JSON array with no conversational markdown or explanation."
+            if not all_raw_combined:
+                st.warning("⚠️ No text detected by local OCR. Ensure screenshot contains legible topology labels.")
+            elif not all_parsed_items:
+                st.warning("⚠️ OCR detected text but no structured records were parsed. Check screenshot quality.")
+            else:
+                seen = set()
+                deduped = []
+                for item in all_parsed_items:
+                    if not isinstance(item, dict):
+                        continue
+                    key = (
+                        str(item.get("Type", "")).strip(),
+                        str(item.get("Interface", "")).strip(),
+                        str(item.get("vSwitch", "")).strip(),
                     )
-                    user_prompt = f"Parse this sanitized topology text:\n\n{sanitized_text}"
-                    response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt)
-                    
-                    m_json = re.search(r"\[\s*\{.*\}\s*\]", response, re.DOTALL)
-                    json_str = m_json.group(0) if m_json else response.strip()
-                    raw_parsed = json.loads(json_str)
-
-                    # Phase 4: Local de-tokenization
-                    restored_parsed = vault.detokenize_data(raw_parsed)
-                    st.session_state["hypervisor_parsed_descriptions"] = restored_parsed
-                    st.success("Successfully processed screenshots via local OCR & sanitized LLM parsing!")
+                    if key not in seen:
+                        seen.add(key)
+                        deduped.append(item)
+                st.session_state["hypervisor_parsed_descriptions"] = deduped
+                st.success(f"Successfully analyzed {total_imgs} screenshots and merged {len(deduped)} unique records!")
         except Exception as e:
             st.error(f"Pipeline execution failed: {str(e)}")
 
