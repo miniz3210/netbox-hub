@@ -1457,46 +1457,12 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         if re.match(r"^(vmnic\d+|eno\w+|ens\w+|enp\w+|eth\d+|vmk\d+)$", clean_purp, re.IGNORECASE):
                             clean_purp = ""
 
-                        # If VMkernel purpose is empty, associate with matching switch portgroup network label
-                        if row_type == "VMkernel" and not clean_purp:
-                            clean_purp = switch_pg_purpose_map.get(resolved_vs, "")
-
                         row_vals["purpose"] = clean_purp
                         row_vals["service"] = clean_purp
 
-                        # Active/Standby teaming extraction (platform-agnostic tokens)
+                        # Active/Standby teaming - use only directly extracted values, no cross-row guessing
                         act_vmnics = row_vals.get("active") or row_vals.get("active_vmnics") or ""
                         stb_vmnics = row_vals.get("standby") or row_vals.get("standby_vmnics") or ""
-                        if not act_vmnics or not stb_vmnics:
-                            m_as = re.search(r"\((.*?)\s+Active\s*/\s*(.*?)\s+Standby\)", desc, re.IGNORECASE)
-                            if not m_as:
-                                m_as = re.search(r"\[(.*?)\s+Active\s*/\s*(.*?)\s+Standby\]", desc, re.IGNORECASE)
-                            if m_as:
-                                if not act_vmnics:
-                                    act_vmnics = m_as.group(1).strip()
-                                if not stb_vmnics:
-                                    stb_vmnics = m_as.group(2).strip()
-                            else:
-                                m_act = re.search(r"\b([a-zA-Z0-9_\-\.]+)\s+Active\b", desc, re.IGNORECASE)
-                                m_stb = re.search(r"\b([a-zA-Z0-9_\-\.]+)\s+Standby\b", desc, re.IGNORECASE)
-                                if m_act and not act_vmnics:
-                                    act_vmnics = m_act.group(1)
-                                if m_stb and not stb_vmnics:
-                                    stb_vmnics = m_stb.group(1)
-
-                        # Propagate vswitch uplinks to PortGroup/VMkernel teaming tokens
-                        if row_type in ("PortGroup", "VMkernel") and not act_vmnics:
-                            bucket = vswitch_uplinks.get(resolved_vs)
-                            if bucket:
-                                if bucket["active"] and bucket["standby"]:
-                                    act_vmnics = ", ".join(bucket["active"])
-                                    stb_vmnics = ", ".join(bucket["standby"])
-                                elif len(bucket["active"]) > 1 and not bucket["standby"]:
-                                    act_vmnics = bucket["active"][0]
-                                    stb_vmnics = ", ".join(bucket["active"][1:])
-                                elif bucket["active"]:
-                                    act_vmnics = ", ".join(bucket["active"])
-
                         row_vals["active_vmnics"] = act_vmnics
                         row_vals["standby_vmnics"] = stb_vmnics
                         row_vals["active"] = act_vmnics

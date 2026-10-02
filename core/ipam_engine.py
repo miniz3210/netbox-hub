@@ -482,43 +482,53 @@ def generate_netbox_vlan_group_csv(site_name: str, scope_id: str, rules: Optiona
     rendered_row = [render_csv_cell(cell, ctx) for cell in row_tpl]
     return f"{','.join(headers)}\n{','.join(rendered_row)}"
 
-def generate_netbox_vlans_csv(site_name: str, rows: List[Dict[str, Any]], rules: Optional[Dict[str, Any]] = None) -> str:
-    from config.naming_rules import get_csv_schemas, load_naming_rules
-    if rules is None:
-        rules = load_naming_rules()
+def generate_netbox_vlans_csv(site_name: str, computed_rows: List[Dict[str, Any]]) -> str:
+    from config.naming_rules import load_naming_rules, get_csv_schemas
+    rules = load_naming_rules()
     schemas = get_csv_schemas(rules)
-    schema = schemas.get("import_vlans", {})
-    headers = schema.get("headers", ["vid", "name", "status", "site", "group", "description", "role"])
-    row_tpl = schema.get("row_template", ["<vid>", "\"<vlan_name>\"", "active", "\"<site>\"", "\"<vlan_group>\"", "\"<vlan_desc>\"", "\"<role>\""])
-
-    if not rows:
-        return "\n".join(headers)
-
-    global_ctx = _get_global_ipam_context(site_name, "")
-    lines = [",".join(headers)]
-
-    for r in rows:
-        vid = r.get("VLAN ID")
-        subnet = sanitize_cidr(str(r.get("Subnet (CIDR)") or "").strip())
-        if not vid or not subnet or "/" not in subnet:
-            continue
-        vname = r.get("VLAN Name") or r.get("Role") or f"VLAN_{vid}"
-        desc = str(r.get("VLAN Description") or "").strip()
-        role_val = r.get("Role") or vname
-
-        row_ctx = {
-            **global_ctx,
-            "vid": vid,
-            "vlan_id": vid,
-            "role": role_val,
-            "vlan_name": vname,
-            "vlan_desc": desc,
-            "subnet": subnet,
-            "prefix": subnet
-        }
-        rendered_cells = [render_csv_cell(cell, row_ctx) for cell in row_tpl]
-        lines.append(",".join(rendered_cells))
-
+    vlan_schema = schemas.get("import_vlans", {})
+    headers_list = vlan_schema.get("headers", ["vid", "name", "status", "site", "group", "description", "role"])
+    headers = ",".join(headers_list)
+    row_tpl = vlan_schema.get("row_template", ["<vid>", '"<vlan_name>"', "active", '"<site>"', '"<vlan_group>"', '"<vlan_desc>"', '"<role>"'])
+    
+    lines = [headers]
+    site_display = format_branch_display(site_name) or "Site"
+    group_name = f"{site_display} VLAN Group"
+    
+    valid_rows = [r for r in (computed_rows or []) if r.get("VLAN ID") is not None]
+    
+    if valid_rows:
+        for r in valid_rows:
+            vid_val = str(r.get("VLAN ID", ""))
+            vname_val = str(r.get("VLAN Name", "") or r.get("Role", ""))
+            role_val = str(r.get("Role", ""))
+            vdesc_val = str(r.get("VLAN Description", "") or r.get("Prefix Description", ""))
+            
+            row_cells = []
+            for token_cell in row_tpl:
+                cell = str(token_cell)
+                cell = cell.replace("<vid>", vid_val)
+                cell = cell.replace("<vlan_name>", vname_val)
+                cell = cell.replace("<site>", site_display)
+                cell = cell.replace("<vlan_group>", group_name)
+                cell = cell.replace("<vlan_desc>", vdesc_val)
+                cell = cell.replace("<role>", role_val)
+                row_cells.append(cell)
+            lines.append(",".join(row_cells))
+    else:
+        # Fallback default preview row matching Site and VLAN Group behavior
+        row_cells = []
+        for token_cell in row_tpl:
+            cell = str(token_cell)
+            cell = cell.replace("<vid>", "300")
+            cell = cell.replace("<vlan_name>", "Corporate WiFi")
+            cell = cell.replace("<site>", site_display)
+            cell = cell.replace("<vlan_group>", group_name)
+            cell = cell.replace("<vlan_desc>", "VIN_Corp")
+            cell = cell.replace("<role>", "Corporate WiFi")
+            row_cells.append(cell)
+        lines.append(",".join(row_cells))
+        
     return "\n".join(lines)
 
 def generate_netbox_prefixes_csv(
