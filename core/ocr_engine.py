@@ -30,7 +30,7 @@ class LocalOCREngine:
 
     @staticmethod
     def _load_image(image_input: Any) -> np.ndarray:
-        """Load image from bytes, file-like, PIL Image, or path and return numpy array."""
+        """Load image from bytes, file-like, PIL Image, or path and return BGR numpy array."""
         if isinstance(image_input, (bytes, bytearray)):
             pil_img = Image.open(io.BytesIO(image_input)).convert("RGB")
         elif hasattr(image_input, "read"):
@@ -40,18 +40,36 @@ class LocalOCREngine:
             pil_img = image_input.convert("RGB")
         else:
             pil_img = Image.open(str(image_input)).convert("RGB")
-        return np.array(pil_img)
+        # Convert to BGR for OpenCV compatibility with RapidOCR
+        rgb_np = np.array(pil_img)
+        if rgb_np.shape[-1] == 3:
+            return cv2.cvtColor(rgb_np, cv2.COLOR_RGB2BGR)
+        elif rgb_np.shape[-1] == 4:
+            # Premultiplied alpha images: convert RGBA -> RGB -> BGR
+            pil_img = Image.fromarray(rgb_np[:, :, :3])
+            return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+        return cv2.cvtColor(rgb_np, cv2.COLOR_GRAY2BGR)
+
+    def _enhance_contrast(self, img_bgr: np.ndarray) -> np.ndarray:
+        """Apply CLAHE contrast enhancement for low-contrast topology labels."""
+        lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        l = clahe.apply(l)
+        return cv2.merge((l, a, b))
 
     def extract_text_with_metadata(
         self, image_input: Any
     ) -> Dict[str, Any]:
         """
         Extract text, line-level segments, and overall confidence metrics
-        using RapidOCR (ONNX runtime).
+        using RapidOCR (ONNX runtime) with contrast-enhancement fallback.
         """
         engine = get_ocr_engine()
-        img_np = self._load_image(image_input)
-        result, elapse_list = engine(img_np)
+        img_bgr = self._load_image(image_input)
+
+        # First pass: standard inference
+        result, elapse_list = engine(img_bgr)
 
         extracted_words: List[str] = []
         confidences: List[float] = []
@@ -67,6 +85,21 @@ class LocalOCREngine:
                         if conf > 0:
                             confidences.append(conf)
                         valid_lines.append(str(text).strip())
+
+        # Fallback: enhanced contrast if first pass yielded nothing
+        if not valid_lines:
+            enhanced_bgr = self._enhance_contrast(img_bgr)
+            result, elapse_list = engine(enhanced_bgr)
+            if result:
+                for line in result:
+                    if line and len(line) >= 2:
+                        text = line[1]
+                        conf = float(line[2]) if len(line) >= 3 and line[2] else 0.0
+                        if text and str(text).strip():
+                            extracted_words.extend(str(text).strip().split())
+                            if conf > 0:
+                                confidences.append(conf)
+                            valid_lines.append(str(text).strip())
 
         avg_conf = (
             sum(confidences) / len(confidences) if confidences else 0.0

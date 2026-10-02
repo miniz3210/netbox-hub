@@ -1101,7 +1101,10 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
                 extracted_txt = ""
                 try:
-                    if hasattr(img, "read"):
+                    # Ensure stream pointer is at beginning for all file-like inputs
+                    if hasattr(img, "seek"):
+                        img.seek(0)
+                    elif hasattr(img, "read"):
                         img.seek(0)
                     ocr_res = run_local_ocr_pipeline([img])
                     extracted_txt = ocr_res.get("combined_text", "").strip()

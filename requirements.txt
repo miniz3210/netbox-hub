@@ -11,6 +11,6 @@ pyyaml
 # google-genai
 # groq
 # openai
-rapidocr_onnxruntime>=1.3.0
-rapidocr_onnxruntime
 opencv-python-headless
+numpy
+rapidocr_onnxruntime>=1.3.0
