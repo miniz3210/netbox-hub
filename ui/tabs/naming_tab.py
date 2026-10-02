@@ -1035,22 +1035,24 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 "You are an expert infrastructure network architect and NetBox data modeling specialist.\n"
                 "Analyze the provided sanitized OCR text from any hypervisor or cloud platform\n"
                 "(VMware ESXi, Proxmox VE, Linux KVM, Microsoft Azure, Oracle Cloud OCI, etc.).\n\n"
-                "First, infer the underlying Platform: ('ESXi', 'Proxmox', 'Azure', 'OCI', 'Linux', or 'Unknown').\n"
-                "Next, extract all networking components into a flat JSON array of objects using universal semantic categories:\n"
-                "  - Type:\n"
-                "    * 'Physical' (Physical NICs, PCIe adapters, Host Uplinks, Bonds, Azure/OCI Base NICs)\n"
-                "    * 'LogicalNetwork' (Virtual Switches, Linux Bridges vmbr, PortGroups, Subnets, VLAN interfaces)\n"
-                "    * 'Endpoint' (Management interfaces, VMkernel vmk, Host IPs, Gateway endpoints, VIPs)\n"
-                "  - Interface: The exact interface name/identifier (e.g. vmnic0, vmk0, ge-0/0/0, eth0)\n"
-                "  - parent: The parent switch, bridge, aggregate bundle (LAG/AE), virtual chassis, or VNet/Subnet it belongs to (e.g. vSwitch0, vmbr0, ae1, vnet-prod), else ''\n"
-                "  - Role: Uplink or teaming role (e.g. Active, Standby, Member), else ''\n"
-                "  - Purpose: Network label, service, security zone, or subnet purpose (e.g. Management, vMotion, TRUST_ZONE, Public), else ''\n"
-                "  - Slot: Physical hardware PCIe/chassis slot location (e.g. PCI:0000:3b:00.0, PCIe1/Port1, Slot 0), else ''\n\n"
-                "Correct obvious OCR character transposition errors and typos in network identifiers (e.g. confusing letter 'o'/'O' with digit '0', letter 'l'/'I' with digit '1') based on surrounding naming context.\n"
-                "CROSS-IMAGE & TABLE RECONCILIATION:\n"
-                "When physical adapter tables list hardware slot locations (e.g. Location: PCI...) for an interface\n"
-                "that is also used in a virtual switch/bridge, resolve and populate the 'Slot' field on that interface.\n"
-                "Output ONLY the valid JSON array without conversational markdown or text wrappers."
+                "Extract all networking components into a flat JSON array of objects.\n\n"
+                "MANDATORY CORE FIELDS:\n"
+                "    - Type: 'Physical' (Physical NICs/Uplinks/Bonds), 'LogicalNetwork' (Switches/Bridges/VLANs/PortGroups), or 'Endpoint' (Management/VMkernel/IP interfaces)\n"
+                "    - Interface: Exact interface identifier (e.g. vmnic0, eth0, ge-0/0/0, vmk0)\n"
+                "    - parent: Parent switch, bridge, aggregate (LAG/AE), virtual chassis, or VNet/Subnet, else ''\n\n"
+                "DYNAMIC ATTRIBUTE EXTRACTION:\n"
+                "    Actively detect and extract ALL observable attributes into clean lowercase keys. Examples:\n"
+                "    - slot: Hardware PCIe/chassis slot location (e.g. PCI:0000:3b:00.0, PCIe1/Port1)\n"
+                "    - ip: Interface IP address or CIDR (e.g. 192.168.50.4, <SAFE_IP_1>)\n"
+                "    - domain: Host domain / FQDN or hostname (e.g. esagexi0.eswine.adds, <SAFE_DOMAIN_1>)\n"
+                "    - speed: Interface speed / duplex (e.g. 10 Gbit/s, Full Duplex)\n"
+                "    - vlan: VLAN ID if present\n"
+                "    - mac: MAC address if present\n"
+                "    - purpose: Network label or role (e.g. Management Network, vMotion, Public)\n"
+                "    - Any other visible configuration attributes as distinct keys.\n\n"
+                "OCR ERROR RECOVERY:\n"
+                "    Correct obvious character substitution typos in identifiers (e.g. 'vSwitcho' -> 'vSwitch0', 'PC10000' -> 'PCI0000') using contextual clues.\n\n"
+                "Output ONLY the valid JSON array."
             )
             user_prompt = f"Parse this consolidated sanitized topology text:\n\n{sanitized_combined}"
             response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt)
@@ -1222,16 +1224,11 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
         # --- Dynamic Token Bag Inspector (Discovers all OCR keys, e.g. for Proxmox/KVM) ---
         raw_token_dict = {}
-        # Inject canonical tokens into raw token dict for complete coverage
-        raw_token_dict["interface"] = set(vmnics)
-        raw_token_dict["parent"] = set(parents)
-        raw_token_dict["slot"] = set(slots)
-        raw_token_dict["purpose"] = set(purposes)
         for r in rows:
             if not isinstance(r, dict):
                 continue
             for k, v in r.items():
-                if v is not None and not str(v).lower() in ["nan", "none", ""]:
+                if v is not None and str(v).strip() and str(v).lower() not in ("nan", "none", ""):
                     norm_k = re.sub(r"[^a-zA-Z0-9]+", "_", str(k).strip().lower()).strip("_")
                     if norm_k:
                         raw_token_dict.setdefault(norm_k, set()).add(str(v).strip())
