@@ -34,7 +34,6 @@ PRESET_ACTION_COLS = [1, 1, 1]
 PRESET_VLAN_COLS = [1.5, 7.3, 1.2]
 # Standardized 3-column ratio for Key-Value mappings: Key (4.4), Value (4.4), Action (1.2) (sum = 10.0)
 VLAND_MAPPINGS_COLS = [4.4, 4.4, 1.2]
-SLOT_MAPPINGS_COLS = [4.4, 4.4, 1.2]
 # Manage Pattern Variables columns: Name, Label, Placeholder, Auto-Fill, Optional, Up, Down, Delete.
 VARIABLE_COLS = [1.5, 2.5, 2.5, 1.5, 0.9, 0.45, 0.45, 0.45]
 # Auto-Correction rule columns: Original Pattern, Replacement, Description, Action.
@@ -1510,102 +1509,6 @@ def _vm_editor(rules: dict) -> None:
 
 # Standardized 3-column ratio for Key-Value mappings: Key, Value, Action
 VLAND_MAPPINGS_COLS = [4.0, 5.0, 1.2]
-SLOT_MAPPINGS_COLS = [4.0, 5.0, 1.2]
-
-def _render_hardware_slot_mappings_editor(rules: dict) -> None:
-    from config.naming_rules import get_hardware_slot_mappings, load_naming_rules
-    with st.container(border=True):
-        _check_and_render_banner("slot_mappings")
-
-        # Always read fresh from disk / rules to guarantee up-to-date state
-        current_disk_rules = load_naming_rules()
-        slots = dict(get_hardware_slot_mappings(current_disk_rules))
-
-        col_t1, col_t2 = st.columns([3, 1])
-        with col_t1:
-            st.markdown("#### 🖧 HARDWARE SLOT MAPPINGS (PCIe / SLOT)")
-        with col_t2:
-            st.markdown(f'<div style="float:right; background:#2b313e; padding:2px 8px; border-radius:4px; font-size:0.85em; color:#fff;">{len(slots)} mappings</div>', unsafe_allow_html=True)
-        st.caption("Map interface/NIC names (vmnic, eno, enp, eth) to physical hardware slots (PCIeX/PortY, CardX/PortY). Platform-agnostic.")
-        # Explicit column headers for Hardware Slot Mappings
-        h_col_nic, h_col_slot, h_col_act = st.columns(SLOT_MAPPINGS_COLS, vertical_alignment="center")
-        with h_col_nic:
-            st.markdown("**Interface / NIC Identifier**")
-        with h_col_slot:
-            st.markdown("**Physical Hardware Slot**")
-        with h_col_act:
-            pass
-
-        items = list(slots.items())
-        updated = {}
-        pending_delete = None
-        for idx, (nic, slot) in enumerate(items):
-            col_nic, col_slot, col_del = st.columns(SLOT_MAPPINGS_COLS, vertical_alignment="center")
-            with col_nic:
-                n_nic = st.text_input("NIC", value=nic, key=f"hwslot_{idx}_nic", label_visibility="collapsed").strip()
-            with col_slot:
-                n_slot = st.text_input("Slot", value=slot, key=f"hwslot_{idx}_slot", label_visibility="collapsed").strip()
-            with col_del:
-                if _render_centered_del_btn(f"hwslot_{idx}_del", "Delete slot mapping"):
-                    pending_delete = idx
-            if pending_delete == idx:
-                new_slots = {k: v for i, (k, v) in enumerate(items) if i != idx}
-                current_full_rules = load_naming_rules()
-                current_full_rules["hardware_slot_mappings"] = new_slots
-                save_naming_rules(current_full_rules, source="Slot Mappings: Delete")
-                SSM.set_naming_rules(current_full_rules.copy())
-                SSM.refresh_naming_rules()
-                st.session_state.pop("hardware_slot_mappings_modified", None)
-                st.session_state["card_saved_banner"] = {"section": "slot_mappings", "msg": "✅ Slot mapping deleted and saved to disk!", "ts": time.time()}
-                st.rerun()
-            if n_nic and n_slot:
-                updated[n_nic] = n_slot
-
-        col_save, col_reset = st.columns([1.2, 1.0])
-        with col_save:
-            if st.button("💾 Save & Apply Changes", key="hwslot_save", type="primary", width="stretch"):
-                current_full_rules = load_naming_rules()
-                current_full_rules["hardware_slot_mappings"] = dict(updated)
-                save_naming_rules(current_full_rules, source="Slot Mappings: Save")
-                SSM.set_naming_rules(current_full_rules.copy())
-                SSM.refresh_naming_rules()
-                st.session_state.pop("hardware_slot_mappings_modified", None)
-                st.session_state["card_saved_banner"] = {"section": "slot_mappings", "msg": "✅ Hardware Slot Mappings saved & applied!", "ts": time.time()}
-                st.rerun()
-        with col_reset:
-            if st.button("🔄 Reset Slot Mappings", key="hwslot_reset", width="stretch"):
-                current_full_rules = load_naming_rules()
-                current_full_rules["hardware_slot_mappings"] = {}
-                save_naming_rules(current_full_rules, source="Slot Mappings: Reset")
-                _clear_session_state_prefixes("hwslot_")
-                st.session_state.pop("hardware_slot_mappings_modified", None)
-                SSM.set_naming_rules(current_full_rules.copy())
-                SSM.refresh_naming_rules()
-                st.session_state["card_saved_banner"] = {"section": "slot_mappings", "msg": "✅ Hardware Slot Mappings reset and cleared from disk!", "ts": time.time()}
-                st.rerun()
-        with st.form(key="hwslot_add_form", clear_on_submit=True):
-            ca_nic, ca_slot, ca_add = st.columns(SLOT_MAPPINGS_COLS, vertical_alignment="center")
-            with ca_nic:
-                new_nic = st.text_input("New NIC", value="", placeholder="e.g. vmnic1 or eno1", key="hwslot_new_nic", label_visibility="collapsed").strip()
-            with ca_slot:
-                new_slot = st.text_input("New Slot", value="", placeholder="e.g. PCIe1/Port1", key="hwslot_new_slot", label_visibility="collapsed").strip()
-            with ca_add:
-                add_sub = st.form_submit_button("➕ Add", width="stretch", help="Add new slot mapping")
-            if add_sub and new_nic and new_slot:
-                current_full_rules = load_naming_rules()
-                existing_slots = dict(get_hardware_slot_mappings(current_full_rules))
-                existing_slots[new_nic.strip()] = new_slot.strip()
-                current_full_rules["hardware_slot_mappings"] = existing_slots
-                save_naming_rules(current_full_rules, source="Slot Mappings: Add")
-                SSM.set_naming_rules(current_full_rules.copy())
-                SSM.refresh_naming_rules()
-                _clear_session_state_prefixes("hwslot_new_nic", "hwslot_new_slot")
-                st.session_state.pop("hardware_slot_mappings_modified", None)
-                st.session_state["card_saved_banner"] = {"section": "slot_mappings", "msg": f"✅ Added mapping {new_nic.strip()} -> {new_slot.strip()} and saved to disk!", "ts": time.time()}
-                st.rerun()
-
-
-def _render_vlan_description_mappings_editor(rules: dict) -> None:
     with st.expander("🏷️ VLAN Description Mappings (Role → Description)", expanded=True):
         _check_and_render_banner("vlan_desc_mappings")
 
@@ -2037,8 +1940,6 @@ def render_standards_tab(active_model):
                                 card_title="☁️ HYPERVISOR NETWORK DESCRIPTION PRESETS",
                                 card_caption="Manage Hypervisor interface descriptions (Uplink, PortGroup, Bridge, VMkernel/Management). Quick Copy dynamically renders from these templates.",
                                  section="esxi", section_label="Hypervisor Virtualization & Networking")
-            st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
-            _render_hardware_slot_mappings_editor(current_rules)
 
         with st.expander("🛠️ Manage Syntax Auto-Correction Rules", expanded=False):
             _check_and_render_banner("auto_correction")

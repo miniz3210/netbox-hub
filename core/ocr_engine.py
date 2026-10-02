@@ -138,22 +138,77 @@ class LocalOCREngine:
         return cv2.merge((l, a, b))
 
     @staticmethod
-    def _parse_result(result) -> Tuple[List[str], List[float]]:
-        """Parse RapidOCR result into (lines, confidences). Handles None, nested lists."""
-        lines: List[str] = []
+    def _auto_invert_dark_mode(img_bgr: np.ndarray) -> np.ndarray:
+        """Auto-detect dark mode UI by average luminance and invert for OCR enhancement."""
+        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY) if HAS_CV2 else np.mean(img_bgr, axis=-1)
+        if np.mean(gray) < 100:
+            return cv2.bitwise_not(img_bgr) if HAS_CV2 else (255 - img_bgr).astype(np.uint8)
+        return img_bgr
+
+    @staticmethod
+    def _spatial_row_grouping(raw_items: List[Any], y_threshold: float = 12.0) -> List[str]:
+        """
+        Reconstruct 2D spatial layout from Bounding Boxes.
+        Groups text blocks sharing similar Y coordinates into markdown virtual table rows,
+        sorted strictly left-to-right (by X coordinate).
+        """
+        boxes_with_text = []
+        for item in raw_items:
+            if not isinstance(item, (list, tuple)) or len(item) < 2:
+                continue
+            box, text = item[0], item[1]
+            if not text or not str(text).strip():
+                continue
+            box_np = np.array(box)
+            center_x = float(np.mean(box_np[:, 0]))
+            center_y = float(np.mean(box_np[:, 1]))
+            boxes_with_text.append({
+                "text": str(text).strip(),
+                "x": center_x,
+                "y": center_y,
+            })
+
+        if not boxes_with_text:
+            return []
+
+        boxes_with_text.sort(key=lambda b: b["y"])
+
+        rows: List[List[Dict[str, Any]]] = []
+        current_row: List[Dict[str, Any]] = [boxes_with_text[0]]
+        current_y = boxes_with_text[0]["y"]
+
+        for item in boxes_with_text[1:]:
+            if abs(item["y"] - current_y) <= y_threshold:
+                current_row.append(item)
+            else:
+                current_row.sort(key=lambda b: b["x"])
+                rows.append(current_row)
+                current_row = [item]
+                current_y = item["y"]
+
+        if current_row:
+            current_row.sort(key=lambda b: b["x"])
+            rows.append(current_row)
+
+        reconstructed_lines = [
+            " | ".join(cell["text"] for cell in row)
+            for row in rows
+        ]
+        return reconstructed_lines
+
+    def _parse_result_with_boxes(self, result) -> Tuple[List[str], List[float]]:
+        """Parse RapidOCR result into spatially grouped lines and confidences."""
         confs: List[float] = []
         if result is None:
-            return lines, confs
+            return [], confs
         for item in result:
             if not isinstance(item, (list, tuple)) or len(item) < 2:
                 continue
-            text = item[1]
             conf = item[2] if len(item) >= 3 else 0.0
-            if text and isinstance(text, str) and text.strip():
-                lines.append(text.strip())
-                if isinstance(conf, (int, float)) and conf > 0:
-                    confs.append(float(conf))
-        return lines, confs
+            if isinstance(conf, (int, float)) and conf > 0:
+                confs.append(float(conf))
+        grouped_lines = self._spatial_row_grouping(result)
+        return grouped_lines, confs
 
     def extract_text_with_metadata(
         self, image_input: Any
@@ -169,22 +224,25 @@ class LocalOCREngine:
         detected_lines: List[str] = []
         all_confidences: List[float] = []
 
-        # Pass 1: standard inference
-        result, _ = engine(img_bgr)
-        detected_lines, all_confidences = self._parse_result(result)
+        # Auto-invert dark mode if running against a dark dashboard
+        processed_bgr = self._auto_invert_dark_mode(img_bgr)
+
+        # Pass 1: standard inference with spatial grouping
+        result, _ = engine(processed_bgr)
+        detected_lines, all_confidences = self._parse_result_with_boxes(result)
         import sys as _sys
-        _sys.stdout.write(f"[OCR ENGINE] Lines detected: {len(detected_lines)}, preview: {detected_lines[:2] if detected_lines else []}\n")
+        _sys.stdout.write(f"[OCR ENGINE] Lines detected (Spatial): {len(detected_lines)}, preview: {detected_lines[:2] if detected_lines else []}\n")
         _sys.stdout.flush()
         _logger.debug("[OCR DEBUG] Pass 1: %d lines", len(detected_lines))
         _flush()
 
-        # Pass 2: contrast-enhanced fallback
+        # Pass 2: contrast-enhanced fallback with spatial grouping
         if not detected_lines:
-            enhanced_bgr = self._enhance_contrast(img_bgr)
+            enhanced_bgr = self._enhance_contrast(processed_bgr)
             result, _ = engine(enhanced_bgr)
-            detected_lines, all_confidences = self._parse_result(result)
+            detected_lines, all_confidences = self._parse_result_with_boxes(result)
             import sys as _sys
-            _sys.stdout.write(f"[OCR ENGINE] Lines detected (Pass 2): {len(detected_lines)}, preview: {detected_lines[:2] if detected_lines else []}\n")
+            _sys.stdout.write(f"[OCR ENGINE] Lines detected (Pass 2 Spatial): {len(detected_lines)}, preview: {detected_lines[:2] if detected_lines else []}\n")
             _sys.stdout.flush()
             _logger.debug("[OCR DEBUG] Pass 2 (enhanced): %d lines", len(detected_lines))
             _flush()
