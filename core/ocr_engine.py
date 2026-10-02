@@ -1,15 +1,27 @@
 """
 Local OCR Engine for Topology & Table Extraction.
 
-Executes local native Tesseract OCR on ARM64 CPU without GPU dependencies.
-Computes word-level extraction confidence and applies quality gate evaluation.
+Replaces legacy Tesseract with RapidOCR (ONNX runtime).
+RapidOCR provides state-of-the-art text line detection and recognition for
+modern UI dashboards (capturing low-contrast gray text, colons, and PCI
+locations cleanly) while remaining 100% local, lightweight, and preserving
+the local Sanitizer Vault pipeline.
 """
 
 import io
-import re
+import numpy as np
 from typing import List, Dict, Any, Tuple
 from PIL import Image
-import pytesseract
+from rapidocr_onnxruntime import RapidOCR
+
+_ocr_engine = None
+
+
+def get_ocr_engine() -> RapidOCR:
+    global _ocr_engine
+    if _ocr_engine is None:
+        _ocr_engine = RapidOCR()
+    return _ocr_engine
 
 
 class LocalOCREngine:
@@ -17,60 +29,49 @@ class LocalOCREngine:
         self.min_confidence_threshold = min_confidence_threshold
 
     @staticmethod
-    def _load_image(image_input: Any) -> Image.Image:
-        if isinstance(image_input, Image.Image):
-            return image_input
-        if hasattr(image_input, "read"):
-            data = image_input.read()
-            if hasattr(image_input, "seek"):
-                image_input.seek(0)
-            return Image.open(io.BytesIO(data))
-        if isinstance(image_input, bytes):
-            return Image.open(io.BytesIO(image_input))
-        if isinstance(image_input, str):
-            return Image.open(image_input)
-        raise ValueError("Unsupported image format provided to LocalOCREngine")
+    def _load_image(image_input: Any) -> np.ndarray:
+        """Load image from bytes, file-like, PIL Image, or path and return numpy array."""
+        if isinstance(image_input, (bytes, bytearray)):
+            pil_img = Image.open(io.BytesIO(image_input)).convert("RGB")
+        elif hasattr(image_input, "read"):
+            image_input.seek(0)
+            pil_img = Image.open(image_input).convert("RGB")
+        elif isinstance(image_input, Image.Image):
+            pil_img = image_input.convert("RGB")
+        else:
+            pil_img = Image.open(str(image_input)).convert("RGB")
+        return np.array(pil_img)
 
     def extract_text_with_metadata(
         self, image_input: Any
     ) -> Dict[str, Any]:
         """
-        Extract text, line-level bounding segments, and overall confidence metrics.
+        Extract text, line-level segments, and overall confidence metrics
+        using RapidOCR (ONNX runtime).
         """
-        img = self._load_image(image_input)
-        # Convert image to RGB if palette/RGBA
-        if img.mode not in ("RGB", "L"):
-            img = img.convert("RGB")
-
-        ocr_data = pytesseract.image_to_data(
-            img, output_type=pytesseract.Output.DICT
-        )
+        engine = get_ocr_engine()
+        img_np = self._load_image(image_input)
+        result, elapse_list = engine(img_np)
 
         extracted_words: List[str] = []
         confidences: List[float] = []
         valid_lines: List[str] = []
 
-        current_line: List[str] = []
-        n_boxes = len(ocr_data.get("text", []))
-
-        for i in range(n_boxes):
-            word = str(ocr_data["text"][i]).strip()
-            conf = float(ocr_data["conf"][i])
-
-            if conf > 0 and word:
-                extracted_words.append(word)
-                confidences.append(conf)
-                current_line.append(word)
-
-            if ocr_data["word_num"][i] == 0 or i == n_boxes - 1:
-                if current_line:
-                    valid_lines.append(" ".join(current_line))
-                    current_line = []
+        if result:
+            for line in result:
+                if line and len(line) >= 2:
+                    text = line[1]
+                    conf = float(line[2]) if len(line) >= 3 and line[2] else 0.0
+                    if text and str(text).strip():
+                        extracted_words.extend(str(text).strip().split())
+                        if conf > 0:
+                            confidences.append(conf)
+                        valid_lines.append(str(text).strip())
 
         avg_conf = (
             sum(confidences) / len(confidences) if confidences else 0.0
         )
-        full_text = pytesseract.image_to_string(img).strip()
+        full_text = "\n".join(valid_lines).strip()
 
         return {
             "text": full_text,

@@ -9,8 +9,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
     nginx \
-    tesseract-ocr \
-    tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
     
 COPY requirements.txt .

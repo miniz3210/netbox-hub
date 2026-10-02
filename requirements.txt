@@ -11,4 +11,4 @@ pyyaml
 # google-genai
 # groq
 # openai
-pytesseract
+rapidocr_onnxruntime>=1.3.0

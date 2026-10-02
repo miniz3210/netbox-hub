@@ -1090,8 +1090,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
     if start_analyze:
         try:
             import json as _json
-            from PIL import Image, ImageEnhance
-            import pytesseract
             from core.ai_client import call_ai
             progress_bar = st.progress(0, text="Initializing topology analysis...")
             total_imgs = len(uploaded_imgs)
@@ -1101,28 +1099,14 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 step_label = f"Analyzing screenshot [{idx + 1}/{total_imgs}]: {getattr(img, 'name', f'Image #{idx+1}')}"
                 progress_bar.progress((idx) / total_imgs, text=step_label)
 
-                if hasattr(img, "seek"):
-                    img.seek(0)
-
                 extracted_txt = ""
                 try:
-                    pil_img = Image.open(img).convert("L")
-                    w, h = pil_img.size
-                    pil_img = pil_img.resize((w * 2, h * 2), Image.Resampling.LANCZOS)
-                    enhancer = ImageEnhance.Contrast(pil_img)
-                    pil_img = enhancer.enhance(1.8)
-                    extracted_txt = pytesseract.image_to_string(pil_img, config="--oem 3 --psm 6").strip()
-                    if not extracted_txt:
-                        extracted_txt = pytesseract.image_to_string(pil_img, config="--oem 3 --psm 11").strip()
-                except Exception:
-                    if hasattr(img, "seek"):
+                    if hasattr(img, "read"):
                         img.seek(0)
-                    img_bytes = img.read() if hasattr(img, "read") else img.getvalue()
-                    ocr_res = run_local_ocr_pipeline(img_bytes)
-                    extracted_txt = ocr_res.get("text", "").strip()
-
-                if hasattr(img, "seek"):
-                    img.seek(0)
+                    ocr_res = run_local_ocr_pipeline([img])
+                    extracted_txt = ocr_res.get("combined_text", "").strip()
+                except Exception:
+                    pass
 
                 if not extracted_txt:
                     continue
