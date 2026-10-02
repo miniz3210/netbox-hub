@@ -994,120 +994,140 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             width=0,
         )
 
-        # Ingest clipboard paste
-        if pasted_data and pasted_data.startswith("data:image"):
-            import base64 as _b64, io as _io
-            try:
-                _, encoded = pasted_data.split(",", 1)
-                img_bytes = _b64.b64decode(encoded)
-                pasted_file = _io.BytesIO(img_bytes)
-                idx = len(st.session_state["staged_topology_imgs"]) + 1
-                pasted_file.name = f"clipboard_screenshot_{idx}.png"
-                pasted_file.type = "image/png"
-                pasted_file.size = len(img_bytes)
-                st.session_state["staged_topology_imgs"].append(pasted_file)
-                st.session_state["paste_input_ver"] = st.session_state.get("paste_input_ver", 0) + 1
-                st.rerun()
-            except Exception as e:
-                st.warning(f"Failed to process pasted image: {e}")
+    # Ingest clipboard paste outside of col_up2
+    if pasted_data and pasted_data.startswith("data:image"):
+        import base64 as _b64, io as _io
+        try:
+            _, encoded = pasted_data.split(",", 1)
+            img_bytes = _b64.b64decode(encoded)
+            pasted_file = _io.BytesIO(img_bytes)
+            idx = len(st.session_state["staged_topology_imgs"]) + 1
+            pasted_file.name = f"clipboard_screenshot_{idx}.png"
+            pasted_file.type = "image/png"
+            pasted_file.size = len(img_bytes)
+            st.session_state["staged_topology_imgs"].append(pasted_file)
+            st.session_state["paste_input_ver"] = st.session_state.get("paste_input_ver", 0) + 1
+            st.rerun()
+        except Exception as e:
+            st.warning(f"Failed to process pasted image: {e}")
 
-        uploaded_imgs = st.session_state.get("staged_topology_imgs", [])
+    uploaded_imgs = st.session_state.get("staged_topology_imgs", [])
 
-        # Minimalist, Robust Preview & Index-Based Removal
-        if uploaded_imgs:
-            with st.expander(f"🔍 Preview Staged Screenshots ({len(uploaded_imgs)} file(s))", expanded=True):
-                preview_cols = st.columns(min(len(uploaded_imgs), 4))
-                del_idx = None
-                for img_idx, img_item in enumerate(uploaded_imgs):
-                    with preview_cols[img_idx % len(preview_cols)]:
-                        img_title = getattr(img_item, "name", f"Screenshot #{img_idx + 1}")
-                        st.caption(f"#{img_idx + 1}: {img_title}")
-                        st.image(img_item, width="stretch")
-                        if st.button("✖ Remove", key=f"unified_remove_btn_{img_idx}"):
-                            del_idx = img_idx
-                if del_idx is not None and 0 <= del_idx < len(st.session_state["staged_topology_imgs"]):
-                    st.session_state["staged_topology_imgs"].pop(del_idx)
-                    st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
-                    st.rerun()
-
-        st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
-        btn_col1, btn_col2, _ = st.columns([2.2, 1.2, 6.6])
-        with btn_col1:
-            start_analyze = st.button(
-                "🚀 Analyze Topology & Auto-Populate",
-                key="btn_analyze_hypervisor_img",
-                type="primary",
-                disabled=not bool(uploaded_imgs),
-                width='stretch'
-            )
-        with btn_col2:
-            if st.button("🗑️ Clear All", key="btn_clear_topo_data", type="secondary", disabled=not bool(uploaded_imgs or st.session_state.get("hypervisor_parsed_descriptions")), width='stretch'):
-                st.session_state["staged_topology_imgs"] = []
-                st.session_state.pop("hypervisor_parsed_descriptions", None)
-                st.session_state.pop("latest_ocr_raw_text", None)
+    # FULL-WIDTH: Preview Staged Screenshots
+    if uploaded_imgs:
+        with st.expander(f"🔍 Preview Staged Screenshots ({len(uploaded_imgs)} file(s))", expanded=True):
+            preview_cols = st.columns(min(len(uploaded_imgs), 4))
+            del_idx = None
+            for img_idx, img_item in enumerate(uploaded_imgs):
+                with preview_cols[img_idx % len(preview_cols)]:
+                    img_title = getattr(img_item, "name", f"Screenshot #{img_idx + 1}")
+                    st.caption(f"#{img_idx + 1}: {img_title}")
+                    st.image(img_item, width="stretch")
+                    if st.button("✖ Remove", key=f"unified_remove_btn_{img_idx}"):
+                        del_idx = img_idx
+            if del_idx is not None and 0 <= del_idx < len(st.session_state["staged_topology_imgs"]):
+                st.session_state["staged_topology_imgs"].pop(del_idx)
                 st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
                 st.rerun()
 
-        if start_analyze:
-            try:
-                with st.spinner("Executing 4-stage local OCR pipeline..."):
-                    import json
-                    from core.ai_client import call_ai
-                    all_raw_text = []
+    # FULL-WIDTH: Action Buttons
+    st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
+    btn_col1, btn_col2, _ = st.columns([2.2, 1.2, 6.6])
+    with btn_col1:
+        start_analyze = st.button(
+            "🚀 Analyze Topology & Auto-Populate",
+            key="btn_analyze_hypervisor_img",
+            type="primary",
+            disabled=not bool(uploaded_imgs),
+            width='stretch'
+        )
+    with btn_col2:
+        if st.button("🗑️️ Clear All", key="btn_clear_topo_data", type="secondary", disabled=not bool(uploaded_imgs or st.session_state.get("hypervisor_parsed_descriptions")), width='stretch'):
+            st.session_state["staged_topology_imgs"] = []
+            st.session_state.pop("hypervisor_parsed_descriptions", None)
+            st.session_state.pop("latest_ocr_raw_text", None)
+            st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
+            st.rerun()
 
-                    # Phase 1: Local Tesseract OCR (with strict pointer reset)
-                    for img in uploaded_imgs:
+    # FULL-WIDTH: 4-Stage Execution with PIL 2x Upscaling & PSM Configuration
+    if start_analyze:
+        try:
+            with st.spinner("Executing 4-stage local OCR pipeline..."):
+                import json
+                from PIL import Image
+                import pytesseract
+                from core.ai_client import call_ai
+                all_raw_text = []
+
+                # Phase 1: Local Tesseract OCR (Upscaling & PSM optimization)
+                for img in uploaded_imgs:
+                    if hasattr(img, "seek"):
+                        img.seek(0)
+
+                    extracted_txt = ""
+                    try:
+                        pil_img = Image.open(img).convert("L")
+                        w, h = pil_img.size
+                        pil_img = pil_img.resize((w * 2, h * 2), Image.Resampling.LANCZOS)
+                        extracted_txt = pytesseract.image_to_string(pil_img, config="--oem 3 --psm 6").strip()
+                        if not extracted_txt:
+                            extracted_txt = pytesseract.image_to_string(pil_img, config="--oem 3 --psm 11").strip()
+                    except Exception:
                         if hasattr(img, "seek"):
                             img.seek(0)
                         img_bytes = img.read() if hasattr(img, "read") else img.getvalue()
-                        if hasattr(img, "seek"):
-                            img.seek(0)
                         ocr_res = run_local_ocr_pipeline(img_bytes)
-                        if ocr_res.get("text") and ocr_res["text"].strip():
-                            all_raw_text.append(ocr_res["text"].strip())
+                        extracted_txt = ocr_res.get("text", "").strip()
 
-                    combined_raw = "\n".join(all_raw_text).strip()
-                    st.session_state["latest_ocr_raw_text"] = combined_raw
+                    if hasattr(img, "seek"):
+                        img.seek(0)
 
-                    if not combined_raw:
-                        st.warning("⚠️ No text detected by local OCR. Ensure screenshot contains legible topology labels.")
-                    else:
-                        # Phase 2: Local persistent sanitization
-                        sanitized_text, token_map = vault.sanitize_text(combined_raw)
-                        st.session_state["latest_vault_tokens"] = token_map
+                    if extracted_txt:
+                        all_raw_text.append(extracted_txt)
 
-                        # Phase 3: Pure JSON semantic extraction
-                        system_prompt = (
-                            "You are a network topology parser. Given sanitized OCR text from a hypervisor networking screen, "
-                            "extract all network components into a flat JSON array of objects. "
-                            "Each object must have these exact keys:\n"
-                            "  - Type: 'Uplink', 'PortGroup', or 'VMkernel'\n"
-                            "  - Interface: name of interface (e.g. vmnic0, vmk0, PortGroupName)\n"
-                            "  - vSwitch: virtual switch name (e.g. vSwitch0, DSwitch01)\n"
-                            "  - Role: role or status if found (e.g. Active Uplink, Standby Uplink)\n"
-                            "  - Purpose: network purpose or label (e.g. Management Network, vMotion, VM Network)\n"
-                            "  - Slot: hardware slot if mentioned (e.g. PCIe1/Port1, PCI BDF), else ''\n"
-                            "Output ONLY valid JSON array with no conversational markdown or explanation."
-                        )
-                        user_prompt = f"Parse this sanitized topology text:\n\n{sanitized_text}"
-                        response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt)
+                combined_raw = "\n".join(all_raw_text).strip()
+                st.session_state["latest_ocr_raw_text"] = combined_raw
 
-                        m_json = re.search(r"\[\s*\{.*\}\s*\]", response, re.DOTALL)
-                        json_str = m_json.group(0) if m_json else response.strip()
-                        raw_parsed = json.loads(json_str)
+                if not combined_raw:
+                    st.warning("⚠️ No text detected by local OCR. Ensure screenshot contains legible topology labels.")
+                else:
+                    # Phase 2: Local persistent sanitization
+                    sanitized_text, token_map = vault.sanitize_text(combined_raw)
+                    st.session_state["latest_vault_tokens"] = token_map
 
-                        # Phase 4: Local de-tokenization
-                        restored_parsed = vault.detokenize_data(raw_parsed)
-                        st.session_state["hypervisor_parsed_descriptions"] = restored_parsed
-                        st.success("Successfully processed screenshots via local OCR & sanitized LLM parsing!")
-            except Exception as e:
-                st.error(f"Pipeline execution failed: {str(e)}")
+                    # Phase 3: Pure JSON semantic extraction
+                    system_prompt = (
+                        "You are a network topology parser. Given sanitized OCR text from a hypervisor networking screen, "
+                        "extract all network components into a flat JSON array of objects. "
+                        "Each object must have these exact keys:\n"
+                        "  - Type: 'Uplink', 'PortGroup', or 'VMkernel'\n"
+                        "  - Interface: name of interface (e.g. vmnic0, vmk0, PortGroupName)\n"
+                        "  - vSwitch: virtual switch name (e.g. vSwitch0, DSwitch01)\n"
+                        "  - Role: role or status if found (e.g. Active Uplink, Standby Uplink)\n"
+                        "  - Purpose: network purpose or label (e.g. Management Network, vMotion, VM Network)\n"
+                        "  - Slot: hardware slot if mentioned (e.g. PCIe1/Port1, PCI BDF), else ''\n"
+                        "Output ONLY valid JSON array with no conversational markdown or explanation."
+                    )
+                    user_prompt = f"Parse this sanitized topology text:\n\n{sanitized_text}"
+                    response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt)
+                    
+                    m_json = re.search(r"\[\s*\{.*\}\s*\]", response, re.DOTALL)
+                    json_str = m_json.group(0) if m_json else response.strip()
+                    raw_parsed = json.loads(json_str)
 
-        if st.session_state.get("latest_ocr_raw_text"):
-            raw_txt = st.session_state["latest_ocr_raw_text"]
-            with st.expander("📄 OCR Raw Text Inspector (Click to expand)", expanded=False):
-                st.caption(f"✅ Extracted {len(raw_txt)} characters from staged screenshots")
-                st.code(raw_txt, language="text")
+                    # Phase 4: Local de-tokenization
+                    restored_parsed = vault.detokenize_data(raw_parsed)
+                    st.session_state["hypervisor_parsed_descriptions"] = restored_parsed
+                    st.success("Successfully processed screenshots via local OCR & sanitized LLM parsing!")
+        except Exception as e:
+            st.error(f"Pipeline execution failed: {str(e)}")
+
+    # FULL-WIDTH: Compact Raw OCR Inspector
+    if st.session_state.get("latest_ocr_raw_text"):
+        raw_txt = st.session_state["latest_ocr_raw_text"]
+        with st.expander("📄 OCR Raw Text Inspector (Click to expand)", expanded=False):
+            st.caption(f"✅ Extracted {len(raw_txt)} characters from staged screenshots")
+            st.code(raw_txt, language="text")
 
         # 2️⃣ Step 2: Extracted Variables Inspector (Full-Width & Clean Filtering)
         st.divider()
