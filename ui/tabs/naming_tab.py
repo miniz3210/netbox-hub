@@ -1048,8 +1048,11 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 "    1. ONLY extract endpoint interfaces, physical adapters (e.g., vmnic, eth), logical ports, or virtual interfaces (e.g., vmk, bond, port groups).\n"
                 "    2. NEVER create an interface record for the hosting switch, bridge, or container fabric itself (e.g., vSwitch, vmbr, bridge are purely container attributes, not standalone interface items).\n\n"
                 "MANDATORY TOPOLOGICAL KEYS (EVERY OBJECT MUST HAVE THESE):\n"
-                "    - interface: The exact identifier of the adapter, port, port group, or endpoint. NEVER name this key 'name'; it MUST be 'interface'.\n"
-                "    - parent: The identifier of the hosting container, switch, bridge, or fabric that this interface connects to. Leave as '' ONLY if the adapter is truly unassigned to any container.\n\n"
+                "    - interface: The exact identifier of the adapter, port, port group, or endpoint (e.g., vmnic0, vmk0). NEVER name this key 'name'; it MUST be 'interface'.\n"
+                "    - parent: The clean identifier of the specific switch, bridge, or fabric (e.g., vSwitch0, vmbr0). STRICT RULES FOR PARENT:\n"
+                "        * Extract ONLY the specific instance name (e.g., 'vSwitch0', NOT 'StandardSwitch:vSwitch0' or 'Standard Switch: vSwitch0'). Strip off all generic category labels, prefixes, and colons.\n"
+                "        * NEVER treat page headings, navigation tabs, or section labels (such as 'Virtual switches', 'Physical adapters', 'VMkernel adapters') as a parent.\n"
+                "        * If an interface is displayed in a global inventory or unassigned list, leave parent as ''.\n\n"
                 "DYNAMIC ATTRIBUTES & CROSS-SCREENSHOT CORRELATION:\n"
                 "    Extract all observable attributes into clean lowercase keys:\n"
                 "    - slot: Physical PCIe hardware slot location if visible.\n"
@@ -1291,29 +1294,51 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
         active_rows = st.session_state.get("hypervisor_parsed_descriptions") or []
 
-        # Collect known assigned parents and interfaces
-        assigned_parents = {str(item.get("parent", "")).strip().lower() for item in active_rows if str(item.get("parent", "")).strip()}
-        known_assigned_interfaces = {
-            str(item.get("interface") or item.get("name") or "").strip().lower()
-            for item in active_rows
-            if str(item.get("parent", "")).strip()
+        # Generic navigation/heading noise words that must never be treated as parent containers
+        GENERIC_NAV_HEADINGS = {
+            "virtual switches", "virtual switch", "switches", "switch",
+            "physical adapters", "physical adapter", "adapters", "adapter",
+            "vmkernel adapters", "vmkernel adapter", "networks", "network"
         }
 
-        # Filter out records where the interface itself is mistakenly a parent container,
-        # and deduplicate orphan records that already have parent assignments elsewhere
-        filtered_topology = []
+        # Normalize and clean parent names
+        cleaned_topology = []
         for item in active_rows:
-            iface_id = str(item.get("interface") or item.get("name") or "").strip().lower()
-            parent_id = str(item.get("parent", "")).strip()
+            row = dict(item)
+            p = str(row.get("parent") or "").strip()
+            # Strip generic UI prefixes like 'StandardSwitch:', 'Standard Switch:', 'DistributedSwitch:'
+            p = re.sub(r"^(?:standard\s*switch|distributed\s*switch|vswitch)\s*[:_-]\s*", "", p, flags=re.IGNORECASE).strip()
+            # If cleaned parent matches generic navigation words or equals interface name, invalidate it
+            if p.lower() in GENERIC_NAV_HEADINGS or p.lower() == str(row.get("interface") or row.get("name") or "").strip().lower():
+                p = ""
+            row["parent"] = p
+            cleaned_topology.append(row)
 
-            # Skip if an interface record is actually just the parent container itself
-            if not parent_id and iface_id in assigned_parents:
+        # Build map of valid parents per interface
+        valid_interface_parents = {}
+        for item in cleaned_topology:
+            iface = str(item.get("interface") or item.get("name") or "").strip().lower()
+            parent = str(item.get("parent") or "").strip()
+            if iface and parent:
+                valid_interface_parents[iface] = parent
+
+        # Final filter and deduplication
+        filtered_topology = []
+        seen_entries = set()
+        for item in cleaned_topology:
+            iface = str(item.get("interface") or item.get("name") or "").strip()
+            iface_lower = iface.lower()
+            parent = str(item.get("parent") or "").strip()
+
+            # If this interface already has a valid parent elsewhere, discard orphan/empty parent rows
+            if not parent and iface_lower in valid_interface_parents:
                 continue
 
-            # Skip unassigned orphan rows if this interface is already attached to a parent
-            if not parent_id and iface_id in known_assigned_interfaces:
+            # Deduplicate identical (parent, interface) pairs
+            entry_key = (parent.lower(), iface_lower)
+            if entry_key in seen_entries:
                 continue
-
+            seen_entries.add(entry_key)
             filtered_topology.append(item)
 
         groups: dict[str, list[dict]] = {}
