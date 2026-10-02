@@ -1024,7 +1024,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
                 width='stretch',
             )
 
-        # Inline Add Row (Card UI compliant: no '+' button in Action column, Enter to submit)
+        # Inline Add Row (Unified Card UI with standard '➕ Add' button)
         with st.form(key=f"{kind}_add_form", clear_on_submit=True):
             is_esxi = kind == "esxi_network"
             code_ph = "e.g. DSwitch" if is_esxi else "e.g. SAN"
@@ -1038,8 +1038,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
             with ca3:
                 new_tpl = st.text_input("Pattern Template", value="", placeholder=tpl_ph, key=f"{kind}_new_tpl", label_visibility="collapsed").strip()
             with ca4:
-                # Action column intentionally empty per UI specification
-                add_preset = True if (new_code != "" and new_tpl != "") else False
+                add_preset = st.form_submit_button("➕ Add", width='stretch', help=f"Add new {kind} preset")
 
     if reset_presets:
         _clear_session_state_prefixes(f"{kind}_")
@@ -1285,7 +1284,7 @@ def _host_editor(rules: dict) -> None:
             with ca3:
                 new_tpl = st.text_input("New Pattern Template", value="", placeholder="<site_prefix>hyp<seq>.<domain>", key="host_new_tpl", label_visibility="collapsed").strip()
             with ca4:
-                add_preset = True if (new_code != "" and new_tpl != "") else False
+                add_preset = st.form_submit_button("➕ Add", width='stretch', help="Add new host preset")
 
     if reset:
         # Reset restores the canonical factory defaults for the host types
@@ -1458,7 +1457,7 @@ def _vm_editor(rules: dict) -> None:
             with ca3:
                 new_tpl = st.text_input("New Pattern Template", value="", key="vm_new_tpl", placeholder="<country><site><role><seq>", label_visibility="collapsed").strip()
             with ca4:
-                add_role = True if (new_code != "" and new_label != "") else False
+                add_role = st.form_submit_button("➕ Add", width='stretch', help="Add new VM role")
 
     if reset:
         # Mirror of the HOSTS reset: only the VM presets are restored, the
@@ -2188,7 +2187,7 @@ def render_standards_tab(active_model):
                         st.session_state["card_saved_banner"] = {"section": f"vars_{s_key}", "msg": f"✅ {s_key.title()} Variables reset to defaults!", "ts": time.time()}
                         _persist_variables(current_rules, all_edited_vars, section_key=s_key)
 
-                # 2. Bottom Inline Add Row (Seamless table extension matching Preset style)
+                # 2. Bottom Inline Add Row (Standardized with '➕ Add' button)
                 with st.form(key=f"var_add_form_{s_key}", clear_on_submit=True):
                     ca1, ca2, ca3, ca4, ca5, ca6 = st.columns(VARIABLE_COLS_OPTIMIZED, vertical_alignment="center")
                     with ca1:
@@ -2203,7 +2202,7 @@ def render_standards_tab(active_model):
                     with ca5:
                         new_opt = st.checkbox("Optional", value=False, key=f"vnew_{s_key}_opt", label_visibility="collapsed")
                     with ca6:
-                        add_tok = True if new_name else False
+                        add_tok = st.form_submit_button("➕ Add", width='stretch', help=f"Add variable to {title}")
 
                     if add_tok:
                         if new_name:
