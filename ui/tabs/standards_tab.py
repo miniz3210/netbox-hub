@@ -1915,9 +1915,13 @@ def _render_parsing_presets_editor(active_model: str, rules: dict) -> None:
             n += 1
         return candidate
 
-    st.markdown("#### 🧰 Topology Parsing Presets (Platform Rules)")
-    st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(preset_names)} presets</span></div>", unsafe_allow_html=True)
-    st.caption("Platform-specific parsing instructions injected into the topology analysis prompt in the Naming tab.")
+    with st.container(border=True):
+        col_h1, col_h2 = st.columns([3, 1], vertical_alignment="center")
+        with col_h1:
+            st.markdown("#### 🧰 Topology Parsing Presets (Platform Rules)")
+        with col_h2:
+            st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(preset_names)} presets</span></div>", unsafe_allow_html=True)
+        st.caption("Platform-specific parsing instructions injected into the topology analysis prompt in the Naming tab.")
 
     # PRE-WIDGET SYNC: consume any staged selection before instantiating the
     # selectbox so we never write to its session-state key after creation.
@@ -2029,9 +2033,45 @@ def _render_parsing_presets_editor(active_model: str, rules: dict) -> None:
                 st.warning("⚠️ Enter a Platform / Vendor first.")
 
         with st.expander("📋 Export Active Preset Rules for External AI", expanded=False):
-            st.caption("Copy the full system prompt and active instructions for use in external LLMs (ChatGPT, Claude, etc.).")
-            active_prompt_export = sm.get_meta_prompt_template(selected_name, instructions_val, "")
-            st.code(active_prompt_export, language="markdown")
+            st.caption("Copy the full system prompt and active instructions for use in external LLMs (ChatGPT, Claude, Gemini).")
+            _platform_name = selected_name or "(no preset selected)"
+            _instructions_text = instructions_val.strip()
+            _export_prompt = (
+                "You are an expert infrastructure network engineer.\n"
+                "I have attached a screenshot of a hypervisor virtual switch topology (VMware ESXi / Proxmox).\n"
+                "Please analyze the image strictly according to the active platform parsing rules below, and extract the network topology into the target JSON format.\n\n"
+                f"=== ACTIVE PLATFORM RULES ({_platform_name}) ===\n"
+                f"{_instructions_text}\n\n"
+                "=== TARGET JSON OUTPUT FORMAT ===\n"
+                "{\n"
+                '  "interfaces": [\n'
+                "    {\n"
+                '      "interface": "vmnic0",\n'
+                '      "parent": "vSwitch0",\n'
+                '      "slot": "0000:5b:00.0",\n'
+                '      "speed": "10000 Full",\n'
+                '      "purpose": "Management / VM Network Active Uplink",\n'
+                '      "role": "Active Uplink"\n'
+                "    },\n"
+                "    {\n"
+                '      "interface": "Management Network",\n'
+                '      "parent": "vSwitch0",\n'
+                '      "purpose": "Port Group",\n'
+                '      "vlan_id": null,\n'
+                '      "active_uplinks": "vmnic4, vmnic5",\n'
+                '      "standby_uplinks": null\n'
+                "    },\n"
+                "    {\n"
+                '      "interface": "vmk0",\n'
+                '      "parent": "vSwitch0",\n'
+                '      "ip": "10.27.177.246",\n'
+                '      "purpose": "Management Network"\n'
+                "    }\n"
+                "  ]\n"
+                "}\n\n"
+                "Output ONLY the raw JSON block without markdown formatting or conversational filler."
+            )
+            st.code(_export_prompt, language="text")
 
     with st.form(key="std_parsing_preset_add_form", clear_on_submit=False):
         new_pname = st.text_input(
