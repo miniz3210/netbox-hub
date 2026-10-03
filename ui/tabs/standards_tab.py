@@ -2124,9 +2124,6 @@ def render_standards_tab(active_model):
             with st.container(border=True):
                 _render_vlan_description_mappings_editor(current_rules)
 
-            with st.container(border=True):
-                _check_and_render_banner("auto_correction")
-                _render_ipam_role_mapping_manager(active_model)
 
         with tab_naming:
             with st.container(border=True):
