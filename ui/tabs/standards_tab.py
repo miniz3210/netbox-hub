@@ -1978,55 +1978,16 @@ def _render_parsing_presets_editor(active_model: str, rules: dict) -> None:
                 st.toast(f"🗑️ Preset '{target}' deleted!", icon="✅")
                 st.rerun()
 
-    with st.expander("✨ AI Assistant: Forge New Platform Rules (Click to expand)", expanded=False):
-        col_in, col_add = st.columns([3, 1])
-        with col_in:
-            target_platform = st.text_input(
-                "Target Platform / Vendor",
-                placeholder="e.g. Cisco NX-OS, Proxmox VE, Nutanix AHV",
-                label_visibility="collapsed"
-            )
-        with col_add:
-            btn_add_blank = st.button("➕ Add Preset", use_container_width=True)
-
-        col_ai1, col_ai2 = st.columns([1, 1])
-        with col_ai1:
-            btn_prep = st.button("📋 Prepare External Prompt", use_container_width=True)
-        with col_ai2:
-            btn_gen = st.button("⚡ Auto-Generate via Local LLM", use_container_width=True)
-
-        if btn_add_blank:
+    with st.expander("✨ AI Assistant: Generate Platform Rules", expanded=False):
+        target_platform = st.text_input(
+            "Target Platform / Vendor",
+            key="std_parsing_ai_platform",
+            placeholder="e.g. Proxmox VE, Cisco NX-OS, Nutanix AHV",
+            label_visibility="collapsed",
+            help="Enter the platform or vendor name to generate topology parsing rules.",
+        )
+        if st.button("⚡ Generate Platform Rules", key="std_parsing_ai_generate", use_container_width=True):
             if target_platform.strip():
-                name = target_platform.strip()
-                existing = [p for p in presets if p.get("name") == name]
-                if existing:
-                    st.warning("⚠️ A preset with this name already exists.")
-                else:
-                    presets.append({
-                        "id": _next_preset_id(preset_names + [name]),
-                        "name": name,
-                        "instructions": "",
-                    })
-                    if sm.save_parsing_presets(presets):
-                        st.session_state["std_preset_selector"] = name
-                        _notify_preset_changed()
-                        st.toast(f"✅ Preset '{name}' added!", icon="💾")
-                        st.rerun()
-            else:
-                st.warning("⚠️ Enter a platform name first.")
-
-        if btn_prep:
-            if not target_platform.strip():
-                st.warning("⚠️ Enter a Platform / Vendor first.")
-            else:
-                meta = sm.get_meta_prompt_template(target_platform, "", "")
-                st.session_state["parsing_forge_output"] = meta
-                st.toast("📋 Meta-Prompt prepared! Copy it into your external AI.", icon="✅")
-
-        if btn_gen:
-            if not target_platform.strip():
-                st.warning("⚠️ Enter a Platform / Vendor first.")
-            else:
                 try:
                     meta = sm.get_meta_prompt_template(target_platform, "", "")
                     with st.spinner(f"Generating platform rules using {active_model}..."):
@@ -2037,11 +1998,13 @@ def _render_parsing_presets_editor(active_model: str, rules: dict) -> None:
                             custom_system_msg=meta,
                             max_tokens=2048,
                         )
-                    st.session_state["parsing_preset_instructions_new"] = generated
-                    st.toast("⚡ Rules generated! Review and click 'Save & Apply Changes' to save.", icon="✅")
+                    st.session_state[f"pinst_{selected_name}"] = generated
+                    st.toast("✅ Rules generated! Review instructions above and click 'Save & Apply Changes'.", icon="⚡")
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ Auto-generation failed: {e}")
+            else:
+                st.warning("⚠️ Enter a Platform / Vendor first.")
 
 
 def _notify_preset_changed() -> None:

@@ -823,12 +823,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             st.info("Verified against ESXi naming standards.")
 
     # --- SECTION 2: 📸 SCREENSHOT OCR PIPELINE (3-STEP WORKFLOW) ---
-    with st.expander("📸 Screenshot OCR Pipeline (3-Step Workflow)", expanded=False):
-        st.caption("3-step streamlined workflow to analyze Hypervisor topology screenshots, inspect variables, and generate bulk NetBox descriptions.")
-
-        # 1️⃣ Step 1: Upload Screenshots & Verify
-        st.markdown("##### 1️⃣ Upload Hypervisor Topology Screenshots & Verify")
-        st.caption("Upload screenshots of Virtual Switches, Physical Adapters, Bridges, or VMkernel/Management Adapters from Hypervisor Host Client (vSphere/ESXi, Proxmox VE, KVM).")
+    with st.expander("📸 1️⃣ Screenshot OCR Pipeline (Upload & Platform Rules)", expanded=True):
+        st.caption("Upload and stage hypervisor topology screenshots for OCR analysis.")
 
         with st.expander("📸 Screenshot Guidelines (Virtual Switches Topology)", expanded=False):
             st.markdown("""
@@ -875,121 +871,114 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                         bio.size = len(file_bytes)
                         st.session_state["staged_topology_imgs"].append(bio)
 
-    with col_up2:
-        st.markdown("**📋 Or Paste from Clipboard (Ctrl+V)**")
-        if "paste_input_ver" not in st.session_state:
-            st.session_state["paste_input_ver"] = 0
-        paste_box_key = f"esxi_paste_input_{st.session_state.get('paste_input_ver', 0)}"
-        pasted_data = st.text_input(
-            "Paste Area",
-            placeholder="Click here and press Ctrl+V",
-            key=paste_box_key,
-            label_visibility="collapsed",
-            help="Focus this box and press Ctrl+V.",
-        )
-        import streamlit.components.v1 as _components
-        _components.html(
-            """
-            <script>
-            const parentDoc = window.parent.document;
-            if (!window.parent._esxiPasteDelegated) {
-                window.parent._esxiPasteDelegated = true;
-                parentDoc.addEventListener('paste', function(e) {
-                    const target = e.target;
-                    if (!target || target.getAttribute('aria-label') !== 'Paste Area') return;
-                    const items = (e.clipboardData || window.clipboardData).items;
-                    for (let i = 0; i < items.length; i++) {
-                        if (items[i].type.indexOf('image') !== -1) {
-                            const blob = items[i].getAsFile();
-                            const reader = new FileReader();
-                            reader.onload = function(event) {
-                                const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-                                nativeSetter.call(target, event.target.result);
-                                target.dispatchEvent(new Event('input', { bubbles: true }));
-                                target.dispatchEvent(new KeyboardEvent('keydown', {
-                                    bubbles: true,
-                                    cancelable: true,
-                                    key: 'Enter',
-                                    code: 'Enter',
-                                    keyCode: 13,
-                                    which: 13
-                                }));
-                                target.dispatchEvent(new Event('change', { bubbles: true }));
-                            };
-                            reader.readAsDataURL(blob);
-                            e.preventDefault();
-                            break;
+        with col_up2:
+            st.markdown("**📋 Or Paste from Clipboard (Ctrl+V)**")
+            if "paste_input_ver" not in st.session_state:
+                st.session_state["paste_input_ver"] = 0
+            paste_box_key = f"esxi_paste_input_{st.session_state.get('paste_input_ver', 0)}"
+            pasted_data = st.text_input(
+                "Paste Area",
+                placeholder="Click here and press Ctrl+V",
+                key=paste_box_key,
+                label_visibility="collapsed",
+                help="Focus this box and press Ctrl+V.",
+            )
+            import streamlit.components.v1 as _components
+            _components.html(
+                """
+                <script>
+                const parentDoc = window.parent.document;
+                if (!window.parent._esxiPasteDelegated) {
+                    window.parent._esxiPasteDelegated = true;
+                    parentDoc.addEventListener('paste', function(e) {
+                        const target = e.target;
+                        if (!target || target.getAttribute('aria-label') !== 'Paste Area') return;
+                        const items = (e.clipboardData || window.clipboardData).items;
+                        for (let i = 0; i < items.length; i++) {
+                            if (items[i].type.indexOf('image') !== -1) {
+                                const blob = items[i].getAsFile();
+                                const reader = new FileReader();
+                                reader.onload = function(event) {
+                                    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                                    nativeSetter.call(target, event.target.result);
+                                    target.dispatchEvent(new Event('input', { bubbles: true }));
+                                    target.dispatchEvent(new KeyboardEvent('keydown', {
+                                        bubbles: true,
+                                        cancelable: true,
+                                        key: 'Enter',
+                                        code: 'Enter',
+                                        keyCode: 13,
+                                        which: 13
+                                    }));
+                                    target.dispatchEvent(new Event('change', { bubbles: true }));
+                                };
+                                reader.readAsDataURL(blob);
+                                e.preventDefault();
+                                break;
+                            }
                         }
-                    }
-                });
-            }
-            </script>
-            """,
-            height=0,
-            width=0,
-        )
+                    });
+                }
+                </script>
+                """,
+                height=0,
+                width=0,
+            )
 
-    # Ingest clipboard paste inside Step 1
-    if pasted_data and pasted_data.startswith("data:image"):
-        import base64 as _b64, io as _io
-        try:
-            _, encoded = pasted_data.split(",", 1)
-            img_bytes = _b64.b64decode(encoded)
-            pasted_file = _io.BytesIO(img_bytes)
-            idx = len(st.session_state["staged_topology_imgs"]) + 1
-            pasted_file.name = f"clipboard_screenshot_{idx}.png"
-            pasted_file.type = "image/png"
-            pasted_file.size = len(img_bytes)
-            st.session_state["staged_topology_imgs"].append(pasted_file)
-            st.session_state["paste_input_ver"] = st.session_state.get("paste_input_ver", 0) + 1
-            st.rerun()
-        except Exception as e:
-            st.warning(f"Failed to process pasted image: {e}")
-
-    uploaded_imgs = st.session_state.get("staged_topology_imgs", [])
-
-    # Initialize parsing presets for later use
-    preset_sm = StandardsManager()
-    parsing_presets = preset_sm.get_parsing_presets()
-
-    # Step 1: Preview Staged Screenshots
-    start_analyze = False
-    if uploaded_imgs:
-        with st.expander(f"🔍 Preview Staged Screenshots ({len(uploaded_imgs)} file(s))", expanded=True):
-            preview_cols = st.columns(min(len(uploaded_imgs), 4))
-            del_idx = None
-            for img_idx, img_item in enumerate(uploaded_imgs):
-                with preview_cols[img_idx % len(preview_cols)]:
-                    img_title = getattr(img_item, "name", f"Screenshot #{img_idx + 1}")
-                    st.caption(f"#{img_idx + 1}: {img_title}")
-                    st.image(img_item, width="stretch")
-                    if st.button("✖ Remove", key=f"unified_remove_btn_{img_idx}"):
-                        del_idx = img_idx
-            if del_idx is not None and 0 <= del_idx < len(st.session_state["staged_topology_imgs"]):
-                st.session_state["staged_topology_imgs"].pop(del_idx)
-                st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
+        # Ingest clipboard paste inside Step 1
+        if pasted_data and pasted_data.startswith("data:image"):
+            import base64 as _b64, io as _io
+            try:
+                _, encoded = pasted_data.split(",", 1)
+                img_bytes = _b64.b64decode(encoded)
+                pasted_file = _io.BytesIO(img_bytes)
+                idx = len(st.session_state["staged_topology_imgs"]) + 1
+                pasted_file.name = f"clipboard_screenshot_{idx}.png"
+                pasted_file.type = "image/png"
+                pasted_file.size = len(img_bytes)
+                st.session_state["staged_topology_imgs"].append(pasted_file)
+                st.session_state["paste_input_ver"] = st.session_state.get("paste_input_ver", 0) + 1
                 st.rerun()
+            except Exception as e:
+                st.warning(f"Failed to process pasted image: {e}")
 
-            st.divider()
+        uploaded_imgs = st.session_state.get("staged_topology_imgs", [])
 
-            # Explicit Platform Selector
+        if uploaded_imgs:
+            with st.expander(f"🔍 Preview Staged Screenshots ({len(uploaded_imgs)} file(s))", expanded=True):
+                preview_cols = st.columns(min(len(uploaded_imgs), 4))
+                del_idx = None
+                for img_idx, img_item in enumerate(uploaded_imgs):
+                    with preview_cols[img_idx % len(preview_cols)]:
+                        img_title = getattr(img_item, "name", f"Screenshot #{img_idx + 1}")
+                        st.caption(f"#{img_idx + 1}: {img_title}")
+                        st.image(img_item, width="stretch")
+                        if st.button("✖ Remove", key=f"unified_remove_btn_{img_idx}"):
+                            del_idx = img_idx
+                if del_idx is not None and 0 <= del_idx < len(st.session_state["staged_topology_imgs"]):
+                    st.session_state["staged_topology_imgs"].pop(del_idx)
+                    st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
+                    st.rerun()
+
+            # Compact single-row control bar: Platform Preset | Analyze | Clear
             preset_sm_naming = StandardsManager()
             parsing_presets_naming = preset_sm_naming.get_parsing_presets()
             preset_choices_naming = [p.get("name", "") for p in parsing_presets_naming if p.get("name")]
-            selected_platform = st.selectbox(
-                "Target Platform Preset",
-                options=preset_choices_naming,
-                index=0 if preset_choices_naming else None,
-                key="naming_target_platform_preset",
-                help="Select the platform rules to apply during topology parsing."
-            )
-
-            # Unified Action Bar
-            col_act1, col_act2 = st.columns([3, 1])
-            with col_act1:
-                btn_analyze = st.button("🚀 Analyze Topology & Auto-Populate", type="primary", use_container_width=True)
+            default_platform = "General (Default)"
+            col_pre, col_btn_an, col_btn_clr = st.columns([5, 3, 2], vertical_alignment="center")
+            with col_pre:
+                st.selectbox(
+                    "Target Platform Preset",
+                    options=preset_choices_naming,
+                    index=preset_choices_naming.index(default_platform) if default_platform in preset_choices_naming else 0,
+                    key="naming_target_platform_preset",
+                    label_visibility="collapsed",
+                    help=None
+                )
+            with col_btn_an:
+                btn_analyze = st.button("🚀 Analyze & Auto-Populate", type="primary", use_container_width=True)
                 st.session_state["_btn_analyze_naming"] = btn_analyze
-            with col_act2:
+            with col_btn_clr:
                 btn_clear = st.button("🗑️ Clear All", use_container_width=True)
             if btn_clear:
                 st.session_state["staged_topology_imgs"] = []
@@ -999,7 +988,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
                 st.rerun()
 
-    # Always-accessible OCR Raw Text Inspector (as long as staged screenshots exist)
+    # Full-width OCR Raw Text Inspector (immediately below the control bar area)
     staged_imgs = st.session_state.get("staged_topology_imgs", [])
     if staged_imgs:
         raw_ocr_text = st.session_state.get("latest_ocr_raw_text", "")
@@ -1011,6 +1000,10 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
     # Execute analyze when button clicked
     start_analyze = st.session_state.get("_btn_analyze_naming", False)
+
+    # Initialize parsing presets for pipeline execution
+    preset_sm = StandardsManager()
+    parsing_presets = preset_sm.get_parsing_presets()
 
     # Step 1: 4-Stage Execution with Universal Image Preprocessing (Map-Reduce Pipeline)
     if start_analyze:
