@@ -1889,8 +1889,6 @@ def _vlan_presets_editor(rules: dict) -> None:
             st.session_state["vlan_pre_selected_group"] = new_group_name.strip() if new_group_name and new_group_name.strip() else st.session_state.get("vlan_pre_selected_group")
         _save_presets(rules, section="vlan_presets", section_label="VLAN Allocation Presets")
 
-    _render_vlan_description_mappings_editor(rules)
-
 
 def _render_parsing_presets_editor(active_model: str, rules: dict) -> None:
     """Render the Topology Parsing Presets editor harmonized with VLAN preset aesthetics."""

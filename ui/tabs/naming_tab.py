@@ -868,7 +868,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         col_up1, col_up2 = st.columns([1, 1])
 
         with col_up1:
-            uploader_key = f"hypervisor_topo_file_uploader_{st.session_state.get('topo_uploader_key_ver', 0)}"
+            uploader_key = "batch_mode_screenshot_uploader"
             raw_uploaded = st.file_uploader(
                 "Upload Screenshots (Drag & Drop)",
                 type=["png", "jpg", "jpeg"],
@@ -1409,169 +1409,52 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         key="dl_esxi_descriptions_pipe"
     )
 
-    with st.container(border=True):
-        with st.expander("📸 Screenshot Guidelines (Virtual Switches Topology)", expanded=False):
-            st.markdown("""
-**Recommended Capture Location:**
+    uploaded_imgs = st.session_state.get("staged_topology_imgs", [])
 
-1. **Access**: vCenter or ESXi Host Client.
-2. **Navigate**: `Host` ➔ `Configure` ➔ `Networking` ➔ `Virtual switches`.
-3. **Expand**: Open target switches (e.g., `vSwitch0`, `vSwitch01`, `vSwitch1`).
-4. **Capture**: Ensure all three sections are visible:
-   - **Left**: Port Groups & VMkernel ports
-   - **Middle**: Virtual Switch diagram
-   - **Right**: Physical Adapters (with link speeds)
-
-> 💡 **Pro-Tip (Complete Data Discovery)**: In addition to **Virtual switches** topology, also upload/paste screenshots of **Networking ➜ Physical adapters** (click `>>` to expand adapters like `vmnic1`~`vmnic6`). This provides exact **MAC addresses**, **PCI slot mappings (PCIeX/PortX)**, and **CDP/LLDP Switch Ports (Cable Connections)** with zero manual guesswork!
-
-> ⚠️ **Manual Verification Required:** ESXi topology views do not explicitly display Active vs. Standby status. Please verify in ESXi: click **EDIT** beside the vSwitch ➜ go to **Teaming and failover** ➜ check **Failover order** (Active vs Standby adapters) before committing to NetBox.
-            """
-            )
-
-        col_up1, col_up2 = st.columns([1, 1])
-
-        with col_up1:
-            uploader_key = f"hypervisor_topo_file_uploader_{st.session_state.get('topo_uploader_key_ver', 0)}"
-            raw_uploaded = st.file_uploader(
-                "Upload Screenshots (Drag & Drop)",
-                type=["png", "jpg", "jpeg"],
-                accept_multiple_files=True,
-                key=uploader_key,
-                help="Upload one or multiple screenshots...",
-            )
-            # Initialize unified image store
-            if "staged_topology_imgs" not in st.session_state:
-                st.session_state["staged_topology_imgs"] = []
-
-            if raw_uploaded:
-                import io as _io
-                existing_names = {getattr(f, "name", "") for f in st.session_state["staged_topology_imgs"]}
-                for uf in raw_uploaded:
-                    if uf.name not in existing_names:
-                        file_bytes = uf.read()
-                        bio = _io.BytesIO(file_bytes)
-                        bio.name = uf.name
-                        bio.type = uf.type
-                        bio.size = len(file_bytes)
-                        st.session_state["staged_topology_imgs"].append(bio)
-
-        with col_up2:
-            st.markdown("**📋 Or Paste from Clipboard (Ctrl+V)**")
-            if "paste_input_ver" not in st.session_state:
-                st.session_state["paste_input_ver"] = 0
-            paste_box_key = f"esxi_paste_input_{st.session_state.get('paste_input_ver', 0)}"
-            pasted_data = st.text_input(
-                "Paste Area",
-                placeholder="Click here and press Ctrl+V",
-                key=paste_box_key,
-                label_visibility="collapsed",
-                help="Focus this box and press Ctrl+V.",
-            )
-            import streamlit.components.v1 as _components
-            _components.html(
-                """
-                <script>
-                const parentDoc = window.parent.document;
-                if (!window.parent._esxiPasteDelegated) {
-                    window.parent._esxiPasteDelegated = true;
-                    parentDoc.addEventListener('paste', function(e) {
-                        const target = e.target;
-                        if (!target || target.getAttribute('aria-label') !== 'Paste Area') return;
-                        const items = (e.clipboardData || window.clipboardData).items;
-                        for (let i = 0; i < items.length; i++) {
-                            if (items[i].type.indexOf('image') !== -1) {
-                                const blob = items[i].getAsFile();
-                                const reader = new FileReader();
-                                reader.onload = function(event) {
-                                    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-                                    nativeSetter.call(target, event.target.result);
-                                    target.dispatchEvent(new Event('input', { bubbles: true }));
-                                    target.dispatchEvent(new KeyboardEvent('keydown', {
-                                        bubbles: true,
-                                        cancelable: true,
-                                        key: 'Enter',
-                                        code: 'Enter',
-                                        keyCode: 13,
-                                        which: 13
-                                    }));
-                                    target.dispatchEvent(new Event('change', { bubbles: true }));
-                                };
-                                reader.readAsDataURL(blob);
-                                e.preventDefault();
-                                break;
-                            }
-                        }
-                    });
-                }
-                </script>
-                """,
-                height=0,
-                width=0,
-            )
-
-        # Ingest clipboard paste inside Step 1
-        if pasted_data and pasted_data.startswith("data:image"):
-            import base64 as _b64, io as _io
-            try:
-                _, encoded = pasted_data.split(",", 1)
-                img_bytes = _b64.b64decode(encoded)
-                pasted_file = _io.BytesIO(img_bytes)
-                idx = len(st.session_state["staged_topology_imgs"]) + 1
-                pasted_file.name = f"clipboard_screenshot_{idx}.png"
-                pasted_file.type = "image/png"
-                pasted_file.size = len(img_bytes)
-                st.session_state["staged_topology_imgs"].append(pasted_file)
-                st.session_state["paste_input_ver"] = st.session_state.get("paste_input_ver", 0) + 1
+    if uploaded_imgs:
+        with st.expander(f"🔍 Preview Staged Screenshots ({len(uploaded_imgs)} file(s))", expanded=True):
+            preview_cols = st.columns(min(len(uploaded_imgs), 4))
+            del_idx = None
+            for img_idx, img_item in enumerate(uploaded_imgs):
+                with preview_cols[img_idx % len(preview_cols)]:
+                    img_title = getattr(img_item, "name", f"Screenshot #{img_idx + 1}")
+                    st.caption(f"#{img_idx + 1}: {img_title}")
+                    st.image(img_item, width="stretch")
+                    if st.button("✖ Remove", key=f"unified_remove_btn_{img_idx}"):
+                        del_idx = img_idx
+            if del_idx is not None and 0 <= del_idx < len(st.session_state["staged_topology_imgs"]):
+                st.session_state["staged_topology_imgs"].pop(del_idx)
+                st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
                 st.rerun()
-            except Exception as e:
-                st.warning(f"Failed to process pasted image: {e}")
 
-        uploaded_imgs = st.session_state.get("staged_topology_imgs", [])
-
-        if uploaded_imgs:
-            with st.expander(f"🔍 Preview Staged Screenshots ({len(uploaded_imgs)} file(s))", expanded=True):
-                preview_cols = st.columns(min(len(uploaded_imgs), 4))
-                del_idx = None
-                for img_idx, img_item in enumerate(uploaded_imgs):
-                    with preview_cols[img_idx % len(preview_cols)]:
-                        img_title = getattr(img_item, "name", f"Screenshot #{img_idx + 1}")
-                        st.caption(f"#{img_idx + 1}: {img_title}")
-                        st.image(img_item, width="stretch")
-                        if st.button("✖ Remove", key=f"unified_remove_btn_{img_idx}"):
-                            del_idx = img_idx
-                if del_idx is not None and 0 <= del_idx < len(st.session_state["staged_topology_imgs"]):
-                    st.session_state["staged_topology_imgs"].pop(del_idx)
-                    st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
-                    st.rerun()
-
-        # Clean single-row control bar (visible unconditionally)
-        preset_sm_naming = StandardsManager()
-        parsing_presets_naming = preset_sm_naming.get_parsing_presets()
-        raw_presets = [p.get("name", "") for p in parsing_presets_naming if p.get("name")]
-        filtered = [p for p in raw_presets if p not in ["General", "General (Default)", "General Platform (Default)"]]
-        preset_choices_naming = ["General Platform (Default)"] + filtered
-        col_plat, col_btn_an, col_btn_clr = st.columns([5, 3, 2], vertical_alignment="center")
-        with col_plat:
-            st.selectbox(
-                "Target Platform",
-                options=preset_choices_naming,
-                index=0,
-                key="naming_target_platform",
-                label_visibility="collapsed",
-                help=None
-            )
-        with col_btn_an:
-            btn_analyze = st.button("🚀 Analyze & Auto-Populate", type="primary", use_container_width=True)
-            st.session_state["_btn_analyze_naming"] = btn_analyze
-        with col_btn_clr:
-            btn_clear = st.button("🗑️ Clear All", use_container_width=True)
-        if btn_clear:
-            st.session_state["staged_topology_imgs"] = []
-            st.session_state.pop("hypervisor_parsed_descriptions", None)
-            st.session_state.pop("latest_ocr_raw_text", None)
-            st.session_state.pop("_btn_analyze_naming", None)
-            st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
-            st.rerun()
+    # Clean single-row control bar (visible unconditionally)
+    preset_sm_naming = StandardsManager()
+    parsing_presets_naming = preset_sm_naming.get_parsing_presets()
+    raw_presets = [p.get("name", "") for p in parsing_presets_naming if p.get("name")]
+    filtered = [p for p in raw_presets if p not in ["General", "General (Default)", "General Platform (Default)"]]
+    preset_choices_naming = ["General Platform (Default)"] + filtered
+    col_plat, col_btn_an, col_btn_clr = st.columns([5, 3, 2], vertical_alignment="center")
+    with col_plat:
+        st.selectbox(
+            "Target Platform",
+            options=preset_choices_naming,
+            index=0,
+            key="naming_target_platform",
+            label_visibility="collapsed",
+            help=None
+        )
+    with col_btn_an:
+        btn_analyze = st.button("🚀 Analyze & Auto-Populate", type="primary", use_container_width=True)
+        st.session_state["_btn_analyze_naming"] = btn_analyze
+    with col_btn_clr:
+        btn_clear = st.button("🗑️ Clear All", use_container_width=True)
+    if btn_clear:
+        st.session_state["staged_topology_imgs"] = []
+        st.session_state.pop("hypervisor_parsed_descriptions", None)
+        st.session_state.pop("latest_ocr_raw_text", None)
+        st.session_state.pop("_btn_analyze_naming", None)
+        st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
+        st.rerun()
 
     # Full-width OCR Raw Text Inspector (immediately below the control bar)
     staged_imgs = st.session_state.get("staged_topology_imgs", [])
