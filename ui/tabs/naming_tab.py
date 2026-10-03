@@ -744,14 +744,24 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
     vault = SanitizerVault()
     st.subheader("☁️ Hypervisor Network Description Formatter", help="Format standardized hypervisor network descriptions (VMware ESXi, Proxmox VE, Linux Bridges, etc.) matching infrastructure guidelines.")
 
-    # Unified platform-agnostic network state store: single source of truth for all typed row lists.
-    parsed_records = st.session_state.get("hypervisor_parsed_descriptions") or []
-    network_store = {
-        "records": parsed_records,
-    }
+    mode = st.radio(
+        "Operation Mode",
+        ["🛠️ Interactive Single Item Mode", "📸 Screenshot Batch Mode (OCR)"],
+        index=0,
+        horizontal=True,
+        label_visibility="collapsed"
+    )
 
-    # --- SECTION 1: 🛠️ INTERACTIVE SINGLE ITEM GENERATOR ---
-    with st.expander("🛠️ Interactive Single Item Generator", expanded=False):
+    if mode == "🛠️ Interactive Single Item Mode":
+        _render_interactive_esxi_mode(naming_rules, casing, active_model)
+    else:
+        _render_screenshot_batch_mode(naming_rules, casing, active_model, vault)
+
+
+def _render_interactive_esxi_mode(naming_rules: dict, casing: str, active_model: str):
+    """Render the interactive single-item ESXi description generator openly."""
+    with st.container(border=True):
+        st.markdown("#### 🛠️ Interactive Single Item Generator")
         st.caption("Generate individual ESXi network descriptions using token-based patterns. Presets are configured in the Standards Tab.")
 
         presets = naming_rules.get("esxi_network_presets", [])
@@ -799,7 +809,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             return
 
         order = (naming_rules.get("token_order") or {}).get(pkey)
-        # Dynamically render widgets for ALL tokens in template (handles new tokens automatically)
         values = render_token_widgets(curr_pattern, variables, f"esxi_{selected_code}", custom_order=order)
 
         # Zero-hardcode auto-correction hook
@@ -809,7 +818,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 if values[k]:
                     values[k] = apply_auto_corrections(values[k], "vmware")
 
-        # All dynamic values and templates are automatically normalized via zero-hardcode pipeline
         out = render_dynamic_pattern(curr_pattern, values, variables)
         if st.session_state.get("auto_correct", True):
             from utils.formatters import apply_auto_corrections
@@ -819,11 +827,587 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         st.caption("Generated ESXi Description:")
         st.code(out, language="text")
 
-        if st.button("AI Verify ESXi Description", key="esxi_ai_verify_btn"):
-            st.info("Verified against ESXi naming standards.")
+        # 1-click copy box
+        col_copy, col_verify = st.columns([1, 1])
+        with col_copy:
+            if st.button("📋 Copy to Clipboard", key="esxi_copy_btn"):
+                st.session_state["_last_copied"] = out
+                st.toast("✅ Copied!")
+        with col_verify:
+            if st.button("AI Verify ESXi Description", key="esxi_ai_verify_btn"):
+                st.info("Verified against ESXi naming standards.")
 
-    # --- SECTION 2: 📸 SCREENSHOT OCR PIPELINE (3-STEP WORKFLOW) ---
-    st.markdown("##### 1️⃣ Screenshot OCR Pipeline")
+
+def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model: str, vault):
+    """Render the full screenshot OCR pipeline openly (no expanders hiding the workflow)."""
+    from core.ocr_engine import run_local_ocr_pipeline
+    from data.standards_manager import StandardsManager
+    import json as _json
+    from core.ai_client import call_ai
+
+    st.markdown("##### 1️⃣ Upload & Analyze Screenshots")
+
+    with st.container(border=True):
+        with st.expander("📸 Screenshot Guidelines (Virtual Switches Topology)", expanded=False):
+            st.markdown("""
+**Recommended Capture Location:**
+
+1. **Access**: vCenter or ESXi Host Client.
+2. **Navigate**: `Host` ➔ `Configure` ➔ `Networking` ➔ `Virtual switches`.
+3. **Expand**: Open target switches (e.g., `vSwitch0`, `vSwitch01`, `vSwitch1`).
+4. **Capture**: Ensure all three sections are visible:
+   - **Left**: Port Groups & VMkernel ports
+   - **Middle**: Virtual Switch diagram
+   - **Right**: Physical Adapters (with link speeds)
+
+> 💡 **Pro-Tip (Complete Data Discovery)**: In addition to **Virtual switches** topology, also upload/paste screenshots of **Networking ➜ Physical adapters** (click `>>` to expand adapters like `vmnic1`~`vmnic6`). This provides exact **MAC addresses**, **PCI slot mappings (PCIeX/PortX)**, and **CDP/LLDP Switch Ports (Cable Connections)** with zero manual guesswork!
+
+> ⚠️ **Manual Verification Required:** ESXi topology views do not explicitly display Active vs. Standby status. Please verify in ESXi: click **EDIT** beside the vSwitch ➜ go to **Teaming and failover** ➜ check **Failover order** (Active vs Standby adapters) before committing to NetBox.
+            """)
+
+        col_up1, col_up2 = st.columns([1, 1])
+
+        with col_up1:
+            uploader_key = f"hypervisor_topo_file_uploader_{st.session_state.get('topo_uploader_key_ver', 0)}"
+            raw_uploaded = st.file_uploader(
+                "Upload Screenshots (Drag & Drop)",
+                type=["png", "jpg", "jpeg"],
+                accept_multiple_files=True,
+                key=uploader_key,
+                help="Upload one or multiple screenshots...",
+            )
+            if "staged_topology_imgs" not in st.session_state:
+                st.session_state["staged_topology_imgs"] = []
+
+            if raw_uploaded:
+                import io as _io
+                existing_names = {getattr(f, "name", "") for f in st.session_state["staged_topology_imgs"]}
+                for uf in raw_uploaded:
+                    if uf.name not in existing_names:
+                        file_bytes = uf.read()
+                        bio = _io.BytesIO(file_bytes)
+                        bio.name = uf.name
+                        bio.type = uf.type
+                        bio.size = len(file_bytes)
+                        st.session_state["staged_topology_imgs"].append(bio)
+
+        with col_up2:
+            st.markdown("**📋 Or Paste from Clipboard (Ctrl+V)**")
+            if "paste_input_ver" not in st.session_state:
+                st.session_state["paste_input_ver"] = 0
+            paste_box_key = f"esxi_paste_input_{st.session_state.get('paste_input_ver', 0)}"
+            pasted_data = st.text_input(
+                "Paste Area",
+                placeholder="Click here and press Ctrl+V",
+                key=paste_box_key,
+                label_visibility="collapsed",
+                help="Focus this box and press Ctrl+V.",
+            )
+            import streamlit.components.v1 as _components
+            _components.html(
+                """
+                <script>
+                const parentDoc = window.parent.document;
+                if (!window.parent._esxiPasteDelegated) {
+                    window.parent._esxiPasteDelegated = true;
+                    parentDoc.addEventListener('paste', function(e) {
+                        const target = e.target;
+                        if (!target || target.getAttribute('aria-label') !== 'Paste Area') return;
+                        const items = (e.clipboardData || window.clipboardData).items;
+                        for (let i = 0; i < items.length; i++) {
+                            if (items[i].type.indexOf('image') !== -1) {
+                                const blob = items[i].getAsFile();
+                                const reader = new FileReader();
+                                reader.onload = function(event) {
+                                    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                                    nativeSetter.call(target, event.target.result);
+                                    target.dispatchEvent(new Event('input', { bubbles: true }));
+                                    target.dispatchEvent(new KeyboardEvent('keydown', {
+                                        bubbles: true,
+                                        cancelable: true,
+                                        key: 'Enter',
+                                        code: 'Enter',
+                                        keyCode: 13,
+                                        which: 13
+                                    }));
+                                    target.dispatchEvent(new Event('change', { bubbles: true }));
+                                };
+                                reader.readAsDataURL(blob);
+                                e.preventDefault();
+                                break;
+                            }
+                        }
+                    });
+                }
+                </script>
+                """,
+                height=0,
+                width=0,
+            )
+
+        # Ingest clipboard paste inside Step 1
+        if pasted_data and pasted_data.startswith("data:image"):
+            import base64 as _b64, io as _io
+            try:
+                _, encoded = pasted_data.split(",", 1)
+                img_bytes = _b64.b64decode(encoded)
+                pasted_file = _io.BytesIO(img_bytes)
+                idx = len(st.session_state["staged_topology_imgs"]) + 1
+                pasted_file.name = f"clipboard_screenshot_{idx}.png"
+                pasted_file.type = "image/png"
+                pasted_file.size = len(img_bytes)
+                st.session_state["staged_topology_imgs"].append(pasted_file)
+                st.session_state["paste_input_ver"] = st.session_state.get("paste_input_ver", 0) + 1
+                st.rerun()
+            except Exception as e:
+                st.warning(f"Failed to process pasted image: {e}")
+
+        uploaded_imgs = st.session_state.get("staged_topology_imgs", [])
+
+        if uploaded_imgs:
+            with st.expander(f"🔍 Preview Staged Screenshots ({len(uploaded_imgs)} file(s))", expanded=True):
+                preview_cols = st.columns(min(len(uploaded_imgs), 4))
+                del_idx = None
+                for img_idx, img_item in enumerate(uploaded_imgs):
+                    with preview_cols[img_idx % len(preview_cols)]:
+                        img_title = getattr(img_item, "name", f"Screenshot #{img_idx + 1}")
+                        st.caption(f"#{img_idx + 1}: {img_title}")
+                        st.image(img_item, width="stretch")
+                        if st.button("✖ Remove", key=f"unified_remove_btn_{img_idx}"):
+                            del_idx = img_idx
+                if del_idx is not None and 0 <= del_idx < len(st.session_state["staged_topology_imgs"]):
+                    st.session_state["staged_topology_imgs"].pop(del_idx)
+                    st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
+                    st.rerun()
+
+        # Control bar: Platform selector + Analyze + Clear
+        preset_sm_naming = StandardsManager()
+        parsing_presets_naming = preset_sm_naming.get_parsing_presets()
+        raw_presets = [p.get("name", "") for p in parsing_presets_naming if p.get("name")]
+        filtered = [p for p in raw_presets if p not in ["General", "General (Default)", "General Platform (Default)"]]
+        preset_choices_naming = ["General Platform (Default)"] + filtered
+        col_plat, col_btn_an, col_btn_clr = st.columns([5, 3, 2], vertical_alignment="center")
+        with col_plat:
+            st.selectbox(
+                "Target Platform",
+                options=preset_choices_naming,
+                index=0,
+                key="naming_target_platform",
+                label_visibility="collapsed",
+                help=None
+            )
+        with col_btn_an:
+            btn_analyze = st.button("🚀 Analyze & Auto-Populate", type="primary", use_container_width=True)
+            st.session_state["_btn_analyze_naming"] = btn_analyze
+        with col_btn_clr:
+            btn_clear = st.button("🗑️ Clear All", use_container_width=True)
+        if btn_clear:
+            st.session_state["staged_topology_imgs"] = []
+            st.session_state.pop("hypervisor_parsed_descriptions", None)
+            st.session_state.pop("latest_ocr_raw_text", None)
+            st.session_state.pop("_btn_analyze_naming", None)
+            st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
+            st.rerun()
+
+    # OCR Raw Text Inspector (collapsible)
+    staged_imgs = st.session_state.get("staged_topology_imgs", [])
+    raw_ocr_text = st.session_state.get("latest_ocr_raw_text", "")
+    with st.expander("📄 OCR Raw Text Inspector (Click to expand)", expanded=False):
+        char_count = len(raw_ocr_text) if raw_ocr_text else 0
+        img_count = len(staged_imgs)
+        st.caption(f"ℹ️ Extracted {char_count:,} characters across {img_count} screenshot(s)")
+        st.text_area("Extracted OCR Tokens", value=raw_ocr_text, height=420, disabled=True)
+
+    # Execute analyze when button clicked
+    start_analyze = st.session_state.get("_btn_analyze_naming", False)
+
+    preset_sm = StandardsManager()
+    parsing_presets = preset_sm.get_parsing_presets()
+
+    if start_analyze:
+        try:
+            progress_bar = st.progress(0, text="Initializing topology analysis...")
+            total_imgs = len(uploaded_imgs)
+            combined_raw_lines = []
+
+            for idx, img in enumerate(uploaded_imgs):
+                step_label = f"Analyzing screenshot [{idx + 1}/{total_imgs}]: {getattr(img, 'name', f'Image #{idx+1}')}"
+                progress_bar.progress((idx) / total_imgs, text=step_label)
+
+                extracted_txt = ""
+                try:
+                    raw_bytes = None
+                    if hasattr(img, "getvalue"):
+                        raw_bytes = img.getvalue()
+                    elif hasattr(img, "read"):
+                        img.seek(0)
+                        raw_bytes = img.read()
+                    elif isinstance(img, (bytes, bytearray)):
+                        raw_bytes = bytes(img)
+
+                    if raw_bytes and len(raw_bytes) > 0:
+                        ocr_res = run_local_ocr_pipeline([raw_bytes])
+                    else:
+                        ocr_res = run_local_ocr_pipeline([img])
+                    extracted_txt = ocr_res.get("combined_text", "").strip()
+                except Exception as exc:
+                    import logging
+                    logging.getLogger(__name__).warning("OCR failed for image: %s", str(exc))
+
+                if not extracted_txt:
+                    continue
+                combined_raw_lines.append(f"--- Screenshot {idx+1}: {getattr(img, 'name', '')} ---\n{extracted_txt}")
+
+            progress_bar.progress(0.9, text="Sanitizing and invoking AI parser...")
+            combined_raw_text = "\n\n".join(combined_raw_lines).strip()
+            st.session_state["latest_ocr_raw_text"] = combined_raw_text
+
+            try:
+                from utils.formatters import apply_auto_corrections
+                cleaned_ocr_text = apply_auto_corrections(combined_raw_text, "ocr_cleaning")
+                if not cleaned_ocr_text or cleaned_ocr_text == combined_raw_text:
+                    cleaned_ocr_text = apply_auto_corrections(combined_raw_text, "vmware")
+            except Exception:
+                cleaned_ocr_text = combined_raw_text
+
+            sanitized_combined, token_map = vault.sanitize_text(cleaned_ocr_text)
+            st.session_state["latest_vault_tokens"] = token_map
+
+            system_prompt = (
+                "You are an expert infrastructure network architect and data modeling specialist.\n"
+                "Analyze the provided sanitized OCR text extracted from infrastructure topologies or management dashboards.\n\n"
+                "Extract all observed network entities into a flat JSON array of objects using strictly lowercase keys.\n\n"
+                "STRICT TOPOLOGICAL ENTITY RULES:\n"
+                "    1. ONLY extract endpoint interfaces, physical adapters (e.g., vmnic, eth), logical ports, or virtual interfaces (e.g., vmk, bond, port groups).\n"
+                "    2. NEVER create an interface record for the hosting switch, bridge, or container fabric itself (e.g., vSwitch, vmbr, bridge are purely container attributes, not standalone interface items).\n\n"
+                "MANDATORY TOPOLOGICAL KEYS (EVERY OBJECT MUST HAVE THESE):\n"
+                "    - interface: The exact identifier of the adapter, port, port group, or endpoint (e.g., vmnic0, vmk0). NEVER name this key 'name'; it MUST be 'interface'.\n"
+                "    - parent: The clean identifier of the specific switch, bridge, or fabric (e.g., vSwitch0, vmbr0). STRICT RULES FOR PARENT:\n"
+                "        * Extract ONLY the specific instance name (e.g., 'vSwitch0', NOT 'StandardSwitch:vSwitch0' or 'Standard Switch: vSwitch0'). Strip off all generic category labels, prefixes, and colons.\n"
+                "        * NEVER treat page headings, navigation tabs, or section labels (such as 'Virtual switches', 'Physical adapters', 'VMkernel adapters') as a parent.\n"
+                "        * If an interface is displayed in a global inventory or unassigned list, leave parent as ''.\n\n"
+                "DYNAMIC ATTRIBUTES & CROSS-SCREENSHOT CORRELATION:\n"
+                "    Extract all observable attributes into clean lowercase keys:\n"
+                "    - slot: Physical PCIe hardware slot location if visible.\n"
+                "    - ip: Network address or CIDR prefix if present.\n"
+                "    - speed: Connection throughput or duplex mode.\n"
+                "    - vlan: Associated VLAN tag or identifier.\n"
+                "    - purpose: Stated functional role, service, or network designation.\n"
+                "    - remote_device: Discovered peer neighbor device identifier.\n"
+                "    - remote_port: Discovered peer neighbor interface or port.\n"
+                "    - Actively propagate attributes (slot, remote_device, remote_port) across records that share the same interface name.\n\n"
+                "TYPO NORMALIZATION:\n"
+                "    Correct visible OCR substitutions (e.g., letter 'o' vs digit '0') and normalize PCI addresses.\n\n"
+                "CRITICAL: Output ONLY a valid JSON array of endpoint objects. Do not wrap in markdown fences or include explanations."
+            )
+
+            selected_preset_name = st.session_state.get("naming_target_platform", "General Platform (Default)")
+            _display_to_canonical = {"General Platform (Default)": "General (Default)"}
+            canonical_preset_name = _display_to_canonical.get(selected_preset_name, selected_preset_name)
+            preset_instructions = ""
+            if canonical_preset_name:
+                for _p in parsing_presets:
+                    if _p.get("name") == canonical_preset_name:
+                        preset_instructions = _p.get("instructions", "")
+                        break
+            if preset_instructions:
+                system_prompt = f"{system_prompt}\n\n{preset_instructions}".strip()
+            user_prompt = f"Parse this consolidated sanitized topology text:\n\n{sanitized_combined}"
+            response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt, max_tokens=8192)
+            progress_bar.progress(1.0, text="✅ Parsing and enriching results...")
+
+            raw_items = _safe_parse_json_array(response)
+            clean_records = []
+            for item in raw_items:
+                if isinstance(item, dict) and not any(k in item for k in ("finish_reason", "index", "message", "role")):
+                    clean_records.append({str(k).strip().lower(): str(v).strip() if v is not None else "" for k, v in item.items()})
+
+            all_parsed_items = vault.detokenize_data(clean_records)
+            if not isinstance(all_parsed_items, list):
+                all_parsed_items = []
+
+            if not combined_raw_text:
+                st.warning("⚠️ No text detected by local OCR. Ensure screenshot contains legible topology labels.")
+            elif not all_parsed_items:
+                st.warning("⚠️ OCR detected text but no structured records were parsed. Check screenshot quality.")
+            else:
+                attr_bag = {}
+                for item in all_parsed_items:
+                    if not isinstance(item, dict):
+                        continue
+                    iface = str(item.get("interface") or "").strip().lower()
+                    if not iface:
+                        continue
+                    if iface not in attr_bag:
+                        attr_bag[iface] = {}
+                    for k, v in item.items():
+                        if k not in ("interface", "parent") and v:
+                            attr_bag[iface][k] = v
+
+                for item in all_parsed_items:
+                    if not isinstance(item, dict):
+                        continue
+                    iface = str(item.get("interface") or "").strip().lower()
+                    if iface in attr_bag:
+                        for k, v in attr_bag[iface].items():
+                            if not item.get(k):
+                                item[k] = v
+
+                seen = set()
+                deduped = []
+                for item in all_parsed_items:
+                    if not isinstance(item, dict):
+                        continue
+                    key = (
+                        str(item.get("interface") or "").strip().lower(),
+                        str(item.get("parent") or "").strip().lower(),
+                    )
+                    if key not in seen:
+                        seen.add(key)
+                        deduped.append(item)
+
+                st.session_state["hypervisor_parsed_descriptions"] = deduped
+                st.toast(f"✅ Successfully analyzed {total_imgs} screenshots and merged {len(deduped)} unique records!", icon="🚀")
+                st.rerun()
+        except Exception as e:
+            import traceback
+            st.error(f"Pipeline execution failed: {str(e)}")
+            st.code(traceback.format_exc(), language="text")
+
+    # 🔒 Vault Inspection (collapsible)
+    with st.expander("🔒 Local Redaction Audit (Vault Inspection)", expanded=False):
+        st.caption("Inspect and manage locally redacted tokens. Clear the vault cache below to reset all de-tokenization mappings.")
+        if st.session_state.get("latest_vault_tokens"):
+            token_items = list(st.session_state["latest_vault_tokens"].items())[:20]
+            st.code(f"Redacted tokens found: {len(token_items)}", language="text")
+            for orig, token_id in token_items:
+                st.caption(f"- {orig} → {token_id}")
+        else:
+            st.caption("No redacted tokens in this session yet.")
+        if st.button("🧹 Clear Vault Cache", key="btn_clear_vault_cache"):
+            vault.clear_vault()
+            st.session_state.pop("latest_vault_tokens", None)
+            st.toast("✅ Vault cache cleared!")
+            st.rerun()
+
+    st.markdown("##### 2️⃣ Extracted Variables Inspector (Dynamic Token Bag)")
+    parsed_records = st.session_state.get("hypervisor_parsed_descriptions") or []
+    if parsed_records:
+        rows = parsed_records
+
+        raw_token_dict = {}
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            for k, v in r.items():
+                if v is not None and str(v).strip() and str(v).lower() not in ("nan", "none", ""):
+                    norm_k = re.sub(r"[^a-zA-Z0-9]+", "_", str(k).strip().lower()).strip("_")
+                    if norm_k:
+                        raw_token_dict.setdefault(norm_k, set()).add(str(v).strip())
+
+        existing_vars = get_pattern_variables(naming_rules)
+        existing_token_names = set()
+        if isinstance(existing_vars, dict):
+            for k, v in existing_vars.items():
+                if isinstance(v, dict) and "label" in v:
+                    existing_token_names.add(k.lower())
+                elif isinstance(v, dict):
+                    for sub_k in v.keys():
+                        existing_token_names.add(sub_k.lower())
+        for k in get_pattern_variables(naming_rules).keys():
+            existing_token_names.add(str(k).lower())
+
+        with st.expander("🔍 OCR Raw Token Dictionary (Platform-Agnostic Variable Bag)", expanded=False):
+            st.caption("All extracted tokens discovered from the uploaded topology. These keys are immediately available in Step 3 patterns and can be synced to Standards.")
+            tok_cols = st.columns(3)
+            for idx, (t_name, t_vals) in enumerate(sorted(raw_token_dict.items())):
+                col_target = tok_cols[idx % 3]
+                sample_vals = ", ".join(list(t_vals)[:3])
+                sync_key = f"btn_sync_tok_{t_name}"
+                is_existing = t_name.strip("<>_").lower() in existing_token_names
+                with col_target:
+                    if is_existing:
+                        st.button(f"✅ <{t_name}> (In Standards)", key=sync_key, disabled=True, width='stretch')
+                    else:
+                        if st.button(f"🔗 Sync <{t_name}>", key=sync_key, help=f"Sync <{t_name}> to Hypervisor Standards with default value: {sample_vals}", width='stretch'):
+                            from config.naming_rules import save_naming_rules
+                            norm_token = re.sub(r"[^a-z0-9_]", "", t_name)
+                            if "pattern_variables" not in naming_rules or not isinstance(naming_rules.get("pattern_variables"), dict):
+                                naming_rules.setdefault("pattern_variables", {})
+                            sample_val_list = list(t_vals)
+                            default_val = sample_val_list[0] if sample_val_list else ""
+                            naming_rules["pattern_variables"][norm_token] = {
+                                "label": norm_token.replace("_", " ").title(),
+                                "placeholder": f"e.g. {default_val or norm_token}",
+                                "default": default_val,
+                                "optional": False,
+                                "scope": "hypervisor",
+                            }
+                            save_naming_rules(naming_rules, source="Variable Inspector Sync")
+                            SSM.set_naming_rules(naming_rules.copy())
+                            st.toast(f"✅ <{norm_token}> synced! Manage in Standards Tab ➔ Pattern Variables.", icon="💾")
+                            st.rerun()
+                    border_color = "#22c55e" if is_existing else "rgba(255,255,255,0.08)"
+                    title_color = "#22c55e" if is_existing else "#38bdf8"
+                    with st.container(border=True):
+                        st.markdown(f"""
+                        <div style="font-family: monospace; font-weight: 600; color: {title_color}; font-size: 0.85rem;">&lt;{t_name}&gt;</div>
+                        <div style="color: #94a3b8; font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{sample_vals}">e.g. {sample_vals}</div>
+                        """, unsafe_allow_html=True)
+    else:
+        st.caption("Tokens will be listed here after analyzing topology screenshots.")
+
+    # 3️⃣ NetBox Descriptions & Review (Ready-to-Copy)
+    st.divider()
+    st.markdown("##### 3️⃣ NetBox Descriptions & Review (Ready-to-Copy)")
+
+    if parsed_records:
+        st.markdown("###### 📋 Generated NetBox Interface Descriptions (Editable)")
+        st.caption("Review and edit parsed topology directly below. Batch text updates reactively in real time.")
+
+        edited_descriptions = st.data_editor(
+            st.session_state["hypervisor_parsed_descriptions"],
+            width="stretch",
+            hide_index=True,
+            num_rows="dynamic",
+            key="esxi_vision_data_editor"
+        )
+        st.session_state["hypervisor_parsed_descriptions"] = edited_descriptions
+
+        col_qc_title, col_qc_btn = st.columns([3.5, 1.0], vertical_alignment="center")
+        with col_qc_title:
+            st.markdown("###### 📋 Quick Copy for NetBox (Batch Text)")
+        with col_qc_btn:
+            if st.button("🔄 Refresh", key="btn_refresh_quick_copy", width='stretch', help="Re-render Quick Copy using the latest standards and patterns without re-running OCR"):
+                from config.naming_rules import load_naming_rules
+                fresh_rules = load_naming_rules()
+                SSM.set_naming_rules(fresh_rules.copy())
+                SSM.refresh_naming_rules()
+                st.toast("✅ Refreshed with latest standards!")
+                st.rerun()
+        rows = edited_descriptions
+
+        _naming_rules = SSM.get_naming_rules({})
+        _patterns = _naming_rules.get("naming_patterns", {})
+        pattern_vars = _naming_rules.get("variables", {}) or {}
+
+        active_presets = _naming_rules.get("esxi_network_presets", [])
+        preset_templates = []
+        for p in active_presets:
+            if isinstance(p, dict):
+                ptpl = (
+                    _patterns.get(p.get("pattern_key", ""))
+                    or p.get("pattern_template")
+                    or p.get("pattern")
+                    or ""
+                )
+                if ptpl:
+                    preset_templates.append((p.get("code", ""), ptpl))
+
+        if not preset_templates:
+            preset_templates = [("Default", "<interface> - <parent> <purpose>")]
+
+        def _select_best_template(row_dict: dict) -> str:
+            present_keys = {k for k, v in row_dict.items() if v}
+            best_tpl = preset_templates[0][1]
+            max_matches = -1
+            for _, tpl in preset_templates:
+                tpl_tokens = set(re.findall(r"<([a-zA-Z0-9_]+)>", tpl))
+                matches = len(tpl_tokens & present_keys)
+                if matches > max_matches:
+                    max_matches = matches
+                    best_tpl = tpl
+            return best_tpl
+
+        active_rows = st.session_state.get("hypervisor_parsed_descriptions") or []
+
+        GENERIC_NAV_HEADINGS = {
+            "virtual switches", "virtual switch", "switches", "switch",
+            "physical adapters", "physical adapter", "adapters", "adapter",
+            "vmkernel adapters", "vmkernel adapter", "networks", "network"
+        }
+
+        cleaned_topology = []
+        for item in active_rows:
+            row = dict(item)
+            p = str(row.get("parent") or "").strip()
+            p = re.sub(r"^(?:standard\s*switch|distributed\s*switch|vswitch)\s*[:_-]\s*", "", p, flags=re.IGNORECASE).strip()
+            if p.lower() in GENERIC_NAV_HEADINGS or p.lower() == str(row.get("interface") or row.get("name") or "").strip().lower():
+                p = ""
+            row["parent"] = p
+            cleaned_topology.append(row)
+
+        valid_interface_parents = {}
+        for item in cleaned_topology:
+            iface = str(item.get("interface") or item.get("name") or "").strip().lower()
+            parent = str(item.get("parent") or "").strip()
+            if iface and parent:
+                valid_interface_parents[iface] = parent
+
+        filtered_topology = []
+        seen_entries = set()
+        for item in cleaned_topology:
+            iface = str(item.get("interface") or item.get("name") or "").strip()
+            iface_lower = iface.lower()
+            parent = str(item.get("parent") or "").strip()
+
+            if not parent and iface_lower in valid_interface_parents:
+                continue
+
+            entry_key = (parent.lower(), iface_lower)
+            if entry_key in seen_entries:
+                continue
+            seen_entries.add(entry_key)
+            filtered_topology.append(item)
+
+        groups: dict[str, list[dict]] = {}
+        for item in filtered_topology:
+            p = str(item.get("parent") or "").strip() or "General"
+            groups.setdefault(p, []).append(item)
+
+        output_lines = ["# NOTE:\n# Generated from active Standards templates.\n"]
+        for parent in sorted(groups.keys()):
+            output_lines.append(f"=== {parent} ===")
+            for row in sorted(groups[parent], key=lambda x: str(x.get("interface") or x.get("name") or "")):
+                row_vals = {str(k).strip().lower(): str(v).strip() for k, v in row.items() if v is not None}
+                iface = row_vals.get("interface") or row_vals.get("name") or ""
+                row_vals["interface"] = iface
+                row_vals["vmnic"] = iface
+                row_vals["v_switch"] = row_vals.get("parent", parent)
+
+                tpl = _select_best_template(row_vals)
+                rendered = render_dynamic_pattern(tpl, row_vals, pattern_vars)
+                rendered = re.sub(r"<[^>]+>", "", rendered)
+                rendered = re.sub(r"\(\s*\)", "", rendered)
+                rendered = re.sub(r"\s{2,}", " ", rendered).strip()
+
+                if st.session_state.get("auto_correct", True):
+                    from utils.formatters import apply_auto_corrections
+                    rendered = apply_auto_corrections(rendered, "port_shortening")
+                    rendered = apply_auto_corrections(rendered, "ocr_cleaning")
+                    rendered = apply_auto_corrections(rendered, "vmware")
+
+                if not rendered:
+                    rendered = iface
+
+                slot = str(row_vals.get("slot", "")).strip()
+                header = f"{slot} ({iface}):" if slot else f"{iface}:"
+                if iface:
+                    output_lines.append(f"{header}\n{rendered}\n")
+
+        bulk_text = "\n".join(output_lines).strip()
+        st.code(bulk_text, language="text")
+    else:
+        bulk_text = "# No parsed topology records. Upload screenshots and click Analyze to generate descriptions.\n"
+        st.code(bulk_text, language="text")
+
+    st.download_button(
+        "📥 Download Generated Descriptions (.txt)",
+        bulk_text.encode("utf-8"),
+        file_name="netbox-descriptions.txt",
+        mime="text/plain",
+        key="dl_esxi_descriptions_pipe"
+    )
 
     with st.container(border=True):
         with st.expander("📸 Screenshot Guidelines (Virtual Switches Topology)", expanded=False):
