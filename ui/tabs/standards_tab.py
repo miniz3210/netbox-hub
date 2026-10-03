@@ -1895,13 +1895,7 @@ def _vlan_presets_editor(rules: dict) -> None:
 def _render_parsing_presets_editor(active_model: str, rules: dict) -> None:
     """Render the Topology Parsing Presets editor harmonized with VLAN preset aesthetics."""
     sm = StandardsManager()
-
-    if "std_preset_save_success" in st.session_state:
-        saved_info = st.session_state["std_preset_save_success"]
-        if time.time() - saved_info["timestamp"] < 10:
-            st.success(saved_info["msg"], icon="✅")
-        else:
-            st.session_state.pop("std_preset_save_success", None)
+    _check_and_render_banner("parsing_presets")
 
     presets = sm.get_parsing_presets()
     preset_names = [p.get("name", "") for p in presets if p.get("name")]
@@ -1970,17 +1964,17 @@ def _render_parsing_presets_editor(active_model: str, rules: dict) -> None:
                     "name": new_name,
                     "instructions": instructions_val,
                 })
-                if sm.save_parsing_presets(presets):
-                    if new_name != selected_name:
-                        st.session_state["_next_preset_to_select"] = new_name
-                    _clear_session_state_prefixes(f"pname_{new_name}", f"pinst_{new_name}")
-                    _notify_preset_changed()
-                    st.session_state["std_preset_save_success"] = {
-                        "msg": f"Topology Parsing Preset '{new_name}' saved & applied successfully!",
-                        "timestamp": time.time()
-                    }
-                    st.toast(f"✅ Preset '{new_name}' saved & applied!", icon="💾")
-                    st.rerun()
+            if sm.save_parsing_presets(presets):
+                if new_name != selected_name:
+                    st.session_state["_next_preset_to_select"] = new_name
+                _clear_session_state_prefixes(f"pname_{new_name}", f"pinst_{new_name}")
+                _notify_preset_changed()
+                st.session_state["card_saved_banner"] = {
+                    "section": "parsing_presets",
+                    "msg": f"✅ Topology Parsing Preset '{new_name}' saved & applied!",
+                    "ts": time.time()
+                }
+                st.rerun()
 
     if btn_del:
         target = selected_name
@@ -1994,7 +1988,11 @@ def _render_parsing_presets_editor(active_model: str, rules: dict) -> None:
                 st.session_state["_next_preset_to_select"] = remaining[0].get("name", "")
                 _clear_session_state_prefixes(f"pname_{target}", f"pinst_{target}")
                 _notify_preset_changed()
-                st.toast(f"🗑️ Preset '{target}' deleted!", icon="✅")
+                st.session_state["card_saved_banner"] = {
+                    "section": "parsing_presets",
+                    "msg": f"✅ Preset '{target}' deleted successfully!",
+                    "ts": time.time()
+                }
                 st.rerun()
 
     with st.expander("✨ AI Assistant: Generate Platform Rules", expanded=False):
@@ -2005,7 +2003,7 @@ def _render_parsing_presets_editor(active_model: str, rules: dict) -> None:
             label_visibility="collapsed",
             help="Enter the platform or vendor name to generate topology parsing rules.",
         )
-        if st.button("⚡ Generate Platform Rules", key="std_parsing_ai_generate", use_container_width=True):
+        if st.button("Generate Platform Rules", key="std_parsing_ai_generate", use_container_width=True):
             if target_platform.strip():
                 try:
                     meta = sm.get_meta_prompt_template(target_platform, "", "")
@@ -2017,13 +2015,54 @@ def _render_parsing_presets_editor(active_model: str, rules: dict) -> None:
                             custom_system_msg=meta,
                             max_tokens=2048,
                         )
-                    st.session_state[f"pinst_{selected_name}"] = generated
-                    st.toast("✅ Rules generated! Review instructions above and click 'Save & Apply Changes'.", icon="⚡")
+                    st.session_state["std_new_preset_name"] = target_platform.strip()
+                    st.session_state["std_new_preset_inst"] = generated
+                    st.toast("✅ Rules generated! Review in the Add Preset section below and click '➕ Add Preset'.")
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ Auto-generation failed: {e}")
             else:
                 st.warning("⚠️ Enter a Platform / Vendor first.")
+
+    with st.form(key="std_parsing_preset_add_form", clear_on_submit=False):
+        new_pname = st.text_input(
+            "New Platform Name",
+            value=st.session_state.get("std_new_preset_name", ""),
+            placeholder="e.g. Proxmox VE",
+            key="std_input_new_preset_name"
+        )
+        new_pinst = st.text_area(
+            "New Platform Parsing Instructions",
+            value=st.session_state.get("std_new_preset_inst", ""),
+            height=180,
+            placeholder="Paste or let AI generate platform-specific instructions...",
+            key="std_input_new_preset_inst"
+        )
+        add_submitted = st.form_submit_button("➕ Add Preset", use_container_width=True)
+
+        if add_submitted:
+            pname_stripped = new_pname.strip()
+            if not pname_stripped:
+                st.warning("⚠️ Enter a platform name to add.")
+            elif pname_stripped in preset_names:
+                st.warning(f"⚠️ Preset '{pname_stripped}' already exists.")
+            else:
+                presets.append({
+                    "id": _next_preset_id([pname_stripped]),
+                    "name": pname_stripped,
+                    "instructions": new_pinst,
+                })
+                if sm.save_parsing_presets(presets):
+                    st.session_state.pop("std_new_preset_name", None)
+                    st.session_state.pop("std_new_preset_inst", None)
+                    st.session_state["_next_preset_to_select"] = pname_stripped
+                    st.session_state["card_saved_banner"] = {
+                        "section": "parsing_presets",
+                        "msg": f"✅ New Preset '{pname_stripped}' created & selected!",
+                        "ts": time.time()
+                    }
+                    _notify_preset_changed()
+                    st.rerun()
 
 
 def _notify_preset_changed() -> None:
