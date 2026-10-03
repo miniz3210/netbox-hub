@@ -419,7 +419,9 @@ def _render_ipam_role_mapping_manager(active_model: str) -> None:
     rules = load_naming_rules()
     role_rules = list(get_ipam_role_mappings(rules))
 
-    with st.expander("🏷️ IPAM Role Mapping Rules (Alias to Canonical Role)", expanded=False):
+    with st.container(border=True):
+        _check_and_render_banner("auto_correction")
+        st.markdown("#### 🏷️ IPAM Role Mapping Rules (Alias to Canonical Role)")
         st.caption(
             "Each row is a regex pattern → canonical role pair. Edit inline or use "
             "the AI generator below to create new rules."
@@ -1511,7 +1513,7 @@ def _vm_editor(rules: dict) -> None:
 VLAND_MAPPINGS_COLS = [4.0, 5.0, 1.2]
 
 def _render_vlan_description_mappings_editor(rules: dict) -> None:
-    with st.expander("🏷️ VLAN Description Mappings (Role → Description)", expanded=True):
+    with st.container(border=True):
         _check_and_render_banner("vlan_desc_mappings")
 
         mappings = dict(get_vlan_description_mappings(rules))
@@ -2113,41 +2115,37 @@ def render_standards_tab(active_model):
             with st.container(border=True):
                 _render_vlan_description_mappings_editor(current_rules)
 
-            _render_ipam_role_mapping_manager(active_model)
+            with st.container(border=True):
+                _render_ipam_role_mapping_manager(active_model)
 
             _render_csv_schemas_editor(current_rules)
 
         with tab_naming:
-            with st.container(border=True):
-                _check_and_render_banner("network_devices")
-                st.markdown("#### 🔧 Network & Security Devices")
-                st.caption("Manage device naming patterns and presets (SW, VS, FW, ION, WAP, RTR, VA).")
-                _preset_type_editor("device", get_device_presets(current_rules), current_rules, prefix="branch",
-                                    card_title="🔧 DEVICE TYPE PRESETS",
-                                    card_caption="",
-                                    section="network_devices", section_label="Network & Security Devices")
-                st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
-                _preset_type_editor("interface", get_interface_presets(current_rules), current_rules, prefix="iface",
-                                    card_title="🔌 INTERFACE TYPE PRESETS",
-                                    card_caption="Manage interface description presets (Uplink, LAG, Po, Access, FW Zone).",
-                                    section="network_devices", section_label="Network & Security Devices")
+            _check_and_render_banner("network_devices")
+            st.markdown("#### 🔧 Network & Security Devices")
+            st.caption("Manage device naming patterns and presets (SW, VS, FW, ION, WAP, RTR, VA).")
+            _preset_type_editor("device", get_device_presets(current_rules), current_rules, prefix="branch",
+                                card_title="🔧 DEVICE TYPE PRESETS",
+                                card_caption="",
+                                section="network_devices", section_label="Network & Security Devices")
+            st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+            _preset_type_editor("interface", get_interface_presets(current_rules), current_rules, prefix="iface",
+                                card_title="🔌 INTERFACE TYPE PRESETS",
+                                card_caption="Manage interface description presets (Uplink, LAG, Po, Access, FW Zone).",
+                                section="network_devices", section_label="Network & Security Devices")
 
-            with st.container(border=True):
-                _check_and_render_banner("hosts")
-                st.markdown("#### 💻 Hosts & Virtual Machines")
-                st.caption("Manage physical hypervisor hosts, virtual machine roles (cvi, afs, sani, vlab), and their naming patterns.")
-                _host_editor(current_rules)
-                st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
-                _vm_editor(current_rules)
+            _check_and_render_banner("hosts")
+            st.markdown("#### 💻 HOSTS TYPE PRESETS")
+            _host_editor(current_rules)
+            st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+            st.markdown("#### 🖱️ VIRTUAL MACHINE PRESETS")
+            _vm_editor(current_rules)
 
-            with st.container(border=True):
-                _check_and_render_banner("esxi")
-                st.markdown("#### ☁️ Hypervisor Network Description Presets")
-                st.caption("Manage Hypervisor interface descriptions (Uplink, PortGroup, Bridge, VMkernel/Management).")
-                _preset_type_editor("esxi_network", get_esxi_network_presets(current_rules), current_rules, prefix="esxinet",
-                                    card_title="☁️ HYPERVISOR NETWORK DESCRIPTION PRESETS",
-                                    card_caption="",
-                                    section="esxi", section_label="Hypervisor Network Description Presets")
+            _check_and_render_banner("esxi")
+            _preset_type_editor("esxi_network", get_esxi_network_presets(current_rules), current_rules, prefix="esxinet",
+                                card_title="☁️ HYPERVISOR NETWORK DESCRIPTION PRESETS",
+                                card_caption="",
+                                section="esxi", section_label="Hypervisor Network Description Presets")
 
         with tab_infra:
             with st.container(border=True):
@@ -2199,8 +2197,6 @@ def render_standards_tab(active_model):
 
             with st.container(border=True):
                 _check_and_render_banner("auto_correction")
-                st.markdown("#### 🧰 Topology Parsing Presets (Platform Rules)")
-                st.caption("Platform-specific parsing instructions injected into the topology analysis prompt.")
                 _render_parsing_presets_editor(active_model, current_rules)
 
             with st.container(border=True):
