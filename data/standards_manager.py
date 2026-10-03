@@ -1,7 +1,12 @@
 import json
 import os
+from datetime import datetime
 from config.constants import RULES_FILE
 from core.session_manager import SessionStateManager as SSM
+
+
+BASELINE_RULES_FILE = "data/naming_rules_baseline.json"
+BASELINE_META_FILE = "data/baseline_meta.json"
 
 
 DEFAULT_PARSING_PRESETS = [
@@ -88,3 +93,62 @@ class StandardsManager:
             "   Output ONLY the JSON array, no markdown fences or explanations."
         )
         return f"{platform_section}{dtype_section}{instructions_section}{notes_section}{output_section}"
+
+    def solidify_baseline(self) -> bool:
+        try:
+            if os.path.exists(RULES_FILE):
+                with open(RULES_FILE, "r", encoding="utf-8") as f:
+                    rules_data = json.load(f)
+            else:
+                rules_data = {}
+            os.makedirs(os.path.dirname(BASELINE_RULES_FILE), exist_ok=True)
+            with open(BASELINE_RULES_FILE, "w", encoding="utf-8") as f:
+                json.dump(rules_data, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            meta = {"timestamp": datetime.now().isoformat()}
+            with open(BASELINE_META_FILE, "w", encoding="utf-8") as f:
+                json.dump(meta, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            return True
+        except Exception:
+            return False
+
+    def get_baseline_timestamp(self) -> str:
+        try:
+            if os.path.exists(BASELINE_META_FILE):
+                with open(BASELINE_META_FILE, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                return meta.get("timestamp", "Factory Default")
+        except Exception:
+            pass
+        return "Factory Default"
+
+    def restore_from_baseline(self) -> bool:
+        try:
+            if os.path.exists(BASELINE_RULES_FILE):
+                with open(BASELINE_RULES_FILE, "r", encoding="utf-8") as f:
+                    baseline_data = json.load(f)
+            else:
+                baseline_data = {}
+            with open(RULES_FILE, "w", encoding="utf-8") as f:
+                json.dump(baseline_data, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            SSM.set_naming_rules(baseline_data)
+            SSM.refresh_naming_rules()
+            return True
+        except Exception:
+            return False
+
+    def compile_full_system_prompt(self) -> str:
+        try:
+            from config.naming_rules import export_rules_as_prompt
+            if os.path.exists(RULES_FILE):
+                with open(RULES_FILE, "r", encoding="utf-8") as f:
+                    rules = json.load(f)
+                return export_rules_as_prompt(rules)
+        except Exception:
+            pass
+        return "# Error compiling system prompt"

@@ -948,7 +948,17 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
     uploaded_imgs = st.session_state.get("staged_topology_imgs", [])
 
+    # Initialize parsing presets for later use
+    preset_sm = StandardsManager()
+    parsing_presets = preset_sm.get_parsing_presets()
+    preset_choices = [p.get("name", "") for p in parsing_presets if p.get("name")]
+    default_preset = st.session_state.get("naming_platform_preset", "General (Default)")
+    if default_preset not in preset_choices:
+        default_preset = preset_choices[0] if preset_choices else "General (Default)"
+    st.session_state["naming_platform_preset"] = default_preset
+
     # Step 1: Preview Staged Screenshots
+    start_analyze = False
     if uploaded_imgs:
         with st.expander(f"🔍 Preview Staged Screenshots ({len(uploaded_imgs)} file(s))", expanded=True):
             preview_cols = st.columns(min(len(uploaded_imgs), 4))
@@ -965,33 +975,19 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
                 st.rerun()
 
-    st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
-    # Step 1: Action Buttons
-    preset_sm = StandardsManager()
-    parsing_presets = preset_sm.get_parsing_presets()
-    preset_choices = [p.get("name", "") for p in parsing_presets if p.get("name")]
-    default_preset = st.session_state.get("naming_platform_preset", "General (Default)")
-    if default_preset not in preset_choices:
-        default_preset = preset_choices[0] if preset_choices else "General (Default)"
-    st.session_state["naming_platform_preset"] = default_preset
-
-    btn_col1, btn_col2 = st.columns([3, 1], vertical_alignment="center")
-    with btn_col1:
-        start_analyze = st.button(
-            "🚀 Analyze Topology & Auto-Populate",
-            key="btn_analyze_hypervisor_img",
-            type="primary",
-            disabled=not bool(uploaded_imgs),
-            use_container_width=True
-        )
-    with btn_col2:
-        if st.button("🗑️ Clear All", key="btn_clear_topo_data", disabled=not bool(uploaded_imgs or st.session_state.get("hypervisor_parsed_descriptions")), use_container_width=True):
-            st.session_state["staged_topology_imgs"] = []
-            st.session_state.pop("hypervisor_parsed_descriptions", None)
-            st.session_state.pop("latest_ocr_raw_text", None)
-            st.session_state.pop("ocr_platform_detected", None)
-            st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
-            st.rerun()
+            st.divider()
+            col_act1, col_act2 = st.columns([3, 1])
+            with col_act1:
+                start_analyze = st.button("Analyze Topology & Auto-Populate", type="primary", use_container_width=True)
+            with col_act2:
+                btn_clear = st.button("Clear All", use_container_width=True)
+            if btn_clear:
+                st.session_state["staged_topology_imgs"] = []
+                st.session_state.pop("hypervisor_parsed_descriptions", None)
+                st.session_state.pop("latest_ocr_raw_text", None)
+                st.session_state.pop("ocr_platform_detected", None)
+                st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
+                st.rerun()
 
     # Step 1: 4-Stage Execution with Universal Image Preprocessing (Map-Reduce Pipeline)
     if start_analyze:
@@ -1165,28 +1161,23 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             st.error(f"Pipeline execution failed: {str(e)}")
             st.code(traceback.format_exc(), language="text")
 
-    # Step 1: OCR Inspector with Platform Badge (Same Row)
+    # Step 1: OCR Inspector with Platform Badge (Full-width Expander)
     if st.session_state.get("latest_ocr_raw_text"):
         raw_txt = st.session_state["latest_ocr_raw_text"]
-        detected_platform = st.session_state.get("ocr_platform_detected", "Auto (Pending)")
+        detected_platform = st.session_state.get("ocr_platform_detected", "VMware ESXi")
 
-        col_ocr, col_badge = st.columns([3, 1])
-        with col_ocr:
-            with st.expander(f"📄 OCR Raw Text Inspector (Click to expand)", expanded=False):
-                # Manual override dropdown
-                preset_override_val = st.session_state.get("ocr_preset_override", "")
-                override_select = st.selectbox(
-                    "Manual Platform Override (Optional)",
-                    options=["General (Default)"] + [p.get("name", "") for p in parsing_presets if p.get("name")],
-                    index=0 if not preset_override_val else 1 + [p.get("name", "") for p in parsing_presets if p.get("name")].index(preset_override_val) if preset_override_val in [p.get("name", "") for p in parsing_presets if p.get("name")] else 0,
-                    key="ocr_preset_override",
-                    help="Override auto-detected platform with a specific parsing preset.",
-                )
-                st.caption(f"✅ Extracted {len(raw_txt)} characters from staged screenshots")
-                st.code(raw_txt, language="text")
-        with col_badge:
-            st.markdown(f"💡 **Platform:** `{detected_platform}`")
-            st.caption("Auto-detected from OCR token scan")
+        if detected_platform:
+            expander_title = f"OCR Raw Text Inspector  |  Platform: {detected_platform} (Click to expand)"
+        else:
+            expander_title = "OCR Raw Text Inspector (Click to expand)"
+
+        with st.expander(expander_title, expanded=False):
+            preset_override = st.selectbox(
+                "Manual Platform Override (Optional)",
+                options=parsing_presets and [p.get("name", "") for p in parsing_presets if p.get("name")] or ["General (Default)"],
+                help="Override auto-detected platform rules if needed."
+            )
+            st.text_area("Extracted OCR Tokens", value=raw_txt, height=220, disabled=True)
 
     # 2️⃣ Step 2: Extracted Variables Inspector (Full-Width & Clean Filtering)
     st.divider()
