@@ -1515,6 +1515,7 @@ VLAND_MAPPINGS_COLS = [4.0, 5.0, 1.2]
 def _render_vlan_description_mappings_editor(rules: dict) -> None:
     with st.container(border=True):
         _check_and_render_banner("vlan_desc_mappings")
+        st.markdown("#### 🏷️ VLAN Description Mappings (Role → Description)")
 
         mappings = dict(get_vlan_description_mappings(rules))
 
@@ -2112,11 +2113,9 @@ def render_standards_tab(active_model):
         with tab_ipam:
             _vlan_presets_editor(current_rules)
 
-            with st.container(border=True):
-                _render_vlan_description_mappings_editor(current_rules)
+            _render_vlan_description_mappings_editor(current_rules)
 
-            with st.container(border=True):
-                _render_ipam_role_mapping_manager(active_model)
+            _render_ipam_role_mapping_manager(active_model)
 
             _render_csv_schemas_editor(current_rules)
 
