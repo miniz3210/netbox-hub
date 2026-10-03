@@ -2015,8 +2015,8 @@ def _render_parsing_presets_editor(active_model: str, rules: dict) -> None:
                             custom_system_msg=meta,
                             max_tokens=2048,
                         )
-                    st.session_state["std_new_preset_name"] = target_platform.strip()
-                    st.session_state["std_new_preset_inst"] = generated
+                    st.session_state["std_input_new_preset_name"] = target_platform.strip()
+                    st.session_state["std_input_new_preset_inst"] = generated
                     st.toast("✅ Rules generated! Review in the Add Preset section below and click '➕ Add Preset'.")
                     st.rerun()
                 except Exception as e:
@@ -2024,16 +2024,20 @@ def _render_parsing_presets_editor(active_model: str, rules: dict) -> None:
             else:
                 st.warning("⚠️ Enter a Platform / Vendor first.")
 
+        st.divider()
+        st.markdown("**📋 Export Active Preset Rules for External AI**")
+        st.caption("Copy the full system prompt and active instructions for use in ChatGPT, Claude, etc.")
+        active_prompt_export = sm.get_meta_prompt_template(selected_name, instructions_val, "")
+        st.code(active_prompt_export, language="markdown")
+
     with st.form(key="std_parsing_preset_add_form", clear_on_submit=False):
         new_pname = st.text_input(
             "New Platform Name",
-            value=st.session_state.get("std_new_preset_name", ""),
             placeholder="e.g. Proxmox VE",
             key="std_input_new_preset_name"
         )
         new_pinst = st.text_area(
             "New Platform Parsing Instructions",
-            value=st.session_state.get("std_new_preset_inst", ""),
             height=180,
             placeholder="Paste or let AI generate platform-specific instructions...",
             key="std_input_new_preset_inst"
@@ -2053,8 +2057,8 @@ def _render_parsing_presets_editor(active_model: str, rules: dict) -> None:
                     "instructions": new_pinst,
                 })
                 if sm.save_parsing_presets(presets):
-                    st.session_state.pop("std_new_preset_name", None)
-                    st.session_state.pop("std_new_preset_inst", None)
+                    st.session_state.pop("std_input_new_preset_name", None)
+                    st.session_state.pop("std_input_new_preset_inst", None)
                     st.session_state["_next_preset_to_select"] = pname_stripped
                     st.session_state["card_saved_banner"] = {
                         "section": "parsing_presets",
