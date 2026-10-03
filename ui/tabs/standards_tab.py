@@ -2007,10 +2007,15 @@ def _render_parsing_presets_editor(active_model: str, rules: dict) -> None:
             if target_platform.strip():
                 try:
                     meta = sm.get_meta_prompt_template(target_platform, "", "")
+                    user_prompt = (
+                        f"Generate the comprehensive, production-grade topology parsing ruleset for the '{target_platform.strip()}' platform.\n"
+                        "Assume standard platform network architecture (e.g., Linux bridges, bonds, physical NICs, VLAN tags, cluster networks).\n"
+                        "Output ONLY the raw parsing instructions ruleset in plain English matching the template format. "
+                        "Do not ask clarifying questions, and do not include conversational greetings or markdown conversational framing."
+                    )
                     with st.spinner(f"Generating platform rules using {active_model}..."):
                         generated = call_ai(
-                            "Generate the complete platform-specific topology parsing ruleset for the platform described below. "
-                            "Return ONLY the ruleset text (English), no commentary.",
+                            user_prompt,
                             active_model,
                             custom_system_msg=meta,
                             max_tokens=2048,
@@ -2024,11 +2029,10 @@ def _render_parsing_presets_editor(active_model: str, rules: dict) -> None:
             else:
                 st.warning("⚠️ Enter a Platform / Vendor first.")
 
-        st.divider()
-        st.markdown("**📋 Export Active Preset Rules for External AI**")
-        st.caption("Copy the full system prompt and active instructions for use in ChatGPT, Claude, etc.")
-        active_prompt_export = sm.get_meta_prompt_template(selected_name, instructions_val, "")
-        st.code(active_prompt_export, language="markdown")
+        with st.expander("📋 Export Active Preset Rules for External AI", expanded=False):
+            st.caption("Copy the full system prompt and active instructions for use in external LLMs (ChatGPT, Claude, etc.).")
+            active_prompt_export = sm.get_meta_prompt_template(selected_name, instructions_val, "")
+            st.code(active_prompt_export, language="markdown")
 
     with st.form(key="std_parsing_preset_add_form", clear_on_submit=False):
         new_pname = st.text_input(

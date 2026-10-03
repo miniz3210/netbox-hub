@@ -18,7 +18,7 @@ DEFAULT_PARSING_PRESETS = [
     {
         "id": "vmware_esxi",
         "name": "VMware ESXi",
-        "instructions": "[PLATFORM ARCHITECTURE: VMWARE ESXI]\n1. HIERARCHY & CONTAINER ROLES:\n   - Root Container (parent): Any entity labeled 'vSwitchX', 'StandardSwitch:X', or 'dvSwitchX'.\n   - Sub-Network Profile (purpose): Functional labels (e.g., 'ManagementNetwork', 'vMotion', 'VM Network', 'iSCSI*') are Port Groups/Purposes, NEVER the parent.\n   - Endpoints (interface): Physical adapters ('vmnic*') and VMkernel ports ('vmk*').\n\n2. PORTGROUP & PURPOSE ENFORCEMENT (MANDATORY):\n   - Port Group / Service Purpose MUST be captured for every network entity and NEVER omitted.\n   - For VMkernel ports (vmk*):\n     * 'purpose' MUST strictly capture the associated functional Port Group name (e.g., 'Management Network', 'vMotion', 'iSCSI01').\n     * Final formatting standard: `<Purpose/Service> (<vSwitch>)` (e.g., `Management Network (vSwitch0)`).\n   - For Physical Uplinks (vmnic*):\n     * 'purpose' MUST incorporate the Port Groups served and Uplink Teaming status (Active Uplink or Standby Uplink; NEVER 'Primary').\n     * Final formatting standard: `<vmnicX> - <vSwitch> <Purpose> Active Uplink / Standby Uplink`.\n   - Virtual Machine Port Groups (e.g., 'VM Network'):\n     * Must be captured in the Switch / Uplink topology context, never dropped or omitted.\n   - 'purpose' FIELD CLEANLINESS (ELIMINATE DOUBLE-PREFIX):\n     * The `purpose` variable MUST contain ONLY the functional role / PortGroup name and uplink state (e.g., 'ManagementNetwork Active Uplink', 'iSCSI01 Active Uplink', 'vMotion Active Uplink', 'Management Network').\n     * STRICTLY PROHIBITED: NEVER include '{interface} - {parent}' or 'vmnicX - vSwitchY' prefix inside the `purpose` field. The output template handles interface and parent prefixes; adding them into `purpose` causes double-prefix duplication errors.\n\n3. MULTI-UPLINK vSWITCH ASSOCIATION (TOPOLOGICAL PARENT PRIORITY):\n   - A single vSwitch often binds multiple physical uplinks.\n   - In topology diagrams, all physical adapters listed within a switch's 'Physical Adapters' box or row (e.g., BOTH vmnic1 and vmnic5 under vSwitch0; BOTH vmnic4 and vmnic6 under vSwitch1) MUST strictly inherit that switch as their 'parent'.\n   - ALL physical adapters (vmnic*) listed under a vSwitch MUST inherit that vSwitch as 'parent'.\n   - vmnic5 MUST be assigned parent 'vSwitch0' and vmnic6 MUST be assigned parent 'vSwitch1' when shown in their respective switch blocks.\n\n4. CONFLICT OVERRIDE:\n   - Topology diagram view connections ALWAYS override isolated sheets showing 'No networks'.\n   - OVERRIDE PHYSICAL ADAPTER PROPERTY STATUS: When cross-referencing between topology diagrams ('Virtual switches') and network adapter properties ('Physical network adapters'), topology diagram associations ALWAYS override standalone properties stating 'No networks', 'Unconnected', or blank switch indicators.\n   - NEVER set parent to empty or categorize an adapter as 'General' / 'Unassigned' if it is visually linked to a vSwitch in any diagram view.\n\n5. VIRTUAL SWITCH & UPLINK TOPOLOGY CORRELATION RULES:\n   - Each 'Standard Switch: <switch_name>' topology diagram associates its physical adapters directly:\n     Any vmnic listed in the right-hand 'Physical Adapters' box strictly has its parent set to that specific vSwitch (e.g., vmnic1 and vmnic5 inside vSwitch0 box -> parent is 'vSwitch0'; vmnic4 and vmnic6 inside vSwitch1 box -> parent is 'vSwitch1').\n   - Cross-Screenshot Reconciliation: When properties screenshots ('Physical network adapter: vmnicX') and topology screenshots ('Virtual switches') are combined, match entries by vmnic name, ensuring PCI slot, driver, speed, and switch parent are fully populated without leaving parent blank.",
+        "instructions": "[PLATFORM ARCHITECTURE: VMWARE ESXI]\n1. HIERARCHY & CONTAINER ROLES:\n   - Root Container (parent): Any entity labeled 'vSwitchX', 'StandardSwitch:X', or 'dvSwitchX'.\n   - Sub-Network Profile (purpose): Functional labels (e.g., 'Management Network', 'vMotion', 'VM Network', 'iSCSI*') are Port Groups/Purposes, NEVER the parent container.\n   - Endpoints (interface): Physical network adapters ('vmnic*') and VMkernel ports ('vmk*').\n\n2. PORTGROUP & PURPOSE ENFORCEMENT (TOKEN BAG PURITY - ELIMINATE DOUBLE-PREFIX):\n   - Port Group / Service Purpose MUST be captured for every network entity and NEVER omitted.\n   - For Physical Uplinks (vmnic*):\n     * The 'purpose' field MUST contain ONLY: <PortGroup/Service> Active Uplink or <PortGroup/Service> Standby Uplink (NEVER 'Primary').\n     * Examples: 'Management Network Active Uplink', 'iSCSI01 Active Uplink', 'vMotion Active Uplink'.\n     * STRICT PROHIBITION: NEVER prefix 'purpose' with '{interface} - {parent}' or 'vmnicX - vSwitchY'. The downstream renderer automatically handles interface and parent prefixes; adding them into 'purpose' causes critical double-prefix duplication errors.\n   - For VMkernel ports (vmk*):\n     * The 'purpose' field MUST capture ONLY: <Purpose/Service> (<vSwitch>)\n     * Examples: 'Management Network (vSwitch0)', 'iSCSI01 (vSwitch01)', 'vMotion (vSwitch1)'.\n     * STRICT PROHIBITION: NEVER prefix with 'vmkX - vSwitchY'.\n\n3. MULTI-ADAPTER UPLINK AGGREGATION (GENERIC TOPOLOGY INHERITANCE):\n   - In VMware ESXi topology diagrams, a single vSwitch frequently binds multiple physical uplinks (e.g., active/standby teaming or multi-adapter trunks).\n   - ALL physical network adapters (vmnic*) visually contained within a switch's 'Physical Adapters' box or connected directly to that switch MUST strictly inherit that switch as their 'parent'.\n   - NEVER drop an adapter's parent or treat it as standalone if it is visually grouped under any vSwitch in the topology diagram.\n\n4. CONFLICT RESOLUTION: TOPOLOGY DIAGRAM OVERRIDES STANDALONE PROPERTIES:\n   - When cross-referencing between topology views ('Virtual switches') and individual adapter properties ('Physical network adapters'):\n     * Visual switch topology ALWAYS takes absolute precedence over isolated properties showing 'No networks', 'Unconnected', or blank switch columns.\n     * If an adapter is bound to a vSwitch in a topology diagram, it is strictly ACTIVE or STANDBY for that switch. NEVER mark its parent as empty and NEVER set purpose to 'Unassigned' based on an isolated property sheet.\n   - Cross-Screenshot Reconciliation: Match entries across screenshots by vmnic name, ensuring PCI slot, driver, speed, and parent vSwitch are fully populated.",
     },
 ]
 
@@ -69,28 +69,37 @@ class StandardsManager:
             "\n\n2. TOPOLOGY PARSING RULES:\n"
             "   - Extract all network interfaces, adapters, port groups, and virtual switches.\n"
             "   - Identify parent-container relationships (which interfaces belong to which switch/fabric).\n"
-            "   - Normalize interface names (e.g., vmnic, eth, bond, vmk) to consistent lowercase identifiers.\n"
+            "   - Normalize interface names to consistent lowercase identifiers (e.g., vmnic, eth, bond, vmk, eth0).\n"
             "   - Map functional roles/purposes (management, storage, vMotion, etc.) from descriptions.\n"
-            "   - For multi-adapter setups, group physical uplinks under their parent switch.\n"
+            "   - For multi-adapter setups, group all physical uplinks under their parent switch via topological inheritance.\n"
             "   - Prefer topology diagram views over isolated status sheets when conflicts arise.\n"
+            "   - NEVER omit the 'purpose' field for any network entity. Every interface, adapter, or port MUST have a populated purpose.\n"
+            "   - 'purpose' FIELD PURITY: The 'purpose' value MUST contain ONLY the functional role / port group name and state. "
+            "NEVER self-format with '{interface} - {parent}' or similar prefixes inside the 'purpose' value itself — "
+            "the output template handles those prefixes automatically; embedding them in 'purpose' causes double-prefix duplication.\n"
+            "   - GENERIC TOPOLOGICAL PARENT BINDING: When an entity appears bound in a topology diagram, "
+            "its 'parent' MUST reflect that binding even if isolated property sheets show 'No networks', 'Unconnected', or blank values. "
+            "Never default to empty parent or 'Unassigned' when topology confirms a connection.\n"
         )
         notes_section = (
             f"\n3. ADDITIONAL NOTES / CUSTOM REQUIREMENTS:\n   {notes}\n"
-            if notes.strip() else "\n3. ADDITIONAL NOTES / CUSTOM REQUIREMENTS:\n   (none specified)\n"
+            if notes.strip() else "\n3. ADDITIONAL NOTES / CUSTOM REQUIREMENTS:\n"
+            "   (Minimal notes detected. Infer industry-standard networking architecture for this platform "
+            "and generate comprehensive, production-grade parsing rules autonomously. "
+            "Do not ask clarifying questions. Apply standard topological invariants and purpose-field purity rules "
+            "appropriate to the platform's known networking stack.)\n"
         )
         output_section = (
             "\n4. OUTPUT FORMAT:\n"
-            "   Return a flat JSON array where each object represents one extracted interface/endpoint with these keys:\n"
-            "   - interface (str): the interface name (e.g. vmnic0, vmk0, eth0)\n"
-            "   - parent (str): the container it belongs to (e.g. vSwitch0, vmbr0); empty if unassigned\n"
-            "   - purpose (str): functional role/description\n"
-            "   - speed (str): connection speed if visible\n"
-            "   - slot (str): hardware slot if visible\n"
-            "   - ip (str): IP/CIDR if assigned\n"
-            "   - vlan (str): VLAN tag/ID if applicable\n"
-            "   - remote_device (str): peer device name if known\n"
-            "   - remote_port (str): peer port if known\n"
-            "   Output ONLY the JSON array, no markdown fences or explanations."
+            "   Return the complete platform-specific topology parsing ruleset as plain English instructions. "
+            "Match the template structure shown below exactly:\n"
+            "   [PLATFORM ARCHITECTURE: <PLATFORM>]\n"
+            "   1. HIERARCHY & CONTAINER ROLES\n"
+            "   2. PORTGROUP & PURPOSE ENFORCEMENT (TOKEN BAG PURITY)\n"
+            "   3. MULTI-ADAPTER UPLINK AGGREGATION (TOPOLOGICAL INHERITANCE)\n"
+            "   4. CONFLICT RESOLUTION: TOPOLOGY OVERRIDES STANDALONE\n\n"
+            "   Output ONLY the raw ruleset text. Do not ask clarifying questions. "
+            "Do not include conversational greetings, markdown framing, or explanatory prose outside the ruleset."
         )
         return f"{platform_section}{dtype_section}{instructions_section}{notes_section}{output_section}"
 
