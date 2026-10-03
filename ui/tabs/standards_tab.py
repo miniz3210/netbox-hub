@@ -1919,6 +1919,13 @@ def _render_parsing_presets_editor(active_model: str, rules: dict) -> None:
     st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(preset_names)} presets</span></div>", unsafe_allow_html=True)
     st.caption("Platform-specific parsing instructions injected into the topology analysis prompt in the Naming tab.")
 
+    # PRE-WIDGET SYNC: consume any staged selection before instantiating the
+    # selectbox so we never write to its session-state key after creation.
+    if "_next_preset_to_select" in st.session_state:
+        next_sel = st.session_state.pop("_next_preset_to_select")
+        if next_sel in preset_names:
+            st.session_state["std_preset_selector"] = next_sel
+
     selected_name = st.selectbox(
         "Select Preset",
         options=preset_names,
@@ -1956,12 +1963,13 @@ def _render_parsing_presets_editor(active_model: str, rules: dict) -> None:
                     "name": new_name,
                     "instructions": instructions_val,
                 })
-            if sm.save_parsing_presets(presets):
-                st.session_state["std_preset_selector"] = new_name
-                _clear_session_state_prefixes(f"pname_{new_name}", f"pinst_{new_name}")
-                _notify_preset_changed()
-                st.toast(f"✅ Preset '{new_name}' saved & applied!", icon="💾")
-                st.rerun()
+                if sm.save_parsing_presets(presets):
+                    if new_name != selected_name:
+                        st.session_state["_next_preset_to_select"] = new_name
+                    _clear_session_state_prefixes(f"pname_{new_name}", f"pinst_{new_name}")
+                    _notify_preset_changed()
+                    st.toast(f"✅ Preset '{new_name}' saved & applied!", icon="💾")
+                    st.rerun()
 
     if btn_del:
         target = selected_name
@@ -1972,7 +1980,7 @@ def _render_parsing_presets_editor(active_model: str, rules: dict) -> None:
             st.warning("⚠️ At least one preset must remain.")
         else:
             if sm.save_parsing_presets(remaining):
-                st.session_state["std_preset_selector"] = remaining[0].get("name", "")
+                st.session_state["_next_preset_to_select"] = remaining[0].get("name", "")
                 _clear_session_state_prefixes(f"pname_{target}", f"pinst_{target}")
                 _notify_preset_changed()
                 st.toast(f"🗑️ Preset '{target}' deleted!", icon="✅")

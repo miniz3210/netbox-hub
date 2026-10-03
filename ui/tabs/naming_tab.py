@@ -823,9 +823,9 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             st.info("Verified against ESXi naming standards.")
 
     # --- SECTION 2: 📸 SCREENSHOT OCR PIPELINE (3-STEP WORKFLOW) ---
-    with st.expander("📸 1️⃣ Screenshot OCR Pipeline (Upload & Platform Rules)", expanded=True):
-        st.caption("Upload and stage hypervisor topology screenshots for OCR analysis.")
+    st.markdown("##### 1️⃣ Screenshot OCR Pipeline")
 
+    with st.container(border=True):
         with st.expander("📸 Screenshot Guidelines (Virtual Switches Topology)", expanded=False):
             st.markdown("""
 **Recommended Capture Location:**
@@ -960,43 +960,41 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                     st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
                     st.rerun()
 
-            # Compact single-row control bar: Platform Preset | Analyze | Clear
-            preset_sm_naming = StandardsManager()
-            parsing_presets_naming = preset_sm_naming.get_parsing_presets()
-            preset_choices_naming = [p.get("name", "") for p in parsing_presets_naming if p.get("name")]
-            default_platform = "General (Default)"
-            col_pre, col_btn_an, col_btn_clr = st.columns([5, 3, 2], vertical_alignment="center")
-            with col_pre:
-                st.selectbox(
-                    "Target Platform Preset",
-                    options=preset_choices_naming,
-                    index=preset_choices_naming.index(default_platform) if default_platform in preset_choices_naming else 0,
-                    key="naming_target_platform_preset",
-                    label_visibility="collapsed",
-                    help=None
-                )
-            with col_btn_an:
-                btn_analyze = st.button("🚀 Analyze & Auto-Populate", type="primary", use_container_width=True)
-                st.session_state["_btn_analyze_naming"] = btn_analyze
-            with col_btn_clr:
-                btn_clear = st.button("🗑️ Clear All", use_container_width=True)
-            if btn_clear:
-                st.session_state["staged_topology_imgs"] = []
-                st.session_state.pop("hypervisor_parsed_descriptions", None)
-                st.session_state.pop("latest_ocr_raw_text", None)
-                st.session_state.pop("_btn_analyze_naming", None)
-                st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
-                st.rerun()
+        # Clean single-row control bar (visible unconditionally)
+        preset_sm_naming = StandardsManager()
+        parsing_presets_naming = preset_sm_naming.get_parsing_presets()
+        preset_choices_naming = ["General Platform (Default)"] + [p.get("name", "") for p in parsing_presets_naming if p.get("name")]
+        col_plat, col_btn_an, col_btn_clr = st.columns([5, 3, 2], vertical_alignment="center")
+        with col_plat:
+            st.selectbox(
+                "Target Platform",
+                options=preset_choices_naming,
+                index=0,
+                key="naming_target_platform",
+                label_visibility="collapsed",
+                help=None
+            )
+        with col_btn_an:
+            btn_analyze = st.button("🚀 Analyze & Auto-Populate", type="primary", use_container_width=True)
+            st.session_state["_btn_analyze_naming"] = btn_analyze
+        with col_btn_clr:
+            btn_clear = st.button("🗑️ Clear All", use_container_width=True)
+        if btn_clear:
+            st.session_state["staged_topology_imgs"] = []
+            st.session_state.pop("hypervisor_parsed_descriptions", None)
+            st.session_state.pop("latest_ocr_raw_text", None)
+            st.session_state.pop("_btn_analyze_naming", None)
+            st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
+            st.rerun()
 
-    # Full-width OCR Raw Text Inspector (immediately below the control bar area)
+    # Full-width OCR Raw Text Inspector (immediately below the control bar)
     staged_imgs = st.session_state.get("staged_topology_imgs", [])
-    if staged_imgs:
-        raw_ocr_text = st.session_state.get("latest_ocr_raw_text", "")
-        with st.expander("📄 OCR Raw Text Inspector (Click to expand)", expanded=False):
-            char_count = len(raw_ocr_text) if raw_ocr_text else 0
-            img_count = len(staged_imgs)
-            st.caption(f"ℹ️ Extracted {char_count:,} characters across {img_count} screenshot(s)")
-            st.text_area("Extracted OCR Tokens", value=raw_ocr_text, height=420, disabled=True)
+    raw_ocr_text = st.session_state.get("latest_ocr_raw_text", "")
+    with st.expander("📄 OCR Raw Text Inspector (Click to expand)", expanded=False):
+        char_count = len(raw_ocr_text) if raw_ocr_text else 0
+        img_count = len(staged_imgs)
+        st.caption(f"ℹ️ Extracted {char_count:,} characters across {img_count} screenshot(s)")
+        st.text_area("Extracted OCR Tokens", value=raw_ocr_text, height=420, disabled=True)
 
     # Execute analyze when button clicked
     start_analyze = st.session_state.get("_btn_analyze_naming", False)
@@ -1091,7 +1089,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             )
 
             # Append preset instructions if applicable (explicit selection only)
-            selected_preset_name = st.session_state.get("naming_target_platform_preset", "General (Default)")
+            selected_preset_name = st.session_state.get("naming_target_platform", "General Platform (Default)")
             preset_instructions = ""
             if selected_preset_name:
                 for _p in parsing_presets:
