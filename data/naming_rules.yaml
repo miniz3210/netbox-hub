@@ -901,22 +901,5 @@
       "active_vmnics",
       "standby_vmnics"
     ]
-  },
-  "parsing_presets": [
-    {
-      "id": "general_default",
-      "name": "General (Default)",
-      "instructions": ""
-    },
-    {
-      "id": "vmware_esxi",
-      "name": "VMware ESXi",
-      "instructions": "[PLATFORM ARCHITECTURE: VMWARE ESXI]\n1. HIERARCHY & CONTAINER ROLES:\n   - Root Container (parent): Any entity labeled 'vSwitchX', 'StandardSwitch:X', or 'dvSwitchX'.\n     * CRITICAL: Preserve EXACT switch naming including leading zeros or trailing digits (e.g., 'vSwitch0', 'vSwitch1', 'vSwitch01', 'vSwitch02' are DISTINCT switches; NEVER merge or truncate them).\n   - Sub-Network Profile (purpose): Functional port groups (e.g., 'ManagementNetwork', 'vMotion', 'VM Network', 'iSCSI*') are Purposive Profiles, NEVER the parent container.\n   - Endpoints (interface): Physical adapters ('vmnic*') and VMkernel ports ('vmk*').\n\n2. MULTI-ADAPTER UPLINK AGGREGATION & TEAMING:\n   - A single vSwitch typically aggregates multiple physical uplinks (e.g., active and standby).\n   - EVERY physical adapter (vmnic*) listed under a switch's Physical Adapters column MUST inherit that exact switch as its 'parent'.\n   - Capture uplink role if visually indicated (e.g., append 'Active Uplink' or 'Standby Uplink' into purpose context; never use 'Primary').\n\n3. CONFLICT OVERRIDE & SCOPE ARBITRATION:\n   - Topological diagram associations ALWAYS supersede single-adapter status sheets stating 'No networks' or 'Unconnected'.\n   - If an adapter appears under ANY switch in any diagram view, it is STRICTLY PROHIBITED from being categorized as 'General' or unassigned.\n\n4. CROSS-SCREENSHOT RECORD RECONCILIATION:\n   - When multiple screenshots are provided (e.g., Virtual Switches topology views + Physical Adapter property views):\n     * Merge information for each unique 'vmnic*' into a SINGLE record.\n     * Retain 'parent' and 'purpose' from the Virtual Switches topology.\n     * Populate 'slot' (PCI Location) and CDP/LLDP device/port information from the Physical Adapter property sheets.\n     * Never create duplicate rows for the same interface name."
-    },
-    {
-      "id": "general_default_2",
-      "name": "Proxmox",
-      "instructions": ""
-    }
-  ]
+  }
 }

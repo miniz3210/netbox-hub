@@ -963,7 +963,9 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         # Clean single-row control bar (visible unconditionally)
         preset_sm_naming = StandardsManager()
         parsing_presets_naming = preset_sm_naming.get_parsing_presets()
-        preset_choices_naming = ["General Platform (Default)"] + [p.get("name", "") for p in parsing_presets_naming if p.get("name")]
+        raw_presets = [p.get("name", "") for p in parsing_presets_naming if p.get("name")]
+        filtered = [p for p in raw_presets if p not in ["General", "General (Default)", "General Platform (Default)"]]
+        preset_choices_naming = ["General Platform (Default)"] + filtered
         col_plat, col_btn_an, col_btn_clr = st.columns([5, 3, 2], vertical_alignment="center")
         with col_plat:
             st.selectbox(
@@ -1090,10 +1092,13 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
             # Append preset instructions if applicable (explicit selection only)
             selected_preset_name = st.session_state.get("naming_target_platform", "General Platform (Default)")
+            # Resolve display label to canonical preset name for lookup
+            _display_to_canonical = {"General Platform (Default)": "General (Default)"}
+            canonical_preset_name = _display_to_canonical.get(selected_preset_name, selected_preset_name)
             preset_instructions = ""
-            if selected_preset_name:
+            if canonical_preset_name:
                 for _p in parsing_presets:
-                    if _p.get("name") == selected_preset_name:
+                    if _p.get("name") == canonical_preset_name:
                         preset_instructions = _p.get("instructions", "")
                         break
             if preset_instructions:

@@ -1896,6 +1896,13 @@ def _render_parsing_presets_editor(active_model: str, rules: dict) -> None:
     """Render the Topology Parsing Presets editor harmonized with VLAN preset aesthetics."""
     sm = StandardsManager()
 
+    if "std_preset_save_success" in st.session_state:
+        saved_info = st.session_state["std_preset_save_success"]
+        if time.time() - saved_info["timestamp"] < 10:
+            st.success(saved_info["msg"], icon="✅")
+        else:
+            st.session_state.pop("std_preset_save_success", None)
+
     presets = sm.get_parsing_presets()
     preset_names = [p.get("name", "") for p in presets if p.get("name")]
 
@@ -1968,6 +1975,10 @@ def _render_parsing_presets_editor(active_model: str, rules: dict) -> None:
                         st.session_state["_next_preset_to_select"] = new_name
                     _clear_session_state_prefixes(f"pname_{new_name}", f"pinst_{new_name}")
                     _notify_preset_changed()
+                    st.session_state["std_preset_save_success"] = {
+                        "msg": f"Topology Parsing Preset '{new_name}' saved & applied successfully!",
+                        "timestamp": time.time()
+                    }
                     st.toast(f"✅ Preset '{new_name}' saved & applied!", icon="💾")
                     st.rerun()
 
@@ -2127,7 +2138,7 @@ def render_standards_tab(active_model):
                     st.rerun()
 
         standards_mgr = StandardsManager()
-        with st.expander("📋 Topology Parsing Presets (Platform Rules)", expanded=True):
+        with st.expander("📋 Topology Parsing Presets (Platform Rules)", expanded=False):
             _render_parsing_presets_editor(active_model, current_rules)
         with st.expander("⚙️ Advanced: Baseline Management & System Prompt Export (Click to expand)", expanded=False):
             st.markdown("#### 📦 Global Ruleset Baseline (Reset Anchor)")
