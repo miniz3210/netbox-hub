@@ -1923,22 +1923,21 @@ def _render_parsing_presets_editor(active_model: str, rules: dict) -> None:
             st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(preset_names)} presets</span></div>", unsafe_allow_html=True)
         st.caption("Platform-specific parsing instructions injected into the topology analysis prompt in the Naming tab.")
 
-    # PRE-WIDGET SYNC: consume any staged selection before instantiating the
-    # selectbox so we never write to its session-state key after creation.
-    if "_next_preset_to_select" in st.session_state:
-        next_sel = st.session_state.pop("_next_preset_to_select")
-        if next_sel in preset_names:
-            st.session_state["std_preset_selector"] = next_sel
+        # PRE-WIDGET SYNC: consume any staged selection before instantiating the
+        # selectbox so we never write to its session-state key after creation.
+        if "_next_preset_to_select" in st.session_state:
+            next_sel = st.session_state.pop("_next_preset_to_select")
+            if next_sel in preset_names:
+                st.session_state["std_preset_selector"] = next_sel
 
-    selected_name = st.selectbox(
-        "Select Preset",
-        options=preset_names,
-        key="std_preset_selector",
-        help="Choose a preset to edit."
-    )
-    curr = next((p for p in presets if p.get("name") == selected_name), {})
+        selected_name = st.selectbox(
+            "Select Preset",
+            options=preset_names,
+            key="std_preset_selector",
+            help="Choose a preset to edit."
+        )
+        curr = next((p for p in presets if p.get("name") == selected_name), {})
 
-    with st.container(border=True):
         name_val = st.text_input("Platform Name", value=curr.get("name", ""), key=f"pname_{selected_name}")
         instructions_val = st.text_area(
             "Parsing Instructions (English System Prompt Rules)",
@@ -1947,169 +1946,169 @@ def _render_parsing_presets_editor(active_model: str, rules: dict) -> None:
             key=f"pinst_{selected_name}"
         )
 
-    col_save, col_del = st.columns([3, 1])
-    with col_save:
-        btn_save = st.button("💾 Save & Apply Changes", type="primary", use_container_width=True)
-    with col_del:
-        btn_del = st.button("🗑️ Delete Selected Preset", use_container_width=True)
+        col_save, col_del = st.columns([3, 1])
+        with col_save:
+            btn_save = st.button("💾 Save & Apply Changes", type="primary", use_container_width=True)
+        with col_del:
+            btn_del = st.button("🗑️ Delete Selected Preset", use_container_width=True)
 
-    if btn_save:
-        new_name = name_val.strip()
-        if not new_name:
-            st.warning("⚠️ Enter a preset name first.")
-        else:
-            existing = [p for p in presets if p.get("name") == new_name]
-            if existing:
-                existing[0]["instructions"] = instructions_val
+        if btn_save:
+            new_name = name_val.strip()
+            if not new_name:
+                st.warning("⚠️ Enter a preset name first.")
             else:
-                presets.append({
-                    "id": _next_preset_id([new_name]),
-                    "name": new_name,
-                    "instructions": instructions_val,
-                })
-            if sm.save_parsing_presets(presets):
-                if new_name != selected_name:
-                    st.session_state["_next_preset_to_select"] = new_name
-                _clear_session_state_prefixes(f"pname_{new_name}", f"pinst_{new_name}")
-                _notify_preset_changed()
-                st.session_state["card_saved_banner"] = {
-                    "section": "parsing_presets",
-                    "msg": f"✅ Topology Parsing Preset '{new_name}' saved & applied!",
-                    "ts": time.time()
-                }
-                st.rerun()
-
-    if btn_del:
-        target = selected_name
-        remaining = [p for p in presets if p.get("name") != target]
-        if len(remaining) == len(presets):
-            st.warning("⚠️ Preset not found.")
-        elif not remaining:
-            st.warning("⚠️ At least one preset must remain.")
-        else:
-            if sm.save_parsing_presets(remaining):
-                st.session_state["_next_preset_to_select"] = remaining[0].get("name", "")
-                _clear_session_state_prefixes(f"pname_{target}", f"pinst_{target}")
-                _notify_preset_changed()
-                st.session_state["card_saved_banner"] = {
-                    "section": "parsing_presets",
-                    "msg": f"✅ Preset '{target}' deleted successfully!",
-                    "ts": time.time()
-                }
-                st.rerun()
-
-    with st.expander("✨ AI Assistant: Generate Platform Rules", expanded=False):
-        target_platform = st.text_input(
-            "Target Platform / Vendor",
-            key="std_parsing_ai_platform",
-            placeholder="e.g. Proxmox VE, Cisco NX-OS, Nutanix AHV",
-            label_visibility="collapsed",
-            help="Enter the platform or vendor name to generate topology parsing rules.",
-        )
-        if st.button("Generate Platform Rules", key="std_parsing_ai_generate", use_container_width=True):
-            if target_platform.strip():
-                try:
-                    meta = sm.get_meta_prompt_template(target_platform, "", "")
-                    user_prompt = (
-                        f"Generate the comprehensive, production-grade topology parsing ruleset for the '{target_platform.strip()}' platform.\n"
-                        "Assume standard platform network architecture (e.g., Linux bridges, bonds, physical NICs, VLAN tags, cluster networks).\n"
-                        "Output ONLY the raw parsing instructions ruleset in plain English matching the template format. "
-                        "Do not ask clarifying questions, and do not include conversational greetings or markdown conversational framing."
-                    )
-                    with st.spinner(f"Generating platform rules using {active_model}..."):
-                        generated = call_ai(
-                            user_prompt,
-                            active_model,
-                            custom_system_msg=meta,
-                            max_tokens=2048,
-                        )
-                    st.session_state["std_input_new_preset_name"] = target_platform.strip()
-                    st.session_state["std_input_new_preset_inst"] = generated
-                    st.toast("✅ Rules generated! Review in the Add Preset section below and click '➕ Add Preset'.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Auto-generation failed: {e}")
-            else:
-                st.warning("⚠️ Enter a Platform / Vendor first.")
-
-        with st.expander("📋 Export Active Preset Rules for External AI", expanded=False):
-            st.caption("Copy the full system prompt and active instructions for use in external LLMs (ChatGPT, Claude, Gemini).")
-            _platform_name = selected_name or "(no preset selected)"
-            _instructions_text = instructions_val.strip()
-            _export_prompt = (
-                "You are an expert infrastructure network engineer.\n"
-                "I have attached a screenshot of a hypervisor virtual switch topology (VMware ESXi / Proxmox).\n"
-                "Please analyze the image strictly according to the active platform parsing rules below, and extract the network topology into the target JSON format.\n\n"
-                f"=== ACTIVE PLATFORM RULES ({_platform_name}) ===\n"
-                f"{_instructions_text}\n\n"
-                "=== TARGET JSON OUTPUT FORMAT ===\n"
-                "{\n"
-                '  "interfaces": [\n'
-                "    {\n"
-                '      "interface": "vmnic0",\n'
-                '      "parent": "vSwitch0",\n'
-                '      "slot": "0000:5b:00.0",\n'
-                '      "speed": "10000 Full",\n'
-                '      "purpose": "Management / VM Network Active Uplink",\n'
-                '      "role": "Active Uplink"\n'
-                "    },\n"
-                "    {\n"
-                '      "interface": "Management Network",\n'
-                '      "parent": "vSwitch0",\n'
-                '      "purpose": "Port Group",\n'
-                '      "vlan_id": null,\n'
-                '      "active_uplinks": "vmnic4, vmnic5",\n'
-                '      "standby_uplinks": null\n'
-                "    },\n"
-                "    {\n"
-                '      "interface": "vmk0",\n'
-                '      "parent": "vSwitch0",\n'
-                '      "ip": "10.27.177.246",\n'
-                '      "purpose": "Management Network"\n'
-                "    }\n"
-                "  ]\n"
-                "}\n\n"
-                "Output ONLY the raw JSON block without markdown formatting or conversational filler."
-            )
-            st.code(_export_prompt, language="text")
-
-    with st.form(key="std_parsing_preset_add_form", clear_on_submit=False):
-        new_pname = st.text_input(
-            "New Platform Name",
-            placeholder="e.g. Proxmox VE",
-            key="std_input_new_preset_name"
-        )
-        new_pinst = st.text_area(
-            "New Platform Parsing Instructions",
-            height=180,
-            placeholder="Paste or let AI generate platform-specific instructions...",
-            key="std_input_new_preset_inst"
-        )
-        add_submitted = st.form_submit_button("➕ Add Preset", use_container_width=True)
-
-        if add_submitted:
-            pname_stripped = new_pname.strip()
-            if not pname_stripped:
-                st.warning("⚠️ Enter a platform name to add.")
-            elif pname_stripped in preset_names:
-                st.warning(f"⚠️ Preset '{pname_stripped}' already exists.")
-            else:
-                presets.append({
-                    "id": _next_preset_id([pname_stripped]),
-                    "name": pname_stripped,
-                    "instructions": new_pinst,
-                })
+                existing = [p for p in presets if p.get("name") == new_name]
+                if existing:
+                    existing[0]["instructions"] = instructions_val
+                else:
+                    presets.append({
+                        "id": _next_preset_id([new_name]),
+                        "name": new_name,
+                        "instructions": instructions_val,
+                    })
                 if sm.save_parsing_presets(presets):
-                    st.session_state.pop("std_input_new_preset_name", None)
-                    st.session_state.pop("std_input_new_preset_inst", None)
-                    st.session_state["_next_preset_to_select"] = pname_stripped
+                    if new_name != selected_name:
+                        st.session_state["_next_preset_to_select"] = new_name
+                    _clear_session_state_prefixes(f"pname_{new_name}", f"pinst_{new_name}")
+                    _notify_preset_changed()
                     st.session_state["card_saved_banner"] = {
                         "section": "parsing_presets",
-                        "msg": f"✅ New Preset '{pname_stripped}' created & selected!",
+                        "msg": f"✅ Topology Parsing Preset '{new_name}' saved & applied!",
                         "ts": time.time()
                     }
-                    _notify_preset_changed()
                     st.rerun()
+
+        if btn_del:
+            target = selected_name
+            remaining = [p for p in presets if p.get("name") != target]
+            if len(remaining) == len(presets):
+                st.warning("⚠️ Preset not found.")
+            elif not remaining:
+                st.warning("⚠️ At least one preset must remain.")
+            else:
+                if sm.save_parsing_presets(remaining):
+                    st.session_state["_next_preset_to_select"] = remaining[0].get("name", "")
+                    _clear_session_state_prefixes(f"pname_{target}", f"pinst_{target}")
+                    _notify_preset_changed()
+                    st.session_state["card_saved_banner"] = {
+                        "section": "parsing_presets",
+                        "msg": f"✅ Preset '{target}' deleted successfully!",
+                        "ts": time.time()
+                    }
+                    st.rerun()
+
+        with st.expander("✨ AI Assistant: Generate Platform Rules", expanded=False):
+            target_platform = st.text_input(
+                "Target Platform / Vendor",
+                key="std_parsing_ai_platform",
+                placeholder="e.g. Proxmox VE, Cisco NX-OS, Nutanix AHV",
+                label_visibility="collapsed",
+                help="Enter the platform or vendor name to generate topology parsing rules.",
+            )
+            if st.button("Generate Platform Rules", key="std_parsing_ai_generate", use_container_width=True):
+                if target_platform.strip():
+                    try:
+                        meta = sm.get_meta_prompt_template(target_platform, "", "")
+                        user_prompt = (
+                            f"Generate the comprehensive, production-grade topology parsing ruleset for the '{target_platform.strip()}' platform.\n"
+                            "Assume standard platform network architecture (e.g., Linux bridges, bonds, physical NICs, VLAN tags, cluster networks).\n"
+                            "Output ONLY the raw parsing instructions ruleset in plain English matching the template format. "
+                            "Do not ask clarifying questions, and do not include conversational greetings or markdown conversational framing."
+                        )
+                        with st.spinner(f"Generating platform rules using {active_model}..."):
+                            generated = call_ai(
+                                user_prompt,
+                                active_model,
+                                custom_system_msg=meta,
+                                max_tokens=2048,
+                            )
+                        st.session_state["std_input_new_preset_name"] = target_platform.strip()
+                        st.session_state["std_input_new_preset_inst"] = generated
+                        st.toast("✅ Rules generated! Review in the Add Preset section below and click '➕ Add Preset'.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Auto-generation failed: {e}")
+                else:
+                    st.warning("⚠️ Enter a Platform / Vendor first.")
+
+            with st.expander("📋 Export Active Preset Rules for External AI", expanded=False):
+                st.caption("Copy the full system prompt and active instructions for use in external LLMs (ChatGPT, Claude, Gemini).")
+                _platform_name = selected_name or "(no preset selected)"
+                _instructions_text = instructions_val.strip()
+                _export_prompt = (
+                    "You are an expert infrastructure network engineer.\n"
+                    "I have attached a screenshot of a hypervisor virtual switch topology (VMware ESXi / Proxmox).\n"
+                    "Please analyze the image strictly according to the active platform parsing rules below, and extract the network topology into the target JSON format.\n\n"
+                    f"=== ACTIVE PLATFORM RULES ({_platform_name}) ===\n"
+                    f"{_instructions_text}\n\n"
+                    "=== TARGET JSON OUTPUT FORMAT ===\n"
+                    "{\n"
+                    '  "interfaces": [\n'
+                    "    {\n"
+                    '      "interface": "vmnic0",\n'
+                    '      "parent": "vSwitch0",\n'
+                    '      "slot": "0000:5b:00.0",\n'
+                    '      "speed": "10000 Full",\n'
+                    '      "purpose": "Management / VM Network Active Uplink",\n'
+                    '      "role": "Active Uplink"\n'
+                    "    },\n"
+                    "    {\n"
+                    '      "interface": "Management Network",\n'
+                    '      "parent": "vSwitch0",\n'
+                    '      "purpose": "Port Group",\n'
+                    '      "vlan_id": null,\n'
+                    '      "active_uplinks": "vmnic4, vmnic5",\n'
+                    '      "standby_uplinks": null\n'
+                    "    },\n"
+                    "    {\n"
+                    '      "interface": "vmk0",\n'
+                    '      "parent": "vSwitch0",\n'
+                    '      "ip": "10.27.177.246",\n'
+                    '      "purpose": "Management Network"\n'
+                    "    }\n"
+                    "  ]\n"
+                    "}\n\n"
+                    "Output ONLY the raw JSON block without markdown formatting or conversational filler."
+                )
+                st.code(_export_prompt, language="text")
+
+        with st.form(key="std_parsing_preset_add_form", clear_on_submit=False):
+            new_pname = st.text_input(
+                "New Platform Name",
+                placeholder="e.g. Proxmox VE",
+                key="std_input_new_preset_name"
+            )
+            new_pinst = st.text_area(
+                "New Platform Parsing Instructions",
+                height=180,
+                placeholder="Paste or let AI generate platform-specific instructions...",
+                key="std_input_new_preset_inst"
+            )
+            add_submitted = st.form_submit_button("➕ Add Preset", use_container_width=True)
+
+            if add_submitted:
+                pname_stripped = new_pname.strip()
+                if not pname_stripped:
+                    st.warning("⚠️ Enter a platform name to add.")
+                elif pname_stripped in preset_names:
+                    st.warning(f"⚠️ Preset '{pname_stripped}' already exists.")
+                else:
+                    presets.append({
+                        "id": _next_preset_id([pname_stripped]),
+                        "name": pname_stripped,
+                        "instructions": new_pinst,
+                    })
+                    if sm.save_parsing_presets(presets):
+                        st.session_state.pop("std_input_new_preset_name", None)
+                        st.session_state.pop("std_input_new_preset_inst", None)
+                        st.session_state["_next_preset_to_select"] = pname_stripped
+                        st.session_state["card_saved_banner"] = {
+                            "section": "parsing_presets",
+                            "msg": f"✅ New Preset '{pname_stripped}' created & selected!",
+                            "ts": time.time()
+                        }
+                        _notify_preset_changed()
+                        st.rerun()
 
 
 def _notify_preset_changed() -> None:
@@ -2234,9 +2233,9 @@ def render_standards_tab(active_model):
                         st.session_state["card_saved_banner"] = {"section": "yaml_guidelines", "msg": "✅ NetBox Server & Hardware YAML Guidelines reset to defaults!", "ts": time.time()}
                         st.rerun()
 
-            with st.container(border=True):
-                _check_and_render_banner("auto_correction")
-                _render_parsing_presets_editor(active_model, current_rules)
+            _check_and_render_banner("auto_correction")
+            _render_parsing_presets_editor(active_model, current_rules)
+            st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
 
             with st.container(border=True):
                 _check_and_render_banner("auto_correction")
