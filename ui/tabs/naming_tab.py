@@ -951,11 +951,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
     # Initialize parsing presets for later use
     preset_sm = StandardsManager()
     parsing_presets = preset_sm.get_parsing_presets()
-    preset_choices = [p.get("name", "") for p in parsing_presets if p.get("name")]
-    default_preset = st.session_state.get("naming_platform_preset", "General (Default)")
-    if default_preset not in preset_choices:
-        default_preset = preset_choices[0] if preset_choices else "General (Default)"
-    st.session_state["naming_platform_preset"] = default_preset
 
     # Step 1: Preview Staged Screenshots
     start_analyze = False
@@ -976,18 +971,46 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 st.rerun()
 
             st.divider()
+
+            # Explicit Platform Selector
+            preset_sm_naming = StandardsManager()
+            parsing_presets_naming = preset_sm_naming.get_parsing_presets()
+            preset_choices_naming = [p.get("name", "") for p in parsing_presets_naming if p.get("name")]
+            selected_platform = st.selectbox(
+                "Target Platform Preset",
+                options=preset_choices_naming,
+                index=0 if preset_choices_naming else None,
+                key="naming_target_platform_preset",
+                help="Select the platform rules to apply during topology parsing."
+            )
+
+            # Unified Action Bar
             col_act1, col_act2 = st.columns([3, 1])
             with col_act1:
-                start_analyze = st.button("Analyze Topology & Auto-Populate", type="primary", use_container_width=True)
+                btn_analyze = st.button("🚀 Analyze Topology & Auto-Populate", type="primary", use_container_width=True)
+                st.session_state["_btn_analyze_naming"] = btn_analyze
             with col_act2:
-                btn_clear = st.button("Clear All", use_container_width=True)
+                btn_clear = st.button("🗑️ Clear All", use_container_width=True)
             if btn_clear:
                 st.session_state["staged_topology_imgs"] = []
                 st.session_state.pop("hypervisor_parsed_descriptions", None)
                 st.session_state.pop("latest_ocr_raw_text", None)
-                st.session_state.pop("ocr_platform_detected", None)
+                st.session_state.pop("_btn_analyze_naming", None)
                 st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
                 st.rerun()
+
+    # Always-accessible OCR Raw Text Inspector (as long as staged screenshots exist)
+    staged_imgs = st.session_state.get("staged_topology_imgs", [])
+    if staged_imgs:
+        raw_ocr_text = st.session_state.get("latest_ocr_raw_text", "")
+        with st.expander("📄 OCR Raw Text Inspector (Click to expand)", expanded=False):
+            char_count = len(raw_ocr_text) if raw_ocr_text else 0
+            img_count = len(staged_imgs)
+            st.caption(f"ℹ️ Extracted {char_count:,} characters across {img_count} screenshot(s)")
+            st.text_area("Extracted OCR Tokens", value=raw_ocr_text, height=420, disabled=True)
+
+    # Execute analyze when button clicked
+    start_analyze = st.session_state.get("_btn_analyze_naming", False)
 
     # Step 1: 4-Stage Execution with Universal Image Preprocessing (Map-Reduce Pipeline)
     if start_analyze:
@@ -1074,22 +1097,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
                 "CRITICAL: Output ONLY a valid JSON array of endpoint objects. Do not wrap in markdown fences or include explanations."
             )
 
-            # Append preset instructions if applicable
-            # Use manual override if set, otherwise auto-detect from OCR text
-            preset_override = st.session_state.get("ocr_preset_override", "")
-            if preset_override and preset_override != "General (Default)":
-                selected_preset_name = preset_override
-            else:
-                # Auto-detect platform from OCR text
-                ocr_text_lower = sanitized_combined.lower()
-                if 'vswitch' in ocr_text_lower or 'vmnic' in ocr_text_lower:
-                    detected_platform = "VMware ESXi"
-                elif 'vmbr' in ocr_text_lower or 'proxmox' in ocr_text_lower:
-                    detected_platform = "Proxmox VE"
-                else:
-                    detected_platform = "General (Default)"
-                st.session_state["ocr_platform_detected"] = detected_platform
-                selected_preset_name = detected_platform
+            # Append preset instructions if applicable (explicit selection only)
+            selected_preset_name = st.session_state.get("naming_target_platform_preset", "General (Default)")
             preset_instructions = ""
             if selected_preset_name:
                 for _p in parsing_presets:
@@ -1161,27 +1170,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
             st.error(f"Pipeline execution failed: {str(e)}")
             st.code(traceback.format_exc(), language="text")
 
-    # Step 1: OCR Inspector with Platform Badge (Full-width Expander)
-    if st.session_state.get("latest_ocr_raw_text"):
-        raw_txt = st.session_state["latest_ocr_raw_text"]
-        detected_platform = st.session_state.get("ocr_platform_detected", "VMware ESXi")
-
-        if detected_platform:
-            expander_title = f"OCR Raw Text Inspector  |  Platform: {detected_platform} (Click to expand)"
-        else:
-            expander_title = "OCR Raw Text Inspector (Click to expand)"
-
-        with st.expander(expander_title, expanded=False):
-            preset_override = st.selectbox(
-                "Manual Platform Override (Optional)",
-                options=parsing_presets and [p.get("name", "") for p in parsing_presets if p.get("name")] or ["General (Default)"],
-                help="Override auto-detected platform rules if needed."
-            )
-            st.text_area("Extracted OCR Tokens", value=raw_txt, height=220, disabled=True)
-
-    # 2️⃣ Step 2: Extracted Variables Inspector (Full-Width & Clean Filtering)
-    st.divider()
-
+    # 🔒 Local Redaction Audit (Vault Inspection) - PRESERVE INTACT
     with st.expander("🔒 Local Redaction Audit (Vault Inspection)", expanded=False):
         st.caption("Inspect and manage locally redacted tokens. Clear the vault cache below to reset all de-tokenization mappings.")
         if st.session_state.get("latest_vault_tokens"):
