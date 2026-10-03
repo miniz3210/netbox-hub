@@ -270,8 +270,6 @@ def _persist_variables(rules: dict, variables: dict, section_key: str = "shared"
 
 
 def _render_auto_correction_manager(active_model: str) -> None:
-    _render_ipam_role_mapping_manager(active_model)
-
     rules = load_auto_corrections()
     categories = list(rules.keys())
 
@@ -2103,27 +2101,21 @@ def render_standards_tab(active_model):
     tab_edit, tab_vars, tab_history = st.tabs(["📝 Edit Standards", "📘 Pattern Variables Reference", "📜 Change History"])
 
     with tab_edit:
-        tab_ipam, tab_naming = st.tabs([
+        tab_ipam, tab_naming, tab_infra = st.tabs([
             "🌐 IPAM Standards",
-            "🏷️ Infrastructure & Naming Standards"
+            "🏷️ Naming Standards",
+            "⚙️ Infrastructure & System Baseline"
         ])
 
         with tab_ipam:
-            with st.container(border=True):
-                _check_and_render_banner("vlan_presets")
-                col_t1, col_t2 = st.columns([3, 1])
-                with col_t1:
-                    st.markdown("#### 🌐 VLAN ALLOCATION PRESETS")
-                with col_t2:
-                    vlan_presets = get_vlan_presets(current_rules)
-                    total_count = sum(len(g.get("items", [])) for g in vlan_presets.values())
-                    st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{total_count} presets</span></div>", unsafe_allow_html=True)
-                st.caption("Manage reusable VLAN allocation groups. Each group has default patterns applied to all its items.")
-                _vlan_presets_editor(current_rules)
+            _vlan_presets_editor(current_rules)
 
             with st.container(border=True):
                 _render_vlan_description_mappings_editor(current_rules)
 
+            _render_ipam_role_mapping_manager(active_model)
+
+            _render_csv_schemas_editor(current_rules)
 
         with tab_naming:
             with st.container(border=True):
@@ -2157,18 +2149,7 @@ def render_standards_tab(active_model):
                                     card_caption="",
                                     section="esxi", section_label="Hypervisor Network Description Presets")
 
-            with st.container(border=True):
-                _check_and_render_banner("auto_correction")
-                st.markdown("#### 🛠️ Topology Parsing Presets (Platform Rules)")
-                st.caption("Platform-specific parsing instructions injected into the topology analysis prompt.")
-                _render_parsing_presets_editor(active_model, current_rules)
-
-            with st.container(border=True):
-                _check_and_render_banner("auto_correction")
-                st.markdown("#### 🛠️ Auto-Correction & Syntax Rules")
-                st.caption("Regex-based text cleaning rules for OCR noise removal and interface port shortening. Used for user-input error prevention.")
-                _render_auto_correction_manager(active_model)
-
+        with tab_infra:
             with st.container(border=True):
                 _check_and_render_banner("yaml_guidelines")
                 st.markdown("#### 📋 NetBox YAML / Hardware Templates & Guidelines")
@@ -2216,6 +2197,18 @@ def render_standards_tab(active_model):
                         st.session_state["card_saved_banner"] = {"section": "yaml_guidelines", "msg": "✅ NetBox Server & Hardware YAML Guidelines reset to defaults!", "ts": time.time()}
                         st.rerun()
 
+            with st.container(border=True):
+                _check_and_render_banner("auto_correction")
+                st.markdown("#### 🧰 Topology Parsing Presets (Platform Rules)")
+                st.caption("Platform-specific parsing instructions injected into the topology analysis prompt.")
+                _render_parsing_presets_editor(active_model, current_rules)
+
+            with st.container(border=True):
+                _check_and_render_banner("auto_correction")
+                st.markdown("#### 🛠️ Auto-Correction & Syntax Rules")
+                st.caption("Regex-based text cleaning rules for OCR noise removal and interface port shortening. Used for user-input error prevention.")
+                _render_auto_correction_manager(active_model)
+
             with st.expander("⚙️ System Prompt Export & Baseline Management", expanded=False):
                 standards_mgr = StandardsManager()
                 st.markdown("#### 📦 Global Ruleset Baseline (Reset Anchor)")
@@ -2239,8 +2232,6 @@ def render_standards_tab(active_model):
                 st.markdown("#### 📋 Full System Prompt for External AI")
                 compiled_prompt = standards_mgr.compile_full_system_prompt()
                 st.code(compiled_prompt, language="markdown")
-
-        _render_csv_schemas_editor(current_rules)
     
     with tab_vars:
         st.markdown("##### 📘 Pattern Variables Reference Guide")
