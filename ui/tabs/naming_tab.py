@@ -868,7 +868,9 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         col_up1, col_up2 = st.columns([1, 1])
 
         with col_up1:
-            uploader_key = "batch_mode_screenshot_uploader"
+            if "topo_uploader_key_ver" not in st.session_state:
+                st.session_state["topo_uploader_key_ver"] = 0
+            uploader_key = f"batch_mode_screenshot_uploader_{st.session_state['topo_uploader_key_ver']}"
             raw_uploaded = st.file_uploader(
                 "Upload Screenshots (Drag & Drop)",
                 type=["png", "jpg", "jpeg"],
@@ -978,6 +980,11 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 if del_idx is not None and 0 <= del_idx < len(st.session_state["staged_topology_imgs"]):
                     st.session_state["staged_topology_imgs"].pop(del_idx)
                     st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
+                    if not st.session_state["staged_topology_imgs"]:
+                        st.session_state.pop("hypervisor_parsed_descriptions", None)
+                        st.session_state.pop("latest_ocr_raw_text", None)
+                        st.session_state.pop("_btn_analyze_naming", None)
+                        st.session_state.pop("latest_vault_tokens", None)
                     st.rerun()
 
         # Control bar: Platform selector + Analyze + Clear
@@ -1006,6 +1013,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             st.session_state.pop("hypervisor_parsed_descriptions", None)
             st.session_state.pop("latest_ocr_raw_text", None)
             st.session_state.pop("_btn_analyze_naming", None)
+            st.session_state.pop("latest_vault_tokens", None)
             st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
             st.rerun()
 
