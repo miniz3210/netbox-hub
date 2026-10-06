@@ -443,6 +443,40 @@ def get_dynamic_table_records(table_name: str, limit: int = 100) -> List[Dict[st
     finally:
         conn.close()
 
+def _collect_known_hostnames() -> List[str]:
+    """Pull all registered device, hypervisor and VM names from the inventory DB.
+
+    Names are returned sorted by length descending so the longest (most specific)
+    hostnames are tokenised first, minimising accidental partial replacements.
+    """
+    names: List[str] = []
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        for cat in ("device", "hypervisor", "vm"):
+            cursor.execute(
+                f"SELECT name FROM inventory_records WHERE category = ? AND name IS NOT NULL AND name != ''",
+                (cat,),
+            )
+            for row in cursor.fetchall():
+                n = str(row["name"]).strip()
+                if n and n not in names:
+                    names.append(n)
+        conn.close()
+    except Exception:
+        pass
+    return sorted(names, key=len, reverse=True)
+
+
+def _sanitize_context_text(text: str) -> Tuple[str, str]:
+    """Sanitize a context string via the vault, returning (sanitized_text, session_id)."""
+    from core.vault import SanitizerVault
+    vault = SanitizerVault()
+    known_hostnames = _collect_known_hostnames()
+    return vault.sanitize(text, known_hostnames=known_hostnames)
+
+
 def build_dynamic_tables_context(prompt: str) -> str:
     """Build context from dynamically uploaded CSV tables."""
     dynamic_tables = get_all_dynamic_tables()
@@ -577,7 +611,9 @@ def build_comprehensive_ipam_context(prompt: str, site_filter: str = None) -> st
         context.append("")
         context.append(dynamic_context)
 
-    return "\n".join(context)
+    full_text = "\n".join(context)
+    sanitized_text, _ = _sanitize_context_text(full_text)
+    return sanitized_text
 
 def build_comprehensive_naming_context(prompt: str, site_filter: str = None) -> str:
     """Build comprehensive naming/inventory context for AI assistant."""
@@ -658,7 +694,9 @@ def build_comprehensive_naming_context(prompt: str, site_filter: str = None) -> 
         context.append("")
         context.append(dynamic_context)
 
-    return "\n".join(context)
+    full_text = "\n".join(context)
+    sanitized_text, _ = _sanitize_context_text(full_text)
+    return sanitized_text
 
 
 # ============================================================================

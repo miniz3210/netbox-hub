@@ -1,15 +1,19 @@
 """
 Local Persistent Sanitization Vault.
 
-Stores bidirectional mappings between real sensitive values (RFC-1918 IPv4/CIDR,
-internal FQDN suffixes) and deterministic synthetic tokens in a local SQLite
-database. Used as transparent gateway middleware: text is sanitised before it
-leaves the process and restored after the LLM response returns.
+Stores bidirectional mappings between real sensitive values (IPv4/CIDR,
+internal FQDN suffixes, hardware serial numbers, MAC addresses, and hostnames)
+and deterministic synthetic tokens in a local SQLite database. Used as
+transparent gateway middleware: text is sanitised before it leaves the process
+and restored after the LLM response returns.
 
 Token format:
-  - Private IPv4 bare addresses              -> <SAFE_IP_N>
-  - Private IPv4 CIDR prefixes               -> <SAFE_NET_N>
-  - Internal domain / FQDN suffixes          -> <SAFE_DOMAIN_N>
+  - IPv4 bare addresses (all)                        -> <SAFE_IP_N>
+  - IPv4 CIDR prefixes (all)                         -> <SAFE_NET_N>
+  - Internal domain / FQDN suffixes                  -> <SAFE_DOMAIN_N>
+  - Hardware serial numbers                          -> <SAFE_SERIAL_N>
+  - MAC addresses                                    -> <SAFE_MAC_N>
+  - Hostnames (device / VM names supplied by caller) -> <SAFE_HOST_N>
 """
 
 import os
@@ -26,39 +30,55 @@ MAX_ENTRIES = 5_000
 TTL_DAYS = 7
 PRUNE_FRACTION = 0.20
 
+# ---------------------------------------------------------------------------
+# Regexes
+# ---------------------------------------------------------------------------
+
 # Per-octet private-IP token used to build both the CIDR and bare-IP patterns.
 _PRIV_OCTET = r"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)"
 
-# Private IPv4 CIDR pattern — requires a slash (e.g. 10.113.64.0/24, 172.16.0.0/12, 192.168.1.0/21).
+# Any valid IPv4 octet (0-255).
+_ANY_OCTET = r"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d|\d)"
+_IPV4_ANY = rf"\b{_ANY_OCTET}\.{_ANY_OCTET}\.{_ANY_OCTET}\.{_ANY_OCTET}\b"
+
+# Private IPv4 CIDR pattern — requires a slash (e.g. 10.113.64.0/24).
 _CIDR_NET_10 = r"10\." + _PRIV_OCTET + r"\." + _PRIV_OCTET + r"\." + _PRIV_OCTET
 _CIDR_NET_172 = r"172\.(?:1[6-9]|2\d|3[01])\." + _PRIV_OCTET + r"\." + _PRIV_OCTET
 _CIDR_NET_192 = r"192\.168\." + _PRIV_OCTET + r"\." + _PRIV_OCTET
-_IPV4_CIDR_RE = re.compile(r"\b(" + _CIDR_NET_10 + r"|" + _CIDR_NET_172 + r"|" + _CIDR_NET_192 + r")/\d{1,2}\b")
+_PRIV_CIDR_RE = re.compile(
+    r"\b(" + _CIDR_NET_10 + r"|" + _CIDR_NET_172 + r"|" + _CIDR_NET_192 + r")/\d{1,2}\b"
+)
 
-# Private IPv4 bare-address pattern — same three RFC-1918 ranges, no slash.
-_IPV4_PRIV_BARE_RE = re.compile(r"\b(" + _CIDR_NET_10 + r"|" + _CIDR_NET_172 + r"|" + _CIDR_NET_192 + r")\b")
+# ALL IPv4 CIDR pattern (private + public) — requires a slash.
+_ALL_CIDR_RE = re.compile(rf"\b({_IPV4_ANY})/\d{{1,2}}\b")
+
+# Private IPv4 bare-address pattern.
+_PRIV_BARE_RE = re.compile(
+    r"\b(" + _CIDR_NET_10 + r"|" + _CIDR_NET_172 + r"|" + _CIDR_NET_192 + r")\b"
+)
+
+# ALL IPv4 bare-address pattern (private + public).
+_ALL_BARE_RE = re.compile(_IPV4_ANY)
 
 # Internal domain / FQDN suffix pattern. Static well-known suffixes plus any
 # dynamically loaded from naming_rules.yaml corp_domain_* fields.
 _STATIC_DOMAIN_SUFFIXES = ["local", "internal", "corp", "adds", "lan", "ot"]
 
-_TOKEN_RE = re.compile(r"<SAFE_(IP|NET|DOMAIN)_(\d+)>")
+# Vendor-specific hardware serial patterns.
+#   Meraki / Cisco: 4-4-4 alphanumeric with hyphens  e.g. Q2GW-C2KF-22EN
+_MERAKI_SERIAL_RE = re.compile(r"\b[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}\b")
+#   Juniper / Generic: starts with E or Q followed by 11-13 alphanums  e.g. EZ3025AX0068
+_JUNIPER_SERIAL_RE = re.compile(r"\b[EeQq][A-Z0-9]{11,13}\b")
+_SERIAL_RE = re.compile(rf"(?:{_MERAKI_SERIAL_RE.pattern}|{_JUNIPER_SERIAL_RE.pattern})")
 
+# MAC address patterns — 6 pairs of hex digits separated by colons or hyphens,
+# or 12 contiguous hex chars (no separators).
+_MAC_COLON_RE = re.compile(r"\b(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}\b")
+_MAC_HYPHEN_RE = re.compile(r"\b(?:[0-9A-Fa-f]{2}-){5}[0-9A-Fa-f]{2}\b")
+_MAC_BARE_RE = re.compile(r"\b[0-9A-Fa-f]{12}\b")
+_MAC_RE = re.compile(rf"(?:{_MAC_COLON_RE.pattern}|{_MAC_HYPHEN_RE.pattern}|{_MAC_BARE_RE.pattern})")
 
-def _is_private_ipv4(addr_str: str) -> bool:
-    """Return True if *addr_str* is a private IPv4 address (RFC 1918)."""
-    try:
-        addr = ipaddress.IPv4Address(addr_str.strip())
-        return any(
-            addr in net
-            for net in (
-                ipaddress.IPv4Network("10.0.0.0/8"),
-                ipaddress.IPv4Network("172.16.0.0/12"),
-                ipaddress.IPv4Network("192.168.0.0/16"),
-            )
-        )
-    except ValueError:
-        return False
+_TOKEN_RE = re.compile(r"<SAFE_(IP|NET|DOMAIN|SERIAL|MAC|HOST)_(\d+)>")
 
 
 def _extract_domain_suffixes() -> List[str]:
@@ -265,7 +285,7 @@ class SanitizerVault:
 
     def _reseed_counters(self, conn: sqlite3.Connection) -> None:
         """Re-seed per-category counters so the next token ID is monotonically increasing."""
-        for cat in ("IP", "NET", "DOMAIN"):
+        for cat in ("IP", "NET", "DOMAIN", "SERIAL", "MAC", "HOST"):
             max_id_row = conn.execute(
                 "SELECT MAX(CAST(REPLACE(REPLACE(token, '<SAFE_', ''), '>', '') AS INT)) AS mx "
                 "FROM vault_mappings WHERE category = ?",
@@ -293,9 +313,19 @@ class SanitizerVault:
     # -------------------------------------------------------------------------
 
     def sanitize(
-        self, text: str, session_id: Optional[str] = None
+        self,
+        text: str,
+        session_id: Optional[str] = None,
+        known_hostnames: Optional[List[str]] = None,
     ) -> Tuple[str, str]:
-        """Replace private IPs/CIDRs and internal domains with safe tokens.
+        """Replace IPs/CIDRs, domains, serials, MACs and hostnames with safe tokens.
+
+        Args:
+            text: Input text to sanitise.
+            session_id: Optional caller-supplied session ID. A deterministic ID is
+                generated automatically when omitted.
+            known_hostnames: Optional list of device/VM names that should be
+                tokenised as ``<SAFE_HOST_N>`` regardless of their lexical shape.
 
         Returns:
             (sanitized_text, session_id)
@@ -310,14 +340,13 @@ class SanitizerVault:
 
         # 1. Private CIDRs first (longer match, preserves subnet mask)
         cidr_matches: Dict[str, str] = {}
-        for m in _IPV4_CIDR_RE.finditer(processed):
+        for m in _PRIV_CIDR_RE.finditer(processed):
             ip_part = m.group(1)
             suffix = m.group(0)[len(ip_part):]  # e.g. "/24"
-            if _is_private_ipv4(ip_part):
-                full = ip_part + suffix
-                if full not in cidr_matches:
-                    tok = self._get_or_create_token(full, "NET", session_id)
-                    cidr_matches[full] = tok
+            full = ip_part + suffix
+            if full not in cidr_matches:
+                tok = self._get_or_create_token(full, "NET", session_id)
+                cidr_matches[full] = tok
 
         for orig in sorted(cidr_matches, key=len, reverse=True):
             processed = processed.replace(orig, cidr_matches[orig], 1)
@@ -325,10 +354,9 @@ class SanitizerVault:
 
         # 2. Bare private IPs (skip if already inside a SAFE_NET token)
         bare_matches: Dict[str, str] = {}
-        for m in _IPV4_PRIV_BARE_RE.finditer(processed):
+        for m in _PRIV_BARE_RE.finditer(processed):
             ip_str = m.group(1)
-            if _is_private_ipv4(ip_str) and ip_str not in bare_matches:
-                # Skip if embedded in an existing token
+            if ip_str not in bare_matches:
                 start, end = m.span()
                 surrounding = processed[max(0, start - 20): end + 20]
                 if "<SAFE_" in surrounding and ">" in surrounding:
@@ -340,7 +368,33 @@ class SanitizerVault:
             processed = processed.replace(orig, bare_matches[orig], 1)
             used_tokens.append((orig, bare_matches[orig]))
 
-        # 3. Internal domain / FQDN suffixes
+        # 3. Public / all remaining CIDRs (skip those already tokenised as private)
+        all_cidr_matches: Dict[str, str] = {}
+        for m in _ALL_CIDR_RE.finditer(processed):
+            full = m.group(0)
+            if full not in all_cidr_matches:
+                tok = self._get_or_create_token(full, "NET", session_id)
+                all_cidr_matches[full] = tok
+        for orig in sorted(all_cidr_matches, key=len, reverse=True):
+            processed = processed.replace(orig, all_cidr_matches[orig], 1)
+            used_tokens.append((orig, all_cidr_matches[orig]))
+
+        # 4. Public / all remaining bare IPs (skip if inside a token already)
+        all_bare_matches: Dict[str, str] = {}
+        for m in _ALL_BARE_RE.finditer(processed):
+            ip_str = m.group(0)
+            if ip_str not in all_bare_matches:
+                start, end = m.span()
+                surrounding = processed[max(0, start - 20): end + 20]
+                if "<SAFE_" in surrounding and ">" in surrounding:
+                    continue
+                tok = self._get_or_create_token(ip_str, "IP", session_id)
+                all_bare_matches[ip_str] = tok
+        for orig in sorted(all_bare_matches, key=len, reverse=True):
+            processed = processed.replace(orig, all_bare_matches[orig], 1)
+            used_tokens.append((orig, all_bare_matches[orig]))
+
+        # 5. Internal domain / FQDN suffixes
         domain_re = self._build_domain_regex()
         domain_matches: Dict[str, str] = {}
         for m in domain_re.findall(processed):
@@ -350,6 +404,60 @@ class SanitizerVault:
         for orig in sorted(domain_matches, key=len, reverse=True):
             processed = processed.replace(orig, domain_matches[orig], 1)
             used_tokens.append((orig, domain_matches[orig]))
+
+        # 6. Hardware serial numbers (Meraki-style and Juniper/Generic)
+        serial_matches: Dict[str, str] = {}
+        for m in _SERIAL_RE.finditer(processed):
+            s = m.group(0)
+            if s not in serial_matches:
+                tok = self._get_or_create_token(s, "SERIAL", session_id)
+                serial_matches[s] = tok
+        for orig in sorted(serial_matches, key=len, reverse=True):
+            processed = processed.replace(orig, serial_matches[orig], 1)
+            used_tokens.append((orig, serial_matches[orig]))
+
+        # 7. MAC addresses — longest matches first to avoid partial replacements
+        mac_matches: Dict[str, str] = {}
+        for m in _MAC_COLON_RE.finditer(processed):
+            mac = m.group(0)
+            if mac not in mac_matches:
+                tok = self._get_or_create_token(mac, "MAC", session_id)
+                mac_matches[mac] = tok
+        for m in _MAC_HYPHEN_RE.finditer(processed):
+            mac = m.group(0)
+            if mac not in mac_matches:
+                tok = self._get_or_create_token(mac, "MAC", session_id)
+                mac_matches[mac] = tok
+        for m in _MAC_BARE_RE.finditer(processed):
+            mac = m.group(0)
+            # Distinguish from serials and IP-like strings
+            start, end = m.span()
+            surrounding = processed[max(0, start - 5): end + 5]
+            if "<SAFE_" in surrounding:
+                continue
+            if mac not in mac_matches:
+                tok = self._get_or_create_token(mac, "MAC", session_id)
+                mac_matches[mac] = tok
+        for orig in sorted(mac_matches, key=len, reverse=True):
+            processed = processed.replace(orig, mac_matches[orig], 1)
+            used_tokens.append((orig, mac_matches[orig]))
+
+        # 8. Known hostnames — longest first to avoid partial overlap
+        if known_hostnames:
+            hostname_matches: Dict[str, str] = {}
+            for name in sorted(known_hostnames, key=len, reverse=True):
+                if not name or name in hostname_matches:
+                    continue
+                # Use word-boundary matching; escape regex metacharacters in the name.
+                pat = re.compile(r"\b" + re.escape(name) + r"\b", re.IGNORECASE)
+                for m in pat.finditer(processed):
+                    if name not in hostname_matches:
+                        tok = self._get_or_create_token(name, "HOST", session_id)
+                        hostname_matches[name] = tok
+                        break  # one token per unique hostname
+            for orig in sorted(hostname_matches, key=len, reverse=True):
+                processed = processed.replace(orig, hostname_matches[orig], 1)
+                used_tokens.append((orig, hostname_matches[orig]))
 
         # Deterministic session token from all tokens consumed in this pass
         if session_id is None:
@@ -453,11 +561,23 @@ class SanitizerVault:
             domain_row = conn.execute(
                 "SELECT COUNT(*) AS cnt FROM vault_mappings WHERE category = 'DOMAIN'"
             ).fetchone()
+            serial_row = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM vault_mappings WHERE category = 'SERIAL'"
+            ).fetchone()
+            mac_row = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM vault_mappings WHERE category = 'MAC'"
+            ).fetchone()
+            host_row = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM vault_mappings WHERE category = 'HOST'"
+            ).fetchone()
         return {
             "total": total_row["cnt"],
             "ips": ip_row["cnt"],
             "nets": net_row["cnt"],
             "domains": domain_row["cnt"],
+            "serials": serial_row["cnt"],
+            "macs": mac_row["cnt"],
+            "hosts": host_row["cnt"],
         }
 
     def get_recent_mappings(self, limit: int = 20) -> List[Dict[str, str]]:
