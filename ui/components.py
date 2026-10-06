@@ -22,6 +22,7 @@ from core.backup_manager import (
     set_backup_enabled,
 )
 from core.shared_backup_state import SharedBackupState
+from core.vault import SanitizerVault
 
 CHAT_HEIGHT = 380
 
@@ -120,16 +121,24 @@ def render_ai_chat(
             with transcript.chat_message("user"):
                 st.markdown(prompt)
 
+            # Sanitize sensitive data in the system prompt before sending to the LLM
+            vault = SanitizerVault()
+            full_system_prompt = build_system_prompt(prompt)
+            safe_system_prompt, session_id = vault.sanitize(full_system_prompt)
+
             with transcript.chat_message("assistant"):
                 with st.spinner("Thinking..."):
                     try:
                         response = call_ai(
                             prompt,
                             active_model,
-                            custom_system_msg=build_system_prompt(prompt),
+                            custom_system_msg=safe_system_prompt,
                         )
                     except Exception as exc:
                         response = f"❌ AI Assistant temporarily unavailable: {exc}"
+                    else:
+                        # Restore (de-tokenize) the LLM response using the same session
+                        response = vault.restore(response, session_id=session_id)
                 st.markdown(response)
 
             history.append({"role": "assistant", "content": response})
