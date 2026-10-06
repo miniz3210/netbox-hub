@@ -103,18 +103,23 @@ def _build_targeted_context(intent: IntentRouting, user_query: str = "", max_row
                 total_records += 1
         else:
             context_parts.append("  No exact matches found.")
-            # Safe fuzzy fallback: zero silent auto-substitution
+            # Fuzzy fallback with full context fetch (v3.9.21)
             from core.ai_helper import try_fuzzy_hostname_lookup, _collect_known_hostnames
             known_names = _collect_known_hostnames()
-            fuzzy_results, fuzzy_hint = try_fuzzy_hostname_lookup(
+            fuzzy_results, fuzzy_context = try_fuzzy_hostname_lookup(
                 query=intent.search_query or intent.identifiers[0] if intent.identifiers else "",
                 known_names=known_names,
                 search_func=lambda ids, site="", limit=10: search_backup_records(ids, site=site, limit=limit),
                 site_filter=intent.site_filter or "",
                 max_rows=max_rows,
             )
-            if fuzzy_hint:
-                context_parts.append(f"\n{fuzzy_hint}")
+            if fuzzy_context:
+                context_parts.append(f"\n{fuzzy_context}")
+            elif fuzzy_results:
+                # Exact match via fuzzy path — add results
+                for row in fuzzy_results:
+                    context_parts.append(f"  [{row.get('object_type', 'unknown')}] {row.get('name', 'N/A')}: {row.get('summary', '')}")
+                    total_records += 1
     
     # 2. Endpoint-specific queries
     for object_type in target_object_types:

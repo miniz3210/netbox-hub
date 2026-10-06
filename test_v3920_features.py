@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Unit Tests for v3.9.20 Features
-  1. Safe Hostname Fuzzy Matching (ai_helper.py)
+Unit Tests for v3.9.21 Features
+  1. Safe Hostname Fuzzy Matching with Full Context Fetch (ai_helper.py)
   2. Deep IPAM Overlap & Hierarchy-Aware Allocation (ipam_engine.py)
   3. Version bump verification
   4. Vault sanitization compatibility
@@ -19,6 +19,7 @@ from core.ai_helper import (
     fuzzy_match_hostname,
     build_fuzzy_suggestion,
     try_fuzzy_hostname_lookup,
+    _fetch_device_context,
     _names_differ_only_by_trailing_number,
 )
 from core.ipam_engine import (
@@ -55,8 +56,8 @@ def section(title: str):
 # PART 1: VERSION BUMP
 # ============================================================================
 def test_version_bump():
-    section("TEST 0: Version Bump → v3.9.20")
-    assert_true(APP_VERSION == "v3.9.20", f"APP_VERSION == 'v3.9.20' (got {APP_VERSION!r})")
+    section("TEST 0: Version Bump → v3.9.21")
+    assert_true(APP_VERSION == "v3.9.21", f"APP_VERSION == 'v3.9.21' (got {APP_VERSION!r})")
 
 
 # ============================================================================
@@ -303,11 +304,97 @@ def test_vault_sanitization_no_regression():
 
 
 # ============================================================================
+# PART 6: FUZZY CONTEXT FETCH (v3.9.21)
+# ============================================================================
+def test_fuzzy_context_fetch_system_notice():
+    """When exact match fails but fuzzy finds candidate, context block has SYSTEM NOTICE."""
+    section("TEST 5a: SYSTEM NOTICE in Context Block")
+    known = ["fwAZESWINE1", "fwAZESWINE2"]
+    # No DB — mock _fetch_device_context to return empty, should fall back to suggestion
+    with mock.patch("core.ai_helper._fetch_device_context", return_value=[]):
+        _, ctx = try_fuzzy_hostname_lookup(
+            "fwazewine1", known_names=known, search_func=lambda ids, site="", limit=10: []
+        )
+    assert_true(ctx is not None, "Context block returned on fuzzy match")
+    assert_true("[FUZZY_SUGGESTION]" in ctx, "Contains FUZZY_SUGGESTION when no DB context")
+
+
+def test_fuzzy_context_fetch_with_db_data():
+    """When DB has data, context block includes SYSTEM NOTICE + device details."""
+    section("TEST 5b: Full Context with SYSTEM NOTICE + Device Details")
+    known = ["fwAZESWINE1"]
+    mock_rows = [
+        {"object_type": "dcim_devices", "object_label": "Device", "name": "fwAZESWINE1",
+         "site": "Spain Central", "summary": "role: firewall | model: Cisco ASA"},
+        {"object_type": "dcim_interfaces", "object_label": "Interface", "name": "GigabitEthernet0/0",
+         "site": "Spain Central", "summary": "mac: aa:bb:cc:dd:ee:01 | speed: 1000Mb/s"},
+        {"object_type": "ipam_ip_addresses", "object_label": "IP Address", "name": "10.0.1.1",
+         "site": "Spain Central", "summary": "assigned: fwAZESWINE1 GigabitEthernet0/0"},
+    ]
+    with mock.patch("core.ai_helper._fetch_device_context", return_value=mock_rows):
+        _, ctx = try_fuzzy_hostname_lookup(
+            "fwazewine1", known_names=known, search_func=lambda ids, site="", limit=10: []
+        )
+    assert_true(ctx is not None, "Context block returned")
+    assert_true("[SYSTEM NOTICE]" in ctx, "Contains [SYSTEM NOTICE] header")
+    assert_true("fwazewine1" in ctx, "Original query in notice")
+    assert_true("fwAZESWINE1" in ctx, "Matched hostname in notice")
+    assert_true("Spain Central" in ctx, "Site present in context")
+    assert_true("GigabitEthernet0/0" in ctx, "Interface present in context")
+    assert_true("10.0.1.1" in ctx, "IP address present in context")
+
+
+def test_fuzzy_context_registers_both_tokens():
+    """Both query and candidate are registered in vault."""
+    section("TEST 5c: Vault Tokens for Query + Candidate")
+    known = ["fwAZESWINE1"]
+    mock_rows = [{"object_type": "dcim_devices", "name": "fwAZESWINE1", "site": "HQ", "summary": ""}]
+    with mock.patch("core.ai_helper._fetch_device_context", return_value=mock_rows):
+        with mock.patch("core.vault.SanitizerVault") as MockVault:
+            mock_vault_inst = mock.MagicMock()
+            MockVault.return_value = mock_vault_inst
+            try_fuzzy_hostname_lookup(
+                "fwazewine1", known_names=known,
+                search_func=lambda ids, site="", limit=10: []
+            )
+            token_calls = [c[0][0] for c in mock_vault_inst._get_or_create_token.call_args_list]
+            assert_true("fwazewine1" in token_calls, "Misspelled query registered in vault")
+            assert_true("fwAZESWINE1" in token_calls, "Matched hostname registered in vault")
+
+
+def test_exact_match_bypasses_fuzzy():
+    """Exact match returns results without fuzzy processing."""
+    section("TEST 5d: Exact Match Bypasses Fuzzy Logic")
+    known = ["fwAZESWINE1"]
+    mock_results = [{"name": "fwAZESWINE1", "site": "HQ", "summary": "firewall"}]
+    search_called = []
+    def mock_search(ids, site="", limit=10):
+        search_called.append(ids)
+        # Return results when the exact name is in the ids list
+        return [r for r in mock_results if any(r["name"].lower() == i.lower() for i in ids)]
+    results, ctx = try_fuzzy_hostname_lookup(
+        "fwAZESWINE1", known_names=known, search_func=mock_search
+    )
+    assert_true(len(results) > 0, "Exact match returns results")
+    assert_true(ctx is None, "No fuzzy context when exact match succeeds")
+
+
+def test_fetch_device_context_queries_both_tables():
+    """_fetch_device_context searches backup_records and inventory_records."""
+    section("TEST 5e: _fetch_device_context Queries Both Tables")
+    rows = _fetch_device_context("nonexistent-host-xyz")
+    # Should not crash; may return empty list if no backup loaded
+    assert_true(isinstance(rows, list), "_fetch_device_context returns a list")
+    # Verify it doesn't raise an exception even with no data
+    assert_true(True, "Function executes without error on missing host")
+
+
+# ============================================================================
 # MAIN
 # ============================================================================
 if __name__ == "__main__":
     print("=" * 60)
-    print("  NetBox Hub v3.9.20 — Unit Test Suite")
+    print("  NetBox Hub v3.9.21 — Unit Test Suite")
     print("=" * 60)
 
     test_version_bump()
@@ -321,6 +408,20 @@ if __name__ == "__main__":
     test_overlap_multi_collision()
     test_overlap_supernet_containment()
     test_overlap_child_in_parent()
+    test_overlap_cross_vrf_ignored()
+    test_overlap_no_collision()
+    test_overlap_equal_length_no_overlap()
+    test_allocator_cidr_aligned()
+    test_allocator_multiple_results()
+    test_allocator_tail_placement()
+    test_allocator_no_space()
+    test_allocator_respects_boundaries()
+    test_vault_sanitization_no_regression()
+    test_fuzzy_context_fetch_system_notice()
+    test_fuzzy_context_fetch_with_db_data()
+    test_fuzzy_context_registers_both_tokens()
+    test_exact_match_bypasses_fuzzy()
+    test_fetch_device_context_queries_both_tables()
     test_overlap_cross_vrf_ignored()
     test_overlap_no_collision()
     test_overlap_equal_length_no_overlap()

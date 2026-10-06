@@ -997,6 +997,54 @@ def build_fuzzy_suggestion(
     return _FUZZY_SUGGESTION_TEMPLATE.format(query=query, candidates=", ".join(names))
 
 
+_SYSTEM_NOTICE_TEMPLATE = (
+    "[SYSTEM NOTICE]: Exact name '{query}' not found. "
+    "Automatically providing context for the closest matching object: '{candidate}'."
+)
+
+
+def _fetch_device_context(name: str, site_filter: str = "") -> List[Dict[str, Any]]:
+    """Return full backup + inventory records for *name* (device/VM/interfaces/IPs).
+
+    Searches both ``backup_records`` (for NetBox objects like interfaces and IP
+    addresses associated with the device) and ``inventory_records`` (for the
+    device/VM profile itself).
+    """
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    rows: List[Dict[str, Any]] = []
+    pattern = f"%{name}%"
+    where_site = f" AND LOWER(site) LIKE ?" if site_filter else ""
+    params: List[Any] = [pattern]
+    if site_filter:
+        params.append(f"%{site_filter.strip().lower()}%")
+
+    # 1. Backup records — device, interfaces, IPs, VRFs, NAT, etc.
+    cursor.execute(
+        f"SELECT object_type, object_label, name, site, summary FROM backup_records "
+        f"WHERE (LOWER(name) LIKE ? OR search_blob LIKE ?){where_site} "
+        f"ORDER BY object_type, name",
+        params + [pattern] + (params[1:] if site_filter else []),
+    )
+    for row in cursor.fetchall():
+        rows.append(dict(row))
+
+    # 2. Inventory records — device/VM profile
+    cursor.execute(
+        f"SELECT category, name, model_or_role, site, cluster, description "
+        f"FROM inventory_records WHERE LOWER(name) LIKE ?{where_site} "
+        f"ORDER BY category, name",
+        params,
+    )
+    for row in cursor.fetchall():
+        rows.append(dict(row))
+
+    conn.close()
+    return rows
+
+
 def try_fuzzy_hostname_lookup(
     query: str,
     known_names: Optional[List[str]] = None,
@@ -1004,11 +1052,18 @@ def try_fuzzy_hostname_lookup(
     site_filter: str = "",
     max_rows: int = 10,
 ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-    """Attempt an exact lookup first; on miss, fall back to fuzzy suggestions.
+    """Attempt an exact lookup first; on miss, fall back to fuzzy matching.
 
-    Returns (results, suggestion_text) where *results* is the list of matched
-    backup records and *suggestion_text* is the FUZZY_SUGGESTION block (or
-    None when exact match succeeded).
+    When a high-confidence fuzzy candidate is found, the function fetches the
+    **full device context** (interfaces, IPs, VRF, NAT, site, inventory profile)
+    for that candidate and returns it inside a structured context block prefixed
+    with a ``[SYSTEM NOTICE]`` header.  Both the misspelled query and the
+    matched hostname are registered in the vault so downstream sanitization
+    remains consistent.
+
+    Returns (results, context_block) where *results* is the list of matched
+    backup records and *context_block* is the formatted context string (or
+    ``None`` when an exact match succeeded).
     """
     if search_func is not None:
         results = search_func([query], site=site_filter, limit=max_rows)
@@ -1020,13 +1075,59 @@ def try_fuzzy_hostname_lookup(
     if not suggestions:
         return [], None
 
-    # Register suggested names in the vault so downstream sanitization is
-    # consistent with the standard Zero-Leakage cycle.
+    # Take the top candidate (highest similarity ratio)
+    best = suggestions[0]
+    best_name = best["name"]
+
+    # Register both the misspelled query and the matched hostname in the vault
     from core.vault import SanitizerVault
     vault = SanitizerVault()
-    for s in suggestions:
-        vault._get_or_create_token(s["name"], "HOST", None)
+    vault._get_or_create_token(query, "HOST", None)
+    vault._get_or_create_token(best_name, "HOST", None)
 
-    suggestion_text = build_fuzzy_suggestion(query, suggestions)
-    return [], suggestion_text
+    # Fetch full device context for the matched hostname
+    context_rows = _fetch_device_context(best_name, site_filter=site_filter)
+
+    if not context_rows:
+        # No context available — fall back to suggestion-only message
+        return [], build_fuzzy_suggestion(query, suggestions)
+
+    # Build structured context block
+    notice = _SYSTEM_NOTICE_TEMPLATE.format(query=query, candidate=best_name)
+    lines = [notice, ""]
+
+    # Group rows by object type for readable output
+    by_type: Dict[str, List[Dict[str, Any]]] = {}
+    for row in context_rows:
+        obj_type = row.get("object_type") or row.get("category") or "unknown"
+        by_type.setdefault(obj_type, []).append(row)
+
+    for obj_type, type_rows in by_type.items():
+        label = obj_type.replace("_", " ").title()
+        lines.append(f"--- {label} for '{best_name}' ---")
+        for r in type_rows[:20]:
+            name = r.get("name", "")
+            site = r.get("site", "")
+            summary = r.get("summary", "")
+            model = r.get("model_or_role", "")
+            cluster = r.get("cluster", "")
+            desc = r.get("description", "")
+
+            parts = [f"name={name}"]
+            if site:
+                parts.append(f"site={site}")
+            if model:
+                parts.append(f"model={model}")
+            if cluster:
+                parts.append(f"cluster={cluster}")
+            if desc:
+                parts.append(f"description={desc}")
+            if summary:
+                parts.append(f"details={summary}")
+
+            lines.append(f"  - {' | '.join(parts)}")
+        lines.append("")
+
+    context_block = "\n".join(lines)
+    return context_rows, context_block
 
