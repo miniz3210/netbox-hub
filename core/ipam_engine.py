@@ -584,3 +584,16 @@ def generate_netbox_prefixes_csv(
         lines.append(",".join(rendered_cells))
 
     return "\n".join(lines)
+
+
+# ── CACHE INVALIDATION HOOK ─────────────────────────────────────────────
+# Call this function whenever database records are updated or a new backup
+# is ingested to ensure cached IPAM calculations reflect current data.
+
+def clear_ipam_cache() -> None:
+    """Clear all @st.cache_data caches in this module.
+
+    Should be called after any database write operation that affects IPAM
+    data (new backup ingestion, CSV import, manual record edits).
+    """
+    st.cache_data.clear()

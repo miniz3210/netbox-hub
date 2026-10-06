@@ -3,6 +3,7 @@ Shared Backup State Manager
 Provides unified backup inspection state across IPAM and Naming tabs.
 """
 
+import threading
 import streamlit as st
 from typing import Dict, Any, Optional, List
 from core.dynamic_backup_inspector import BackupInspector, load_backup_from_file, load_backup_from_json_string
@@ -17,6 +18,9 @@ class SharedBackupState:
     CUSTOM_FIELDS_KEY = "netbox_custom_fields"
     CHOICE_SETS_KEY = "netbox_choice_sets"
     CSV_OVERRIDES_KEY = "netbox_csv_overrides"
+    
+    # Thread-safe lock for state mutations
+    _lock = threading.Lock()
     
     @classmethod
     def initialize(cls):
@@ -55,78 +59,79 @@ class SharedBackupState:
         Returns:
             BackupInspector instance
         """
-        cls.initialize()
-        
-        inspector = BackupInspector(backup_data, filename, ingestion_timestamp=ingestion_timestamp)
-        
-        # Get new objects from inspector
-        new_objects = inspector.inspect_all_objects()
-        
-        # Determine backup type based on endpoint count
-        new_endpoint_count = len(new_objects)
-        is_full_backup = new_endpoint_count >= 100  # Full backup has 145+ endpoints
-        is_minimal_backup = 50 <= new_endpoint_count < 100  # Minimal has ~64 endpoints
-        
-        # Get existing registry (may contain Full backup + CSV overrides)
-        existing_registry = st.session_state.get(cls.OBJECT_REGISTRY_KEY, {})
-        
-        # STRATEGY 1: Full backup upload - Replace everything (it's the new base layer)
-        if is_full_backup:
-            # Full backup becomes the new base - all its data wins
-            st.session_state[cls.OBJECT_REGISTRY_KEY] = new_objects.copy()
+        with cls._lock:
+            cls.initialize()
             
-            # Preserve any CSV overrides that are newer than the Full backup
-            from datetime import datetime
-            for endpoint, existing_meta in existing_registry.items():
-                if existing_meta.get("source_type") == "csv":
-                    # CSV override exists, check if it's newer than Full backup
-                    csv_timestamp = existing_meta.get("timestamp", "")
-                    
-                    if endpoint in new_objects:
-                        full_timestamp = new_objects[endpoint].get("timestamp", "")
-                        try:
-                            csv_dt = datetime.fromisoformat(csv_timestamp.replace("UTC", "").strip())
-                            full_dt = datetime.fromisoformat(full_timestamp.replace("UTC", "").strip())
-                            
-                            # Keep CSV if newer than Full
-                            if csv_dt > full_dt:
-                                st.session_state[cls.OBJECT_REGISTRY_KEY][endpoint] = existing_meta
-                        except:
-                            pass
-        
-        # STRATEGY 2: Minimal/CSV upload - Selective override with timestamp check
-        else:
-            from datetime import datetime
+            inspector = BackupInspector(backup_data, filename, ingestion_timestamp=ingestion_timestamp)
             
-            for endpoint, new_metadata in new_objects.items():
-                new_timestamp = new_metadata.get("timestamp", "")
+            # Get new objects from inspector
+            new_objects = inspector.inspect_all_objects()
+            
+            # Determine backup type based on endpoint count
+            new_endpoint_count = len(new_objects)
+            is_full_backup = new_endpoint_count >= 100  # Full backup has 145+ endpoints
+            is_minimal_backup = 50 <= new_endpoint_count < 100  # Minimal has ~64 endpoints
+            
+            # Get existing registry (may contain Full backup + CSV overrides)
+            existing_registry = st.session_state.get(cls.OBJECT_REGISTRY_KEY, {})
+            
+            # STRATEGY 1: Full backup upload - Replace everything (it's the new base layer)
+            if is_full_backup:
+                # Full backup becomes the new base - all its data wins
+                st.session_state[cls.OBJECT_REGISTRY_KEY] = new_objects.copy()
                 
-                if endpoint in existing_registry:
-                    # Endpoint exists - check which is newer
-                    existing_timestamp = existing_registry[endpoint].get("timestamp", "")
-                    
-                    try:
-                        new_dt = datetime.fromisoformat(new_timestamp.replace("UTC", "").strip())
-                        existing_dt = datetime.fromisoformat(existing_timestamp.replace("UTC", "").strip())
+                # Preserve any CSV overrides that are newer than the Full backup
+                from datetime import datetime
+                for endpoint, existing_meta in existing_registry.items():
+                    if existing_meta.get("source_type") == "csv":
+                        # CSV override exists, check if it's newer than Full backup
+                        csv_timestamp = existing_meta.get("timestamp", "")
                         
-                        # Newer data wins (whether from Minimal or CSV)
-                        if new_dt >= existing_dt:
+                        if endpoint in new_objects:
+                            full_timestamp = new_objects[endpoint].get("timestamp", "")
+                            try:
+                                csv_dt = datetime.fromisoformat(csv_timestamp.replace("UTC", "").strip())
+                                full_dt = datetime.fromisoformat(full_timestamp.replace("UTC", "").strip())
+                                
+                                # Keep CSV if newer than Full
+                                if csv_dt > full_dt:
+                                    st.session_state[cls.OBJECT_REGISTRY_KEY][endpoint] = existing_meta
+                            except:
+                                pass
+            
+            # STRATEGY 2: Minimal/CSV upload - Selective override with timestamp check
+            else:
+                from datetime import datetime
+                
+                for endpoint, new_metadata in new_objects.items():
+                    new_timestamp = new_metadata.get("timestamp", "")
+                    
+                    if endpoint in existing_registry:
+                        # Endpoint exists - check which is newer
+                        existing_timestamp = existing_registry[endpoint].get("timestamp", "")
+                        
+                        try:
+                            new_dt = datetime.fromisoformat(new_timestamp.replace("UTC", "").strip())
+                            existing_dt = datetime.fromisoformat(existing_timestamp.replace("UTC", "").strip())
+                            
+                            # Newer data wins (whether from Minimal or CSV)
+                            if new_dt >= existing_dt:
+                                existing_registry[endpoint] = new_metadata
+                            # else: keep existing (it's newer, e.g., from CSV uploaded after old JSON)
+                        except:
+                            # If timestamp parsing fails, new data wins
                             existing_registry[endpoint] = new_metadata
-                        # else: keep existing (it's newer, e.g., from CSV uploaded after old JSON)
-                    except:
-                        # If timestamp parsing fails, new data wins
+                    else:
+                        # New endpoint not in registry - add it
+                        # This shouldn't happen with Full as base, but handles edge cases
                         existing_registry[endpoint] = new_metadata
-                else:
-                    # New endpoint not in registry - add it
-                    # This shouldn't happen with Full as base, but handles edge cases
-                    existing_registry[endpoint] = new_metadata
-        
-        # Store inspector (always the most recent upload, for metadata/inspection)
-        st.session_state[cls.INSPECTOR_KEY] = inspector
-        st.session_state[cls.CUSTOM_FIELDS_KEY] = inspector.inspect_custom_fields()
-        st.session_state[cls.CHOICE_SETS_KEY] = inspector.inspect_choice_sets()
-        
-        return inspector
+            
+            # Store inspector (always the most recent upload, for metadata/inspection)
+            st.session_state[cls.INSPECTOR_KEY] = inspector
+            st.session_state[cls.CUSTOM_FIELDS_KEY] = inspector.inspect_custom_fields()
+            st.session_state[cls.CHOICE_SETS_KEY] = inspector.inspect_choice_sets()
+            
+            return inspector
     
     @classmethod
     def get_inspector(cls) -> Optional[BackupInspector]:

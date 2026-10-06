@@ -258,72 +258,72 @@ NAME_KEYS = ("name", "display", "prefix", "address", "cid", "model", "rd", "vid"
 
 def init_backup_tables() -> None:
     init_db()
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS backup_records (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            object_type TEXT,
-            object_label TEXT,
-            object_id INTEGER,
-            name TEXT,
-            site TEXT,
-            summary TEXT,
-            search_blob TEXT,
-            imported_at TEXT
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS backup_metadata (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
-            filename TEXT,
-            uploaded_at TEXT,
-            record_count INTEGER,
-            object_counts TEXT,
-            enabled INTEGER DEFAULT 1
-        )
-    """)
-    
-    # Migration: Add backup_json_compressed column if it doesn't exist
-    cursor.execute("PRAGMA table_info(backup_metadata)")
-    columns = [col[1] for col in cursor.fetchall()]
-    if "backup_json_compressed" not in columns:
-        cursor.execute("ALTER TABLE backup_metadata ADD COLUMN backup_json_compressed BLOB")
-    
-    # Authoritative custom field choice values (Instance Type Set, Resource Group
-    # Set, ...) so object-existence checks read NetBox rather than guessing from
-    # per-VM custom field text.
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS backup_choice_values (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            choice_set TEXT,
-            field_name TEXT,
-            value TEXT,
-            label TEXT,
-            imported_at TEXT
-        )
-    """)
-    # Dynamic NetBox schema registry - stores discovered fields and custom fields
-    # so the UI adapts automatically when NetBox upgrades or custom fields are added
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS netbox_schema (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            object_type TEXT UNIQUE,
-            field_config TEXT,
-            netbox_version TEXT,
-            is_enabled INTEGER DEFAULT 1,
-            created_at TEXT,
-            updated_at TEXT
-        )
-    """)
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_backup_type ON backup_records(object_type)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_backup_site ON backup_records(site)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_backup_name ON backup_records(name)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_choice_set ON backup_choice_values(choice_set)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_choice_field ON backup_choice_values(field_name)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_schema_object_type ON netbox_schema(object_type)")
-    conn.commit()
-    conn.close()
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS backup_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                object_type TEXT,
+                object_label TEXT,
+                object_id INTEGER,
+                name TEXT,
+                site TEXT,
+                summary TEXT,
+                search_blob TEXT,
+                imported_at TEXT
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS backup_metadata (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                filename TEXT,
+                uploaded_at TEXT,
+                record_count INTEGER,
+                object_counts TEXT,
+                enabled INTEGER DEFAULT 1
+            )
+        """)
+        
+        # Migration: Add backup_json_compressed column if it doesn't exist
+        cursor.execute("PRAGMA table_info(backup_metadata)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if "backup_json_compressed" not in columns:
+            cursor.execute("ALTER TABLE backup_metadata ADD COLUMN backup_json_compressed BLOB")
+        
+        # Authoritative custom field choice values (Instance Type Set, Resource Group
+        # Set, ...) so object-existence checks read NetBox rather than guessing from
+        # per-VM custom field text.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS backup_choice_values (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                choice_set TEXT,
+                field_name TEXT,
+                value TEXT,
+                label TEXT,
+                imported_at TEXT
+            )
+        """)
+        # Dynamic NetBox schema registry - stores discovered fields and custom fields
+        # so the UI adapts automatically when NetBox upgrades or custom fields are added
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS netbox_schema (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                object_type TEXT UNIQUE,
+                field_config TEXT,
+                netbox_version TEXT,
+                is_enabled INTEGER DEFAULT 1,
+                created_at TEXT,
+                updated_at TEXT
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_backup_type ON backup_records(object_type)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_backup_site ON backup_records(site)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_backup_name ON backup_records(name)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_backup_search ON backup_records(search_blob)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_choice_set ON backup_choice_values(choice_set)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_choice_field ON backup_choice_values(field_name)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_schema_object_type ON netbox_schema(object_type)")
+        conn.commit()
 
 
 # ── VALUE HELPERS ───────────────────────────────────────────────────────
