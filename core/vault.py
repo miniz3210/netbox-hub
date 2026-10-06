@@ -20,6 +20,7 @@ import os
 import re
 import ipaddress
 import sqlite3
+import hashlib
 import logging
 from typing import Dict, List, Optional, Tuple
 
@@ -470,27 +471,27 @@ class SanitizerVault:
             processed = processed.replace(orig, mac_matches[orig], 1)
             used_tokens.append((orig, mac_matches[orig]))
 
-        # 9. Known hostnames — longest first to avoid partial overlap
+        # 9. Known hostnames — longest first to avoid partial overlap.
+        #    Use re.sub (global) so every occurrence of each hostname is tokenised,
+        #    not just the first one.
         if known_hostnames:
             hostname_matches: Dict[str, str] = {}
             for name in sorted(known_hostnames, key=len, reverse=True):
                 if not name or name in hostname_matches:
                     continue
-                # Use word-boundary matching; escape regex metacharacters in the name.
-                pat = re.compile(r"\b" + re.escape(name) + r"\b", re.IGNORECASE)
-                for m in pat.finditer(processed):
-                    if name not in hostname_matches:
-                        tok = self._get_or_create_token(name, "HOST", session_id)
-                        hostname_matches[name] = tok
-                        break  # one token per unique hostname
+                tok = self._get_or_create_token(name, "HOST", session_id)
+                hostname_matches[name] = tok
             for orig in sorted(hostname_matches, key=len, reverse=True):
-                processed = processed.replace(orig, hostname_matches[orig], 1)
+                pat = re.compile(re.escape(orig), re.IGNORECASE)
+                processed = pat.sub(hostname_matches[orig], processed)
                 used_tokens.append((orig, hostname_matches[orig]))
 
-        # Deterministic session token from all tokens consumed in this pass
+        # Deterministic session token from all tokens consumed in this pass.
+        # Uses SHA-256 (stable across processes) instead of Python's randomised hash().
         if session_id is None:
+            token_names = tuple(sorted(t[1] for t in used_tokens))
             session_id = (
-                f"sess_{abs(hash(tuple(t[1] for t in used_tokens))) & 0xFFFFFFFF:08x}"
+                f"sess_{hashlib.sha256(str(token_names).encode()).hexdigest()[:12]}"
             )
 
         return processed, session_id
@@ -504,6 +505,11 @@ class SanitizerVault:
         """
         if not text or not isinstance(text, str):
             return text
+
+        # Undo common LLM Markdown/HTML escaping artifacts so tokens remain matchable.
+        text = text.replace("\\_", "_")
+        text = text.replace("&lt;", "<").replace("&gt;", ">")
+        text = text.replace("&#x27;", "'").replace("&#x2F;", "/")
 
         tokens_found = _TOKEN_RE.findall(text)
         if not tokens_found:

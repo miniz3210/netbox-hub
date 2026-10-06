@@ -8,6 +8,8 @@ UPDATED: Now supports two-pass query system for efficient intent routing
 """
 
 import re
+import gzip
+import json
 from typing import Dict, List, Any, Optional, Tuple
 from core.db_manager import (
     get_all_site_names,
@@ -38,6 +40,56 @@ from core.backup_manager import (
 import sqlite3
 
 DB_PATH = "data/netbox_hub.db"
+
+# ── Compressed backup JSON cache ──────────────────────────────────────────
+# Avoids repeated gzip.decompress() + json.loads() on every AI query by
+# caching the fully-decoded payload in-process.  Cache is invalidated when the
+# stored filename or record count changes (i.e. a new backup was uploaded).
+_cached_backup_payload: Optional[Dict[str, Any]] = None
+_cached_backup_meta: Tuple[str, int] = ("", 0)
+
+
+def _get_cached_backup_payload() -> Optional[Dict[str, Any]]:
+    """Return the decompressed backup JSON dict, loading/caching it once per upload."""
+    global _cached_backup_payload, _cached_backup_meta
+    try:
+        meta = get_backup_metadata()
+    except Exception:
+        return None
+    current_meta = (meta.get("filename") or "", meta.get("record_count") or 0)
+    if current_meta == _cached_backup_meta and _cached_backup_payload is not None:
+        return _cached_backup_payload
+    # Cache miss or upload changed — decompress fresh
+    try:
+        init_backup_tables()
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(backup_metadata)")
+        cols = [c[1] for c in cursor.fetchall()]
+        if "backup_json_compressed" in cols:
+            cursor.execute("SELECT backup_json_compressed FROM backup_metadata WHERE id = 1")
+            row = cursor.fetchone()
+            conn.close()
+            if row and row[0]:
+                raw = gzip.decompress(row[0]).decode("utf-8")
+                payload = json.loads(raw)
+                _cached_backup_payload = payload
+                _cached_backup_meta = current_meta
+                return payload
+        conn.close()
+    except Exception:
+        pass
+    # Failed to load — clear cache so we don't keep retrying the same bad state
+    _cached_backup_payload = None
+    _cached_backup_meta = current_meta
+    return None
+
+
+def invalidate_backup_cache() -> None:
+    """Clear the in-process backup payload cache (call after upload or clear)."""
+    global _cached_backup_payload, _cached_backup_meta
+    _cached_backup_payload = None
+    _cached_backup_meta = ("", 0)
 
 # Terms that map a natural-language question onto backup object collections.
 BACKUP_TOPIC_HINTS: List[tuple] = [
@@ -446,8 +498,8 @@ def get_dynamic_table_records(table_name: str, limit: int = 100) -> List[Dict[st
 def _collect_known_serials() -> List[str]:
     """Extract the exact *serial* attribute directly from structured device records.
 
-    Reads the ``serial`` key from the compressed NetBox backup JSON stored in
-    ``backup_metadata`` and returns distinct, non-trivial serial strings sorted by
+    Reads the ``serial`` key from the cached (or freshly decompressed) NetBox
+    backup JSON and returns distinct, non-trivial serial strings sorted by
     length descending so the longest serials are matched first by the vault.
 
     No regex guessing is performed on raw search blobs — only the explicit
@@ -457,63 +509,42 @@ def _collect_known_serials() -> List[str]:
     seen: set = set()
     serials: List[str] = []
 
-    try:
-        from core.backup_manager import init_backup_tables
-        init_backup_tables()
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
+    # 1. Try in-memory cache first (avoids DB + gzip + json overhead).
+    payload = _get_cached_backup_payload()
+    endpoints: List[Any] = payload.get("endpoints") if isinstance(payload, dict) else []
+    records_map: Dict[str, Any] = {
+        k: v for k, v in (payload or {}).items()
+        if isinstance(v, list) and k not in ("metadata", "endpoints", "summary")
+    } if isinstance(payload, dict) else {}
 
-        cursor.execute("PRAGMA table_info(backup_metadata)")
-        columns = [c[1] for c in cursor.fetchall()]
-        has_compressed = "backup_json_compressed" in columns
+    # Collect serials only from the dcim/devices endpoint and its flat-key
+    # equivalent; virtual-machine records carry no serial in NetBox and are
+    # intentionally skipped here.
+    target_types = ("dcim/devices",)
+    flat_keys = ("dcim_devices",)
+    for ep in endpoints:
+        path = ep.get("path", "")
+        if path not in target_types:
+            continue
+        for rec in ep.get("records", []):
+            s = (rec.get("serial") or "").strip()
+            if s and s.lower() not in trivial and s not in seen:
+                seen.add(s)
+                serials.append(s)
 
-        if has_compressed:
-            cursor.execute("SELECT backup_json_compressed FROM backup_metadata WHERE id = 1")
-            row = cursor.fetchone()
-            conn.close()
-            if row and row[0]:
-                import gzip
-                raw = gzip.decompress(row[0]).decode("utf-8")
-                payload = __import__("json").loads(raw)
-
-                endpoints: List[Any] = payload.get("endpoints") or []
-                records_map: Dict[str, Any] = {
-                    k: v for k, v in payload.items()
-                    if isinstance(v, list) and k not in ("metadata", "endpoints", "summary")
-                } if isinstance(payload, dict) else {}
-
-                # Collect serials only from the dcim/devices endpoint and its
-                # flat-key equivalent; virtual-machine records carry no serial in
-                # NetBox and are intentionally skipped here.
-                target_types = ("dcim/devices",)
-                flat_keys = ("dcim_devices",)
-                for ep in endpoints:
-                    path = ep.get("path", "")
-                    if path not in target_types:
-                        continue
-                    for rec in ep.get("records", []):
-                        s = (rec.get("serial") or "").strip()
-                        if s and s.lower() not in trivial and s not in seen:
-                            seen.add(s)
-                            serials.append(s)
-
-                for fk in flat_keys:
-                    for rec in records_map.get(fk, []):
-                        s = (rec.get("serial") or "").strip()
-                        if s and s.lower() not in trivial and s not in seen:
-                            seen.add(s)
-                            serials.append(s)
-        else:
-            conn.close()
-    except Exception:
-        pass
+    for fk in flat_keys:
+        for rec in records_map.get(fk, []):
+            s = (rec.get("serial") or "").strip()
+            if s and s.lower() not in trivial and s not in seen:
+                seen.add(s)
+                serials.append(s)
 
     return sorted(serials, key=len, reverse=True)
 
 
 def _collect_known_hostnames() -> List[str]:
     """Pull all registered device, hypervisor and VM names from the inventory DB
-    and supplement with VM names from the compressed NetBox backup JSON.
+    and supplement with VM names from the cached NetBox backup JSON.
 
     Names are returned sorted by length descending so the longest (most specific)
     hostnames are tokenised first, minimising accidental partial replacements.
@@ -549,40 +580,26 @@ def _collect_known_hostnames() -> List[str]:
     # 2. Backup JSON — virtualization_virtual_machines (flat key) and the
     #    virtualization/virtual-machines endpoint.  This catches VMs that may
     #    exist in the master backup but were not yet indexed into inventory_records.
-    try:
-        import gzip
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA table_info(backup_metadata)")
-        cols = [c[1] for c in cursor.fetchall()]
-        if "backup_json_compressed" in cols:
-            cursor.execute("SELECT backup_json_compressed FROM backup_metadata WHERE id = 1")
-            row = cursor.fetchone()
-            conn.close()
-            if row and row[0]:
-                raw = gzip.decompress(row[0]).decode("utf-8")
-                payload = __import__("json").loads(raw)
+    payload = _get_cached_backup_payload()
+    if isinstance(payload, dict):
+        # Flat-key layout.
+        vms_flat = payload.get("virtualization_virtual_machines", [])
+        if isinstance(vms_flat, list):
+            for rec in vms_flat:
+                n = (rec.get("name") or "").strip()
+                if n and n not in seen and n not in site_names:
+                    seen.add(n)
+                    names.append(n)
 
-                # Flat-key layout.
-                vms_flat = payload.get("virtualization_virtual_machines", [])
-                if isinstance(vms_flat, list):
-                    for rec in vms_flat:
-                        n = (rec.get("name") or "").strip()
-                        if n and n not in seen and n not in site_names:
-                            seen.add(n)
-                            names.append(n)
-
-                # API-walk endpoint layout.
-                for ep in (payload.get("endpoints") or []):
-                    if ep.get("path") == "virtualization/virtual-machines":
-                        for rec in ep.get("records", []):
-                            n = (rec.get("name") or "").strip()
-                            if n and n not in seen and n not in site_names:
-                                seen.add(n)
-                                names.append(n)
-                        break
-    except Exception:
-        pass
+        # API-walk endpoint layout.
+        for ep in (payload.get("endpoints") or []):
+            if ep.get("path") == "virtualization/virtual-machines":
+                for rec in ep.get("records", []):
+                    n = (rec.get("name") or "").strip()
+                    if n and n not in seen and n not in site_names:
+                        seen.add(n)
+                        names.append(n)
+                break
 
     return sorted(names, key=len, reverse=True)
 

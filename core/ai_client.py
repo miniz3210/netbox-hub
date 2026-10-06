@@ -384,7 +384,7 @@ def parse_raw_gateway_payload(raw_text: str) -> str:
     # Strategy 3: text fallback — return the raw body unchanged
     return raw_text or ""
 
-def call_ai(prompt: str, selected_model: str, custom_system_msg: Optional[str] = None, timeout: int = 90, max_tokens: int = 4096) -> str:
+def call_ai(prompt: str, selected_model: str, custom_system_msg: Optional[str] = None, timeout: int = 90, max_tokens: int = 4096, _pre_sanitized: bool = False) -> str:
     rules = load_naming_rules()
     naming_context = export_rules_as_prompt(rules)
     system_msg = custom_system_msg or (
@@ -403,7 +403,13 @@ def call_ai(prompt: str, selected_model: str, custom_system_msg: Optional[str] =
     from core.vault import SanitizerVault
     vault = SanitizerVault()
     safe_system_msg, session_id = vault.sanitize(system_msg)
-    safe_prompt, _ = vault.sanitize(prompt, session_id=session_id)
+    if _pre_sanitized:
+        # Caller already sanitized the prompt (e.g. ui/components.py); reuse
+        # the session_id so both system and user messages share the same vault
+        # session dictionary.
+        safe_prompt = prompt
+    else:
+        safe_prompt, _ = vault.sanitize(prompt, session_id=session_id)
 
     clean_token = OPENROUTER_API_KEY.replace("Bearer ", "").strip()
     headers = {

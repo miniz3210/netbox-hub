@@ -121,18 +121,23 @@ def render_ai_chat(
             with transcript.chat_message("user"):
                 st.markdown(prompt)
 
-            # Sanitize sensitive data in the system prompt before sending to the LLM
+            # Sanitize sensitive data in the system prompt before sending to the LLM.
+            # Generate ONE deterministic session_id and reuse it for both the system
+            # prompt and the user prompt so that every token lives in a single vault
+            # session dictionary and restore() can always find its mapping.
             vault = SanitizerVault()
             full_system_prompt = build_system_prompt(prompt)
             safe_system_prompt, session_id = vault.sanitize(full_system_prompt)
+            safe_prompt, _ = vault.sanitize(prompt, session_id=session_id)
 
             with transcript.chat_message("assistant"):
                 with st.spinner("Thinking..."):
                     try:
                         response = call_ai(
-                            prompt,
+                            safe_prompt,
                             active_model,
                             custom_system_msg=safe_system_prompt,
+                            _pre_sanitized=True,
                         )
                     except Exception as exc:
                         response = f"❌ AI Assistant temporarily unavailable: {exc}"
