@@ -444,11 +444,14 @@ def get_dynamic_table_records(table_name: str, limit: int = 100) -> List[Dict[st
         conn.close()
 
 def _collect_known_serials() -> List[str]:
-    """Extract structured serial numbers directly from device database records.
+    """Extract the exact *serial* attribute directly from structured device records.
 
-    Reads the *serial* column from the compressed NetBox backup JSON stored in
-    backup_metadata and returns distinct, non-trivial serial strings sorted by
+    Reads the ``serial`` key from the compressed NetBox backup JSON stored in
+    ``backup_metadata`` and returns distinct, non-trivial serial strings sorted by
     length descending so the longest serials are matched first by the vault.
+
+    No regex guessing is performed on raw search blobs — only the explicit
+    ``serial`` field of each record is used.
     """
     trivial = {"n/a", "none", ""}
     seen: set = set()
@@ -460,8 +463,6 @@ def _collect_known_serials() -> List[str]:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
 
-        # Check whether the compressed-JSON column exists (older imports may
-        # not have it) and skip gracefully if not.
         cursor.execute("PRAGMA table_info(backup_metadata)")
         columns = [c[1] for c in cursor.fetchall()]
         has_compressed = "backup_json_compressed" in columns
@@ -475,21 +476,21 @@ def _collect_known_serials() -> List[str]:
                 raw = gzip.decompress(row[0]).decode("utf-8")
                 payload = __import__("json").loads(raw)
 
-                # Support both legacy flat layout and full API-walk layout.
                 endpoints: List[Any] = payload.get("endpoints") or []
                 records_map: Dict[str, Any] = {
                     k: v for k, v in payload.items()
                     if isinstance(v, list) and k not in ("metadata", "endpoints", "summary")
                 } if isinstance(payload, dict) else {}
 
-                target_types = ("dcim/devices", "virtualization/virtual-machines")
-                flat_keys = ("dcim_devices", "virtualization_virtual_machines")
-                seen_endpoints: set = set()
+                # Collect serials only from the dcim/devices endpoint and its
+                # flat-key equivalent; virtual-machine records carry no serial in
+                # NetBox and are intentionally skipped here.
+                target_types = ("dcim/devices",)
+                flat_keys = ("dcim_devices",)
                 for ep in endpoints:
                     path = ep.get("path", "")
                     if path not in target_types:
                         continue
-                    seen_endpoints.add(path)
                     for rec in ep.get("records", []):
                         s = (rec.get("serial") or "").strip()
                         if s and s.lower() not in trivial and s not in seen:
@@ -497,9 +498,6 @@ def _collect_known_serials() -> List[str]:
                             serials.append(s)
 
                 for fk in flat_keys:
-                    if fk in records_map:
-                        # Map flat-key names back to endpoint paths for summary
-                        pass
                     for rec in records_map.get(fk, []):
                         s = (rec.get("serial") or "").strip()
                         if s and s.lower() not in trivial and s not in seen:
@@ -514,19 +512,22 @@ def _collect_known_serials() -> List[str]:
 
 
 def _collect_known_hostnames() -> List[str]:
-    """Pull all registered device, hypervisor and VM names from the inventory DB.
+    """Pull all registered device, hypervisor and VM names from the inventory DB
+    and supplement with VM names from the compressed NetBox backup JSON.
 
     Names are returned sorted by length descending so the longest (most specific)
     hostnames are tokenised first, minimising accidental partial replacements.
     Site names are explicitly excluded so they remain visible in AI responses.
     """
-    # Build the set of site names to exclude — sites must never be masked.
     try:
         site_names = set(get_all_site_names())
     except Exception:
         site_names = set()
 
     names: List[str] = []
+    seen: set = set()
+
+    # 1. Inventory DB — devices, hypervisors, VMs.
     try:
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
@@ -538,11 +539,51 @@ def _collect_known_hostnames() -> List[str]:
             )
             for row in cursor.fetchall():
                 n = str(row["name"]).strip()
-                if n and n not in names and n not in site_names:
+                if n and n not in seen and n not in site_names:
+                    seen.add(n)
                     names.append(n)
         conn.close()
     except Exception:
         pass
+
+    # 2. Backup JSON — virtualization_virtual_machines (flat key) and the
+    #    virtualization/virtual-machines endpoint.  This catches VMs that may
+    #    exist in the master backup but were not yet indexed into inventory_records.
+    try:
+        import gzip
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(backup_metadata)")
+        cols = [c[1] for c in cursor.fetchall()]
+        if "backup_json_compressed" in cols:
+            cursor.execute("SELECT backup_json_compressed FROM backup_metadata WHERE id = 1")
+            row = cursor.fetchone()
+            conn.close()
+            if row and row[0]:
+                raw = gzip.decompress(row[0]).decode("utf-8")
+                payload = __import__("json").loads(raw)
+
+                # Flat-key layout.
+                vms_flat = payload.get("virtualization_virtual_machines", [])
+                if isinstance(vms_flat, list):
+                    for rec in vms_flat:
+                        n = (rec.get("name") or "").strip()
+                        if n and n not in seen and n not in site_names:
+                            seen.add(n)
+                            names.append(n)
+
+                # API-walk endpoint layout.
+                for ep in (payload.get("endpoints") or []):
+                    if ep.get("path") == "virtualization/virtual-machines":
+                        for rec in ep.get("records", []):
+                            n = (rec.get("name") or "").strip()
+                            if n and n not in seen and n not in site_names:
+                                seen.add(n)
+                                names.append(n)
+                        break
+    except Exception:
+        pass
+
     return sorted(names, key=len, reverse=True)
 
 
