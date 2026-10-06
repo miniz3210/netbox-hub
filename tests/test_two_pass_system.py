@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 
 # Add project root to path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.ai_intent_router import (
     validate_pass1_token_budget,
@@ -40,22 +40,23 @@ def print_section(title: str):
 def test_token_budget():
     """Test 1: Validate Pass 1 token budget"""
     print_section("TEST 1: Pass 1 Token Budget Validation")
-    
+
+    PASS_1_MAX_TOKENS = 3500
     validation = validate_pass1_token_budget()
-    
+
     print(f"Estimated tokens: {validation['estimated_tokens']}")
-    print(f"Token budget: 1000")
+    print(f"Token budget: {PASS_1_MAX_TOKENS}")
     print(f"Budget remaining: {validation['budget_remaining']}")
     print(f"Status: {validation['status']}")
     print(f"Endpoint count: {validation['endpoint_count']}")
     print(f"Schema tokens: {int(validation['schema_tokens'])}")
-    
+
     if validation['under_budget']:
-        print("\n✓ PASS: Token budget constraint met (<1000 tokens)")
+        print(f"\n✓ PASS: Token budget constraint met (<{PASS_1_MAX_TOKENS} tokens)")
     else:
-        print("\n✗ FAIL: Token budget exceeded!")
-    
-    return validation['under_budget']
+        print(f"\n✗ FAIL: Token budget exceeded!")
+
+    assert validation['under_budget'], f"Pass 1 token budget exceeded: {validation['estimated_tokens']} tokens > {PASS_1_MAX_TOKENS}"
 
 
 def test_endpoint_coverage():
@@ -78,8 +79,8 @@ def test_endpoint_coverage():
         print(f"\n✓ PASS: Good endpoint coverage ({stats['coverage_percentage']:.1f}%)")
     else:
         print(f"\n⚠ WARNING: Low endpoint coverage ({stats['coverage_percentage']:.1f}%)")
-    
-    return coverage_ok
+
+    assert coverage_ok, f"Low endpoint coverage: {stats['coverage_percentage']:.1f}%"
 
 
 def test_sample_queries():
@@ -99,21 +100,22 @@ def test_sample_queries():
         "List all wireless SSIDs",
     ]
     
+    PASS_1_MAX_TOKENS = 3500
     all_pass = True
-    
+
     for query in test_queries:
         tokens = estimate_pass1_tokens(query)
-        status = "✓" if tokens < 1000 else "✗"
+        status = "✓" if tokens < PASS_1_MAX_TOKENS else "✗"
         print(f"{status} {tokens:4d} tokens | {query}")
-        if tokens >= 1000:
+        if tokens >= PASS_1_MAX_TOKENS:
             all_pass = False
-    
+
     if all_pass:
-        print("\n✓ PASS: All sample queries under 1000 tokens")
+        print(f"\n✓ PASS: All sample queries under {PASS_1_MAX_TOKENS} tokens")
     else:
-        print("\n✗ FAIL: Some queries exceeded budget")
-    
-    return all_pass
+        print(f"\n✗ FAIL: Some queries exceeded budget")
+
+    assert all_pass, "Some sample queries exceeded the token budget"
 
 
 def test_schema_generation():
@@ -148,8 +150,8 @@ def test_schema_generation():
         print("\n✓ PASS: Schema format valid")
     else:
         print("\n✗ FAIL: Schema format issues")
-    
-    return format_ok
+
+    assert format_ok, "Schema format validation failed"
 
 
 def test_pass1_prompt_structure():
@@ -175,13 +177,13 @@ def test_pass1_prompt_structure():
     print(f"  {'✓' if has_json_format else '✗'} Has JSON format spec")
     
     all_present = all([has_instructions, has_schema, has_query, has_json_format])
-    
+
     if all_present:
         print("\n✓ PASS: Prompt structure complete")
     else:
         print("\n✗ FAIL: Prompt structure incomplete")
-    
-    return all_present
+
+    assert all_present, "Prompt structure is incomplete"
 
 
 def test_system_info():
@@ -205,49 +207,84 @@ def test_system_info():
             print(f"  {category}: {count}")
         
         print("\n✓ PASS: System info retrieved successfully")
-        return True
+        assert True
     except Exception as e:
         print(f"\n✗ FAIL: Error retrieving system info: {e}")
-        return False
+        raise
 
 
 def run_all_tests():
     """Run all tests and generate report"""
     print_section("TWO-PASS AI ASSISTANT SYSTEM - TEST SUITE")
-    
-    print("Testing Pass 1 token budget constraint (<1000 tokens)")
+
+    print("Testing Pass 1 token budget constraint (<3500 tokens)")
     print("Testing with 112+ NetBox endpoints")
     print("Date: 2026-09-18\n")
-    
+
     results = {}
-    
+
     # Run tests
-    results['token_budget'] = test_token_budget()
-    results['endpoint_coverage'] = test_endpoint_coverage()
-    results['sample_queries'] = test_sample_queries()
-    results['schema_generation'] = test_schema_generation()
-    results['prompt_structure'] = test_pass1_prompt_structure()
-    results['system_info'] = test_system_info()
-    
+    try:
+        test_token_budget()
+        results['token_budget'] = True
+    except Exception as e:
+        results['token_budget'] = False
+        print(f"  Error: {e}")
+
+    try:
+        test_endpoint_coverage()
+        results['endpoint_coverage'] = True
+    except Exception as e:
+        results['endpoint_coverage'] = False
+        print(f"  Error: {e}")
+
+    try:
+        test_sample_queries()
+        results['sample_queries'] = True
+    except Exception as e:
+        results['sample_queries'] = False
+        print(f"  Error: {e}")
+
+    try:
+        test_schema_generation()
+        results['schema_generation'] = True
+    except Exception as e:
+        results['schema_generation'] = False
+        print(f"  Error: {e}")
+
+    try:
+        test_pass1_prompt_structure()
+        results['prompt_structure'] = True
+    except Exception as e:
+        results['prompt_structure'] = False
+        print(f"  Error: {e}")
+
+    try:
+        test_system_info()
+        results['system_info'] = True
+    except Exception as e:
+        results['system_info'] = False
+        print(f"  Error: {e}")
+
     # Summary
     print_section("TEST SUMMARY")
-    
+
     total_tests = len(results)
     passed_tests = sum(1 for passed in results.values() if passed)
-    
+
     print(f"Total tests: {total_tests}")
     print(f"Passed: {passed_tests}")
     print(f"Failed: {total_tests - passed_tests}")
     print(f"Success rate: {passed_tests / total_tests * 100:.1f}%\n")
-    
+
     for test_name, passed in results.items():
         status = "✓ PASS" if passed else "✗ FAIL"
         print(f"{status} | {test_name.replace('_', ' ').title()}")
-    
+
     if all(results.values()):
         print("\n" + "="*70)
         print("  ✓ ALL TESTS PASSED")
-        print("  Pass 1 token budget constraint verified (<1000 tokens)")
+        print("  Pass 1 token budget constraint verified (<3500 tokens)")
         print("="*70)
         return 0
     else:

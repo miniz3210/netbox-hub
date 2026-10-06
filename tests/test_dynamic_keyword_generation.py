@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 # Add project root to path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.ai_intent_router import (
     _generate_keywords_from_endpoint,
@@ -30,7 +30,7 @@ def print_section(title: str):
 def test_dynamic_keyword_generation():
     """Test 1: Dynamic keyword generation for various endpoints"""
     print_section("TEST 1: Dynamic Keyword Generation (No Hardcoding)")
-    
+
     # Test with real endpoints from the system
     test_endpoints = [
         "dcim/devices",
@@ -44,18 +44,18 @@ def test_dynamic_keyword_generation():
         "extras/custom-field-choice-sets",
         "core/object-changes",
     ]
-    
+
     print("Testing keyword generation for known endpoints:\n")
-    
+
     for endpoint in test_endpoints:
         keywords = _generate_keywords_from_endpoint(endpoint)
         print(f"{endpoint}")
         print(f"  Keywords: {keywords}")
         print()
-    
+
     # Test with hypothetical future endpoints (NetBox 5.0, 6.0, etc.)
     print("\nTesting with hypothetical FUTURE endpoints:\n")
-    
+
     future_endpoints = [
         "dcim/smart-racks",  # Doesn't exist yet
         "ipam/ipv6-pools",   # Doesn't exist yet
@@ -63,58 +63,55 @@ def test_dynamic_keyword_generation():
         "cloud/azure-resources",  # New cloud category
         "security/firewall-policies",  # New security category
     ]
-    
+
     for endpoint in future_endpoints:
         keywords = _generate_keywords_from_endpoint(endpoint)
         print(f"{endpoint} (FUTURE/HYPOTHETICAL)")
         print(f"  Keywords: {keywords}")
         print(f"  ✓ Generated dynamically without hardcoding")
         print()
-    
+
     print("✓ PASS: Dynamic keyword generation works for any endpoint")
-    return True
+    assert True
 
 
 def test_full_schema_generation():
     """Test 2: Full schema generation from live endpoint discovery"""
     print_section("TEST 2: Full Dynamic Schema Generation")
-    
+
     # Get ALL endpoints from the discovery system
     all_endpoints = get_all_endpoints()
-    
+
     print(f"Total endpoints discovered: {len(all_endpoints)}")
     print(f"Source: config.backup_endpoints (dynamically parsed)")
     print()
-    
+
     # Generate schema
     schema = _generate_compact_endpoint_schema()
     schema_lines = [line for line in schema.split('\n') if line.strip()]
-    
+
     print(f"Schema lines generated: {len(schema_lines)}")
     print(f"Schema size: {len(schema):,} bytes")
     print(f"Estimated tokens: {len(schema) // 3.5:.0f}")
     print()
-    
+
     # Show sample
     print("Sample schema entries (first 5):")
     for line in schema_lines[:5]:
         print(f"  {line}")
-    
+
     print("\n...")
     print("\nSample schema entries (last 5):")
     for line in schema_lines[-5:]:
         print(f"  {line}")
-    
+
     # Verify all discovered endpoints are in schema
     coverage = len(schema_lines) / len(all_endpoints) * 100 if all_endpoints else 0
     print(f"\nCoverage: {coverage:.1f}% of discovered endpoints")
-    
-    if coverage >= 95:
-        print("✓ PASS: Full dynamic schema generation successful")
-        return True
-    else:
-        print(f"⚠ WARNING: Only {coverage:.1f}% coverage")
-        return False
+
+    assert coverage >= 95, f"Schema coverage too low: {coverage:.1f}%"
+    print("✓ PASS: Full dynamic schema generation successful")
+    assert True
 
 
 def test_endpoint_discovery_source():
@@ -150,34 +147,32 @@ def test_endpoint_discovery_source():
     print("  ✓ Keywords generated algorithmically from endpoint paths")
     print()
     print("✓ PASS: Zero hardcoding verified")
-    
-    return True
+
+    assert True
 
 
 def test_token_budget_with_dynamic_schema():
     """Test 4: Token budget compliance with dynamic schema"""
     print_section("TEST 4: Token Budget Compliance (Dynamic Schema)")
-    
+
+    PASS_1_MAX_TOKENS = 3500
     validation = validate_pass1_token_budget()
-    
+
     print(f"Pass 1 estimated tokens: {validation['estimated_tokens']}")
-    print(f"Token budget: 1000")
+    print(f"Token budget: {PASS_1_MAX_TOKENS}")
     print(f"Budget remaining: {validation['budget_remaining']}")
     print(f"Status: {validation['status']}")
     print()
-    
+
     print("Schema generation method: FULLY DYNAMIC")
     print("  - No hardcoded endpoints")
     print("  - No hardcoded keywords")
     print("  - Adapts to any NetBox version")
     print()
-    
-    if validation['under_budget']:
-        print(f"✓ PASS: Token budget met with {validation['budget_remaining']} tokens to spare")
-        return True
-    else:
-        print(f"✗ FAIL: Token budget exceeded by {-validation['budget_remaining']} tokens")
-        return False
+
+    assert validation['under_budget'], f"Token budget exceeded: {validation['estimated_tokens']} tokens > {PASS_1_MAX_TOKENS}"
+    print(f"✓ PASS: Token budget met with {validation['budget_remaining']} tokens to spare")
+    assert True
 
 
 def test_keyword_quality():
@@ -217,8 +212,8 @@ def test_keyword_quality():
         print("✓ PASS: Keyword quality is good")
     else:
         print("⚠ WARNING: Some keywords could be improved")
-    
-    return all_good
+
+    assert all_good, "Keyword quality check failed"
 
 
 def test_schema_consistency():
@@ -247,13 +242,13 @@ def test_schema_consistency():
     print(f"Sizes (bytes): {sizes}")
     
     consistent = len(set(line_counts)) == 1 and len(set(sizes)) == 1
-    
+
     if consistent:
         print("\n✓ PASS: Schema generation is consistent")
-        return True
     else:
         print("\n⚠ WARNING: Schema generation has minor variations")
-        return True  # Still pass if minor variations
+    # Always pass if schema generates without errors
+    assert True
 
 
 def run_all_tests():
@@ -261,38 +256,73 @@ def run_all_tests():
     print_section("DYNAMIC KEYWORD GENERATION TEST SUITE")
     print("Verifying ZERO HARDCODING - Future-proof for any NetBox version")
     print("Date: 2026-09-18\n")
-    
+
     results = {}
-    
+
     # Run tests
-    results['dynamic_keywords'] = test_dynamic_keyword_generation()
-    results['full_schema'] = test_full_schema_generation()
-    results['discovery_source'] = test_endpoint_discovery_source()
-    results['token_budget'] = test_token_budget_with_dynamic_schema()
-    results['keyword_quality'] = test_keyword_quality()
-    results['schema_consistency'] = test_schema_consistency()
-    
+    try:
+        test_dynamic_keyword_generation()
+        results['dynamic_keywords'] = True
+    except Exception as e:
+        results['dynamic_keywords'] = False
+        print(f"  Error: {e}")
+
+    try:
+        test_full_schema_generation()
+        results['full_schema'] = True
+    except Exception as e:
+        results['full_schema'] = False
+        print(f"  Error: {e}")
+
+    try:
+        test_endpoint_discovery_source()
+        results['discovery_source'] = True
+    except Exception as e:
+        results['discovery_source'] = False
+        print(f"  Error: {e}")
+
+    try:
+        test_token_budget_with_dynamic_schema()
+        results['token_budget'] = True
+    except Exception as e:
+        results['token_budget'] = False
+        print(f"  Error: {e}")
+
+    try:
+        test_keyword_quality()
+        results['keyword_quality'] = True
+    except Exception as e:
+        results['keyword_quality'] = False
+        print(f"  Error: {e}")
+
+    try:
+        test_schema_consistency()
+        results['schema_consistency'] = True
+    except Exception as e:
+        results['schema_consistency'] = False
+        print(f"  Error: {e}")
+
     # Summary
     print_section("TEST SUMMARY")
-    
+
     total_tests = len(results)
     passed_tests = sum(1 for passed in results.values() if passed)
-    
+
     print(f"Total tests: {total_tests}")
     print(f"Passed: {passed_tests}")
     print(f"Failed: {total_tests - passed_tests}")
     print(f"Success rate: {passed_tests / total_tests * 100:.1f}%\n")
-    
+
     for test_name, passed in results.items():
         status = "✓ PASS" if passed else "✗ FAIL"
         print(f"{status} | {test_name.replace('_', ' ').title()}")
-    
+
     if all(results.values()):
         print("\n" + "="*70)
         print("  ✓ ALL TESTS PASSED")
         print("  ✓ ZERO HARDCODING VERIFIED")
         print("  ✓ Future-proof for any NetBox version")
-        print("  ✓ Token budget compliant (<1000 tokens)")
+        print("  ✓ Token budget compliant (<3500 tokens)")
         print("="*70)
         return 0
     else:
