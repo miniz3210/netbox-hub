@@ -316,6 +316,243 @@ def evaluate_subnet_row(
 
     return {"usable_range": usable_range, "status": "🟢 Available", "desc": desc}
 
+# ── BUG-6: Deep IPAM Overlap & Hierarchy-Aware Allocation ──────────────────
+
+_CONTAINMENT_OVERLAP = "CONTAINED_BY_SUPERNET"
+_COLLISION_OVERLAP = "COLLISION_ERROR"
+
+
+def _get_trailing_digits(name: str) -> str:
+    """Return the trailing numeric suffix (e.g. '01' from 'fwAZESWINE101')."""
+    m = re.search(r'(\d+)$', name)
+    return m.group(1) if m else ""
+
+
+def _names_differ_only_by_trailing_seq(a: str, b: str) -> bool:
+    """True when a and b are identical except for a trailing digit sequence.
+
+    Example: 'fwAZESWINE1' vs 'fwAZESWINE2' → True  (blocked by suffix guard).
+    Example: 'fwAZESWINE1' vs 'fwAZESWINE10' → False (different names).
+    """
+    if a.lower() == b.lower():
+        return False
+    al, bl = a.lower(), b.lower()
+    da, db = _get_trailing_digits(al), _get_trailing_digits(bl)
+    if not da or not db:
+        return False
+    prefix_a = al[: len(al) - len(da)]
+    prefix_b = bl[: len(bl) - len(db)]
+    return prefix_a == prefix_b and da != db
+
+
+def check_prefix_overlap(
+    prefix_str: str,
+    known_prefixes: List[Dict[str, Any]],
+    vrf_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Detect ALL overlapping/colliding prefixes within the SAME VRF.
+
+    Unlike the previous single-return version, this traverses every candidate
+    prefix in the supplied list, categorises the overlap as either a legitimate
+    parent-supernet containment (info-level) or a destructive peer collision
+    (error-level), and returns a comprehensive list of findings.
+
+    Cross-VRF overlaps are intentionally ignored — they are valid NetBox
+    deployments.
+
+    Returns a list of dicts:
+        {"prefix": str, "vlan": str/None, "site": str/None,
+         "status": str, "conflict_type": str}
+    """
+    clean = sanitize_cidr(prefix_str)
+    if not clean or "/" not in clean:
+        return []
+
+    try:
+        query_net = ipaddress.ip_network(clean, strict=False)
+    except ValueError:
+        return []
+
+    findings: List[Dict[str, Any]] = []
+    for cand in known_prefixes:
+        cand_str = sanitize_cidr(str(cand.get("prefix", "") or ""))
+        if not cand_str or "/" not in cand_str:
+            continue
+        # Skip self-reference
+        if cand_str == clean:
+            continue
+        # Respect VRF filter — cross-VRF overlaps are valid
+        cand_vrf = str(cand.get("vrf", "") or "").strip()
+        if vrf_id and cand_vrf and cand_vrf != vrf_id:
+            continue
+        try:
+            cand_net = ipaddress.ip_network(cand_str, strict=False)
+        except ValueError:
+            continue
+
+        if not query_net.overlaps(cand_net):
+            continue
+
+        # Determine containment relationship
+        try:
+            is_parent = query_net.supernet_of(cand_net)  # query contains cand
+            is_child = cand_net.supernet_of(query_net)   # cand contains query
+        except ValueError:
+            is_parent = is_child = False
+
+        if is_parent or is_child:
+            # Legitimate hierarchical containment (info-level)
+            findings.append({
+                "prefix": cand_str,
+                "vlan": cand.get("vlan") or None,
+                "site": cand.get("site") or None,
+                "status": "INFO",
+                "conflict_type": _CONTAINMENT_OVERLAP,
+            })
+        else:
+            # Destructive peer collision — partial or equal-length overlap
+            findings.append({
+                "prefix": cand_str,
+                "vlan": cand.get("vlan") or None,
+                "site": cand.get("site") or None,
+                "status": "ERROR",
+                "conflict_type": _COLLISION_OVERLAP,
+            })
+
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# BUG-7: Fragmentation-Aware Subnet Allocator
+# ---------------------------------------------------------------------------
+
+
+def _cidr_boundary_mask(prefix_len: int) -> int:
+    """Return the integer mask that defines the CIDR binary boundary for *prefix_len*."""
+    return (0xFFFFFFFF << (32 - prefix_len)) & 0xFFFFFFFF
+
+
+def _is_aligned(network: ipaddress.IPv4Network, prefix_len: int) -> bool:
+    """Check whether *network*'s start address is aligned to its CIDR boundary."""
+    if network.prefixlen != prefix_len:
+        return False
+    net_int = int(network.network_address)
+    mask = _cidr_boundary_mask(prefix_len)
+    return (net_int & mask) == net_int
+
+
+def _cidr_subnets(start: ipaddress.IPv4Address, length: int, prefix: int) -> List[ipaddress.IPv4Network]:
+    """Yield all CIDR-legal /prefix subnets contained in the range starting at
+    *start* with *length* addresses (must be a power of two)."""
+    if length == 0:
+        return []
+    base = ipaddress.IPv4Network((start, prefix), strict=False)
+    return list(base.subnets())
+
+
+def _find_frag_chunks(
+    supernet: ipaddress.IPv4Network,
+    existing: List[ipaddress.IPv4Network],
+    desired_prefix: int,
+    max_results: int = 3,
+) -> List[ipaddress.IPv4Network]:
+    """Return up to *max_results* non-overlapping CIDR-legal subnets inside
+    *supernet* that do NOT collide with any *existing* prefix.
+
+    The allocator prefers already-fragmented regions (smaller subnets near the
+    tail) while preserving large contiguous blocks near the head for bigger
+    /24–/26 allocations.
+    """
+    candidates: List[ipaddress.IPv4Network] = []
+    if desired_prefix > supernet.prefixlen:
+        try:
+            candidates = list(supernet.subnets(new_prefix=desired_prefix))
+        except ValueError:
+            return []
+
+    # Sort: small fragmented chunks near the tail first, large head blocks last.
+    # Total count in supernet for that prefix size.
+    total = len(candidates) if candidates else 1
+    # Reverse so tail-first; already fragmented tail chunks come first.
+    candidates.reverse()
+
+    used: List[ipaddress.IPv4Network] = list(existing)
+    available: List[ipaddress.IPv4Network] = []
+    for cand in candidates:
+        if any(cand.overlaps(u) for u in used):
+            continue
+        available.append(cand)
+        if len(available) >= max_results:
+            break
+
+    # If we didn't find enough via tail-first, fall back to head-first
+    if len(available) < max_results:
+        candidates.reverse()
+        seen = set(str(c) for c in available)
+        for cand in candidates:
+            if str(cand) in seen:
+                continue
+            if any(cand.overlaps(u) for u in used):
+                continue
+            available.append(cand)
+            if len(available) >= max_results:
+                break
+
+    return available[:max_results]
+
+
+def get_top_3_available_subnets(
+    supernet_str: str,
+    existing_prefixes: List[str],
+    requested_prefix_len: int,
+) -> List[Dict[str, Any]]:
+    """Fragmentation-aware subnet allocator returning Top-3 non-overlapping
+    CIDR-aligned candidates inside *supernet_str*.
+
+    Returns a list of dicts:
+        {"prefix": str, "range": str, "notes": str}
+    """
+    clean_sup = sanitize_cidr(supernet_str)
+    if not clean_sup or "/" not in clean_sup:
+        return []
+    try:
+        sup = ipaddress.ip_network(clean_sup, strict=False)
+    except ValueError:
+        return []
+
+    if requested_prefix_len < sup.prefixlen:
+        return []  # Requested prefix is larger than supernet itself
+
+    parsed_existing: List[ipaddress.IPv4Network] = []
+    for p in existing_prefixes:
+        cp = sanitize_cidr(str(p).strip())
+        if not cp or "/" not in cp:
+            continue
+        try:
+            parsed_existing.append(ipaddress.ip_network(cp, strict=False))
+        except ValueError:
+            continue
+
+    results = _find_frag_chunks(sup, parsed_existing, requested_prefix_len, max_results=3)
+
+    out: List[Dict[str, Any]] = []
+    for idx, net in enumerate(results, start=1):
+        notes_parts = [f"CIDR-aligned /{net.prefixlen}"]
+        if net.prefixlen <= 26:
+            notes_parts.append("large-block candidate")
+        elif net.prefixlen >= 29:
+            notes_parts.append("fragmented-tail placement")
+        out.append({
+            "prefix": str(net),
+            "range": calculate_ip_range_str(net),
+            "notes": "; ".join(notes_parts),
+            "rank": idx,
+        })
+    return out
+
+
+# ── CACHE INVALIDATION HOOK ─────────────────────────────────────────────
+
 def calculate_remaining_subnets(supernet_str: str, allocated_subnets: List[str]) -> Dict[str, int]:
     result = {"/24": 0, "/25": 0, "/26": 0, "/27": 0, "/28": 0}
     clean_supernet = sanitize_cidr(supernet_str)

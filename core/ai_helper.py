@@ -10,6 +10,7 @@ UPDATED: Now supports two-pass query system for efficient intent routing
 import re
 import gzip
 import json
+import difflib
 from typing import Dict, List, Any, Optional, Tuple
 from core.db_manager import (
     get_all_site_names,
@@ -902,3 +903,130 @@ def validate_two_pass_token_budget() -> Dict[str, Any]:
     from core.ai_intent_router import validate_pass1_token_budget
     
     return validate_pass1_token_budget()
+
+
+# ── SAFE HOSTNAME FUZZY MATCHING (v3.9.20) ─────────────────────────────────
+
+_FUZZY_CUTOFF = 0.82
+_FUZZY_MAX_CANDIDATES = 3
+_FUZZY_SUGGESTION_TEMPLATE = (
+    "[FUZZY_SUGGESTION]: Exact object '{query}' not found. "
+    "Did you mean one of: {candidates} ?"
+)
+
+
+def _extract_trailing_seq(name: str) -> str:
+    """Return the trailing numeric sequence from *name* (e.g. '01' from 'sw01')."""
+    m = re.search(r'(\d+)$', name)
+    return m.group(1) if m else ""
+
+
+def _names_differ_only_by_trailing_number(a: str, b: str) -> bool:
+    """Return True when *a* and *b* are identical except for a trailing digit
+    sequence.  Used by the suffix guard to reject near-misses like SW1 vs SW2.
+    """
+    if a.lower() == b.lower():
+        return False
+    al, bl = a.lower(), b.lower()
+    da, db = _extract_trailing_seq(al), _extract_trailing_seq(bl)
+    if not da or not db:
+        return False
+    prefix_a = al[: len(al) - len(da)]
+    prefix_b = bl[: len(bl) - len(db)]
+    return prefix_a == prefix_b and da != db
+
+
+def fuzzy_match_hostname(
+    query: str,
+    known_names: Optional[List[str]] = None,
+    cutoff: float = _FUZZY_CUTOFF,
+    max_candidates: int = _FUZZY_MAX_CANDIDATES,
+) -> List[Dict[str, Any]]:
+    """Compute fuzzy-match candidates for *query* against *known_names*.
+
+    Guardrails enforced:
+      - Similarity ratio must be >= *cutoff* (default 0.82).
+      - Names differing ONLY by trailing digit sequence are rejected (suffix
+        guard) to prevent mixing up Node1/Node2 or Prod/Test.
+      - At most *max_candidates* top-ranked suggestions are returned.
+
+    Returns a list of dicts with keys ``{name, ratio, token}`` so that callers
+    can pass the matched names through the standard Zero-Leakage tokenization
+    cycle via ``SanitizerVault.sanitize()``.
+    """
+    if not known_names:
+        return []
+    query_clean = query.strip()
+    if not query_clean:
+        return []
+
+    # Build ratio map, apply suffix guard, filter by cutoff.
+    scored: List[Tuple[str, float]] = []
+    for name in known_names:
+        name_str = str(name).strip()
+        if not name_str:
+            continue
+        # Exact match → skip (caller should handle that separately)
+        if name_str.lower() == query_clean.lower():
+            continue
+        # Suffix guard: reject if names differ only by trailing digits
+        if _names_differ_only_by_trailing_number(query_clean, name_str):
+            continue
+        ratio = difflib.SequenceMatcher(None, query_clean.lower(), name_str.lower()).ratio()
+        if ratio >= cutoff:
+            scored.append((name_str, ratio))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    top = scored[:max_candidates]
+
+    return [{"name": n, "ratio": round(r, 4), "token": n} for n, r in top]
+
+
+def build_fuzzy_suggestion(
+    query: str,
+    candidates: List[Dict[str, Any]],
+) -> str:
+    """Format a FUZZY_SUGGESTION block from *candidates* for the AI context.
+
+    The query term itself is returned as a token entry so the caller can route
+    it through the vault sanitization cycle.
+    """
+    if not candidates:
+        return ""
+    names = [c["name"] for c in candidates]
+    return _FUZZY_SUGGESTION_TEMPLATE.format(query=query, candidates=", ".join(names))
+
+
+def try_fuzzy_hostname_lookup(
+    query: str,
+    known_names: Optional[List[str]] = None,
+    search_func=None,
+    site_filter: str = "",
+    max_rows: int = 10,
+) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """Attempt an exact lookup first; on miss, fall back to fuzzy suggestions.
+
+    Returns (results, suggestion_text) where *results* is the list of matched
+    backup records and *suggestion_text* is the FUZZY_SUGGESTION block (or
+    None when exact match succeeded).
+    """
+    if search_func is not None:
+        results = search_func([query], site=site_filter, limit=max_rows)
+        if results:
+            return results, None
+
+    # Exact miss — run fuzzy matcher
+    suggestions = fuzzy_match_hostname(query, known_names=known_names)
+    if not suggestions:
+        return [], None
+
+    # Register suggested names in the vault so downstream sanitization is
+    # consistent with the standard Zero-Leakage cycle.
+    from core.vault import SanitizerVault
+    vault = SanitizerVault()
+    for s in suggestions:
+        vault._get_or_create_token(s["name"], "HOST", None)
+
+    suggestion_text = build_fuzzy_suggestion(query, suggestions)
+    return [], suggestion_text
+
