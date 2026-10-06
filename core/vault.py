@@ -69,7 +69,13 @@ _STATIC_DOMAIN_SUFFIXES = ["local", "internal", "corp", "adds", "lan", "ot"]
 _MERAKI_SERIAL_RE = re.compile(r"\b[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}\b")
 #   Juniper / Generic: starts with E or Q followed by 11-13 alphanums  e.g. EZ3025AX0068
 _JUNIPER_SERIAL_RE = re.compile(r"\b[EeQq][A-Z0-9]{11,13}\b")
-_SERIAL_RE = re.compile(rf"(?:{_MERAKI_SERIAL_RE.pattern}|{_JUNIPER_SERIAL_RE.pattern})")
+#   Standard Cisco Enterprise 11-char serials: 3 uppercase letters + 8 alphanums  e.g. FGL2614L1QU, FVH28332J63
+_CISCO_ENT_SERIAL_RE = re.compile(r"\b[A-Z]{3}[0-9A-Z]{8}\b")
+#   Delimited hardware serials (e.g. Palo Alto): 6 digits - 6 digits - 4 digits  e.g. 024609-001020-4253
+_DELIMITED_SERIAL_RE = re.compile(r"\b\d{6}-\d{6}-\d{4}\b")
+_SERIAL_RE = re.compile(
+    rf"(?:{_MERAKI_SERIAL_RE.pattern}|{_JUNIPER_SERIAL_RE.pattern}|{_CISCO_ENT_SERIAL_RE.pattern}|{_DELIMITED_SERIAL_RE.pattern})"
+)
 
 # MAC address patterns — 6 pairs of hex digits separated by colons or hyphens,
 # or 12 contiguous hex chars (no separators).
@@ -317,6 +323,7 @@ class SanitizerVault:
         text: str,
         session_id: Optional[str] = None,
         known_hostnames: Optional[List[str]] = None,
+        known_serials: Optional[List[str]] = None,
     ) -> Tuple[str, str]:
         """Replace IPs/CIDRs, domains, serials, MACs and hostnames with safe tokens.
 
@@ -326,6 +333,9 @@ class SanitizerVault:
                 generated automatically when omitted.
             known_hostnames: Optional list of device/VM names that should be
                 tokenised as ``<SAFE_HOST_N>`` regardless of their lexical shape.
+            known_serials: Optional list of real serial strings harvested from
+                NetBox. Each is replaced via exact word match before the generic
+                vendor-regex serial pass runs.
 
         Returns:
             (sanitized_text, session_id)
@@ -338,7 +348,25 @@ class SanitizerVault:
         processed = text
         used_tokens: List[Tuple[str, str]] = []
 
-        # 1. Private CIDRs first (longer match, preserves subnet mask)
+        # 1. Known serials — exact word-boundary replacements, longest first.
+        #    This ensures 100% coverage for every real serial regardless of
+        #    vendor formatting, before the fragile regex fallback runs.
+        if known_serials:
+            serial_matches: Dict[str, str] = {}
+            for s in sorted(known_serials, key=len, reverse=True):
+                if not s or s in serial_matches:
+                    continue
+                pat = re.compile(r"\b" + re.escape(s) + r"\b", re.IGNORECASE)
+                for m in pat.finditer(processed):
+                    if s not in serial_matches:
+                        tok = self._get_or_create_token(s, "SERIAL", session_id)
+                        serial_matches[s] = tok
+                        break
+            for orig in sorted(serial_matches, key=len, reverse=True):
+                processed = processed.replace(orig, serial_matches[orig], 1)
+                used_tokens.append((orig, serial_matches[orig]))
+
+        # 2. Private CIDRs first (longer match, preserves subnet mask)
         cidr_matches: Dict[str, str] = {}
         for m in _PRIV_CIDR_RE.finditer(processed):
             ip_part = m.group(1)
@@ -352,7 +380,7 @@ class SanitizerVault:
             processed = processed.replace(orig, cidr_matches[orig], 1)
             used_tokens.append((orig, cidr_matches[orig]))
 
-        # 2. Bare private IPs (skip if already inside a SAFE_NET token)
+        # 3. Bare private IPs (skip if already inside a SAFE_NET token)
         bare_matches: Dict[str, str] = {}
         for m in _PRIV_BARE_RE.finditer(processed):
             ip_str = m.group(1)
@@ -368,7 +396,7 @@ class SanitizerVault:
             processed = processed.replace(orig, bare_matches[orig], 1)
             used_tokens.append((orig, bare_matches[orig]))
 
-        # 3. Public / all remaining CIDRs (skip those already tokenised as private)
+        # 4. Public / all remaining CIDRs (skip those already tokenised as private)
         all_cidr_matches: Dict[str, str] = {}
         for m in _ALL_CIDR_RE.finditer(processed):
             full = m.group(0)
@@ -379,7 +407,7 @@ class SanitizerVault:
             processed = processed.replace(orig, all_cidr_matches[orig], 1)
             used_tokens.append((orig, all_cidr_matches[orig]))
 
-        # 4. Public / all remaining bare IPs (skip if inside a token already)
+        # 5. Public / all remaining bare IPs (skip if inside a token already)
         all_bare_matches: Dict[str, str] = {}
         for m in _ALL_BARE_RE.finditer(processed):
             ip_str = m.group(0)
@@ -394,7 +422,7 @@ class SanitizerVault:
             processed = processed.replace(orig, all_bare_matches[orig], 1)
             used_tokens.append((orig, all_bare_matches[orig]))
 
-        # 5. Internal domain / FQDN suffixes
+        # 6. Internal domain / FQDN suffixes
         domain_re = self._build_domain_regex()
         domain_matches: Dict[str, str] = {}
         for m in domain_re.findall(processed):
@@ -405,7 +433,7 @@ class SanitizerVault:
             processed = processed.replace(orig, domain_matches[orig], 1)
             used_tokens.append((orig, domain_matches[orig]))
 
-        # 6. Hardware serial numbers (Meraki-style and Juniper/Generic)
+        # 7. Hardware serial numbers (Meraki-style and Juniper/Generic)
         serial_matches: Dict[str, str] = {}
         for m in _SERIAL_RE.finditer(processed):
             s = m.group(0)
@@ -416,7 +444,7 @@ class SanitizerVault:
             processed = processed.replace(orig, serial_matches[orig], 1)
             used_tokens.append((orig, serial_matches[orig]))
 
-        # 7. MAC addresses — longest matches first to avoid partial replacements
+        # 8. MAC addresses — longest matches first to avoid partial replacements
         mac_matches: Dict[str, str] = {}
         for m in _MAC_COLON_RE.finditer(processed):
             mac = m.group(0)
@@ -442,7 +470,7 @@ class SanitizerVault:
             processed = processed.replace(orig, mac_matches[orig], 1)
             used_tokens.append((orig, mac_matches[orig]))
 
-        # 8. Known hostnames — longest first to avoid partial overlap
+        # 9. Known hostnames — longest first to avoid partial overlap
         if known_hostnames:
             hostname_matches: Dict[str, str] = {}
             for name in sorted(known_hostnames, key=len, reverse=True):

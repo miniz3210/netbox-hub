@@ -443,12 +443,61 @@ def get_dynamic_table_records(table_name: str, limit: int = 100) -> List[Dict[st
     finally:
         conn.close()
 
+def _collect_known_serials() -> List[str]:
+    """Pull all registered hardware serial numbers from backup_records.
+
+    Serials are extracted from the search_blob of dcim_devices and
+    virtualization_virtual_machines rows using the known vendor patterns.
+    Trivial strings (length < 4, 'N/A', 'None') are dropped. Results are
+    sorted by length descending so the longest serials are matched first.
+    """
+    trivial = {"n/a", "none", ""}
+    seen: set = set()
+    serials: List[str] = []
+
+    serial_re = re.compile(
+        r"\b[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}\b"
+        r"|\b[EeQq][A-Z0-9]{11,13}\b"
+        r"|\b[A-Z]{3}[0-9A-Z]{8}\b"
+        r"|\b\d{6}-\d{6}-\d{4}\b"
+    )
+
+    try:
+        from core.backup_manager import init_backup_tables
+        init_backup_tables()
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT search_blob FROM backup_records "
+            "WHERE object_type IN ('dcim_devices', 'virtualization_virtual_machines')"
+        )
+        for row in cursor.fetchall():
+            blob = str(row["search_blob"] or "")
+            for m in serial_re.finditer(blob):
+                s = m.group(0)
+                if s.lower() not in trivial and s not in seen:
+                    seen.add(s)
+                    serials.append(s)
+        conn.close()
+    except Exception:
+        pass
+
+    return sorted(serials, key=len, reverse=True)
+
+
 def _collect_known_hostnames() -> List[str]:
     """Pull all registered device, hypervisor and VM names from the inventory DB.
 
     Names are returned sorted by length descending so the longest (most specific)
     hostnames are tokenised first, minimising accidental partial replacements.
+    Site names are explicitly excluded so they remain visible in AI responses.
     """
+    # Build the set of site names to exclude — sites must never be masked.
+    try:
+        site_names = set(get_all_site_names())
+    except Exception:
+        site_names = set()
+
     names: List[str] = []
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -461,7 +510,7 @@ def _collect_known_hostnames() -> List[str]:
             )
             for row in cursor.fetchall():
                 n = str(row["name"]).strip()
-                if n and n not in names:
+                if n and n not in names and n not in site_names:
                     names.append(n)
         conn.close()
     except Exception:
@@ -474,7 +523,8 @@ def _sanitize_context_text(text: str) -> Tuple[str, str]:
     from core.vault import SanitizerVault
     vault = SanitizerVault()
     known_hostnames = _collect_known_hostnames()
-    return vault.sanitize(text, known_hostnames=known_hostnames)
+    known_serials = _collect_known_serials()
+    return vault.sanitize(text, known_hostnames=known_hostnames, known_serials=known_serials)
 
 
 def build_dynamic_tables_context(prompt: str) -> str:
