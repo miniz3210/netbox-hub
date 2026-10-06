@@ -444,41 +444,69 @@ def get_dynamic_table_records(table_name: str, limit: int = 100) -> List[Dict[st
         conn.close()
 
 def _collect_known_serials() -> List[str]:
-    """Pull all registered hardware serial numbers from backup_records.
+    """Extract structured serial numbers directly from device database records.
 
-    Serials are extracted from the search_blob of dcim_devices and
-    virtualization_virtual_machines rows using the known vendor patterns.
-    Trivial strings (length < 4, 'N/A', 'None') are dropped. Results are
-    sorted by length descending so the longest serials are matched first.
+    Reads the *serial* column from the compressed NetBox backup JSON stored in
+    backup_metadata and returns distinct, non-trivial serial strings sorted by
+    length descending so the longest serials are matched first by the vault.
     """
     trivial = {"n/a", "none", ""}
     seen: set = set()
     serials: List[str] = []
-
-    serial_re = re.compile(
-        r"\b[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}\b"
-        r"|\b[EeQq][A-Z0-9]{11,13}\b"
-        r"|\b[A-Z]{3}[0-9A-Z]{8}\b"
-        r"|\b\d{6}-\d{6}-\d{4}\b"
-    )
 
     try:
         from core.backup_manager import init_backup_tables
         init_backup_tables()
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT search_blob FROM backup_records "
-            "WHERE object_type IN ('dcim_devices', 'virtualization_virtual_machines')"
-        )
-        for row in cursor.fetchall():
-            blob = str(row["search_blob"] or "")
-            for m in serial_re.finditer(blob):
-                s = m.group(0)
-                if s.lower() not in trivial and s not in seen:
-                    seen.add(s)
-                    serials.append(s)
-        conn.close()
+
+        # Check whether the compressed-JSON column exists (older imports may
+        # not have it) and skip gracefully if not.
+        cursor.execute("PRAGMA table_info(backup_metadata)")
+        columns = [c[1] for c in cursor.fetchall()]
+        has_compressed = "backup_json_compressed" in columns
+
+        if has_compressed:
+            cursor.execute("SELECT backup_json_compressed FROM backup_metadata WHERE id = 1")
+            row = cursor.fetchone()
+            conn.close()
+            if row and row[0]:
+                import gzip
+                raw = gzip.decompress(row[0]).decode("utf-8")
+                payload = __import__("json").loads(raw)
+
+                # Support both legacy flat layout and full API-walk layout.
+                endpoints: List[Any] = payload.get("endpoints") or []
+                records_map: Dict[str, Any] = {
+                    k: v for k, v in payload.items()
+                    if isinstance(v, list) and k not in ("metadata", "endpoints", "summary")
+                } if isinstance(payload, dict) else {}
+
+                target_types = ("dcim/devices", "virtualization/virtual-machines")
+                flat_keys = ("dcim_devices", "virtualization_virtual_machines")
+                seen_endpoints: set = set()
+                for ep in endpoints:
+                    path = ep.get("path", "")
+                    if path not in target_types:
+                        continue
+                    seen_endpoints.add(path)
+                    for rec in ep.get("records", []):
+                        s = (rec.get("serial") or "").strip()
+                        if s and s.lower() not in trivial and s not in seen:
+                            seen.add(s)
+                            serials.append(s)
+
+                for fk in flat_keys:
+                    if fk in records_map:
+                        # Map flat-key names back to endpoint paths for summary
+                        pass
+                    for rec in records_map.get(fk, []):
+                        s = (rec.get("serial") or "").strip()
+                        if s and s.lower() not in trivial and s not in seen:
+                            seen.add(s)
+                            serials.append(s)
+        else:
+            conn.close()
     except Exception:
         pass
 
