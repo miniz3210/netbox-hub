@@ -1,0 +1,111 @@
+auto_corrections:
+  port_shortening:
+  - pattern: (?i)\b(xgigabitethernet|xge)\s*(\d+[\d/:]*)\b
+    replacement: XGE\2
+    description: Shorten XGigabitEthernet/XGE ports to XGE
+    enabled: true
+  - pattern: (?i)\b(tengigabitethernet|te)\s*(\d+[\d/:]*)\b
+    replacement: Te\2
+    description: Shorten TenGigabitEthernet/TE ports to Te
+    enabled: true
+  - pattern: (?i)\b(gigabitethernet|ge)\s*(\d+[\d/:]*)\b
+    replacement: GE\2
+    description: Shorten GigabitEthernet/GE ports to GE
+    enabled: true
+  - pattern: (?i)\b(fastethernet|fe)\s*(\d+[\d/:]*)\b
+    replacement: FE\2
+    description: Shorten FastEthernet/FE ports to FE
+    enabled: true
+  - pattern: (?i)\b(ethernet|eth)\s*(\d+[\d/:]*)\b
+    replacement: Eth\2
+    description: Shorten Ethernet/ETH ports to Eth
+    enabled: true
+  - pattern: (?i)\b(port-channel|po)\s*(\d+)\b
+    replacement: Po\2
+    description: Shorten Port-channel/PO ports to Po
+    enabled: true
+  - pattern: (?i)\b(fortygigabitethernet|fo)\s*(\d+[\d/:]*)\b
+    replacement: Fo\2
+    description: Shorten FortyGigabitEthernet/FO ports to Fo
+    enabled: true
+  - pattern: (?i)\b(twentyfivegigabitethernet|twentyfivegige|twe)\s*(\d+[\d/:]*)\b
+    replacement: Twe\2
+    description: Shorten 25GigabitEthernet ports to Twe
+    enabled: true
+  - pattern: (?i)\b(hundredgigabitethernet|hundredgige|hu)\s*(\d+[\d/:]*)\b
+    replacement: Hu\2
+    description: Shorten HundredGigabitEthernet ports to Hu
+    enabled: true
+  - pattern: (?i)\b(twohundredgige|twohundredgigabitethernet)\s*(\d+[\d/:]*)\b
+    replacement: TwoHu\2
+    description: Shorten 200GigabitEthernet ports to TwoHu
+    enabled: true
+  - pattern: (?i)\b(fourhundredgige|fourhundredgigabitethernet)\s*(\d+[\d/:]*)\b
+    replacement: FourHu\2
+    description: Shorten 400GigabitEthernet ports to FourHu
+    enabled: true
+  - pattern: (?i)\b(management|mgmt)\s*(\d+[\d/:]*)\b
+    replacement: Mgmt\2
+    description: Shorten Management/MGMT ports to Mgmt
+    enabled: true
+  - pattern: (?i)\b(loopback|lo)\s*(\d+)\b
+    replacement: Lo\2
+    description: Shorten Loopback/LO ports to Lo
+    enabled: true
+  - pattern: (?i)\b(vlan)\s*(\d+)\b
+    replacement: Vlan\2
+    description: Normalize VLAN interface naming
+    enabled: true
+  - pattern: (?i)\b(tunnel|tu)\s*(\d+)\b
+    replacement: Tu\2
+    description: Shorten Tunnel/TU ports to Tu
+    enabled: true
+  vmware:
+  - pattern: (?i)\bvswitch(\d*)\b
+    replacement: vSwitch\1
+    description: Normalize vSwitch casing (vswitchX -> vSwitchX)
+    enabled: true
+  - pattern: (?i)\bdvswitch(\d*)\b
+    replacement: dvSwitch\1
+    description: Normalize dvSwitch casing (dvswitchX -> dvSwitchX)
+    enabled: true
+  - pattern: (?i)\b(?:VMNIC|VmnIc)\s*(\d+)\b
+    replacement: vmnic\1
+    description: Normalize VMNIC casing to lowercase vmnic
+    enabled: true
+  - pattern: (?i)\bnic\s*(\d+)\b
+    replacement: vmnic\1
+    description: Standardize nicX to vmnicX
+    enabled: true
+  - pattern: (?i)\beth\s*(\d+)\b
+    replacement: vmnic\1
+    description: Standardize ethX to vmnicX
+    enabled: true
+  - pattern: (?i)\bvmk(\d+)\b
+    replacement: vmk\1
+    description: Normalize VMkernel adapter casing (VMKX -> vmkX)
+    enabled: true
+  - pattern: (?i)\bvm\s+network\b
+    replacement: VM Network
+    description: Sandardized form 'VM Network'
+    enabled: true
+  - pattern: (?i)\bmanagement\b
+    replacement: Management
+    description: Capitalize Management network/service
+    enabled: true
+  - pattern: (?i)\bwmn[ki]c(\d+)\b
+    replacement: vmnic\1
+    description: Normalize wmnkc/wmnic OCR typos
+    enabled: true
+  - pattern: (?i)\b(vswitch)[oO]\b
+    replacement: \g<1>0
+    description: Fix OCR letter o to digit 0 in switch name
+    enabled: true
+  - pattern: (?i)\bvmotion\b
+    replacement: vMotion
+    description: Normalize vMotion casing
+    enabled: true
+  - pattern: (?i)\bvsan\b
+    replacement: vSAN
+    description: Normalize vSAN casing
+    enabled: true

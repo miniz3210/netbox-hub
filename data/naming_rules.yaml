@@ -1,0 +1,1069 @@
+{
+  "branch_switch": "SW<country><state><site><zone><seq>-<stack_id>",
+  "branch_stack": "VS<country><state><site><seq>-<stack_id>",
+  "branch_ap": "WAP<country><state><site><seq>",
+  "branch_firewall": "FW<country><state><site><vendor><seq>",
+  "branch_ion": "ION<country><state><site><seq>",
+  "branch_router": "RTR<country><state><site><zone><seq>",
+  "branch_va": "VA<country><state><site><zone><seq>",
+  "branch_security": "FW<country><state><site><vendor><seq>",
+  "switch_uplink_desc": "Uplink_to_<remote_device>_<remote_port>",
+  "switch_lag_member": "LACP_to_<remote_device>_<remote_port>",
+  "switch_port_channel": "<local_po_id>_to_<remote_device>",
+  "switch_access_desc": "<vlan_name> - <device>_<port>",
+  "firewall_interface": "<role_zone>_<vlan_id>",
+  "esxi_host": "<site_prefix><role_esx><seq>.<domain>",
+  "vm_host": "<country><site><role><seq>",
+  "esxi_uplink": "<vmnic> - <v_switch> <purpose> <uplink_role>",
+  "esxi_portgroup_name": "PG-<pg_network>",
+  "esxi_portgroup": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
+  "esxi_vmkernel_name": "<vmk>",
+  "esxi_vmkernel": "<purpose> (<v_switch>)",
+  "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
+  "iface_switch_zone": "<switch_zone>_<port>",
+  "host_vm_proxmox": "<site_prefix>pve<seq>.<domain>",
+  "host_vm_proxmox_x": "<site_prefix><role_esx><seq>.<domain>",
+  "esxinet_vswitch": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
+  "esxinet_host": "<site_prefix><role_esx><seq>.<domain>",
+  "esxinet_uplink": "<vmnic> - <v_switch> <purpose> <uplink_role>",
+  "esxinet_portgroup_name": "PG-<pg_network>",
+  "esxinet_portgroup": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
+  "esxinet_vmkernel_name": "<vmk>",
+  "esxinet_vmkernel": "<purpose> (<v_switch>)",
+  "esxi_vswitch": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
+  "esxinet_pgname": "PG-<pg_network>",
+  "esxi_pgname": "PG-<pg_network>",
+  "esxinet_pg_name": "PG-<pg_network>",
+  "esxi_pg_name": "PG-<pg_network>",
+  "host_vm_proxmox_x_x": "<site_prefix><role_esx><seq>.<domain>",
+  "branch_san": "san<country><state><site><zone><seq>",
+  "branch_san_x": "SAN<country><state><site><seq>",
+  "vlan_name_pattern": "<role>",
+  "esxinet_pg_net": "PG-<pg_network>",
+  "esxi_pg_net": "PG-<pg_network>",
+  "esxinet_pg_net_x": "PG123-<pg_network>",
+  "esxi_pg_net_x": "PGTest123-<pg_network>",
+  "esxinet_pgnet": "PG123-<pg_network>",
+  "esxi_pgnet": "PG123-<pg_network>",
+  "esxinet_pg_header": "PG-<port_group>",
+  "esxi_pg_header": "PG-<port_group>",
+  "custom_patterns": [],
+  "device_presets": [
+    {
+      "code": "SW",
+      "label": "Switch (SW / SWI)",
+      "pattern_key": "branch_switch",
+      "description": "Layer 2/3 access/distribution switch"
+    },
+    {
+      "code": "VS",
+      "label": "Virtual Chassis / Stack (VS)",
+      "pattern_key": "branch_stack",
+      "description": "Virtual chassis or physical switch stack"
+    },
+    {
+      "code": "FW",
+      "label": "Firewall / Security (FW)",
+      "pattern_key": "branch_firewall",
+      "description": "Firewall / security appliance"
+    },
+    {
+      "code": "ION",
+      "label": "SD-WAN / Prisma (ION)",
+      "pattern_key": "branch_ion",
+      "description": "SD-WAN / Prisma Access gateway"
+    },
+    {
+      "code": "WAP",
+      "label": "Wireless AP (WAP)",
+      "pattern_key": "branch_ap",
+      "description": "Wireless access point"
+    },
+    {
+      "code": "RTR",
+      "label": "Router (RTR)",
+      "pattern_key": "branch_router",
+      "description": "Routing device"
+    },
+    {
+      "code": "VA",
+      "label": "Virtual Appliance (VA)",
+      "pattern_key": "branch_va",
+      "description": "Virtualised appliance / gateway"
+    }
+  ],
+  "interface_presets": [
+    {
+      "code": "Uplink",
+      "label": "Switch Uplink (Inter-Switch)",
+      "pattern_key": "switch_uplink_desc",
+      "description": "Inter-switch uplink description"
+    },
+    {
+      "code": "LAG",
+      "label": "Switch LAG Member (LACP)",
+      "pattern_key": "switch_lag_member",
+      "description": "LACP aggregate member description"
+    },
+    {
+      "code": "Po",
+      "label": "Switch Port-Channel (Logical)",
+      "pattern_key": "switch_port_channel",
+      "description": "Logical port-channel / port-group description"
+    },
+    {
+      "code": "Access",
+      "label": "Switch Access Port (Endpoint)",
+      "pattern_key": "switch_access_desc",
+      "description": "Endpoint access-port description"
+    },
+    {
+      "code": "FW Zone",
+      "label": "Firewall Security Zone Interface",
+      "pattern_key": "firewall_interface",
+      "description": "Firewall security-zone interface description"
+    }
+  ],
+  "host_vm_presets": [
+    {
+      "code": "ESXi",
+      "label": "ESXi Host",
+      "pattern_key": "esxi_host",
+      "description": "ESXi Hypervisor Host"
+    },
+    {
+      "code": "Proxmox",
+      "label": "Proxmox Host",
+      "pattern_key": "host_vm_proxmox",
+      "description": "Proxmox VE Hypervisor Host"
+    },
+    {
+      "code": "cvi",
+      "label": "Core Virtualization (cvi)",
+      "pattern_key": "vm_host",
+      "description": ""
+    },
+    {
+      "code": "afs",
+      "label": "App & File Services (afs)",
+      "pattern_key": "vm_host",
+      "description": ""
+    },
+    {
+      "code": "sani",
+      "label": "Storage Infrastructure (sani)",
+      "pattern_key": "vm_host",
+      "description": ""
+    },
+    {
+      "code": "vlab",
+      "label": "Virtual Lab / Test (vlab)",
+      "pattern_key": "vm_host",
+      "description": ""
+    }
+  ],
+  "esxi_network_presets": [
+    {
+      "code": "Uplink",
+      "label": "Physical Uplink",
+      "pattern_key": "esxi_uplink",
+      "description": "vmnic Uplink Interface"
+    },
+    {
+      "code": "PortGroup",
+      "label": "Port Group",
+      "pattern_key": "esxi_portgroup",
+      "description": "Standard / Distributed Port Group"
+    },
+    {
+      "code": "VMkernel",
+      "label": "VMkernel",
+      "pattern_key": "esxi_vmkernel",
+      "description": "VMkernel Management / vMotion / Storage"
+    },
+    {
+      "code": "PG_Header",
+      "label": "PortGroup Interface Name",
+      "pattern_key": "esxinet_pg_header",
+      "description": ""
+    }
+  ],
+  "vlan_presets": {
+    "Branch Office VLAN Preset": {
+      "vlan_name_pattern": "<role>",
+      "prefix_pattern": "<site> <role> -- VLAN <vid>",
+      "items": [
+        {
+          "vid": 300,
+          "role": "Corporate WiFi"
+        },
+        {
+          "vid": 100,
+          "role": "Workstations"
+        },
+        {
+          "vid": 5,
+          "role": "Management"
+        },
+        {
+          "vid": 700,
+          "role": "Printers"
+        },
+        {
+          "vid": 800,
+          "role": "Audio Visual"
+        },
+        {
+          "vid": 200,
+          "role": "Guests"
+        },
+        {
+          "vid": 400,
+          "role": "Mobiles"
+        }
+      ]
+    },
+    "Data Center VLAN Preset": {
+      "vlan_name_pattern": "<role>",
+      "prefix_pattern": "<site> <role> -- VLAN <vid>",
+      "items": [
+        {
+          "vid": 10,
+          "role": "Server Management"
+        },
+        {
+          "vid": 20,
+          "role": "Production App"
+        },
+        {
+          "vid": 30,
+          "role": "Database"
+        },
+        {
+          "vid": 40,
+          "role": "DMZ"
+        },
+        {
+          "vid": 50,
+          "role": "Storage / vSAN"
+        }
+      ]
+    },
+    "Custom / Empty Preset": {
+      "vlan_name_pattern": "<role>",
+      "prefix_pattern": "<site> <role> -- VLAN <vid>",
+      "items": []
+    }
+  },
+  "naming_patterns": {
+    "branch_switch": "SW<country><state><site><zone><seq>-<stack_id>",
+    "branch_stack": "VS<country><state><site><seq>-<stack_id>",
+    "branch_ap": "WAP<country><state><site><seq>",
+    "branch_firewall": "FW<country><state><site><vendor><seq>",
+    "branch_ion": "ION<country><state><site><seq>",
+    "branch_router": "RTR<country><state><site><zone><seq>",
+    "branch_va": "VA<country><state><site><zone><seq>",
+    "branch_security": "FW<country><state><site><vendor><seq>",
+    "switch_uplink_desc": "Uplink_to_<remote_device>_<remote_port>",
+    "switch_lag_member": "LACP_to_<remote_device>_<remote_port>",
+    "switch_port_channel": "<local_po_id>_to_<remote_device>",
+    "switch_access_desc": "<vlan_name> - <device>_<port>",
+    "firewall_interface": "<role_zone>_<vlan_id>",
+    "esxi_host": "<site_prefix><role_esx><seq>.<domain>",
+    "vm_host": "<country><site><role><seq>",
+    "esxi_uplink": "<vmnic> - <v_switch> <purpose> <uplink_role>",
+    "esxi_portgroup_name": "PG-<pg_network>",
+    "esxi_portgroup": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
+    "esxi_vmkernel_name": "<vmk>",
+    "esxi_vmkernel": "<purpose> (<v_switch>)",
+    "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
+    "iface_switch_zone": "<switch_zone>_<port>",
+    "host_vm_proxmox": "<site_prefix>pve<seq>.<domain>",
+    "host_vm_proxmox_x": "<site_prefix><role_esx><seq>.<domain>",
+    "esxinet_vswitch": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
+    "esxinet_host": "<site_prefix><role_esx><seq>.<domain>",
+    "esxinet_uplink": "<vmnic> - <v_switch> <purpose> <uplink_role>",
+    "esxinet_portgroup_name": "PG-<pg_network>",
+    "esxinet_portgroup": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
+    "esxinet_vmkernel_name": "<vmk>",
+    "esxinet_vmkernel": "<purpose> (<v_switch>)",
+    "esxi_vswitch": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
+    "esxinet_pgname": "PG-<pg_network>",
+    "esxi_pgname": "PG-<pg_network>",
+    "esxinet_pg_name": "PG-<pg_network>",
+    "esxi_pg_name": "PG-<pg_network>",
+    "host_vm_proxmox_x_x": "<site_prefix><role_esx><seq>.<domain>",
+    "branch_san": "san<country><state><site><zone><seq>",
+    "branch_san_x": "SAN<country><state><site><seq>",
+    "vlan_name_pattern": "<role>",
+    "esxinet_pg_net": "PG-<pg_network>",
+    "esxi_pg_net": "PG-<pg_network>",
+    "esxinet_pg_net_x": "PG123-<pg_network>",
+    "esxi_pg_net_x": "PGTest123-<pg_network>",
+    "esxinet_pgnet": "PG123-<pg_network>",
+    "esxi_pgnet": "PG123-<pg_network>",
+    "esxinet_pg_header": "PG-<port_group>",
+    "esxi_pg_header": "PG-<port_group>"
+  },
+  "pattern_variables": {
+    "site": {
+      "label": "Site / Branch Name",
+      "placeholder": "e.g. Bristol, AGE, NYC",
+      "scope": "shared",
+      "default": "",
+      "optional": false
+    },
+    "site_slug": {
+      "label": "Site URL Slug",
+      "placeholder": "e.g. bristol, age, nyc",
+      "scope": "shared",
+      "default": "",
+      "optional": false
+    },
+    "country": {
+      "label": "Country Code (2-letter)",
+      "placeholder": "e.g. US, UK, AU, DE, JP",
+      "scope": "shared",
+      "default": "",
+      "optional": false
+    },
+    "state": {
+      "label": "State / Region (Optional)",
+      "placeholder": "e.g. NY, CA, TX, NSW",
+      "scope": "shared",
+      "default": "",
+      "optional": false
+    },
+    "domain": {
+      "label": "Domain Name (FQDN Suffix)",
+      "placeholder": "e.g. corp.example.com, internal.net",
+      "scope": "shared",
+      "default": "",
+      "optional": false
+    },
+    "status": {
+      "label": "Object Status",
+      "placeholder": "active / planned",
+      "default": "active",
+      "scope": "shared",
+      "optional": false
+    },
+    "corp_domain_it": {
+      "label": "IT / Corporate ESXi Domain",
+      "placeholder": ".example.corp",
+      "required": true,
+      "scope": "shared",
+      "default": "",
+      "optional": false
+    },
+    "corp_domain_ot_primary": {
+      "label": "OT Primary Cluster Domain",
+      "placeholder": ".example.ot",
+      "required": true,
+      "scope": "shared",
+      "default": "",
+      "optional": false
+    },
+    "corp_domain_ot_secondary": {
+      "label": "OT Secondary Cluster Domain",
+      "placeholder": ".example.ot",
+      "required": true,
+      "scope": "shared",
+      "default": "",
+      "optional": false
+    },
+    "corp_domain_local": {
+      "label": "Branch / Local Domain",
+      "placeholder": ".corp.local",
+      "required": true,
+      "scope": "shared",
+      "default": "",
+      "optional": false
+    },
+    "vid": {
+      "label": "VLAN ID",
+      "placeholder": "e.g. 100, 300",
+      "scope": "ipam",
+      "default": "",
+      "optional": false
+    },
+    "vlan_id": {
+      "label": "VLAN ID (Alias)",
+      "placeholder": "e.g. 100, 300",
+      "scope": "ipam",
+      "default": "",
+      "optional": false
+    },
+    "role": {
+      "label": "VLAN / Subnet Role",
+      "placeholder": "e.g. Corporate WiFi, Workstations",
+      "scope": "ipam",
+      "default": "",
+      "optional": false
+    },
+    "vlan_name": {
+      "label": "NetBox VLAN Name",
+      "placeholder": "e.g. Corporate WiFi",
+      "scope": "ipam",
+      "default": "",
+      "optional": false
+    },
+    "vlan_desc": {
+      "label": "VLAN Description",
+      "placeholder": "e.g. VIN_Corp",
+      "scope": "ipam",
+      "default": "",
+      "optional": false
+    },
+    "subnet": {
+      "label": "Subnet (CIDR)",
+      "placeholder": "e.g. 10.113.64.0/24",
+      "scope": "ipam",
+      "default": "",
+      "optional": false
+    },
+    "prefix": {
+      "label": "Prefix (CIDR)",
+      "placeholder": "e.g. 10.113.64.0/24",
+      "scope": "ipam",
+      "default": "",
+      "optional": false
+    },
+    "prefix_desc": {
+      "label": "Prefix Description",
+      "placeholder": "e.g. Bristol Corporate WiFi -- VLAN 300",
+      "scope": "ipam",
+      "default": "",
+      "optional": false
+    },
+    "scope_id": {
+      "label": "NetBox Scope ID (Site ID)",
+      "placeholder": "e.g. 30",
+      "scope": "ipam",
+      "default": "",
+      "optional": false
+    },
+    "scope_type": {
+      "label": "NetBox Scope Type",
+      "placeholder": "dcim.site",
+      "default": "dcim.site",
+      "scope": "ipam",
+      "optional": false
+    },
+    "site_supernet": {
+      "label": "Site Supernet (CIDR)",
+      "placeholder": "e.g. 10.113.64.0/21",
+      "scope": "ipam",
+      "default": "",
+      "optional": false
+    },
+    "supernet_desc": {
+      "label": "Supernet Description",
+      "placeholder": "e.g. Site Subnet - 10.113.64.1 - 10.113.71.254",
+      "scope": "ipam",
+      "default": "",
+      "optional": false
+    },
+    "vlan_group": {
+      "label": "VLAN Group Name",
+      "placeholder": "e.g. Bristol VLAN Group",
+      "scope": "ipam",
+      "default": "",
+      "optional": false
+    },
+    "vlan_group_slug": {
+      "label": "VLAN Group Slug",
+      "placeholder": "e.g. bristol-vlan-group",
+      "scope": "ipam",
+      "default": "",
+      "optional": false
+    },
+    "zone": {
+      "label": "Zone / Role / Vendor (Optional)",
+      "placeholder": "e.g. CORE, DIST, EDGE, PA",
+      "scope": "naming",
+      "default": "",
+      "optional": false
+    },
+    "vendor": {
+      "label": "Vendor (Optional)",
+      "placeholder": "e.g. PA, CISCO, HUAWEI",
+      "scope": "naming",
+      "default": "",
+      "optional": false
+    },
+    "seq": {
+      "label": "Sequence Number",
+      "placeholder": "e.g. 01, 02",
+      "scope": "naming",
+      "default": "",
+      "optional": false
+    },
+    "stack_id": {
+      "label": "Stack / Member ID (Optional)",
+      "placeholder": "e.g. 0, 1",
+      "scope": "naming",
+      "default": "",
+      "optional": false
+    },
+    "local_device": {
+      "label": "Local Device Hostname",
+      "placeholder": "e.g. SWUSNYC01-0",
+      "scope": "naming",
+      "default": "",
+      "optional": false
+    },
+    "local_port": {
+      "label": "Local Port",
+      "placeholder": "e.g. Gi1/0/48, Te1/0/1",
+      "scope": "naming",
+      "default": "",
+      "optional": false
+    },
+    "remote_device": {
+      "label": "Remote Device Hostname",
+      "placeholder": "e.g. SWUSNYC02-0",
+      "scope": "naming",
+      "default": "",
+      "optional": false
+    },
+    "remote_port": {
+      "label": "Remote Port",
+      "placeholder": "e.g. Gi1/0/48, Te1/0/1",
+      "scope": "naming",
+      "default": "",
+      "optional": false
+    },
+    "local_po_id": {
+      "label": "Local Port-Channel ID",
+      "placeholder": "LAG1",
+      "scope": "naming",
+      "default": "",
+      "optional": false
+    },
+    "device": {
+      "label": "Connected Device",
+      "placeholder": "e.g. WAP01",
+      "scope": "naming",
+      "default": "",
+      "optional": false
+    },
+    "port": {
+      "label": "Connected Port",
+      "placeholder": "e.g. Gi0/1",
+      "scope": "naming",
+      "default": "",
+      "optional": false
+    },
+    "role_zone": {
+      "label": "Security Zone / Role",
+      "placeholder": "e.g. INSIDE, OUTSIDE",
+      "scope": "naming",
+      "default": "",
+      "optional": false
+    },
+    "role_esx": {
+      "label": "Host Role (Optional)",
+      "placeholder": "e.g. esx, otinfhost, infhost",
+      "scope": "naming",
+      "default": "",
+      "optional": false
+    },
+    "site_prefix": {
+      "label": "Site Prefix (Short Code)",
+      "placeholder": "e.g. age, nyc, lon, syd",
+      "scope": "naming",
+      "default": "",
+      "optional": false
+    },
+    "vm_site": {
+      "label": "Site Prefix / Country & Site",
+      "placeholder": "e.g. age, usnyc, uklon",
+      "scope": "naming",
+      "default": "",
+      "optional": false
+    },
+    "vmnic": {
+      "label": "vmnic Name",
+      "placeholder": "vmnic",
+      "default": "vmnic",
+      "scope": "hypervisor",
+      "optional": false
+    },
+    "v_switch": {
+      "label": "vSwitch Name",
+      "placeholder": "vSwitchX",
+      "default": "vSwitch",
+      "scope": "hypervisor",
+      "optional": false
+    },
+    "purpose": {
+      "label": "Purpose / Service",
+      "placeholder": "e.g. Management, vMotion, Storage",
+      "default": "Management",
+      "scope": "hypervisor",
+      "optional": false
+    },
+    "port_group": {
+      "label": "Port Group / vSwitch",
+      "placeholder": "e.g. vSwitch0",
+      "default": "",
+      "scope": "hypervisor",
+      "optional": false
+    },
+    "interface": {
+      "label": "Interface / Port Group Name",
+      "placeholder": "e.g. vmnic0, PG-VMDK",
+      "default": "",
+      "scope": "hypervisor",
+      "optional": false
+    },
+    "slot": {
+      "label": "Hardware / PCIe Slot",
+      "placeholder": "e.g. PCIe1, Port1",
+      "default": "",
+      "optional": true,
+      "scope": "hypervisor"
+    },
+    "active_vmnics": {
+      "label": "Active vmnics",
+      "placeholder": "e.g. vmnic0, vmnic1",
+      "default": "",
+      "optional": true,
+      "scope": "hypervisor"
+    },
+    "standby_vmnics": {
+      "label": "Standby vmnics (Optional)",
+      "placeholder": "e.g. vmnic2",
+      "default": "",
+      "optional": true,
+      "scope": "hypervisor"
+    },
+    "vmk": {
+      "label": "vmk Name",
+      "placeholder": "vmk",
+      "default": "",
+      "scope": "hypervisor",
+      "optional": false
+    },
+    "switch_zone": {
+      "label": "Switch Zone / Network Zone",
+      "placeholder": "e.g. DMZ, Production, Management",
+      "default": "",
+      "scope": "hypervisor",
+      "optional": false
+    },
+    "uplink_role": {
+      "label": "Uplink Role / Status",
+      "placeholder": "Active Uplink / Standby Uplink",
+      "default": "Active Uplink / Standby Uplink",
+      "optional": true,
+      "scope": "hypervisor"
+    },
+    "description": {
+      "label": "Description",
+      "placeholder": "e.g. description",
+      "default": "",
+      "optional": true,
+      "scope": "shared"
+    },
+    "pg_network": {
+      "label": "Network Name (Deprecated, use interface)",
+      "placeholder": "e.g. VM Network",
+      "default": "",
+      "optional": true,
+      "scope": "hypervisor"
+    },
+    "parent": {
+      "label": "Parent",
+      "placeholder": "e.g. vSwitch01",
+      "default": "vSwitch01",
+      "optional": false,
+      "scope": "hypervisor"
+    },
+    "ip": {
+      "label": "Ip",
+      "placeholder": "e.g. 172.16.239.9",
+      "default": "172.16.239.9",
+      "optional": false,
+      "scope": "hypervisor"
+    },
+    "speed": {
+      "label": "Speed",
+      "placeholder": "e.g. 10 Gbit/s Full",
+      "default": "10 Gbit/s Full",
+      "optional": false,
+      "scope": "hypervisor"
+    }
+  },
+  "site_code_rules": {
+    "separators": [
+      " ",
+      "-",
+      "_"
+    ],
+    "multi_word_chars_per_word": [
+      2,
+      2
+    ],
+    "single_word_max_chars": 4,
+    "fallback": "SITE",
+    "exact_mappings": {
+      "new york": "NYC",
+      "london": "LON",
+      "sydney": "SYD",
+      "singapore": "SIN",
+      "tokyo": "TYO",
+      "hong kong": "HKGSAR",
+      "amsterdam": "AMS",
+      "frankfurt": "FRA",
+      "paris": "PAR",
+      "chicago": "CHI",
+      "los angeles": "LAX",
+      "san francisco": "SFO",
+      "dallas": "DFW",
+      "seattle": "SEA",
+      "boston": "BOS",
+      "toronto": "YYZ",
+      "bristol": "BRS",
+      "age": "AGE"
+    }
+  },
+  "vlan_description_mappings": {
+    "Corporate WiFi": "VIN_Corp",
+    "Workstations": "Wired Workstations",
+    "Management": "Management",
+    "Printers": "Printers",
+    "Guests": "VIN_Guest",
+    "Audio Visual": "AV equipment",
+    "Mobiles": "VIN_Mobi"
+  },
+  "ipam_role_mappings": [
+    {
+      "pattern": "(?i)^guests?$",
+      "replacement": "Guests",
+      "description": "Normalize guest / guests to Guests",
+      "enabled": true
+    },
+    {
+      "pattern": "(?i)^corp[_\\s\\-]?wifi$",
+      "replacement": "Corporate WiFi",
+      "description": "Normalize corporate wifi variations",
+      "enabled": true
+    },
+    {
+      "pattern": "(?i)^workstations?$",
+      "replacement": "Workstations",
+      "description": "Normalize workstation / workstations",
+      "enabled": true
+    },
+    {
+      "pattern": "(?i)^mobiles?$",
+      "replacement": "Mobiles",
+      "description": "Normalize mobile / mobiles",
+      "enabled": true
+    },
+    {
+      "pattern": "(?i)^printers?$",
+      "replacement": "Printers",
+      "description": "Normalize printer / printers",
+      "enabled": true
+    },
+    {
+      "pattern": "(?i)^mgmt|management$",
+      "replacement": "Management",
+      "description": "Normalize mgmt / management",
+      "enabled": true
+    },
+    {
+      "pattern": "(?i)^av|audiovisual|audio[\\s\\-]?visual$",
+      "replacement": "Audio Visual",
+      "description": "Normalize AV variations",
+      "enabled": true
+    }
+  ],
+  "hardware_slot_mappings": {
+    "vmnic1": "PCIe1/Port1",
+    "vmnic2": "PCIe1/Port2",
+    "vmnic3": "PCIe2/Port1",
+    "vmnic4": "PCIe2/Port2",
+    "vmnic5": "PCIe3/Port1",
+    "vmnic6": "PCIe3/Port2"
+  },
+  "csv_schemas": {
+    "import_site": {
+      "headers": [
+        "name",
+        "slug",
+        "status"
+      ],
+      "row_template": [
+        "\"<site>\"",
+        "\"<site_slug>\"",
+        "active"
+      ]
+    },
+    "import_vlan_group": {
+      "headers": [
+        "name",
+        "slug",
+        "scope_type",
+        "scope_id"
+      ],
+      "row_template": [
+        "\"<vlan_group>\"",
+        "\"<vlan_group_slug>\"",
+        "\"<scope_type>\"",
+        "<scope_id>"
+      ]
+    },
+    "import_vlans": {
+      "headers": [
+        "vid",
+        "name",
+        "status",
+        "site",
+        "group",
+        "description",
+        "role"
+      ],
+      "row_template": [
+        "<vid>",
+        "\"<vlan_name>\"",
+        "active",
+        "\"<site>\"",
+        "\"<vlan_group>\"",
+        "\"<vlan_desc>\"",
+        "\"<role>\""
+      ]
+    },
+    "import_prefixes": {
+      "headers": [
+        "prefix",
+        "status",
+        "scope_type",
+        "scope_id",
+        "vlan_group",
+        "vlan",
+        "role",
+        "description"
+      ],
+      "row_template": [
+        "\"<prefix>\"",
+        "active",
+        "\"<scope_type>\"",
+        "<scope_id>",
+        "\"<vlan_group>\"",
+        "<vid>",
+        "\"<role>\"",
+        "\"<prefix_desc>\""
+      ],
+      "supernet_template": [
+        "\"<site_supernet>\"",
+        "active",
+        "\"<scope_type>\"",
+        "<scope_id>",
+        "\"<vlan_group>\"",
+        "\"<supernet_desc>\""
+      ]
+    }
+  },
+  "topology_parsing_presets": {
+    "VMware ESXi": {
+      "platform": "VMware ESXi",
+      "aliases": {
+        "parent": [
+          "v_switch",
+          "vswitch",
+          "dvswitch"
+        ],
+        "interface": [
+          "vmnic",
+          "vmk",
+          "port_group"
+        ],
+        "speed": [
+          "speed",
+          "link_speed"
+        ]
+      },
+      "instructions": "[PLATFORM ARCHITECTURE: VMWARE ESXI - PRODUCTION RECONCILIATION]\n\n1. OCR TEXT, TYPO & TOKEN DE-CONCATENATION:\n   - Normalize switch names: convert 'vSwitcho' or 'vSwitcho1' into 'vSwitch0' / 'vSwitch01' (letter 'o'/'O' to digit '0').\n   - Strip generic prefixes: 'StandardSwitch:vSwitch0' -> 'vSwitch0', 'Standard Switch: vSwitch02' -> 'vSwitch02'.\n   - SMART TOKEN SEPARATION: OCR frequently fuses adapter names and link speeds without spaces (e.g., 'vmnic110000Full' -> 'vmnic1' + '10 Gbit/s Full', 'vmnic51000Full' -> 'vmnic5' + '1 Gbit/s Full'). You MUST split them cleanly into discrete 'interface' and 'speed' keys.\n\n2. VISUAL TOPOLOGY INHERITANCE & ZERO ORPHAN POLICY:\n   - TOPOLOGICAL PRIORITY: All physical adapters ('vmnic*') listed within a virtual switch's 'Physical Adapters' column strictly belong to that switch as their 'parent'.\n   - ABSOLUTE PROHIBITION ON ADAPTER ORPHANS: NEVER leave 'parent' empty, null, or unassigned for secondary, grouped, or fallback adapters (e.g., vmnic5 and vmnic6). If multiple adapters appear under vSwitch0, EVERY adapter (vmnic4 AND vmnic5) MUST output parent: 'vSwitch0'.\n   - ZERO OMISSION OF VMKERNELS: You MUST explicitly extract EVERY visible VMkernel port shown in the topology into its own JSON record. Pay special attention to 'vmk0' attached to vSwitch0 under 'Management Network' — NEVER omit vmk0.\n   - Reconcile PCI slot, driver, speed, and CDP neighbor info from 'Physical adapters' screenshots into the respective vmnic records.\n\n3. MANDATORY ATOMIC JSON ATTRIBUTES (EVERY RECORD MUST HAVE THESE):\n   - \"interface\": Clean interface identifier ONLY (e.g., 'vmnic1', 'vmnic4', 'vmnic5', 'vmk0', 'vmk1').\n   - \"parent\": Connected vSwitch name (e.g., 'vSwitch0', 'vSwitch01', 'vSwitch02', 'vSwitch1'). Only leave empty if an adapter is proven completely standalone on a bare-metal table with no switch link.\n   - \"purpose\": Pure functional/service name:\n       * For VMkernels (vmk): The exact service name (e.g., 'Management Network', 'iSCSI01', 'iSCSI02', 'vMotion').\n       * For Physical Adapters (vmnic):\n         - If the vSwitch has a dedicated service (e.g., iSCSI, vMotion), inherit that service name.\n         - If the vSwitch hosts multiple services or management (e.g., vSwitch0), EVERY member adapter (primary and secondary like vmnic5) strictly inherits the primary service: 'Management Network'.\n         - STRICT PROHIBITION: NEVER append '(vSwitchX)', 'Active Uplink', or 'Standby Uplink' into 'purpose'.\n   - \"uplink_role\": REQUIRED for physical adapters connected to a vSwitch:\n       * Set to \"Active Uplink\" by default for all connected vmnic adapters (unless explicitly marked standby in failover text).\n       * Leave strictly empty (\"\") for VMkernels ('vmk*') and Port Groups.\n   - \"slot\": Hardware PCIe slot (e.g., '0000:5b:00.0', '0000:08:00.1').\n   - \"speed\": Link speed (e.g., '10 Gbit/s Full', '1 Gbit/s Full').\n   - \"ip\": Clean IPv4 address ONLY for vmk interfaces (e.g., '10.27.177.246'). Strip any leading 'vmkX :' labels.\n\n4. ZERO CONCATENATION:\n   Keep 'interface', 'parent', 'purpose', and 'uplink_role' strictly isolated into their atomic keys. Downstream templates handle all prefix/suffix formatting.\n\n5. STRICT VIRTUAL SWITCH ISOLATION & BOUNDARY SCOPING:\n   - Each virtual switch container (\"Standard Switch: <name>\" or \"Distributed Switch: <name>\") strictly owns ONLY the Port Groups, VMkernel adapters (vmk), and Physical Adapters (vmnic) visually rendered inside its own bounding box.\n   - Zero Cross-Switch Leakage: An adapter (vmnic/vmk) visible inside Switch A's frame must NEVER be assigned to Switch B.\n   - Collapsed Switch Handling: Switch rows with a collapsed arrow (\">\") contain no visible adapter details; never infer or carry over adapters from other visible switches into collapsed rows.\n   - Dynamic Uplink Association: In non-management switches (e.g., dedicated iSCSI or vMotion switches), physical uplinks must inherit the dedicated service purpose established by that switch's VMkernel ports.",
+      "export_prompt": "You are an expert infrastructure network engineer specializing in VMware ESXi.\nI have attached screenshots of VMware ESXi virtual switch topology and physical network adapter properties.\nPlease analyze the images and extract the network topology into a flat JSON array of objects matching these exact attributes:\n- interface: 'vmnicX' or 'vmkX' (e.g., 'vmnic1', 'vmk0')\n- parent: 'vSwitchX' (e.g., 'vSwitch0'). TOPOLOGY PRIORITY: Every adapter listed in the switch's Physical Adapters column strictly belongs to that switch. NEVER output parent as null or unassigned for grouped/secondary adapters (e.g., vmnic5 under vSwitch0).\n- purpose: Pure service name ('Management Network', 'vMotion', 'iSCSI01') without appending switch names or roles. Secondary adapters inherit the primary management network purpose.\n- uplink_role: 'Active Uplink' by default for all connected vmnic adapters (unless explicitly marked standby in failover settings); leave empty string \"\" for vmk.\n- slot: Hardware PCIe slot (e.g., '0000:5b:00.0')\n- speed: Link speed (e.g., '10 Gbit/s Full', '1 Gbit/s Full')\n- ip: IPv4 address for vmk ports\n\nOutput ONLY a valid JSON array of objects: [ {...}, {...} ]. Do not wrap in markdown fences or include explanatory text."
+    },
+    "Proxmox VE": {
+      "platform": "Proxmox VE",
+      "aliases": {
+        "parent": [
+          "bridge",
+          "vmbr"
+        ],
+        "interface": [
+          "bond",
+          "eth",
+          "eno",
+          "ens",
+          "vmbr"
+        ],
+        "speed": [
+          "speed",
+          "link_speed"
+        ]
+      },
+      "instructions": "[PLATFORM ARCHITECTURE: PROXMOX VE]\n1. HIERARCHY & BRIDGES:\n   - Root bridges: 'vmbr0', 'vmbr1', etc.\n   - Bonds: 'bond0', 'bond1', etc.\n   - Physical slaves: 'eno1', 'ens18', etc.\n2. ATOMIC ATTRIBUTES:\n   - \"interface\": Interface or bridge name.\n   - \"parent\": Connected bridge or bond master.\n   - \"purpose\": Functional service name or VLAN purpose.\n   - \"ip\": CIDR IP address assigned to bridge/interface.\n   - \"speed\": Link speed if visible.",
+      "export_prompt": "You are an expert infrastructure network engineer specializing in Proxmox VE.\nI have attached screenshots of Proxmox VE network configuration (/etc/network/interfaces / GUI).\nPlease extract the Linux Bridge (vmbr), Bond, and physical interfaces into the standard atomic JSON format matching these exact attributes:\n- interface: 'vmbrX', 'bondX', or physical NIC ('ensX', 'enoX')\n- parent: Connected bridge or master\n- purpose: Functional description or VLAN profile\n- ip: CIDR IP address if assigned\n\nOutput ONLY a JSON object with key \"interfaces\": array of objects."
+    },
+    "Microsoft Azure": {
+      "platform": "Microsoft Azure",
+      "instructions": "1. Acquire a high‑resolution screenshot or PDF of the Azure network topology diagram.\n2. Pre‑process the image: convert to grayscale, apply contrast enhancement, and de‑skew if needed.\n3. Run OCR (e.g., Tesseract) on the entire image to extract all textual elements.\n4. Parse OCR output line‑by‑line, normalising whitespace and removing OCR artefacts (e.g., \"l\" vs \"1\").\n5. Identify graphical primitives using a computer‑vision library (OpenCV):\n   a. Detect rectangles, rounded rectangles, and clouds – typically representing Azure resources (VMs, VNet, Subnet, Load Balancer, etc.).\n   b. Detect arrows/lines – representing connections or traffic flow.\n   c. Detect icons/logos – map known Azure icons (e.g., \"Virtual Machine\", \"SQL Database\", \"Application Gateway\") to resource types.\n6. Correlate OCR‑extracted text with detected shapes by spatial proximity (centroid of text within shape bounds).\n7. Build a structured representation:\n   a. For each resource, capture: name, type (derived from icon or keyword), region, resource group (if present), and any tags.\n   b. For each connection, capture source resource, destination resource, direction (if arrow is unidirectional), and protocol/port annotations (if present).\n8. Resolve hierarchical relationships:\n   a. Group resources under their VNet/Subnet containers based on nesting or explicit labels.\n   b. Associate NICs, Public IPs, and Load Balancers with the VM they belong to.\n9. Validate extracted data against Azure naming conventions and known resource schemas (e.g., VM names must match /^[a-z0-9-]{1,64}$/).\n10. Output the final topology as a JSON object with two top‑level arrays: \"resources\" and \"connections\".\n11. Perform a sanity check: ensure every connection references existing resources and that there are no orphan nodes.\n12. Log any ambiguous or low‑confidence detections for manual review.",
+      "export_prompt": "You are an AI assistant tasked with extracting a complete Azure network topology from a screenshot or PDF diagram. The diagram may contain Azure resource icons (VM, VNet, Subnet, Application Gateway, Azure Firewall, Load Balancer, Storage Account, etc.), textual labels, and arrows indicating connections.\n\nYour job is to:\n1. Identify every Azure resource, capturing its exact name as shown, its type (based on icon or label), and any additional attributes such as region, resource group, or tags.\n2. Detect all connections between resources, noting the source, destination, direction (if the arrow is one‑way), and any protocol/port information displayed on the line.\n3. Preserve hierarchical relationships (e.g., VMs inside a Subnet, Subnets inside a VNet).\n4. Return the extracted data in the following JSON structure:\n{\n  \"resources\": [\n    {\n      \"name\": \"<resource_name>\",\n      \"type\": \"<azure_resource_type>\",\n      \"region\": \"<region_if_present>\",\n      \"resource_group\": \"<resource_group_if_present>\",\n      \"tags\": { \"key\": \"value\", ... }\n    }\n    ...\n  ],\n  \"connections\": [\n    {\n      \"source\": \"<source_resource_name>\",\n      \"destination\": \"<dest_resource_name>\",\n      \"direction\": \"unidirectional|bidirectional\",\n      \"protocol\": \"<protocol_if_shown>\",\n      \"port\": \"<port_if_shown>\"\n    }\n    ...\n  ]\n}\n\nIf any element is ambiguous or unreadable, mark its value as null and add a comment field explaining the uncertainty. Do not include any explanatory text outside the JSON. Ensure the JSON is syntactically valid.",
+      "aliases": {
+        "parent": [
+          "vnet",
+          "virtual_network"
+        ],
+        "interface": [
+          "eth0",
+          "vNIC",
+          "nic"
+        ],
+        "speed": [
+          "speed",
+          "link_speed"
+        ]
+      }
+    },
+    "Oracle Cloud": {
+      "platform": "Oracle Cloud",
+      "aliases": {},
+      "instructions": "[PLATFORM ARCHITECTURE: ORACLE CLOUD]\n1. Extract network topology into atomic attributes.",
+      "export_prompt": "You are an expert network engineer specializing in Oracle Cloud..."
+    }
+  },
+  "hypervisor_presets": {
+    "VMware ESXi": [
+      {
+        "code": "Uplink",
+        "label": "Physical Uplink",
+        "pattern": "<vmnic> - <v_switch> <purpose> <uplink_role>",
+        "hidden": false
+      },
+      {
+        "code": "PortGroup",
+        "label": "Port Group",
+        "pattern": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
+        "hidden": false
+      },
+      {
+        "code": "VMkernel",
+        "label": "VMkernel",
+        "pattern": "<purpose> (<v_switch>)",
+        "hidden": false
+      },
+      {
+        "code": "Uplink_None",
+        "label": "Physical Uplink None",
+        "pattern": "<vmnic> - <v_switch> <uplink_role>",
+        "hidden": true
+      },
+      {
+        "code": "PortGroup_VLAN",
+        "label": "Port Group with VLAN",
+        "pattern": "<v_switch> [<vlan_id>] (<active_vmnics> Active / <standby_vmnics> Standby)",
+        "hidden": true
+      }
+    ],
+    "Proxmox VE": [
+      {
+        "code": "Bond",
+        "label": "Linux Bond",
+        "entity_type": "physical",
+        "pattern": "<bond> (<slaves> Active)"
+      },
+      {
+        "code": "Bridge",
+        "label": "Linux Bridge",
+        "entity_type": "virtual",
+        "pattern": "<bridge> - <purpose>"
+      }
+    ],
+    "Microsoft Azure": [
+      {
+        "code": "Uplink",
+        "label": "Physical Uplink",
+        "pattern": "<interface> - <parent> <purpose>"
+      },
+      {
+        "code": "Default",
+        "label": "Default Interface",
+        "pattern": "<interface> (<purpose>)"
+      }
+    ],
+    "Oracle Cloud": [
+      {
+        "code": "Uplink",
+        "label": "Physical Uplink",
+        "pattern": "<interface> - <parent> <purpose>"
+      },
+      {
+        "code": "Default",
+        "label": "Default Interface",
+        "pattern": "<interface> (<purpose>)"
+      }
+    ]
+  },
+  "token_order": {
+    "esxi_vmkernel_name": [
+      "vmk",
+      "purpose",
+      "v_switch",
+      "active_vmnics",
+      "standby_vmnics"
+    ],
+    "esxi_vmkernel": [
+      "purpose",
+      "v_switch",
+      "active_vmnics",
+      "standby_vmnics"
+    ],
+    "esxi_uplink": [
+      "vmnic",
+      "v_switch",
+      "purpose",
+      "uplink_role"
+    ],
+    "esxinet_uplink": [
+      "vmnic",
+      "v_switch",
+      "purpose",
+      "uplink_role"
+    ],
+    "esxi_portgroup": [
+      "v_switch",
+      "active_vmnics",
+      "standby_vmnics"
+    ],
+    "esxinet_portgroup": [
+      "v_switch",
+      "active_vmnics",
+      "standby_vmnics"
+    ],
+    "esxinet_pgname": [
+      "pg_network"
+    ],
+    "esxi_pgname": [
+      "pg_network"
+    ],
+    "esxinet_pg_name": [
+      "pg_network"
+    ],
+    "esxi_pg_name": [
+      "pg_network"
+    ],
+    "esxinet_vmkernel": [
+      "purpose",
+      "v_switch",
+      "active_vmnics",
+      "standby_vmnics"
+    ]
+  }
+}
