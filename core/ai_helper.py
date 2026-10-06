@@ -369,6 +369,25 @@ def build_backup_context(prompt: str, site_filter: str = None, max_rows: int = 6
             for row in matches:
                 site_part = f" | Site: {row['site']}" if row["site"] else ""
                 context.append(f"- [{row['object_label']}] {row['name']}{site_part} | {row['summary']}")
+        else:
+            # Fuzzy hostname fallback (v3.9.21): fetch full device context
+            known_names = _collect_known_hostnames()
+            fuzzy_results, fuzzy_ctx = try_fuzzy_hostname_lookup(
+                query=identifiers[0],
+                known_names=known_names,
+                search_func=lambda ids, site="", limit=10: search_backup_records(
+                    ids, keywords, site=site, limit=limit
+                ),
+                site_filter=target_site,
+                max_rows=max_rows,
+            )
+            if fuzzy_ctx:
+                context.append(f"\n{fuzzy_ctx}")
+            elif fuzzy_results:
+                context.append(f"\n--- Objects Matching Your Query ({len(fuzzy_results)}) ---")
+                for row in fuzzy_results:
+                    site_part = f" | Site: {row.get('site', '')}" if row.get("site") else ""
+                    context.append(f"- [{row.get('object_label', 'unknown')}] {row.get('name', 'N/A')}{site_part} | {row.get('summary', '')}")
 
     # 2. Topic-scoped listings so counting and listing questions get real data.
     if topics:
