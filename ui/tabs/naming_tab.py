@@ -1235,11 +1235,13 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     raw_bytes = None
                     if hasattr(img, "seek"):
                         img.seek(0)
+                    raw_bytes = None
                     if hasattr(img, "getvalue"):
                         raw_bytes = img.getvalue()
                     elif hasattr(img, "read"):
                         raw_bytes = img.read()
-                        img.seek(0)
+                        if hasattr(img, "seek"):
+                            img.seek(0)
                     elif isinstance(img, (bytes, bytearray)):
                         raw_bytes = bytes(img)
 
@@ -1397,8 +1399,9 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         deduped.append(item)
 
                 st.session_state["hypervisor_parsed_descriptions"] = deduped
+                # Increment editor version to FORCE Streamlit to mount a brand new data_editor widget
                 st.session_state["hypervisor_editor_version"] = st.session_state.get("hypervisor_editor_version", 0) + 1
-                st.toast(f"✅ Successfully analyzed {total_imgs} screenshots and merged {len(deduped)} unique records!", icon="🚀")
+                st.toast(f"Successfully analyzed {total_imgs} screenshots and merged {len(deduped)} unique records!", icon="🚀")
                 st.rerun()
         except Exception as e:
             import traceback
@@ -1516,13 +1519,15 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             num_rows="dynamic",
             key=f"hypervisor_data_editor_{st.session_state['hypervisor_editor_version']}"
         )
+        # PROTECT STATE: Only update if the user actually edited non-empty content
         if edited_descriptions is not None:
             if hasattr(edited_descriptions, "to_dict"):
-                edited_list = edited_descriptions.to_dict(orient="records")
+                ed_list = edited_descriptions.to_dict(orient="records")
             else:
-                edited_list = list(edited_descriptions)
-            if edited_list or not st.session_state.get("hypervisor_parsed_descriptions"):
-                st.session_state["hypervisor_parsed_descriptions"] = edited_list
+                ed_list = list(edited_descriptions)
+            # Only overwrite if ed_list is populated or if session was already empty
+            if ed_list:
+                st.session_state["hypervisor_parsed_descriptions"] = ed_list
 
         col_qc_title, col_qc_btn = st.columns([3.5, 1.0], vertical_alignment="center")
         with col_qc_title:
