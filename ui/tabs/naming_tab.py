@@ -1006,8 +1006,12 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     # edits that triggered a rerun while this tab was inactive are picked up.
     # The caller's `naming_rules` param is a snapshot from the top of
     # render_naming_tab and may be stale after cross-tab saves.
-    from config.naming_rules import load_naming_rules as _load_naming_rules
-    naming_rules = SSM.get_naming_rules(_load_naming_rules())
+    #
+    # We use force_reload_naming_rules() (which clears _cached_naming_rules in
+    # memory) instead of reading the file directly, to avoid triggering
+    # Streamlit's "File change detected. Rerun?" dialog.
+    from config.naming_rules import force_reload_naming_rules
+    naming_rules = SSM.get_naming_rules(force_reload_naming_rules())
     st.session_state["_hyp_last_naming_rules_ts"] = id(naming_rules)
 
     st.markdown("##### 1️⃣ Upload & Analyze Screenshots")
@@ -1223,10 +1227,10 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     start_analyze = btn_analyze
 
     preset_sm = StandardsManager()
-    # Reload parsing presets fresh each time to avoid stale cached values
-    # after a Standards-tab save + rerun cycle.
-    _fresh_rules = SSM.get_naming_rules(_load_naming_rules())
-    _unified_presets = _fresh_rules.get("topology_parsing_presets") or {}
+    # Reload parsing presets fresh from the SAME freshly-loaded rules dict
+    # (naming_rules) rather than calling load_naming_rules() again, to avoid
+    # hitting a potentially still-stale cache.
+    _unified_presets = naming_rules.get("topology_parsing_presets") or {}
     parsing_presets = _unified_presets if _unified_presets else preset_sm.get_parsing_presets()
 
     if start_analyze:

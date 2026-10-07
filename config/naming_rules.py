@@ -1350,6 +1350,18 @@ def save_naming_rules(rules: Dict[str, str], source: str = "Manual Edit"):
     if hasattr(st, "session_state"):
         st.session_state["_cached_naming_rules"] = stored
 
+
+def force_reload_naming_rules() -> dict:
+    """Clear the in-memory cache and reload naming rules from disk.
+
+    Use this when cross-tab saves may have left ``_cached_naming_rules`` stale
+    without re-reading the file directly (which would trigger Streamlit's
+    ``File change detected. Rerun?`` dialog).
+    """
+    import streamlit as st
+    st.session_state.pop("_cached_naming_rules", None)
+    return load_naming_rules()
+
 DEFAULT_RULES = _normalize_rules(DEFAULT_NAMING_PATTERNS.copy())
 
 # Unified platform presets: each entry is a single source of truth containing
