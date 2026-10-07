@@ -1081,7 +1081,8 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     });
                 }
                 </script>
-                """
+                """,
+                unsafe_allow_javascript=True,
             )
 
         # Ingest clipboard paste inside Step 1
