@@ -1006,7 +1006,8 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     # edits that triggered a rerun while this tab was inactive are picked up.
     # The caller's `naming_rules` param is a snapshot from the top of
     # render_naming_tab and may be stale after cross-tab saves.
-    naming_rules = SSM.get_naming_rules(load_naming_rules())
+    from config.naming_rules import load_naming_rules as _load_naming_rules
+    naming_rules = SSM.get_naming_rules(_load_naming_rules())
     st.session_state["_hyp_last_naming_rules_ts"] = id(naming_rules)
 
     st.markdown("##### 1️⃣ Upload & Analyze Screenshots")
@@ -1224,7 +1225,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     preset_sm = StandardsManager()
     # Reload parsing presets fresh each time to avoid stale cached values
     # after a Standards-tab save + rerun cycle.
-    _fresh_rules = SSM.get_naming_rules(load_naming_rules())
+    _fresh_rules = SSM.get_naming_rules(_load_naming_rules())
     _unified_presets = _fresh_rules.get("topology_parsing_presets") or {}
     parsing_presets = _unified_presets if _unified_presets else preset_sm.get_parsing_presets()
 
