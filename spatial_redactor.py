@@ -13,13 +13,13 @@ Token format expected:
 
 Config keys (spatial_anchors_and_redaction block):
     enabled: bool
-    left_boundary_anchor: str          # e.g. "Virtual switches"
-    container_header: str              # e.g. "Standard Switch:"
-    adapter_column_anchor: str         # e.g. "Physical Adapters"
+    anchors: list[dict]           # Each dict has "role" and "patterns" (list of strings)
+        role: "left_boundary" | "container_header" | "adapter_column"
+        patterns: list[str]       # Multi-pattern support per role
     redact_ipv4: bool
     redact_domains: bool
     redact_mac: bool
-    domain_patterns: list[str]         # e.g. ["\\.adds$", "\\.local$", ...]
+    domain_patterns: list[str]    # e.g. ["\\.adds$", "\\.local$", ...]
 """
 
 import re
@@ -39,6 +39,8 @@ _MAC_COLON_RE = re.compile(r"\b(?:(?:[0-9A-Fa-f]{2}:){5})[0-9A-Fa-f]{2}\b")
 _MAC_HYPHEN_RE = re.compile(r"\b(?:(?:[0-9A-Fa-f]{2}-){5})[0-9A-Fa-f]{2}\b")
 _MAC_BARE_RE = re.compile(r"\b[0-9A-Fa-f]{12}\b")
 _MAC_RE = re.compile(rf"(?:{_MAC_COLON_RE.pattern}|{_MAC_HYPHEN_RE.pattern}|{_MAC_BARE_RE.pattern})")
+
+_COLLAPSED_PREFIX_RE = re.compile(r"^[\s>›]+")
 
 
 def _build_domain_re(patterns: List[str]) -> Optional[re.Pattern]:
@@ -78,10 +80,67 @@ def _build_domain_re(patterns: List[str]) -> Optional[re.Pattern]:
     except re.error as exc:
         logger.warning("Invalid combined domain pattern: %s — %s", combined, exc)
         return None
+
+
+def _resolve_anchor_patterns(config: Dict, role: str) -> List[str]:
+    """Extract pattern list for a given anchor role from config.
+
+    Supports both legacy scalar fields and the new anchors list format.
+    Legacy scalar keys:
+        left_boundary_anchor, container_header, adapter_column_anchor
+    New anchors list:
+        anchors: [{role, patterns: [...]}]
+    """
+    # New format: anchors list
+    anchors = config.get("anchors")
+    if isinstance(anchors, list):
+        for anchor_entry in anchors:
+            if not isinstance(anchor_entry, dict):
+                continue
+            if anchor_entry.get("role") == role:
+                patterns = anchor_entry.get("patterns")
+                if isinstance(patterns, list) and patterns:
+                    return patterns
+                return []
+
+    # Legacy scalar format → wrap into single-element list
+    legacy_map = {
+        "left_boundary": "left_boundary_anchor",
+        "container_header": "container_header",
+        "adapter_column": "adapter_column_anchor",
+    }
+    key = legacy_map.get(role)
+    if key and key in config:
+        val = config[key]
+        if isinstance(val, list):
+            return val
+        if isinstance(val, str) and val.strip():
+            return [val.strip()]
+    return []
+
+
 def _token_center(box: List[float]) -> Tuple[float, float]:
     """Return (center_x, center_y) from a [x, y, w, h] box."""
     x, y, w, h = box
     return (x + w / 2.0, y + h / 2.0)
+
+
+def _is_collapsed_header(text: str) -> bool:
+    """Return True if the token text or its leading symbols indicate a collapsed section.
+
+    Collapsed ESXi tree nodes are prefixed with '>' or '›' (e.g. '> Standard Switch: vSwitchNutanix').
+    These should NOT define active container boundaries.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return False
+    # Check if the text starts with collapse markers (ignoring leading whitespace)
+    prefix_match = _COLLAPSED_PREFIX_RE.match(stripped)
+    if prefix_match:
+        prefix = prefix_match.group(0)
+        if any(c in prefix for c in ('>', '›')):
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -110,9 +169,10 @@ def process_spatial_topology(
         lines = [t.get("text", "") for t in ocr_tokens if t.get("text")]
         return "\n".join(lines), {}
 
-    left_anchor = str(config.get("left_boundary_anchor", "")).strip()
-    container_header = str(config.get("container_header", "")).strip()
-    adapter_anchor = str(config.get("adapter_column_anchor", "")).strip()
+    # Extract multi-pattern lists for each anchor role
+    left_boundary_patterns = _resolve_anchor_patterns(config, "left_boundary")
+    container_patterns = _resolve_anchor_patterns(config, "container_header")
+    adapter_patterns = _resolve_anchor_patterns(config, "adapter_column")
 
     redact_ipv4 = bool(config.get("redact_ipv4", True))
     redact_domains = bool(config.get("redact_domains", True))
@@ -123,20 +183,20 @@ def process_spatial_topology(
 
     redaction_map: Dict[str, str] = {}
 
-    # Step A: Dynamic left boundary filter
-    filtered_tokens = _step_a_filter(ocr_tokens, left_anchor)
+    # Step A: Dynamic left boundary filter (multi-pattern)
+    filtered_tokens = _step_a_filter(ocr_tokens, left_boundary_patterns)
 
-    # Step B: Y-interval partitioning into switch containers
-    containers = _step_b_partition(filtered_tokens, container_header)
+    # Step B: Y-interval partitioning into switch containers (multi-pattern, exclude collapsed)
+    containers = _step_b_partition(filtered_tokens, container_patterns)
 
     # Step C + D + E: For each container, partition by column and redact
     output_lines: List[str] = []
     total_redacted = 0
 
     for container_name, tokens_in_container in containers:
-        # Step C: Column split
+        # Step C: Column split (multi-pattern)
         port_group_tokens, uplink_tokens = _step_c_column_split(
-            tokens_in_container, adapter_anchor
+            tokens_in_container, adapter_patterns
         )
 
         output_lines.append(f"=== CONTAINER: {container_name} ===")
@@ -173,26 +233,28 @@ def process_spatial_topology(
 
 
 # ---------------------------------------------------------------------------
-# Step A: Left-boundary filter
+# Step A: Left-boundary filter (multi-pattern)
 # ---------------------------------------------------------------------------
 
 def _step_a_filter(
     tokens: List[Dict],
-    anchor_text: str,
+    anchor_patterns: List[str],
 ) -> List[Dict]:
     """Discard tokens that lie to the left of the sidebar boundary anchor."""
-    if not anchor_text:
+    if not anchor_patterns:
         return list(tokens)
 
-    # Find all matching tokens; pick the one with the largest x to target the
-    # main-content anchor rather than a potential sidebar navigation item.
+    # Find all matching tokens across all patterns; pick the one with the largest x
     matches = [
         t for t in tokens
-        if anchor_text.lower() in str(t.get("text", "")).lower()
+        if any(
+            pat.lower() in str(t.get("text", "")).lower()
+            for pat in anchor_patterns
+        )
         and t.get("box") and len(t["box"]) >= 3
     ]
     if not matches:
-        # Anchor not found (e.g. scrolled past) — retain all tokens.
+        # Anchor not found — retain all tokens.
         return list(tokens)
 
     anchor_match = max(matches, key=lambda t: float(t["box"][0]))
@@ -208,38 +270,42 @@ def _step_a_filter(
 
 
 # ---------------------------------------------------------------------------
-# Step B: Y-interval partitioning
+# Step B: Y-interval partitioning (multi-pattern, exclude collapsed headers)
 # ---------------------------------------------------------------------------
 
 def _step_b_partition(
     tokens: List[Dict],
-    header_pattern: str,
+    header_patterns: List[str],
 ) -> List[Tuple[str, List[Dict]]]:
     """
     Group tokens into containers based on vertical intervals delimited by
     container-header tokens (e.g. "Standard Switch: vSwitch0").
+
+    Collapsed headers (prefixed with '>' or '›') are EXCLUDED — they only mark
+    the end of a previous switch, not the start of a new active container.
+
     Returns list of (container_name, [tokens]) sorted top-to-bottom.
     """
-    if not header_pattern:
-        # No header anchor: treat all tokens as one global container.
+    if not header_patterns:
         return [("__global__", list(tokens))]
 
-    # Find all container header tokens.
+    # Find all container header tokens, excluding collapsed entries
     header_tokens: List[Dict] = []
     for t in tokens:
         text = str(t.get("text", "")).strip()
-        if header_pattern.lower() in text.lower():
+        if _is_collapsed_header(text):
+            continue
+        if any(pat.lower() in text.lower() for pat in header_patterns):
             header_tokens.append(t)
 
     if not header_tokens:
-        # No headers found — everything falls into one global container.
         return [("__global__", list(tokens))]
 
     header_tokens.sort(key=lambda t: float(t.get("box", [0, 0, 0, 0])[1]))
 
     containers: List[Tuple[str, List[Dict]]] = []
     for idx, ht in enumerate(header_tokens):
-        name = _extract_container_name(ht.get("text", ""), header_pattern)
+        name = _extract_container_name(ht.get("text", ""), header_patterns)
         y_top = float(ht["box"][1])
         y_bottom = (
             float(header_tokens[idx + 1]["box"][1])
@@ -256,36 +322,38 @@ def _step_b_partition(
     return containers
 
 
-def _extract_container_name(raw_text: str, header_pattern: str) -> str:
+def _extract_container_name(raw_text: str, header_patterns: List[str]) -> str:
     """Pull the container label out of a header token's text."""
     text = str(raw_text).strip()
-    pat = header_pattern.rstrip(":").strip()
-    if pat and pat.lower() in text.lower():
-        parts = text.split(pat, 1)
-        label = parts[-1].strip().lstrip(":").strip()
-        return label or text
+    for pat in header_patterns:
+        pat_clean = pat.rstrip(":").strip()
+        if pat_clean and pat_clean.lower() in text.lower():
+            parts = text.split(pat_clean, 1)
+            label = parts[-1].strip().lstrip(":").strip()
+            if label:
+                return label
     return text
 
 
 # ---------------------------------------------------------------------------
-# Step C: Column partitioning (PortGroups vs Uplinks)
+# Step C: Column partitioning (PortGroups vs Uplinks) — multi-pattern
 # ---------------------------------------------------------------------------
 
 def _step_c_column_split(
     tokens: List[Dict],
-    adapter_anchor: str,
+    adapter_patterns: List[str],
 ) -> Tuple[List[Dict], List[Dict]]:
     """
     Split *tokens* into (port_groups, uplinks) using a vertical split at the
     x-position of the adapter-column anchor token.
     """
-    if not adapter_anchor:
+    if not adapter_patterns:
         return list(tokens), []
 
     split_x: Optional[float] = None
     for t in tokens:
         text = str(t.get("text", "")).strip()
-        if adapter_anchor.lower() in text.lower():
+        if any(pat.lower() in text.lower() for pat in adapter_patterns):
             box = t.get("box")
             if box and len(box) >= 1:
                 split_x = float(box[0]) - 10.0

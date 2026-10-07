@@ -270,6 +270,7 @@ class LocalOCREngine:
             sum(all_confidences) / len(all_confidences) if all_confidences else 0.0
         )
         full_text = "\n".join(detected_lines).strip()
+        image_height = int(processed_bgr.shape[0]) if processed_bgr is not None else 0
 
         return {
             "text": full_text,
@@ -277,6 +278,7 @@ class LocalOCREngine:
             "word_count": len(full_text.split()),
             "lines": detected_lines,
             "raw_tokens": all_raw_tokens,
+            "image_height": image_height,
         }
 
     def assess_quality(
@@ -351,6 +353,10 @@ def run_local_ocr_pipeline(
     Batch helper to process uploaded screenshots into a combined plain text buffer.
     Each image is preprocessed (grayscale + CLAHE + upscale) before OCR to improve
     character separation and overall readability.
+
+    Returns an additional ``image_heights`` list keyed alongside raw_tokens so
+    the caller can apply cumulative Y-offset stitching when multiple screenshots
+    are processed together.
     """
     engine = LocalOCREngine()
     aggregated_lines: List[str] = []
@@ -358,6 +364,7 @@ def run_local_ocr_pipeline(
     total_conf: float = 0.0
     passed_count: int = 0
     errors: List[str] = []
+    image_heights: List[int] = []
 
     for idx, img_file in enumerate(image_files):
         try:
@@ -386,8 +393,10 @@ def run_local_ocr_pipeline(
                         t["_src"] = idx
                     all_raw_tokens.extend(res["raw_tokens"])
                 total_conf += res["average_confidence"]
+                image_heights.append(res.get("image_height", 0))
         except Exception as exc:
             errors.append(f"Image #{idx + 1} processing error: {str(exc)}")
+            image_heights.append(0)
 
     combined_text = "\n\n".join(aggregated_lines).strip()
     avg_conf = (
@@ -402,4 +411,5 @@ def run_local_ocr_pipeline(
         "passed_count": passed_count,
         "errors": errors,
         "raw_tokens": all_raw_tokens,
+        "image_heights": image_heights,
     }

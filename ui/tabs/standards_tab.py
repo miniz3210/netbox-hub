@@ -971,15 +971,52 @@ def _render_spatial_anchors_redaction_editor(
     if not isinstance(sp_cfg, dict):
         sp_cfg = {}
 
+    # Handle pending add from session state (deferred from clear_on_submit form)
+    pending_add_key = f"_spat_pending_add_{active_plat}"
+    if st.session_state.pop(pending_add_key, False):
+        new_role = st.session_state.pop(f"spat_new_role_{active_plat}", "").strip()
+        new_pat = st.session_state.pop(f"spat_new_pat_{active_plat}", "").strip()
+        if new_role:
+            pat_list = [p.strip() for p in new_pat.split(",") if p.strip()] if new_pat else []
+            anchors_list = sp_cfg.get("anchors")
+            if not isinstance(anchors_list, list):
+                anchors_list = []
+            anchors_list.append({"role": new_role, "patterns": pat_list})
+            sp_cfg["anchors"] = anchors_list
+            plat_parsing["spatial_anchors_and_redaction"] = sp_cfg
+
     enabled = sp_cfg.get("enabled", False)
-    left_anchor = sp_cfg.get("left_boundary_anchor", "Virtual switches")
-    container_hdr = sp_cfg.get("container_header", "Standard Switch:")
-    adapter_anchor = sp_cfg.get("adapter_column_anchor", "Physical Adapters")
+
+    # Migrate legacy scalar fields into the new anchors list format on-the-fly
+    anchors_list = sp_cfg.get("anchors")
+    if not isinstance(anchors_list, list) or not anchors_list:
+        legacy_map = [
+            ("left_boundary_anchor", "left_boundary"),
+            ("container_header", "container_header"),
+            ("adapter_column_anchor", "adapter_column"),
+        ]
+        anchors_list = []
+        for legacy_key, role in legacy_map:
+            val = sp_cfg.get(legacy_key)
+            if isinstance(val, str) and val.strip():
+                anchors_list.append({"role": role, "patterns": [val.strip()]})
+            elif isinstance(val, list) and val:
+                anchors_list.append({"role": role, "patterns": list(val)})
+        if not anchors_list:
+            anchors_list = [
+                {"role": "left_boundary", "patterns": ["Virtual switches"]},
+                {"role": "container_header", "patterns": ["Standard Switch:"]},
+                {"role": "adapter_column", "patterns": ["Physical Adapters"]},
+            ]
+        sp_cfg["anchors"] = anchors_list
+
     redact_ipv4 = sp_cfg.get("redact_ipv4", True)
     redact_domains = sp_cfg.get("redact_domains", True)
     redact_mac = sp_cfg.get("redact_mac", True)
     domain_pats = sp_cfg.get("domain_patterns", ["\\.adds$", "\\.local$", "\\.internal$", "\\.corp$"])
-    domain_pats_str = ", ".join(domain_pats) if isinstance(domain_pats, list) else str(domain_pats)
+    if not isinstance(domain_pats, list):
+        domain_pats = []
+    domain_pats_str = ", ".join(domain_pats)
 
     with st.container(border=True):
         st.markdown(
@@ -1006,30 +1043,79 @@ def _render_spatial_anchors_redaction_editor(
         sp_cfg_out["enabled"] = enabled_ui
 
         if enabled_ui:
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                left_anchor_ui = st.text_input(
-                    "Left Boundary Anchor",
-                    value=left_anchor,
-                    key=f"spat_left_anchor_{active_plat}",
-                    help="Anchor text whose x-position defines the left cutoff (sidebar noise filter).",
-                )
-            with col2:
-                container_hdr_ui = st.text_input(
-                    "Container Header",
-                    value=container_hdr,
-                    key=f"spat_container_hdr_{active_plat}",
-                    help="Delimiter matched to partition tokens into per-switch containers (e.g. 'Standard Switch:').",
-                )
-            with col3:
-                adapter_anchor_ui = st.text_input(
-                    "Adapter Column Anchor",
-                    value=adapter_anchor,
-                    key=f"spat_adapter_anchor_{active_plat}",
-                    help="Anchor text used to split Port Groups vs Uplinks within each container.",
-                )
+            # ── Dynamic Anchor Rows (identical UX to Section 2) ──────────────
+            st.markdown(
+                "<div style='display:flex; justify-content:space-between; align-items:center; margin-top:8px; margin-bottom:4px;'>"
+                "<span style='font-size:0.95rem; font-weight:600;'>Anchor Roles &amp; Patterns</span>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            st.caption("Each row defines a spatial anchor role with one or more text patterns. Patterns are matched case-insensitively against OCR token text.")
+
+            ANC_COLS = [2.0, 5.3, 1.2]
+            ac_role, ac_pat, ac_act = st.columns(ANC_COLS, vertical_alignment="center")
+            with ac_role:
+                st.markdown("**Anchor Role**")
+            with ac_pat:
+                st.markdown("**Anchor Patterns (comma-separated)**")
+            with ac_act:
+                pass
+
+            updated_anchors = []
+            for idx, anchor_entry in enumerate(anchors_list):
+                role = anchor_entry.get("role", "")
+                patterns = anchor_entry.get("patterns", [])
+                if not isinstance(patterns, list):
+                    patterns = [str(patterns)]
+                pat_str = ", ".join(patterns)
+
+                rc, rp, ra = st.columns(ANC_COLS, vertical_alignment="center")
+                with rc:
+                    new_role = st.text_input(
+                        "Anchor Role", value=role,
+                        key=f"spat_role_{active_plat}_{idx}",
+                        label_visibility="collapsed",
+                    ).strip()
+                with rp:
+                    new_pat = st.text_input(
+                        "Patterns", value=pat_str,
+                        key=f"spat_pat_{active_plat}_{idx}",
+                        label_visibility="collapsed",
+                    ).strip()
+                with ra:
+                    if _render_centered_del_btn(f"spat_del_{active_plat}_{idx}", "Delete anchor row"):
+                        continue  # skip re-adding this row
+                if new_role:
+                    pat_list = [p.strip() for p in new_pat.split(",") if p.strip()] if new_pat else []
+                    updated_anchors.append({"role": new_role, "patterns": pat_list})
+
+            # Inline add-row form (clear_on_submit avoids layout crashes)
+            with st.form(key=f"spat_add_form_{active_plat}", clear_on_submit=True):
+                ca1, ca2, ca3 = st.columns(ANC_COLS, vertical_alignment="center")
+                with ca1:
+                    new_role = st.text_input(
+                        "New Role", value="", key=f"spat_new_role_{active_plat}",
+                        placeholder="e.g. container_header", label_visibility="collapsed",
+                    )
+                with ca2:
+                    new_pat = st.text_input(
+                        "New Patterns", value="", key=f"spat_new_pat_{active_plat}",
+                        placeholder="e.g. Standard Switch:, DVSwitch:", label_visibility="collapsed",
+                    )
+                with ca3:
+                    add_anchor = st.form_submit_button("➕ Add", width='stretch', help="Add new anchor row")
+                if add_anchor:
+                    if new_role.strip():
+                        pat_list = [p.strip() for p in new_pat.split(",") if p.strip()] if new_pat.strip() else []
+                        updated_anchors.append({"role": new_role.strip(), "patterns": pat_list})
+                        st.session_state[f"_spat_pending_add_{active_plat}"] = True
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ Enter an anchor role name.")
 
             st.divider()
+
+            # ── Redaction Controls ────────────────────────────────────────────
             redact_ipv4_ui = st.checkbox(
                 "Redact IPv4 addresses",
                 value=bool(redact_ipv4),
@@ -1057,9 +1143,6 @@ def _render_spatial_anchors_redaction_editor(
                 domain_pats_ui = domain_pats_str
 
             sp_cfg_out.update({
-                "left_boundary_anchor": left_anchor_ui.strip(),
-                "container_header": container_hdr_ui.strip(),
-                "adapter_column_anchor": adapter_anchor_ui.strip(),
                 "redact_ipv4": redact_ipv4_ui,
                 "redact_domains": redact_domains_ui,
                 "redact_mac": redact_mac_ui,
@@ -1069,9 +1152,7 @@ def _render_spatial_anchors_redaction_editor(
             })
         else:
             # Preserve anchor settings while the feature is disabled.
-            sp_cfg_out.setdefault("left_boundary_anchor", left_anchor)
-            sp_cfg_out.setdefault("container_header", container_hdr)
-            sp_cfg_out.setdefault("adapter_column_anchor", adapter_anchor)
+            sp_cfg_out.setdefault("anchors", anchors_list)
 
         plat_parsing["spatial_anchors_and_redaction"] = sp_cfg_out
 

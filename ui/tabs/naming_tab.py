@@ -1276,8 +1276,9 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             combined_raw_text = "\n\n".join(combined_raw_lines).strip()
             st.session_state["latest_ocr_raw_text"] = combined_raw_text
 
-            # Collect raw OCR tokens (with boxes) for spatial redaction
+            # ── Collect raw OCR tokens with cumulative Y-offset across screenshots ──
             all_raw_tokens: List[Dict] = []
+            cumulative_y = 0
             for idx, img in enumerate(uploaded_imgs):
                 try:
                     raw_bytes = None
@@ -1296,9 +1297,15 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     else:
                         ocr_res = run_local_ocr_pipeline([img])
                     toks = ocr_res.get("raw_tokens", [])
+                    img_heights = ocr_res.get("image_heights", [])
+                    img_h = img_heights[0] if img_heights else 0
                     for t in toks:
                         t["_src"] = idx
+                        box = t.get("box")
+                        if box and len(box) >= 2 and cumulative_y > 0:
+                            t["box"] = [box[0], box[1] + cumulative_y, box[2], box[3]]
                     all_raw_tokens.extend(toks)
+                    cumulative_y += img_h
                 except Exception:
                     pass
 

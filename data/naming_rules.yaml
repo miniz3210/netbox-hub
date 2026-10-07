@@ -891,9 +891,11 @@
       "export_prompt": "You are an expert infrastructure network engineer specializing in VMware ESXi.\nI have attached screenshots of VMware ESXi virtual switch topology and physical network adapter properties.\nPlease analyze the images and extract the network topology into a flat JSON array of objects matching these exact attributes:\n- interface: 'vmnicX' or 'vmkX' (e.g., 'vmnic1', 'vmk0')\n- parent: 'vSwitchX' (e.g., 'vSwitch0'). TOPOLOGY PRIORITY: Every adapter listed in the switch's Physical Adapters column strictly belongs to that switch. NEVER output parent as null or unassigned for grouped/secondary adapters (e.g., vmnic5 under vSwitch0).\n- purpose: Pure service name ('Management Network', 'vMotion', 'iSCSI01') without appending switch names or roles. Secondary adapters inherit the primary management network purpose.\n- uplink_role: 'Active Uplink' by default for all connected vmnic adapters (unless explicitly marked standby in failover settings); leave empty string \"\" for vmk.\n- slot: Hardware PCIe slot (e.g., '0000:5b:00.0')\n- speed: Link speed (e.g., '10 Gbit/s Full', '1 Gbit/s Full')\n- ip: IPv4 address for vmk ports\n\nOutput ONLY a valid JSON array of objects: [ {...}, {...} ]. Do not wrap in markdown fences or include explanatory text.",
       "spatial_anchors_and_redaction": {
         "enabled": true,
-        "left_boundary_anchor": "Virtual switches",
-        "container_header": "Standard Switch:",
-        "adapter_column_anchor": "Physical Adapters",
+        "anchors": [
+          {"role": "left_boundary", "patterns": ["Virtual switches", "Networking"]},
+          {"role": "container_header", "patterns": ["Standard Switch:", "DVSwitch:", "vSphere Distributed Switch:"]},
+          {"role": "adapter_column", "patterns": ["Physical Adapters", "Uplinks"]}
+        ],
         "redact_ipv4": true,
         "redact_domains": true,
         "domain_patterns": ["\\.adds$", "\\.local$", "\\.internal$", "\\.corp$"],
