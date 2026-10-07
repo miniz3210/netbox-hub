@@ -811,9 +811,7 @@ def _persist_auto_corrections(data: dict, category: str = "") -> None:
 
 def _save_presets(rules: dict, section: str = "presets", section_label: str = "Presets") -> None:
     save_naming_rules(rules, source="Presets Manager")
-    # Reload the persisted rules fresh from disk so the in-memory copy and SSM cache stay in sync
-    # with what's on disk, preventing stale-widget defaults on immediate rerender.
-    fresh = load_naming_rules()
+    fresh = SSM.get_cached_naming_rules() or load_naming_rules()
     rules.clear()
     rules.update(fresh)
     SSM.set_naming_rules(fresh.copy())
@@ -1058,10 +1056,10 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                     all_platforms[cur_idx - 1], all_platforms[cur_idx] = all_platforms[cur_idx], all_platforms[cur_idx - 1]
                     rules["hypervisor_platform_order"] = all_platforms
                     save_naming_rules(rules, source="Reorder Hypervisor Platforms")
-                    fresh_rules = load_naming_rules()
+                    fresh = SSM.get_cached_naming_rules() or load_naming_rules()
                     rules.clear()
-                    rules.update(fresh_rules)
-                    SSM.set_naming_rules(fresh_rules.copy())
+                    rules.update(fresh)
+                    SSM.set_naming_rules(fresh.copy())
                     SSM.refresh_naming_rules()
                     st.session_state["sel_unified_platform"] = sel_choice
                     st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
@@ -1071,10 +1069,10 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                     all_platforms[cur_idx + 1], all_platforms[cur_idx] = all_platforms[cur_idx], all_platforms[cur_idx + 1]
                     rules["hypervisor_platform_order"] = all_platforms
                     save_naming_rules(rules, source="Reorder Hypervisor Platforms")
-                    fresh_rules = load_naming_rules()
+                    fresh = SSM.get_cached_naming_rules() or load_naming_rules()
                     rules.clear()
-                    rules.update(fresh_rules)
-                    SSM.set_naming_rules(fresh_rules.copy())
+                    rules.update(fresh)
+                    SSM.set_naming_rules(fresh.copy())
                     SSM.refresh_naming_rules()
                     st.session_state["sel_unified_platform"] = sel_choice
                     st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
@@ -1087,10 +1085,10 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                     rules["topology_parsing_presets"] = parsing_presets
                     rules["hypervisor_platform_order"] = [p for p in all_platforms if p != sel_choice]
                     save_naming_rules(rules, source=f"Delete Platform {sel_choice}")
-                    fresh_rules = load_naming_rules()
+                    fresh = SSM.get_cached_naming_rules() or load_naming_rules()
                     rules.clear()
-                    rules.update(fresh_rules)
-                    SSM.set_naming_rules(fresh_rules.copy())
+                    rules.update(fresh)
+                    SSM.set_naming_rules(fresh.copy())
                     SSM.refresh_naming_rules()
 
                     st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
@@ -1126,7 +1124,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                         rules["hypervisor_presets"] = hyp_presets
                         rules["topology_parsing_presets"] = parsing_presets
                         save_naming_rules(rules, source=f"Create Platform {new_plat_name}")
-                        SSM.set_naming_rules(load_naming_rules())
+                        SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
                         st.session_state["sel_unified_platform"] = new_plat_name
                         st.session_state["card_saved_banner"] = {"section": "hypervisor_platform_presets", "msg": f"✅ Platform '{new_plat_name}' created!", "ts": time.time()}
                         st.rerun()
@@ -1210,7 +1208,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
             hyp_presets[active_plat] = plat_patterns
             rules["hypervisor_presets"] = hyp_presets
             save_naming_rules(rules, source=f"Delete template in {active_plat}")
-            SSM.set_naming_rules(load_naming_rules())
+            SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
             st.rerun()
 
         if move_up_idx is not None:
@@ -1218,7 +1216,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
             hyp_presets[active_plat] = updated_patterns
             rules["hypervisor_presets"] = hyp_presets
             save_naming_rules(rules, source=f"Reorder templates in {active_plat}")
-            SSM.set_naming_rules(load_naming_rules())
+            SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
             st.rerun()
 
         if move_down_idx is not None:
@@ -1226,7 +1224,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
             hyp_presets[active_plat] = updated_patterns
             rules["hypervisor_presets"] = hyp_presets
             save_naming_rules(rules, source=f"Reorder templates in {active_plat}")
-            SSM.set_naming_rules(load_naming_rules())
+            SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
             st.rerun()
 
         st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
@@ -1254,7 +1252,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 hyp_presets[active_plat] = updated_patterns
                 rules["hypervisor_presets"] = hyp_presets
                 save_naming_rules(rules, source=f"Add template to {active_plat}")
-                SSM.set_naming_rules(load_naming_rules())
+                SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
                 st.rerun()
 
         st.markdown("<div style='height: 16px; border-bottom: 1px solid rgba(255,255,255,0.07);'></div>", unsafe_allow_html=True)
@@ -1397,7 +1395,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                             rules["topology_parsing_presets"] = parsing_presets
 
                             save_naming_rules(rules, source=f"AI Generated {target_p}")
-                            fresh_rules = load_naming_rules()
+                            fresh_rules = SSM.get_cached_naming_rules() or load_naming_rules()
                             rules.clear()
                             rules.update(fresh_rules)
                             SSM.set_naming_rules(fresh_rules.copy())
@@ -1447,7 +1445,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 rules["hypervisor_platform_order"] = all_platforms
 
                 save_naming_rules(rules, source=f"Save All Presets for {active_plat}")
-                fresh_rules = load_naming_rules()
+                fresh_rules = SSM.get_cached_naming_rules() or load_naming_rules()
                 rules.clear()
                 rules.update(fresh_rules)
                 SSM.set_naming_rules(fresh_rules.copy())
@@ -1481,7 +1479,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 rules["hypervisor_presets"] = hyp_presets
                 rules["topology_parsing_presets"] = parsing_presets
                 save_naming_rules(rules, source=f"Reset to Defaults for {active_plat}")
-                fresh_rules = load_naming_rules()
+                fresh_rules = SSM.get_cached_naming_rules() or load_naming_rules()
                 rules.clear()
                 rules.update(fresh_rules)
                 SSM.set_naming_rules(fresh_rules.copy())
@@ -2277,7 +2275,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                     preset_names[cur_idx - 1], preset_names[cur_idx] = preset_names[cur_idx], preset_names[cur_idx - 1]
                     rules["vlan_presets"] = {k: rules["vlan_presets"][k] for k in preset_names}
                     save_naming_rules(rules, source="Reorder VLAN Preset Groups")
-                    fresh_rules = load_naming_rules()
+                    fresh_rules = SSM.get_cached_naming_rules() or load_naming_rules()
                     rules.clear()
                     rules.update(fresh_rules)
                     SSM.set_naming_rules(fresh_rules.copy())
@@ -2289,7 +2287,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                     preset_names[cur_idx + 1], preset_names[cur_idx] = preset_names[cur_idx], preset_names[cur_idx + 1]
                     rules["vlan_presets"] = {k: rules["vlan_presets"][k] for k in preset_names}
                     save_naming_rules(rules, source="Reorder VLAN Preset Groups")
-                    fresh_rules = load_naming_rules()
+                    fresh_rules = SSM.get_cached_naming_rules() or load_naming_rules()
                     rules.clear()
                     rules.update(fresh_rules)
                     SSM.set_naming_rules(fresh_rules.copy())
@@ -2329,7 +2327,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                         }
                         rules["vlan_presets"] = vlan_presets
                         save_naming_rules(rules, source=f"Create VLAN Group {new_grp_name}")
-                        SSM.set_naming_rules(load_naming_rules())
+                        SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
                         st.session_state["pending_vlan_group"] = new_grp_name
                         st.session_state["card_saved_banner"] = {
                             "section": "vlan_presets",

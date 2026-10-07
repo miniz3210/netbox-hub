@@ -62,6 +62,22 @@ class SessionStateManager:
         rules = load_naming_rules()
         st.session_state["naming_rules"] = rules
         return rules
+
+    @staticmethod
+    def get_cached_naming_rules() -> dict:
+        """Return the in-memory cached rules without re-reading from disk.
+
+        This avoids triggering Streamlit's file watcher on the rules file
+        after a save operation. Use this instead of ``load_naming_rules()``
+        when the caller has just saved rules and needs the freshly-persisted
+        copy that ``save_naming_rules()`` already wrote to session state.
+        """
+        import streamlit as st
+        cached = st.session_state.get("_cached_naming_rules")
+        if isinstance(cached, dict) and cached:
+            return cached
+        # Fallback: if cache is missing for some reason, return empty dict
+        return {}
     
     @staticmethod
     def get_naming_rules_loaded(default: bool = False) -> bool:
