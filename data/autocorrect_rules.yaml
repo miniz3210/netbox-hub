@@ -98,7 +98,7 @@ auto_corrections:
     description: Normalize wmnkc/wmnic OCR typos
     enabled: true
   - pattern: (?i)\b(vswitch)[oO]\b
-    replacement: \g<1>0
+    replacement: vSwitch0
     description: Fix OCR letter o to digit 0 in switch name
     enabled: true
   - pattern: (?i)\bvmotion\b
@@ -108,4 +108,8 @@ auto_corrections:
   - pattern: (?i)\bvsan\b
     replacement: vSAN
     description: Normalize vSAN casing
+    enabled: true
+  - pattern: (?i)\bManagementNetwork\b
+    replacement: Management Network
+    description: Separate fused ManagementNetwork
     enabled: true

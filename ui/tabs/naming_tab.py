@@ -1,5 +1,8 @@
+import logging
 import re
 import streamlit as st
+
+logger = logging.getLogger(__name__)
 from utils.formatters import normalize_port_shortname
 from utils.pattern_formatter import apply_pattern
 from core.naming_engine import verify_and_suggest_with_ai
@@ -431,6 +434,17 @@ def _safe_parse_json_array(response: str) -> list:
         if stripped.startswith("[") and stripped.endswith("]"):
             json_str = stripped
         else:
+            # Handle wrapped dictionaries like {"interfaces": [...]} or markdown blocks
+            m_obj = re.search(r"\{\s*.*?\s*\}", response, re.DOTALL)
+            if m_obj:
+                try:
+                    obj = _json.loads(m_obj.group(0))
+                    if isinstance(obj, dict):
+                        for v in obj.values():
+                            if isinstance(v, list) and v and isinstance(v[0], dict):
+                                return v
+                except _json.JSONDecodeError:
+                    pass
             return []
     try:
         return _json.loads(json_str)
@@ -985,6 +999,9 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     import json as _json
     from core.ai_client import call_ai
 
+    if "hypervisor_editor_version" not in st.session_state:
+        st.session_state["hypervisor_editor_version"] = 0
+
     st.markdown("##### 1️⃣ Upload & Analyze Screenshots")
 
     with st.container(border=True):
@@ -1179,11 +1196,13 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             btn_clear = st.button("🗑️ Clear All", use_container_width=True)
         if btn_clear:
             st.session_state["staged_topology_imgs"] = []
-            st.session_state.pop("hypervisor_parsed_descriptions", None)
-            st.session_state.pop("latest_ocr_raw_text", None)
+            st.session_state["hypervisor_parsed_descriptions"] = []
+            st.session_state["hypervisor_parsed_items"] = []
+            st.session_state["latest_ocr_raw_text"] = ""
             st.session_state.pop("_btn_analyze_naming", None)
             st.session_state.pop("latest_vault_session", None)
             st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
+            st.session_state["hypervisor_editor_version"] = st.session_state.get("hypervisor_editor_version", 0) + 1
             st.rerun()
 
     # OCR Raw Text Inspector (collapsible)
@@ -1379,10 +1398,12 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         deduped.append(item)
 
                 st.session_state["hypervisor_parsed_descriptions"] = deduped
+                st.session_state["hypervisor_editor_version"] = st.session_state.get("hypervisor_editor_version", 0) + 1
                 st.toast(f"✅ Successfully analyzed {total_imgs} screenshots and merged {len(deduped)} unique records!", icon="🚀")
                 st.rerun()
         except Exception as e:
             import traceback
+            logger.error("Pipeline execution failed: %s", str(e))
             st.error(f"Pipeline execution failed: {str(e)}")
             st.code(traceback.format_exc(), language="text")
 
@@ -1491,10 +1512,10 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
 
         edited_descriptions = st.data_editor(
             st.session_state["hypervisor_parsed_descriptions"],
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
             num_rows="dynamic",
-            key="esxi_vision_data_editor"
+            key=f"hypervisor_data_editor_{st.session_state['hypervisor_editor_version']}"
         )
         st.session_state["hypervisor_parsed_descriptions"] = edited_descriptions
 
