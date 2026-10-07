@@ -1138,7 +1138,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     if not st.session_state["staged_topology_imgs"]:
                         st.session_state.pop("hypervisor_parsed_descriptions", None)
                         st.session_state.pop("latest_ocr_raw_text", None)
-                        st.session_state.pop("_btn_analyze_naming", None)
                         st.session_state.pop("latest_vault_session", None)
                     st.rerun()
 
@@ -1191,7 +1190,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             st.session_state["ocr_target_platform"] = target_platform
         with col_btn_an:
             btn_analyze = st.button("🚀 Analyze & Auto-Populate", type="primary", use_container_width=True)
-            st.session_state["_btn_analyze_naming"] = btn_analyze
         with col_btn_clr:
             btn_clear = st.button("🗑️ Clear All", use_container_width=True)
         if btn_clear:
@@ -1199,7 +1197,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             st.session_state["hypervisor_parsed_descriptions"] = []
             st.session_state["hypervisor_parsed_items"] = []
             st.session_state["latest_ocr_raw_text"] = ""
-            st.session_state.pop("_btn_analyze_naming", None)
             st.session_state.pop("latest_vault_session", None)
             st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
             st.session_state["hypervisor_editor_version"] = st.session_state.get("hypervisor_editor_version", 0) + 1
@@ -1215,7 +1212,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         st.text_area("Extracted OCR Tokens", value=raw_ocr_text, height=420, disabled=True)
 
     # Execute analyze when button clicked
-    start_analyze = st.session_state.get("_btn_analyze_naming", False)
+    start_analyze = btn_analyze
 
     preset_sm = StandardsManager()
     # Prefer the unified topology_parsing_presets from rules; fall back to
@@ -1236,11 +1233,13 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 extracted_txt = ""
                 try:
                     raw_bytes = None
+                    if hasattr(img, "seek"):
+                        img.seek(0)
                     if hasattr(img, "getvalue"):
                         raw_bytes = img.getvalue()
                     elif hasattr(img, "read"):
-                        img.seek(0)
                         raw_bytes = img.read()
+                        img.seek(0)
                     elif isinstance(img, (bytes, bytearray)):
                         raw_bytes = bytes(img)
 
@@ -1517,7 +1516,13 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             num_rows="dynamic",
             key=f"hypervisor_data_editor_{st.session_state['hypervisor_editor_version']}"
         )
-        st.session_state["hypervisor_parsed_descriptions"] = edited_descriptions
+        if edited_descriptions is not None:
+            if hasattr(edited_descriptions, "to_dict"):
+                edited_list = edited_descriptions.to_dict(orient="records")
+            else:
+                edited_list = list(edited_descriptions)
+            if edited_list or not st.session_state.get("hypervisor_parsed_descriptions"):
+                st.session_state["hypervisor_parsed_descriptions"] = edited_list
 
         col_qc_title, col_qc_btn = st.columns([3.5, 1.0], vertical_alignment="center")
         with col_qc_title:
