@@ -1002,6 +1002,13 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     if "hypervisor_editor_version" not in st.session_state:
         st.session_state["hypervisor_editor_version"] = 0
 
+    # Always reload fresh rules from disk/SSM on entry so that any Standards-tab
+    # edits that triggered a rerun while this tab was inactive are picked up.
+    # The caller's `naming_rules` param is a snapshot from the top of
+    # render_naming_tab and may be stale after cross-tab saves.
+    naming_rules = SSM.get_naming_rules(load_naming_rules())
+    st.session_state["_hyp_last_naming_rules_ts"] = id(naming_rules)
+
     st.markdown("##### 1️⃣ Upload & Analyze Screenshots")
 
     with st.container(border=True):
@@ -1215,9 +1222,10 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     start_analyze = btn_analyze
 
     preset_sm = StandardsManager()
-    # Prefer the unified topology_parsing_presets from rules; fall back to
-    # StandardsManager's legacy parsing_presets when the unified key is empty.
-    _unified_presets = naming_rules.get("topology_parsing_presets") or {}
+    # Reload parsing presets fresh each time to avoid stale cached values
+    # after a Standards-tab save + rerun cycle.
+    _fresh_rules = SSM.get_naming_rules(load_naming_rules())
+    _unified_presets = _fresh_rules.get("topology_parsing_presets") or {}
     parsing_presets = _unified_presets if _unified_presets else preset_sm.get_parsing_presets()
 
     if start_analyze:
@@ -1402,12 +1410,18 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 # Increment editor version to FORCE Streamlit to mount a brand new data_editor widget
                 st.session_state["hypervisor_editor_version"] = st.session_state.get("hypervisor_editor_version", 0) + 1
                 st.toast(f"Successfully analyzed {total_imgs} screenshots and merged {len(deduped)} unique records!", icon="🚀")
-                st.rerun()
         except Exception as e:
             import traceback
             logger.error("Pipeline execution failed: %s", str(e))
             st.error(f"Pipeline execution failed: {str(e)}")
             st.code(traceback.format_exc(), language="text")
+
+    # st.rerun() is placed OUTSIDE the try/except so that Streamlit's internal
+    # RerunException (raised by st.rerun) cannot be caught by the bare
+    # except Exception and silently swallowed, which would leave the page
+    # rendering Section 3 before the session state has been persisted.
+    if start_analyze and "hypervisor_parsed_descriptions" in st.session_state:
+        st.rerun()
 
     st.markdown("##### 2️⃣ Extracted Variables Inspector (Dynamic Token Bag)")
     parsed_records = st.session_state.get("hypervisor_parsed_descriptions") or []
