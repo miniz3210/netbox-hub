@@ -196,19 +196,37 @@ class LocalOCREngine:
         ]
         return reconstructed_lines
 
-    def _parse_result_with_boxes(self, result) -> Tuple[List[str], List[float]]:
-        """Parse RapidOCR result into spatially grouped lines and confidences."""
+    def _parse_result_with_boxes(self, result) -> Tuple[List[str], List[float], List[Dict]]:
+        """Parse RapidOCR result into spatially grouped lines, confidences, and raw token boxes."""
         confs: List[float] = []
+        raw_tokens: List[Dict] = []
         if result is None:
-            return [], confs
+            return [], confs, raw_tokens
         for item in result:
             if not isinstance(item, (list, tuple)) or len(item) < 2:
                 continue
             conf = item[2] if len(item) >= 3 else 0.0
             if isinstance(conf, (int, float)) and conf > 0:
                 confs.append(float(conf))
+            box = item[0] if len(item) >= 1 else None
+            text = item[1] if len(item) >= 2 else ""
+            if box is not None and text:
+                box_np = np.array(box)
+                if box_np.ndim == 2 and box_np.shape == (4, 2):
+                    x0, y0 = box_np[0]
+                    x1, y1 = box_np[1]
+                    x2, y2 = box_np[2]
+                    x3, y3 = box_np[3]
+                    xmin = float(min(x0, x1, x2, x3))
+                    ymin = float(min(y0, y1, y2, y3))
+                    xmax = float(max(x0, x1, x2, x3))
+                    ymax = float(max(y0, y1, y2, y3))
+                    raw_tokens.append({
+                        "text": str(text).strip(),
+                        "box": [xmin, ymin, xmax - xmin, ymax - ymin],
+                    })
         grouped_lines = self._spatial_row_grouping(result)
-        return grouped_lines, confs
+        return grouped_lines, confs, raw_tokens
 
     def extract_text_with_metadata(
         self, image_input: Any
@@ -223,13 +241,14 @@ class LocalOCREngine:
 
         detected_lines: List[str] = []
         all_confidences: List[float] = []
+        all_raw_tokens: List[Dict] = []
 
         # Auto-invert dark mode if running against a dark dashboard
         processed_bgr = self._auto_invert_dark_mode(img_bgr)
 
         # Pass 1: standard inference with spatial grouping
         result, _ = engine(processed_bgr)
-        detected_lines, all_confidences = self._parse_result_with_boxes(result)
+        detected_lines, all_confidences, all_raw_tokens = self._parse_result_with_boxes(result)
         import sys as _sys
         _sys.stdout.write(f"[OCR ENGINE] Lines detected (Spatial): {len(detected_lines)}, preview: {detected_lines[:2] if detected_lines else []}\n")
         _sys.stdout.flush()
@@ -240,7 +259,7 @@ class LocalOCREngine:
         if not detected_lines:
             enhanced_bgr = self._enhance_contrast(processed_bgr)
             result, _ = engine(enhanced_bgr)
-            detected_lines, all_confidences = self._parse_result_with_boxes(result)
+            detected_lines, all_confidences, all_raw_tokens = self._parse_result_with_boxes(result)
             import sys as _sys
             _sys.stdout.write(f"[OCR ENGINE] Lines detected (Pass 2 Spatial): {len(detected_lines)}, preview: {detected_lines[:2] if detected_lines else []}\n")
             _sys.stdout.flush()
@@ -257,6 +276,7 @@ class LocalOCREngine:
             "average_confidence": round(avg_conf, 2),
             "word_count": len(full_text.split()),
             "lines": detected_lines,
+            "raw_tokens": all_raw_tokens,
         }
 
     def assess_quality(
@@ -334,6 +354,7 @@ def run_local_ocr_pipeline(
     """
     engine = LocalOCREngine()
     aggregated_lines: List[str] = []
+    all_raw_tokens: List[Dict] = []
     total_conf: float = 0.0
     passed_count: int = 0
     errors: List[str] = []
@@ -360,12 +381,18 @@ def run_local_ocr_pipeline(
                 # Defensive: always include text when non-empty, regardless of force_pass
                 if res.get("text") and len(res["text"].strip()) > 0:
                     aggregated_lines.append(res["text"])
+                if res.get("raw_tokens"):
+                    for t in res["raw_tokens"]:
+                        t["_src"] = idx
+                    all_raw_tokens.extend(res["raw_tokens"])
                 total_conf += res["average_confidence"]
         except Exception as exc:
             errors.append(f"Image #{idx + 1} processing error: {str(exc)}")
 
     combined_text = "\n\n".join(aggregated_lines).strip()
-    avg_conf = round(total_conf / passed_count, 2) if passed_count > 0 else 0.0
+    avg_conf = (
+        round(total_conf / passed_count, 2) if passed_count > 0 else 0.0
+    )
 
     return {
         "success": bool(combined_text and (len(errors) == 0 or force_pass)),
@@ -374,4 +401,5 @@ def run_local_ocr_pipeline(
         "processed_count": len(image_files),
         "passed_count": passed_count,
         "errors": errors,
+        "raw_tokens": all_raw_tokens,
     }

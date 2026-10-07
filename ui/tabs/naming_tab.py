@@ -1,5 +1,6 @@
 import logging
 import re
+from typing import Dict, List
 import streamlit as st
 
 logger = logging.getLogger(__name__)
@@ -1275,11 +1276,72 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             combined_raw_text = "\n\n".join(combined_raw_lines).strip()
             st.session_state["latest_ocr_raw_text"] = combined_raw_text
 
+            # Collect raw OCR tokens (with boxes) for spatial redaction
+            all_raw_tokens: List[Dict] = []
+            for idx, img in enumerate(uploaded_imgs):
+                try:
+                    raw_bytes = None
+                    if hasattr(img, "seek"):
+                        img.seek(0)
+                    if hasattr(img, "getvalue"):
+                        raw_bytes = img.getvalue()
+                    elif hasattr(img, "read"):
+                        raw_bytes = img.read()
+                        if hasattr(img, "seek"):
+                            img.seek(0)
+                    elif isinstance(img, (bytes, bytearray)):
+                        raw_bytes = bytes(img)
+                    if raw_bytes and len(raw_bytes) > 0:
+                        ocr_res = run_local_ocr_pipeline([raw_bytes])
+                    else:
+                        ocr_res = run_local_ocr_pipeline([img])
+                    toks = ocr_res.get("raw_tokens", [])
+                    for t in toks:
+                        t["_src"] = idx
+                    all_raw_tokens.extend(toks)
+                except Exception:
+                    pass
+
+            # ── Spatial redaction hook ──────────────────────────────────────
+            structured_text = None
+            spatial_redaction_map: Dict[str, str] = {}
+            try:
+                from spatial_redactor import process_spatial_topology
+                active_plat_name = st.session_state.get("naming_target_platform", "VMware ESXi")
+                _sp_cfg = (
+                    (naming_rules.get("topology_parsing_presets") or {})
+                    .get(active_plat_name, {})
+                    .get("spatial_anchors_and_redaction")
+                    if isinstance(naming_rules.get("topology_parsing_presets"), dict)
+                    else {}
+                )
+                if not isinstance(_sp_cfg, dict):
+                    _sp_cfg = {}
+                if _sp_cfg.get("enabled", False) and all_raw_tokens:
+                    structured_text, spatial_redaction_map = process_spatial_topology(
+                        all_raw_tokens, _sp_cfg
+                    )
+                    st.session_state["active_redaction_map"] = spatial_redaction_map
+                    logger.info(
+                        "Spatial grouping applied. Redacted %d sensitive tokens locally.",
+                        len(spatial_redaction_map),
+                    )
+            except Exception as exc:
+                import logging as _log
+                _log.getLogger(__name__).warning(
+                    "Spatial redaction hook failed, falling back to flat text: %s", exc
+                )
+                structured_text = None
+                spatial_redaction_map = {}
+
             try:
                 from utils.formatters import apply_auto_corrections
-                cleaned_ocr_text = apply_auto_corrections(combined_raw_text, "ocr_cleaning")
-                if not cleaned_ocr_text or cleaned_ocr_text == combined_raw_text:
-                    cleaned_ocr_text = apply_auto_corrections(combined_raw_text, "vmware")
+                if structured_text:
+                    cleaned_ocr_text = structured_text
+                else:
+                    cleaned_ocr_text = apply_auto_corrections(combined_raw_text, "ocr_cleaning")
+                    if not cleaned_ocr_text or cleaned_ocr_text == (structured_text or combined_raw_text):
+                        cleaned_ocr_text = apply_auto_corrections(combined_raw_text, "vmware")
             except Exception:
                 cleaned_ocr_text = combined_raw_text
 
@@ -1368,6 +1430,15 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         {k: vault.restore(str(v), session_id=session_id) for k, v in item.items()}
                         for item in all_parsed_items
                     ]
+            # Post-LLM reverse de-tokenization for spatial redaction map
+            if spatial_redaction_map:
+                all_parsed_items = [
+                    {
+                        k: spatial_redaction_map.get(str(v), str(v))
+                        for k, v in item.items()
+                    }
+                    for item in all_parsed_items
+                ]
             if not isinstance(all_parsed_items, list):
                 all_parsed_items = []
 

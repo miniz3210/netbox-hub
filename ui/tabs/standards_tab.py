@@ -962,6 +962,120 @@ DEFAULT_HYPERVISOR_PRESETS = {
 }
 
 
+def _render_spatial_anchors_redaction_editor(
+    plat_parsing: dict,
+    active_plat: str,
+) -> None:
+    """Render Section 2.5: Relative Spatial Anchors & Local Privacy Redaction UI."""
+    sp_cfg = plat_parsing.get("spatial_anchors_and_redaction")
+    if not isinstance(sp_cfg, dict):
+        sp_cfg = {}
+
+    enabled = sp_cfg.get("enabled", False)
+    left_anchor = sp_cfg.get("left_boundary_anchor", "Virtual switches")
+    container_hdr = sp_cfg.get("container_header", "Standard Switch:")
+    adapter_anchor = sp_cfg.get("adapter_column_anchor", "Physical Adapters")
+    redact_ipv4 = sp_cfg.get("redact_ipv4", True)
+    redact_domains = sp_cfg.get("redact_domains", True)
+    redact_mac = sp_cfg.get("redact_mac", True)
+    domain_pats = sp_cfg.get("domain_patterns", ["\\.adds$", "\\.local$", "\\.internal$", "\\.corp$"])
+    domain_pats_str = ", ".join(domain_pats) if isinstance(domain_pats, list) else str(domain_pats)
+
+    with st.container(border=True):
+        st.markdown(
+            '<div style="font-weight:700;font-size:1.05rem;">'
+            '2.5. Relative Spatial Anchors &amp; Local Privacy Redaction</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "Configure dynamic relative spatial boundaries (resolution-agnostic) and "
+            "on-device deterministic data redaction. When enabled, OCR tokens are grouped "
+            "by virtual-switch containers using anchor-based geometry instead of fixed "
+            "pixel offsets, and sensitive values (IPs, domains, MACs) are replaced locally "
+            "with deterministic tokens before the payload reaches any external LLM."
+        )
+
+        enabled_ui = st.checkbox(
+            "Enable Relative Spatial Grouping & Local Redaction",
+            value=bool(enabled),
+            key=f"spat_enabled_{active_plat}",
+            help="When enabled, OCR tokens are spatially grouped and sensitive data is redacted locally.",
+        )
+
+        sp_cfg_out = dict(sp_cfg)
+        sp_cfg_out["enabled"] = enabled_ui
+
+        if enabled_ui:
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                left_anchor_ui = st.text_input(
+                    "Left Boundary Anchor",
+                    value=left_anchor,
+                    key=f"spat_left_anchor_{active_plat}",
+                    help="Anchor text whose x-position defines the left cutoff (sidebar noise filter).",
+                )
+            with col2:
+                container_hdr_ui = st.text_input(
+                    "Container Header",
+                    value=container_hdr,
+                    key=f"spat_container_hdr_{active_plat}",
+                    help="Delimiter matched to partition tokens into per-switch containers (e.g. 'Standard Switch:').",
+                )
+            with col3:
+                adapter_anchor_ui = st.text_input(
+                    "Adapter Column Anchor",
+                    value=adapter_anchor,
+                    key=f"spat_adapter_anchor_{active_plat}",
+                    help="Anchor text used to split Port Groups vs Uplinks within each container.",
+                )
+
+            st.divider()
+            redact_ipv4_ui = st.checkbox(
+                "Redact IPv4 addresses",
+                value=bool(redact_ipv4),
+                key=f"spat_redact_ip_{active_plat}",
+            )
+            redact_domains_ui = st.checkbox(
+                "Redact internal domains",
+                value=bool(redact_domains),
+                key=f"spat_redact_domain_{active_plat}",
+            )
+            redact_mac_ui = st.checkbox(
+                "Redact MAC addresses",
+                value=bool(redact_mac),
+                key=f"spat_redact_mac_{active_plat}",
+            )
+
+            if redact_domains_ui:
+                domain_pats_ui = st.text_input(
+                    "Domain Suffix Patterns (comma-separated regex)",
+                    value=domain_pats_str,
+                    key=f"spat_domain_pats_{active_plat}",
+                    help="Regex patterns matching internal domain suffixes to redact (e.g. '.adds, .local').",
+                )
+            else:
+                domain_pats_ui = domain_pats_str
+
+            sp_cfg_out.update({
+                "left_boundary_anchor": left_anchor_ui.strip(),
+                "container_header": container_hdr_ui.strip(),
+                "adapter_column_anchor": adapter_anchor_ui.strip(),
+                "redact_ipv4": redact_ipv4_ui,
+                "redact_domains": redact_domains_ui,
+                "redact_mac": redact_mac_ui,
+                "domain_patterns": [
+                    p.strip() for p in domain_pats_ui.split(",") if p.strip()
+                ] if redact_domains_ui else [],
+            })
+        else:
+            # Preserve anchor settings while the feature is disabled.
+            sp_cfg_out.setdefault("left_boundary_anchor", left_anchor)
+            sp_cfg_out.setdefault("container_header", container_hdr)
+            sp_cfg_out.setdefault("adapter_column_anchor", adapter_anchor)
+
+        plat_parsing["spatial_anchors_and_redaction"] = sp_cfg_out
+
+
 def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | None = None):
     """Unified editor for hypervisor platform presets.
 
@@ -1325,6 +1439,11 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                     st.rerun()
                 else:
                     st.warning("⚠️ Enter a canonical token name.")
+
+        st.markdown("<div style='height: 16px; border-bottom: 1px solid rgba(255,255,255,0.07);'></div>", unsafe_allow_html=True)
+
+        # ── Section 2.5: Dynamic Relative Spatial Anchors & Zero-Leakage Local Redaction ──
+        _render_spatial_anchors_redaction_editor(plat_parsing, active_plat)
 
         st.markdown("<div style='height: 16px; border-bottom: 1px solid rgba(255,255,255,0.07);'></div>", unsafe_allow_html=True)
 
