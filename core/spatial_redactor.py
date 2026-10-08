@@ -250,22 +250,24 @@ def process_spatial_topology(
 
     structured_text = "\n".join(output_lines).strip()
 
-    # Failsafe: if 0 cards were grouped (unrecognized UI layout), emit cleaned
-    # raw text of tokens containing alphanumeric characters.
+    # Failsafe: if no valid switch containers were found or all containers are empty,
+    # emit cleaned flat text of tokens.
     if not containers or all(
         not pg_tokens and not ul_tokens for _, pg_tokens, ul_tokens in containers
     ):
         logger.warning(
-            "[SpatialEngine] Card-centric grouping found 0 cards. "
-            "Emitting cleaned raw token stream."
+            "[SpatialEngine] No valid switch containers found. Falling back to clean flat text."
         )
         flat_lines = [
-            t.get("text", "").strip()
+            str(t.get("text", "")).strip()
             for t in filtered_tokens
-            if t.get("text", "").strip() and re.search(r'[a-zA-Z0-9]', t.get("text", ""))
+            if str(t.get("text", "")).strip()
         ]
         if flat_lines:
-            structured_text = "\n".join(flat_lines)
+            structured_text, _ = _redact_flat_text(
+                "\n".join(flat_lines), redaction_map,
+                redact_ipv4, redact_domains, redact_mac, domain_patterns,
+            )
     elif not structured_text:
         logger.warning(
             "[SpatialEngine] Fallback triggered: empty spatial clustering. "
@@ -344,34 +346,32 @@ def _extract_switch_headers(
     """
     active_switches: List[Tuple[float, str]] = []
 
-    # Build normalized container patterns for matching.
-    norm_containers = [re.sub(r'[\s:]', '', p).lower() for p in header_patterns if p]
+    # Combine user config patterns with default universal patterns
+    all_patterns = list(header_patterns) + _CONTAINER_NORM_PATTERNS
+    norm_containers = [re.sub(r'[\s:]', '', p).lower() for p in all_patterns if p]
 
     for t in tokens:
         text = str(t.get("text", "")).strip()
         if _is_collapsed_header(text):
             continue
 
-        # Check against normalized container patterns.
         norm_text = _normalize_for_match(text)
-        is_container = False
-        for npat in norm_containers:
-            if npat and norm_text.startswith(npat):
-                is_container = True
-                break
+        # Strip leading expanded arrow 'v' or 'v-'
+        if norm_text.startswith(('v', 'v-')) and not any(np.startswith(('v', 'v-')) for np in norm_containers):
+            norm_text = norm_text.lstrip('v-')
 
-        # Also try legacy regex match for "Standard Switch: ..." format.
-        if not is_container:
-            m = _SWITCH_NAME_RE.match(text)
-            if m:
-                is_container = True
-
+        is_container = any(npat in norm_text for npat in norm_containers)
         if not is_container:
             continue
 
-        y_top = float(t.get("box", [0, 0, 0, 0])[1])
-        switch_name = _extract_switch_name(text)
-        active_switches.append((y_top, switch_name))
+        # Extract clean switch name:
+        # Split by ':' first, then split by '|' or UI buttons (ADD, EDIT, MANAGE)
+        parts = text.split(':')
+        raw_name = parts[-1] if len(parts) > 1 else text
+        clean_name = re.split(r'[\s|]*(?:ADD|EDIT|MANAGE|\.\.\.)', raw_name, flags=re.IGNORECASE)[0].strip(' :->»▶|')
+        if clean_name:
+            y_top = float(t.get("box", [0, 0, 0, 0])[1])
+            active_switches.append((y_top, clean_name))
 
     # Sort by Y-top ascending.
     active_switches.sort(key=lambda sw: sw[0])
@@ -414,9 +414,9 @@ def _step_b_card_centric_bind(
     if not active_switches:
         logger.warning(
             "[SpatialEngine] No active containers identified via dynamic patterns. "
-            "Emitting full cleaned OCR token stream."
+            "Signalling fallback to process_spatial_topology."
         )
-        return [("__global__", list(tokens), [])]
+        return []
 
     # Classify each token as a card and bind to parent switch.
     card_assignments: Dict[str, List[Dict]] = {sw[1]: [] for sw in active_switches}
@@ -640,6 +640,33 @@ def _redact_mac(
         return token
     result = _MAC_RE.sub(_repl, text)
     return result, count
+
+
+def _redact_flat_text(
+    text: str,
+    redaction_map: Dict[str, str],
+    redact_ipv4: bool,
+    redact_domains: bool,
+    redact_mac: bool,
+    domain_patterns: List[str],
+) -> Tuple[str, int]:
+    """Redact sensitive data in plain text (no card structure)."""
+    domain_re = _build_domain_re(domain_patterns) if redact_domains else None
+    counters = {"ip": 0, "domain": 0, "mac": 0}
+    redacted_count = 0
+
+    cleaned = text
+    if redact_ipv4:
+        cleaned, n = _redact_ipv4(cleaned, counters, redaction_map)
+        redacted_count += n
+    if redact_domains and domain_re:
+        cleaned, n = _redact_domains(cleaned, counters, redaction_map, domain_re)
+        redacted_count += n
+    if redact_mac:
+        cleaned, n = _redact_mac(cleaned, counters, redaction_map)
+        redacted_count += n
+
+    return cleaned, redacted_count
 
 
 # ---------------------------------------------------------------------------

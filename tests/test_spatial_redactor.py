@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from spatial_redactor import (
+from core.spatial_redactor import (
     process_spatial_topology,
     _step_a_filter,
     _step_b_partition,
@@ -195,23 +195,23 @@ def test_empty_adapters_no_inheritance():
 
 def test_fallback_empty_clustering():
     """When clustering produces no containers, flat text fallback kicks in."""
-    # No container headers match → falls into __global__ but with no structure
+    # No container headers match → falls into flat text fallback
     # Use tokens that won't match any header pattern
     tokens = [
         tok("Random text without switch headers", 10, 10),
         tok("More random content", 10, 30),
     ]
     structured, _ = process_spatial_topology(tokens, SPATIAL_CONFIG)
-    # Should fall back to flat concatenated text
+    # Should fall back to flat concatenated text (redacted)
     assert "Random text without switch headers" in structured
     assert "More random content" in structured
 
 
 def test_fallback_empty_structured():
-    """Empty ocr_tokens → __global__ container with no tokens → minimal output."""
+    """Empty ocr_tokens → no containers → flat text fallback."""
     structured, _ = process_spatial_topology([], SPATIAL_CONFIG)
-    # Empty input produces a __global__ container with no tokens → structure is minimal
-    assert "=== CONTAINER:" in structured
+    # Empty input produces no containers, falls back to flat text
+    assert "=== CONTAINER:" not in structured
 
 
 # ===========================================================================

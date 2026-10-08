@@ -1318,7 +1318,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             structured_text = None
             spatial_redaction_map: Dict[str, str] = {}
             try:
-                from spatial_redactor import process_spatial_topology
+                from core.spatial_redactor import process_spatial_topology
                 active_plat_name = st.session_state.get("naming_target_platform", "VMware ESXi")
                 _sp_cfg = (
                     (naming_rules.get("topology_parsing_presets") or {})
