@@ -1395,7 +1395,9 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 "    - remote_port: Discovered peer neighbor interface or port.\n"
                 "    - Actively propagate attributes (slot, remote_device, remote_port) across records that share the same interface name.\n\n"
                 "TYPO NORMALIZATION:\n"
-                "    Correct visible OCR substitutions (e.g., letter 'o' vs digit '0') and normalize PCI addresses.\n\n"
+                "    Correct visible OCR substitutions (e.g., letter 'o' vs digit '0') and normalize PCI addresses.\n"
+                "STRICT 1:1 IP ASSIGNMENT:\n"
+                "    Assign each unique IP address to exactly ONE interface record; never duplicate an IP across multiple records.\n\n"
                 "CRITICAL: Output ONLY a valid JSON array of endpoint objects. Do not wrap in markdown fences or include explanations."
             )
 
@@ -1538,6 +1540,10 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
 
     st.markdown("##### 2️⃣ Extracted Variables Inspector (Dynamic Token Bag)")
     parsed_records = st.session_state.get("hypervisor_parsed_descriptions") or []
+    parsed_records = [
+        r for r in parsed_records
+        if isinstance(r, dict) and str(r.get("interface", "")).strip().lower() not in ("", "none", "null")
+    ]
     if parsed_records:
         rows = parsed_records
 
