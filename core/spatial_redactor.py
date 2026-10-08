@@ -585,16 +585,22 @@ def _redact_ipv4(
     redaction_map: Dict[str, str],
 ) -> Tuple[str, int]:
     count = 0
+    # Reverse lookup: if this exact IP was already assigned a token, reuse it
+    reverse_map = {v: k for k, v in redaction_map.items()}
+
     def _repl(m: re.Match) -> str:
         nonlocal count
         ip = m.group(0)
-        if ip in redaction_map:
-            return redaction_map[ip]
-        counters["ip"] += 1
-        token = f"<IP_{counters['ip']}>"
+        if ip in reverse_map:
+            return reverse_map[ip]
+        # Create unique token index based on total unique IPs registered so far
+        token_idx = len([k for k in redaction_map if k.startswith("<IP_")]) + 1
+        token = f"<IP_{token_idx}>"
         redaction_map[token] = ip
+        reverse_map[ip] = token
         count += 1
         return token
+
     result = _IPV4_RE.sub(_repl, text)
     return result, count
 
@@ -606,14 +612,17 @@ def _redact_domains(
     domain_re: re.Pattern,
 ) -> Tuple[str, int]:
     count = 0
+    reverse_map = {v: k for k, v in redaction_map.items()}
+
     def _repl(m: re.Match) -> str:
         nonlocal count
         domain = m.group(0)
-        if domain in redaction_map:
-            return redaction_map[domain]
-        counters["domain"] += 1
-        token = f"<DOMAIN_{counters['domain']}>"
+        if domain in reverse_map:
+            return reverse_map[domain]
+        token_idx = len([k for k in redaction_map if k.startswith("<DOMAIN_")]) + 1
+        token = f"<DOMAIN_{token_idx}>"
         redaction_map[token] = domain
+        reverse_map[domain] = token
         count += 1
         return token
     result = domain_re.sub(_repl, text)
@@ -626,14 +635,17 @@ def _redact_mac(
     redaction_map: Dict[str, str],
 ) -> Tuple[str, int]:
     count = 0
+    reverse_map = {v: k for k, v in redaction_map.items()}
+
     def _repl(m: re.Match) -> str:
         nonlocal count
         mac = m.group(0)
-        if mac in redaction_map:
-            return redaction_map[mac]
-        counters["mac"] += 1
-        token = f"<MAC_{counters['mac']}>"
+        if mac in reverse_map:
+            return reverse_map[mac]
+        token_idx = len([k for k in redaction_map if k.startswith("<MAC_")]) + 1
+        token = f"<MAC_{token_idx}>"
         redaction_map[token] = mac
+        reverse_map[mac] = token
         count += 1
         return token
     result = _MAC_RE.sub(_repl, text)
