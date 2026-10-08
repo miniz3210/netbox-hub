@@ -425,18 +425,23 @@ def _interface_ref_examples(intf_code):
 
 
 def _safe_parse_json_array(response: str) -> list:
-    """Extract and parse a JSON array from LLM response, handling truncated/invalid JSON."""
+    """Extract and parse a JSON array from LLM response, handling truncated/invalid JSON and markdown fences."""
     import json as _json
-    m_json = re.search(r"\[\s*\{.*\}\s*\]", response, re.DOTALL)
+    # Strip markdown code fences if present
+    cleaned = response.strip()
+    fence = re.match(r"^```(?:json)?\s*(.*?)\s*```$", cleaned, re.DOTALL)
+    if fence:
+        cleaned = fence.group(1).strip()
+    m_json = re.search(r"\[\s*\{.*\}\s*\]", cleaned, re.DOTALL)
     if m_json:
         json_str = m_json.group(0)
     else:
-        stripped = response.strip()
+        stripped = cleaned.strip()
         if stripped.startswith("[") and stripped.endswith("]"):
             json_str = stripped
         else:
             # Handle wrapped dictionaries like {"interfaces": [...]} or markdown blocks
-            m_obj = re.search(r"\{\s*.*?\s*\}", response, re.DOTALL)
+            m_obj = re.search(r"\{\s*.*?\s*\}", cleaned, re.DOTALL)
             if m_obj:
                 try:
                     obj = _json.loads(m_obj.group(0))
@@ -1360,6 +1365,9 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 )
                 cleaned_ocr_text = combined_raw_text
 
+            if not cleaned_ocr_text or not cleaned_ocr_text.strip():
+                cleaned_ocr_text = combined_raw_text
+
             sanitized_combined, session_id = vault.sanitize(cleaned_ocr_text)
             st.session_state["latest_vault_session"] = session_id
 
@@ -1427,9 +1435,15 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             if active_platform_tokens:
                 system_prompt += f"\n\nTARGET OUTPUT SCHEMA KEYS: Extract fields into matching lowercase keys: {', '.join(sorted(active_platform_tokens))}"
 
+            print(f"[DEBUG-1] Payload sent to LLM (Length: {len(sanitized_combined)}):")
+            print(sanitized_combined[:500])
+
             user_prompt = f"Parse this consolidated sanitized topology text:\n\n{sanitized_combined}"
             response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt, max_tokens=8192)
             progress_bar.progress(1.0, text="✅ Parsing and enriching results...")
+
+            print(f"[DEBUG-2] LLM Raw Response (Length: {len(response) if response else 0}):")
+            print(response)
 
             raw_items = _safe_parse_json_array(response)
             clean_records = []
@@ -1437,23 +1451,31 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 if isinstance(item, dict) and not any(k in item for k in ("finish_reason", "index", "message", "role")):
                     clean_records.append({str(k).strip().lower(): str(v).strip() if v is not None else "" for k, v in item.items()})
 
+            print(f"[DEBUG-3] Parsed JSON records count: {len(clean_records)}")
+
             all_parsed_items = clean_records
             if session_id:
                 token_map = vault.get_session_token_map(session_id)
                 if token_map:
-                    all_parsed_items = [
-                        {k: vault.restore(str(v), session_id=session_id) for k, v in item.items()}
-                        for item in all_parsed_items
-                    ]
+                    try:
+                        all_parsed_items = [
+                            {k: vault.restore(str(v), session_id=session_id) for k, v in item.items()}
+                            for item in all_parsed_items
+                        ]
+                    except Exception as e:
+                        logger.warning("Vault de-tokenization failed: %s — keeping raw records.", e)
             # Post-LLM reverse de-tokenization for spatial redaction map
             if spatial_redaction_map:
-                all_parsed_items = [
-                    {
-                        k: spatial_redaction_map.get(str(v), str(v))
-                        for k, v in item.items()
-                    }
-                    for item in all_parsed_items
-                ]
+                try:
+                    all_parsed_items = [
+                        {
+                            k: spatial_redaction_map.get(str(v), str(v))
+                            for k, v in item.items()
+                        }
+                        for item in all_parsed_items
+                    ]
+                except Exception as e:
+                    logger.warning("Spatial redaction map apply failed: %s — keeping parsed items as-is.", e)
             if not isinstance(all_parsed_items, list):
                 all_parsed_items = []
 
