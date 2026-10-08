@@ -215,6 +215,7 @@ def process_spatial_topology(
 
     # Step A: Dynamic left boundary filter
     filtered_tokens = _step_a_filter(ocr_tokens, left_boundary_patterns)
+    print(f"[SPATIAL-FILTER] Input tokens: {len(ocr_tokens)}, Kept tokens: {len(filtered_tokens)}")
 
     # Step B: Card-centric upward binding
     containers = _step_b_card_centric_bind(filtered_tokens, container_header_patterns)
@@ -296,8 +297,7 @@ def _step_a_filter(
     tokens: List[Dict],
     anchor_patterns: List[str],
 ) -> List[Dict]:
-    """Discard tokens that lie to the left of the sidebar boundary anchor."""
-    if not anchor_patterns:
+    if not anchor_patterns or not tokens:
         return list(tokens)
 
     matches = [
@@ -311,16 +311,10 @@ def _step_a_filter(
     if not matches:
         return list(tokens)
 
-    anchor_match = max(matches, key=lambda t: float(t["box"][0]))
+    anchor_match = min(matches, key=lambda t: float(t["box"][0]))
     anchor_x = float(anchor_match["box"][0])
-    canvas_width = max(
-        (float(t["box"][0]) + float(t["box"][2]))
-        for t in tokens
-        if t.get("box") and len(t["box"]) >= 3
-    ) if tokens else 0
-    canvas_width = max(canvas_width, 1920.0)
 
-    if anchor_x < 150 or anchor_x < canvas_width * 0.12:
+    if anchor_x < 180:
         return list(tokens)
 
     left_cutoff_x = max(0.0, anchor_x - 15.0)
@@ -329,6 +323,10 @@ def _step_a_filter(
         if t.get("box") and len(t["box"]) >= 1
         and float(t["box"][0]) >= left_cutoff_x
     ]
+
+    if len(tokens) > 5 and len(kept) < (len(tokens) * 0.6):
+        return list(tokens)
+
     return kept
 
 
