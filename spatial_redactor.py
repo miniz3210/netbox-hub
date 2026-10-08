@@ -1,11 +1,11 @@
 """
-Spatial Redactor: Resolution-Agnostic Relative Geometry & Zero-Leakage Local Redaction.
+Spatial Redactor: Card-Centric Upward Binding Pipeline.
 
 Processes OCR token lists (with bounding boxes) into hierarchical structured text
-grouped by virtual switch containers, using dynamic relative spatial anchors
-that are immune to DPI / resolution scaling. Simultaneously performs deterministic
-in-memory redaction of sensitive tokens (IPv4, internal domains, MACs) before
-the payload reaches any external LLM.
+grouped by virtual switch containers, using card-centric upward binding that is
+immune to DPI / resolution scaling and sidebar state. Simultaneously performs
+deterministic in-memory redaction of sensitive tokens (IPv4, internal domains,
+MACs) before the payload reaches any external LLM.
 
 Token format expected:
     list[dict]  [{"text": str, "box": [x, y, w, h]}, ...]
@@ -33,15 +33,28 @@ logger = logging.getLogger(__name__)
 # Regex helpers
 # ---------------------------------------------------------------------------
 
-_IPV4_RE = re.compile(r"\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b")
+_IPV4_RE = re.compile(
+    r"\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}"
+    r"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b"
+)
 
-_MAC_COLON_RE = re.compile(r"\b(?:(?:[0-9A-Fa-f]{2}:){5})[0-9A-Fa-f]{2}\b")
-_MAC_HYPHEN_RE = re.compile(r"\b(?:(?:[0-9A-Fa-f]{2}-){5})[0-9A-Fa-f]{2}\b")
+_MAC_COLON_RE = re.compile(
+    r"\b(?:(?:[0-9A-Fa-f]{2}:){5})[0-9A-Fa-f]{2}\b"
+)
+_MAC_HYPHEN_RE = re.compile(
+    r"\b(?:(?:[0-9A-Fa-f]{2}-){5})[0-9A-Fa-f]{2}\b"
+)
 _MAC_BARE_RE = re.compile(r"\b[0-9A-Fa-f]{12}\b")
-_MAC_RE = re.compile(rf"(?:{_MAC_COLON_RE.pattern}|{_MAC_HYPHEN_RE.pattern}|{_MAC_BARE_RE.pattern})")
+_MAC_RE = re.compile(
+    rf"(?:{_MAC_COLON_RE.pattern}|{_MAC_HYPHEN_RE.pattern}|{_MAC_BARE_RE.pattern})"
+)
 
 _COLLAPSED_PREFIX_RE = re.compile(r"^[\s>›»▶]+")
 
+# Normalized container patterns — lowercase, no colons/spaces.
+_CONTAINER_NORM_PATTERNS = ["standardswitch", "dvswitch", "vmbr"]
+
+# Switch-name extraction regex (preserves legacy behaviour).
 _SWITCH_NAME_RE = re.compile(
     r'(?:[vV\s]*)?'
     r'Standard\s*Switch:\s*'
@@ -52,20 +65,13 @@ _SWITCH_NAME_RE = re.compile(
 
 
 def _build_domain_re(patterns: List[str]) -> Optional[re.Pattern]:
-    """Build a combined regex from user-provided domain suffix patterns.
-
-    Patterns like ``\\.adds$`` are treated as regex fragments; the trailing
-    ``$`` is stripped so the fragment can match anywhere within an FQDN token.
-    The resulting regex matches sequences of dot-separated labels that contain
-    at least one of the provided fragments.
-    """
+    """Build a combined regex from user-provided domain suffix patterns."""
     if not patterns:
         return None
     fragments: List[str] = []
     for p in patterns:
         if not p:
             continue
-        # Strip trailing $ anchor so the fragment matches mid-FQDN.
         pat = p.rstrip("$").rstrip("\\") if p.endswith("$") else p
         try:
             compiled = re.compile(pat, re.IGNORECASE)
@@ -74,7 +80,6 @@ def _build_domain_re(patterns: List[str]) -> Optional[re.Pattern]:
             logger.warning("Invalid domain pattern: %s — %s", pat, exc)
     if not fragments:
         return None
-    # Match a complete FQDN token (dot-separated labels) that contains any fragment.
     label = r"[a-zA-Z0-9](?:[a-zA-Z0-9\-]*[a-zA-Z0-9])?"
     dot_label = rf"\.{label}"
     inner = "|".join(fragments)
@@ -91,15 +96,7 @@ def _build_domain_re(patterns: List[str]) -> Optional[re.Pattern]:
 
 
 def _resolve_anchor_patterns(config: Dict, role: str) -> List[str]:
-    """Extract pattern list for a given anchor role from config.
-
-    Supports both legacy scalar fields and the new anchors list format.
-    Legacy scalar keys:
-        left_boundary_anchor, container_header, adapter_column_anchor
-    New anchors list:
-        anchors: [{role, patterns: [...]}]
-    """
-    # New format: anchors list
+    """Extract pattern list for a given anchor role from config."""
     anchors = config.get("anchors")
     if isinstance(anchors, list):
         for anchor_entry in anchors:
@@ -111,7 +108,6 @@ def _resolve_anchor_patterns(config: Dict, role: str) -> List[str]:
                     return patterns
                 return []
 
-    # Legacy scalar format → wrap into single-element list
     legacy_map = {
         "left_boundary": "left_boundary_anchor",
         "container_header": "container_header",
@@ -134,12 +130,7 @@ def _token_center(box: List[float]) -> Tuple[float, float]:
 
 
 def _is_collapsed_header(text: str) -> bool:
-    """Return True if the token text or its leading symbols indicate a collapsed section.
-
-    Collapsed ESXi tree nodes are prefixed with '>', '›', '»', or '▶'
-    (e.g. '> Standard Switch: vSwitchNutanix').
-    These should NOT define active container boundaries.
-    """
+    """Return True if the token text or its leading symbols indicate a collapsed section."""
     stripped = text.strip()
     if not stripped:
         return False
@@ -151,6 +142,41 @@ def _is_collapsed_header(text: str) -> bool:
     return False
 
 
+def _normalize_for_match(text: str) -> str:
+    """Lowercase, strip all whitespace and colons for pattern matching."""
+    return re.sub(r'[\s:]', '', text.lower())
+
+
+def _extract_switch_name(raw_text: str) -> str:
+    """Extract the switch name from a header token's raw text.
+
+    Uses the dedicated regex first, then falls back to colon-split + UI-artifact
+    stripping per the card-centric spec.
+    """
+    text = str(raw_text).strip()
+
+    m = _SWITCH_NAME_RE.match(text)
+    if m:
+        name = m.group(1).strip()
+        if name:
+            return name
+
+    # Fallback: split on last colon, then strip UI control artifacts.
+    parts = text.split(':')
+    if len(parts) > 1:
+        remaining = parts[-1].strip()
+    else:
+        remaining = text
+
+    clean_name = re.split(
+        r'\s*(?:ADD|EDIT|MANAGE|\.\.\.)',
+        remaining,
+        flags=re.IGNORECASE,
+    )[0].strip(' :->»▶')
+
+    return clean_name if clean_name else text
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -160,7 +186,7 @@ def process_spatial_topology(
     config: Dict,
 ) -> Tuple[str, Dict[str, str]]:
     """
-    Process OCR tokens through relative spatial grouping + deterministic redaction.
+    Process OCR tokens through card-centric upward binding + deterministic redaction.
 
     Args:
         ocr_tokens: list of {"text": str, "box": [x, y, w, h]} dicts.
@@ -168,18 +194,14 @@ def process_spatial_topology(
 
     Returns:
         (structured_text, redaction_map)
-        structured_text  — hierarchical markdown grouped by switch container.
-        redaction_map    — { "<IP_N>": "real_ip", "<DOMAIN_N>": "real_domain", ... }
     """
     enabled = bool(config.get("enabled", False))
     if not enabled:
-        # Fallback: concatenate raw tokens line-by-line, no redaction.
         lines = [t.get("text", "") for t in ocr_tokens if t.get("text")]
         return "\n".join(lines), {}
 
-    # Extract multi-pattern lists for each anchor role
     left_boundary_patterns = _resolve_anchor_patterns(config, "left_boundary")
-    container_patterns = _resolve_anchor_patterns(config, "container_header")
+    container_header_patterns = _resolve_anchor_patterns(config, "container_header")
     adapter_patterns = _resolve_anchor_patterns(config, "adapter_column")
 
     redact_ipv4 = bool(config.get("redact_ipv4", True))
@@ -191,27 +213,22 @@ def process_spatial_topology(
 
     redaction_map: Dict[str, str] = {}
 
-    # Step A: Dynamic left boundary filter (multi-pattern)
+    # Step A: Dynamic left boundary filter
     filtered_tokens = _step_a_filter(ocr_tokens, left_boundary_patterns)
 
-    # Step B: Y-interval partitioning into switch containers (multi-pattern, exclude collapsed)
-    containers = _step_b_partition(filtered_tokens, container_patterns)
+    # Step B: Card-centric upward binding
+    containers = _step_b_card_centric_bind(filtered_tokens, container_header_patterns)
 
     # Step C + D + E: For each container, partition by column and redact
     output_lines: List[str] = []
     total_redacted = 0
 
-    for container_name, tokens_in_container in containers:
-        # Step C: Column split (multi-pattern)
-        port_group_tokens, uplink_tokens = _step_c_column_split(
-            tokens_in_container, adapter_patterns
-        )
-
+    for container_name, pg_tokens, ul_tokens in containers:
         output_lines.append(f"=== CONTAINER: {container_name} ===")
 
-        # Step D/E: Redact and emit Port Groups & VMkernel section
+        # Port Groups & VMkernel section
         pg_text, n_pg = _redact_and_emit(
-            port_group_tokens, redaction_map,
+            pg_tokens, redaction_map,
             redact_ipv4, redact_domains, redact_mac, domain_patterns,
         )
         total_redacted += n_pg
@@ -219,66 +236,65 @@ def process_spatial_topology(
             output_lines.append("[Port Groups & VMkernel]")
             output_lines.extend(pg_text.strip().splitlines())
 
-        # Step D/E: Redact and emit Physical Uplinks section
+        # Physical Uplinks section
         ul_text, n_ul = _redact_and_emit(
-            uplink_tokens, redaction_map,
+            ul_tokens, redaction_map,
             redact_ipv4, redact_domains, redact_mac, domain_patterns,
         )
         total_redacted += n_ul
         if ul_text.strip():
-            output_lines.append("[Physical Uplinks]")
+            output_lines.append("[Physical Adapters]")
             output_lines.extend(ul_text.strip().splitlines())
 
-        output_lines.append("")  # blank separator
+        output_lines.append("")
 
     structured_text = "\n".join(output_lines).strip()
 
-    # Failsafe: if all containers are __global__ (no active headers matched),
-    # fall back to flat concatenated text from non-sidebar tokens.
-    valid_containers = [c for c in containers if c[0] != "__global__"]
-    if len(valid_containers) == 0:
+    # Failsafe: if 0 cards were grouped (unrecognized UI layout), emit cleaned
+    # raw text of tokens containing alphanumeric characters.
+    if not containers or all(
+        not pg_tokens and not ul_tokens for _, pg_tokens, ul_tokens in containers
+    ):
         logger.warning(
-            "[SpatialEngine] No active containers identified via dynamic patterns. "
-            "Emitting full cleaned OCR token stream."
+            "[SpatialEngine] Card-centric grouping found 0 cards. "
+            "Emitting cleaned raw token stream."
         )
-        flat_lines = [t.get("text", "").strip() for t in filtered_tokens if t.get("text", "").strip()]
+        flat_lines = [
+            t.get("text", "").strip()
+            for t in filtered_tokens
+            if t.get("text", "").strip() and re.search(r'[a-zA-Z0-9]', t.get("text", ""))
+        ]
         if flat_lines:
             structured_text = "\n".join(flat_lines)
     elif not structured_text:
-        # Original empty-structured fallback.
         logger.warning(
             "[SpatialEngine] Fallback triggered: empty spatial clustering. "
             "Falling back to cleaned flat text."
         )
-        flat_lines = []
-        for t in ocr_tokens:
-            txt = str(t.get("text", "")).strip()
-            if txt:
-                flat_lines.append(txt)
+        flat_lines = [
+            str(t.get("text", "")).strip()
+            for t in ocr_tokens
+            if str(t.get("text", "")).strip()
+        ]
         if flat_lines:
             structured_text = "\n".join(flat_lines)
 
     logger.info(
-        "Spatial grouping applied. Redacted %d sensitive tokens locally.",
+        "Card-centric spatial grouping applied. Redacted %d sensitive tokens locally.",
         total_redacted,
     )
     return structured_text, redaction_map
 
 
 # ---------------------------------------------------------------------------
-# Step A: Left-boundary filter (multi-pattern)
+# Step A: Left-boundary filter
 # ---------------------------------------------------------------------------
 
 def _step_a_filter(
     tokens: List[Dict],
     anchor_patterns: List[str],
 ) -> List[Dict]:
-    """Discard tokens that lie to the left of the sidebar boundary anchor.
-
-    Adaptive sidebar cutoff: if the anchor token is at x < 150px (or < 12% of
-    canvas width), the sidebar is collapsed/absent and we keep ALL tokens.
-    Otherwise, discard tokens strictly to the left of the anchor title.
-    """
+    """Discard tokens that lie to the left of the sidebar boundary anchor."""
     if not anchor_patterns:
         return list(tokens)
 
@@ -291,7 +307,6 @@ def _step_a_filter(
         and t.get("box") and len(t["box"]) >= 2
     ]
     if not matches:
-        # Anchor not found (e.g. scrolled past) — retain all tokens.
         return list(tokens)
 
     anchor_match = max(matches, key=lambda t: float(t["box"][0]))
@@ -301,13 +316,11 @@ def _step_a_filter(
         for t in tokens
         if t.get("box") and len(t["box"]) >= 3
     ) if tokens else 0
-    canvas_width = max(canvas_width, 1920.0)  # safety floor
+    canvas_width = max(canvas_width, 1920.0)
 
     if anchor_x < 150 or anchor_x < canvas_width * 0.12:
-        # Sidebar is collapsed or absent — keep every token.
         return list(tokens)
 
-    # Sidebar exists. Discard tokens strictly to the left of the anchor title.
     left_cutoff_x = max(0.0, anchor_x - 15.0)
     kept = [
         t for t in tokens
@@ -318,172 +331,194 @@ def _step_a_filter(
 
 
 # ---------------------------------------------------------------------------
-# Step B: Y-interval partitioning (multi-pattern, exclude collapsed headers)
+# Step B: Card-centric upward binding
 # ---------------------------------------------------------------------------
 
-def _step_b_partition(
+def _extract_switch_headers(
     tokens: List[Dict],
     header_patterns: List[str],
-) -> List[Tuple[str, List[Dict]]]:
+) -> List[Tuple[float, str]]:
+    """Scan tokens and identify active (non-collapsed) switch headers.
+
+    Returns list of (header_y_top, switch_name) sorted by header_y ascending.
     """
-    Group tokens into containers based on vertical intervals delimited by
-    container-header tokens (e.g. "Standard Switch: vSwitch0").
+    active_switches: List[Tuple[float, str]] = []
 
-    Collapsed headers (prefixed with '>', '›', '»', or '▶') are EXCLUDED — they
-    only mark the end of a previous switch, not the start of a new active
-    container.  Headers starting with 'v' or 'V' (expanded downward arrow) or
-    without symbols are treated as active containers.
+    # Build normalized container patterns for matching.
+    norm_containers = [re.sub(r'[\s:]', '', p).lower() for p in header_patterns if p]
 
-    Matching is space-agnostic: patterns like "Standard Switch:" match tokens
-    like "StandardSwitch:PRSpainFuenmayorAgeVLab".
-
-    Returns list of (container_name, [tokens]) sorted top-to-bottom.
-    """
-    if not header_patterns:
-        return [("__global__", list(tokens))]
-
-    # Normalize patterns for space-agnostic matching.
-    norm_patterns = []
-    for pat in header_patterns:
-        norm = re.sub(r'[\s:]', '', pat).lower()
-        if norm:
-            norm_patterns.append(norm)
-
-    if not norm_patterns:
-        return [("__global__", list(tokens))]
-
-    # Find all container header tokens, excluding collapsed entries.
-    header_tokens: List[Dict] = []
     for t in tokens:
         text = str(t.get("text", "")).strip()
         if _is_collapsed_header(text):
             continue
-        # Normalize token text (collapse whitespace only, preserve ':' for splitting)
-        norm_text = re.sub(r'[\s]', '', text).lower()
-        # Strip leading expanded markers ('v', 'v-') if the pattern doesn't start with them.
-        if norm_text.startswith(('v', 'v-')) and not any(
-            np.startswith(('v', 'v-')) for np in norm_patterns
-        ):
-            norm_text = norm_text[1:]
-        # Check if normalized text starts with any normalized pattern.
-        for npat in norm_patterns:
-            if norm_text.startswith(npat):
-                header_tokens.append(t)
+
+        # Check against normalized container patterns.
+        norm_text = _normalize_for_match(text)
+        is_container = False
+        for npat in norm_containers:
+            if npat and norm_text.startswith(npat):
+                is_container = True
                 break
 
-    if not header_tokens:
+        # Also try legacy regex match for "Standard Switch: ..." format.
+        if not is_container:
+            m = _SWITCH_NAME_RE.match(text)
+            if m:
+                is_container = True
+
+        if not is_container:
+            continue
+
+        y_top = float(t.get("box", [0, 0, 0, 0])[1])
+        switch_name = _extract_switch_name(text)
+        active_switches.append((y_top, switch_name))
+
+    # Sort by Y-top ascending.
+    active_switches.sort(key=lambda sw: sw[0])
+    return active_switches
+
+
+def _is_port_group_card(text: str) -> bool:
+    """Return True if token text indicates a Port Group / VMkernel card."""
+    low = text.lower()
+    indicators = [
+        'vlan id', 'vmkernel', 'virtual machines', 'port group',
+        'vmkernel ports', 'vmk',
+    ]
+    return any(ind in low for ind in indicators)
+
+
+def _is_uplink_card(text: str) -> bool:
+    """Return True if token text indicates an Uplink / physical adapter card."""
+    low = text.lower()
+    if 'vmnic' in low:
+        return True
+    if 'no physical network adapters' in low:
+        return True
+    if 'full' in low and re.search(r'\d+\s*full', low):
+        return True
+    return False
+
+
+def _step_b_card_centric_bind(
+    tokens: List[Dict],
+    header_patterns: List[str],
+) -> List[Tuple[str, List[Dict], List[Dict]]]:
+    """Group tokens into (switch_name, port_group_tokens, uplink_tokens).
+
+    Each card/token block is assigned to the nearest ACTIVE switch header ABOVE it.
+    Tokens with no active switch above are discarded.
+    """
+    active_switches = _extract_switch_headers(tokens, header_patterns)
+
+    if not active_switches:
         logger.warning(
             "[SpatialEngine] No active containers identified via dynamic patterns. "
             "Emitting full cleaned OCR token stream."
         )
-        return [("__global__", list(tokens))]
+        return [("__global__", list(tokens), [])]
 
-    # Sort by global cumulative Y-coordinate ascending.
-    header_tokens.sort(key=lambda t: float(t.get("box", [0, 0, 0, 0])[1]))
+    # Classify each token as a card and bind to parent switch.
+    card_assignments: Dict[str, List[Dict]] = {sw[1]: [] for sw in active_switches}
+    discarded_count = 0
 
-    containers: List[Tuple[str, List[Dict]]] = []
-    for idx, ht in enumerate(header_tokens):
-        name = _extract_container_name(ht.get("text", ""), header_patterns)
-        y_top = float(ht["box"][1])
-        y_bottom = (
-            float(header_tokens[idx + 1]["box"][1])
-            if idx + 1 < len(header_tokens)
-            else float(ht["box"][1]) + float(ht["box"][3]) + 500
+    for t in tokens:
+        text = str(t.get("text", "")).strip()
+        if not text:
+            continue
+        # Discard collapsed headers — they are not cards, only section markers.
+        if _is_collapsed_header(text):
+            discarded_count += 1
+            continue
+
+        box = t.get("box", [0, 0, 0, 0])
+        card_y = float(box[1])
+
+        # Find nearest active switch ABOVE this card.
+        parent_switch = None
+        for sw_y, sw_name in active_switches:
+            if sw_y <= card_y:
+                parent_switch = sw_name
+            else:
+                break
+
+        if parent_switch is None:
+            # No active switch above — discard (eliminates breadcrumbs, top-bar controls).
+            discarded_count += 1
+            continue
+
+        card_assignments[parent_switch].append(t)
+
+    if discarded_count > 0:
+        logger.debug(
+            "[SpatialEngine] Discarded %d tokens with no active switch above them.",
+            discarded_count,
         )
-        assigned: List[Dict] = []
-        for t in tokens:
-            cy = _token_center(t.get("box", [0, 0, 0, 0]))[1]
-            if y_top <= cy < y_bottom:
-                assigned.append(t)
-        containers.append((name, assigned))
 
-    return containers
+    # Within each container, split into port-group bucket and uplink bucket.
+    result: List[Tuple[str, List[Dict], List[Dict]]] = []
+    for sw_name in [sw[1] for sw in active_switches]:
+        sw_tokens = card_assignments[sw_name]
+        pg_tokens, ul_tokens = _step_c_column_split_card_centric(sw_tokens)
+        result.append((sw_name, pg_tokens, ul_tokens))
+
+    return result
 
 
-def _extract_container_name(raw_text: str, header_patterns: List[str]) -> str:
-    """Pull the container label out of a header token's text.
+def _resolve_anchor_patterns_raw(role: str) -> List[str]:
+    """Placeholder — callers should pass patterns explicitly."""
+    return []
 
-    Uses space-agnostic dynamic matching: normalizes both pattern and text,
-    strips the matched pattern prefix, then cleans UI control artifacts.
-    Falls back to the existing regex-based extraction.
+
+# ---------------------------------------------------------------------------
+# Step C: Column partitioning (PortGroups vs Uplinks) — card-centric
+# ---------------------------------------------------------------------------
+
+def _step_c_column_split_card_centric(
+    tokens: List[Dict],
+) -> Tuple[List[Dict], List[Dict]]:
     """
-    text = str(raw_text).strip()
+    Split tokens into (port_groups, uplinks) based on card content patterns.
 
-    # Try the dedicated switch-name regex first (preserves existing behavior).
-    m = _SWITCH_NAME_RE.match(text)
-    if m:
-        name = m.group(1).strip()
-        if name:
-            return name
+    - Uplink bucket: tokens containing 'vmnic', 'Full' (speed), or
+      'No physical network adapters'.
+    - Port Group bucket: all remaining tokens (port group titles, VLAN IDs,
+      VMkernel interfaces, IP addresses, etc.).
 
-    # Space-agnostic dynamic extraction.
-    norm_pat_stripped = re.sub(r'[\s:]', '', text).lower()
-    # Strip leading 'v'/'V' expanded marker if present and pattern doesn't.
-    if norm_pat_stripped.startswith(('v', 'v-')):
-        norm_pat_stripped = norm_pat_stripped[1:]
+    If 'No physical network adapters' is detected, uplink bucket is explicitly
+    marked EMPTY (no inheritance from other switches).
+    """
+    if not tokens:
+        return [], []
 
-    for pat in header_patterns:
-        npat = re.sub(r'[\s:]', '', pat).lower()
-        if not npat:
-            continue
-        # Determine how many chars of the original text to skip (the matched prefix).
-        # We need to map from normalized position back to original text position.
-        # Strategy: walk through original text, build normalized version, find match point.
-        orig_norm = ""
-        match_end_orig = -1
-        for i, ch in enumerate(text):
-            if ch == ' ' or ch == '\t' or ch == '\n' or ch == '\r':
-                continue
-            orig_norm += ch.lower()
-            if len(orig_norm) == len(npat):
-                if orig_norm == npat:
-                    match_end_orig = i + 1
-                    break
-                elif not orig_norm.startswith(npat):
-                    break
-        if match_end_orig < 0:
-            continue
+    combined_text = " ".join(str(t.get("text", "")).lower() for t in tokens)
 
-        # Extract raw name after the matched pattern prefix in original text.
-        remaining = text[match_end_orig:].lstrip(':').strip()
+    # Empty-state check: no physical adapters present.
+    if "no physical network adapters" in combined_text:
+        return list(tokens), []
 
-        # Also check for colon-separated format: "Standard Switch: <name>"
-        if ':' in text:
-            colon_idx = text.index(':')
-            remaining = text[colon_idx + 1:].strip()
+    port_groups: List[Dict] = []
+    uplinks: List[Dict] = []
 
-        # Strip known common UI control artifacts dynamically.
-        clean_name = re.split(
-            r'\s*(?:ADD|EDIT|MANAGE|\.\.\.)',
-            remaining,
-            flags=re.IGNORECASE,
-        )[0].strip(' :->»▶')
+    for t in tokens:
+        text = str(t.get("text", "")).strip()
+        if _is_uplink_card(text):
+            uplinks.append(t)
+        else:
+            port_groups.append(t)
 
-        if clean_name:
-            return clean_name
-
-    return text
+    return port_groups, uplinks
 
 
-# ---------------------------------------------------------------------------
-# Step C: Column partitioning (PortGroups vs Uplinks) — multi-pattern
-# ---------------------------------------------------------------------------
-
+# Legacy column split preserved for backward compatibility with tests.
 def _step_c_column_split(
     tokens: List[Dict],
     adapter_patterns: List[str],
 ) -> Tuple[List[Dict], List[Dict]]:
-    """
-    Split *tokens* into (port_groups, uplinks) using a vertical split at the
-    x-position of the adapter-column anchor token.
-
-    If the container text contains "No physical network adapters" or
-    "No associated port groups", returns all tokens as port_groups (no uplinks).
-    """
+    """Legacy column split using adapter anchor position."""
     if not adapter_patterns:
         return list(tokens), []
 
-    # Check for empty-state markers first.
     combined_text = " ".join(str(t.get("text", "")).lower() for t in tokens)
     if "no physical network adapters" in combined_text or "no associated port groups" in combined_text:
         return list(tokens), []
@@ -521,10 +556,7 @@ def _redact_and_emit(
     redact_mac: bool,
     domain_patterns: List[str],
 ) -> Tuple[str, int]:
-    """
-    Redact sensitive data in-token and emit clean markdown lines.
-    Returns (formatted_text, count_of_redacted_tokens).
-    """
+    """Redact sensitive data in-token and emit clean markdown lines."""
     domain_re = _build_domain_re(domain_patterns) if redact_domains else None
     counters = {"ip": 0, "domain": 0, "mac": 0}
     redacted_count = 0
@@ -608,3 +640,114 @@ def _redact_mac(
         return token
     result = _MAC_RE.sub(_repl, text)
     return result, count
+
+
+# ---------------------------------------------------------------------------
+# Legacy helpers preserved for test compatibility
+# ---------------------------------------------------------------------------
+
+def _step_b_partition(
+    tokens: List[Dict],
+    header_patterns: List[str],
+) -> List[Tuple[str, List[Dict]]]:
+    """Legacy Y-interval partitioning — preserved for backward compat with tests."""
+    if not header_patterns:
+        return [("__global__", list(tokens))]
+
+    norm_patterns = []
+    for pat in header_patterns:
+        norm = re.sub(r'[\s:]', '', pat).lower()
+        if norm:
+            norm_patterns.append(norm)
+
+    if not norm_patterns:
+        return [("__global__", list(tokens))]
+
+    header_tokens: List[Dict] = []
+    for t in tokens:
+        text = str(t.get("text", "")).strip()
+        if _is_collapsed_header(text):
+            continue
+        norm_text = re.sub(r'[\s]', '', text).lower()
+        if norm_text.startswith(('v', 'v-')) and not any(
+            np.startswith(('v', 'v-')) for np in norm_patterns
+        ):
+            norm_text = norm_text[1:]
+        for npat in norm_patterns:
+            if norm_text.startswith(npat):
+                header_tokens.append(t)
+                break
+
+    if not header_tokens:
+        return [("__global__", list(tokens))]
+
+    header_tokens.sort(key=lambda t: float(t.get("box", [0, 0, 0, 0])[1]))
+
+    containers: List[Tuple[str, List[Dict]]] = []
+    for idx, ht in enumerate(header_tokens):
+        name = _extract_container_name(ht.get("text", ""), header_patterns)
+        y_top = float(ht["box"][1])
+        y_bottom = (
+            float(header_tokens[idx + 1]["box"][1])
+            if idx + 1 < len(header_tokens)
+            else float(ht["box"][1]) + float(ht["box"][3]) + 500
+        )
+        assigned: List[Dict] = []
+        for t in tokens:
+            cy = _token_center(t.get("box", [0, 0, 0, 0]))[1]
+            if y_top <= cy < y_bottom:
+                assigned.append(t)
+        containers.append((name, assigned))
+
+    return containers
+
+
+def _extract_container_name(raw_text: str, header_patterns: List[str]) -> str:
+    """Pull the container label out of a header token's text (legacy)."""
+    text = str(raw_text).strip()
+
+    m = _SWITCH_NAME_RE.match(text)
+    if m:
+        name = m.group(1).strip()
+        if name:
+            return name
+
+    norm_pat_stripped = re.sub(r'[\s:]', '', text).lower()
+    if norm_pat_stripped.startswith(('v', 'v-')):
+        norm_pat_stripped = norm_pat_stripped[1:]
+
+    for pat in header_patterns:
+        npat = re.sub(r'[\s:]', '', pat).lower()
+        if not npat:
+            continue
+        orig_norm = ""
+        match_end_orig = -1
+        for i, ch in enumerate(text):
+            if ch == ' ' or ch == '\t' or ch == '\n' or ch == '\r':
+                continue
+            orig_norm += ch.lower()
+            if len(orig_norm) == len(npat):
+                if orig_norm == npat:
+                    match_end_orig = i + 1
+                    break
+                elif not orig_norm.startswith(npat):
+                    break
+        if match_end_orig < 0:
+            continue
+
+        remaining = text[match_end_orig:].lstrip(':').strip()
+
+        if ':' in text:
+            colon_idx = text.index(':')
+            remaining = text[colon_idx + 1:].strip()
+
+        clean_name = re.split(
+            r'\s*(?:ADD|EDIT|MANAGE|\.\.\.)',
+            remaining,
+            flags=re.IGNORECASE,
+        )[0].strip(' :->»▶')
+
+        if clean_name:
+            return clean_name
+
+    return text

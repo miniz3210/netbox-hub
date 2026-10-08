@@ -21,7 +21,9 @@ from spatial_redactor import (
     process_spatial_topology,
     _step_a_filter,
     _step_b_partition,
+    _step_b_card_centric_bind,
     _step_c_column_split,
+    _extract_switch_headers,
     _extract_container_name,
     _is_collapsed_header,
     _redact_ipv4,
@@ -351,6 +353,234 @@ def test_v_prefix_active_container():
 
 
 # ===========================================================================
+# TEST 10: Card-Centric Upward Binding
+# ===========================================================================
+
+def test_card_centric_binding_assigns_cards_to_nearest_switch_above():
+    """Each card is assigned to the nearest active switch header ABOVE it."""
+    tokens = [
+        tok("Standard Switch: vSwitch0", 10, 50),
+        tok("PG-Data VLAN100", 20, 80),
+        tok("vmnic0 10 Gbit Full", 300, 80),
+        tok("Standard Switch: vSwitch1", 10, 200),
+        tok("PG-Mgmt VLAN200", 20, 230),
+        tok("vmnic1 1 Gbit Full", 300, 230),
+    ]
+    containers = _step_b_card_centric_bind(tokens, ["Standard Switch:"])
+    assert len(containers) == 2
+    names = [c[0] for c in containers]
+    assert "vSwitch0" in names
+    assert "vSwitch1" in names
+
+    # Verify vSwitch0 has its own cards, vSwitch1 has its own.
+    for sw_name, pg_tokens, ul_tokens in containers:
+        if sw_name == "vSwitch0":
+            pg_texts = [t["text"] for t in pg_tokens]
+            ul_texts = [t["text"] for t in ul_tokens]
+            assert any("PG-Data" in t for t in pg_texts)
+            assert any("vmnic0" in t for t in ul_texts)
+        elif sw_name == "vSwitch1":
+            pg_texts = [t["text"] for t in pg_tokens]
+            ul_texts = [t["text"] for t in ul_tokens]
+            assert any("PG-Mgmt" in t for t in pg_texts)
+            assert any("vmnic1" in t for t in ul_texts)
+
+
+def test_card_centric_discards_tokens_with_no_switch_above():
+    """Tokens with no active switch above them are discarded."""
+    tokens = [
+        tok("Breadcrumb nav item", 10, 10),
+        tok("Top bar control", 10, 20),
+        tok("Standard Switch: vSwitch0", 10, 50),
+        tok("PG-Data", 20, 80),
+    ]
+    containers = _step_b_card_centric_bind(tokens, ["Standard Switch:"])
+    assert len(containers) == 1
+    assert containers[0][0] == "vSwitch0"
+    pg_texts = [t["text"] for t in containers[0][1]]
+    assert "Breadcrumb nav item" not in " ".join(pg_texts)
+    assert "Top bar control" not in " ".join(pg_texts)
+    assert "PG-Data" in " ".join(pg_texts)
+
+
+def test_collapsed_switch_ignored_in_upward_binding():
+    """Collapsed switches ('>') are not used as parent containers."""
+    tokens = [
+        tok("Standard Switch: vSwitch0", 10, 50),
+        tok("PG-Data", 20, 80),
+        tok("> Standard Switch: vSwitchNutanix", 10, 150),
+        tok("PG-Nutanium", 20, 180),
+        tok("Standard Switch: vSwitch1", 10, 200),
+        tok("PG-Prod", 20, 230),
+    ]
+    containers = _step_b_card_centric_bind(tokens, ["Standard Switch:"])
+    names = [c[0] for c in containers]
+    assert "vSwitchNutanix" not in names, "Collapsed switch should not be a container"
+    assert "vSwitch0" in names
+    assert "vSwitch1" in names
+
+    # PG-Nutanium should belong to vSwitch0 (nearest active switch above).
+    for sw_name, pg_tokens, _ in containers:
+        if sw_name == "vSwitch0":
+            pg_texts = [t["text"] for t in pg_tokens]
+            assert any("PG-Nutanium" in t for t in pg_texts), \
+                "PG-Nutanium should bind to vSwitch0 (collapsed switch ignored)"
+
+
+def test_full_width_and_sidebar_parse_identically():
+    """Full-width (no sidebar) and sidebar layouts produce same grouping."""
+    # Full-width layout (tokens at x≈0-200)
+    full_width_tokens = [
+        tok("Standard Switch: vSwitch0", 10, 50),
+        tok("PG-Data VLAN100", 20, 80),
+        tok("vmnic0 10G Full", 150, 80),
+        tok("Standard Switch: vSwitch1", 10, 200),
+        tok("PG-Mgmt VLAN200", 20, 230),
+        tok("vmnic1 1G Full", 150, 230),
+    ]
+    # Sidebar layout (tokens shifted right, sidebar at x<150)
+    sidebar_tokens = [
+        tok("Virtual switches", 15, 10),
+        tok("Standard Switch: vSwitch0", 160, 50),
+        tok("PG-Data VLAN100", 170, 80),
+        tok("vmnic0 10G Full", 310, 80),
+        tok("Standard Switch: vSwitch1", 160, 200),
+        tok("PG-Mgmt VLAN200", 170, 230),
+        tok("vmnic1 1G Full", 310, 230),
+    ]
+
+    structured_fw, _ = process_spatial_topology(full_width_tokens, SPATIAL_CONFIG)
+    structured_sb, _ = process_spatial_topology(sidebar_tokens, SPATIAL_CONFIG)
+
+    # Both should have the same switch names in output.
+    assert "vSwitch0" in structured_fw
+    assert "vSwitch0" in structured_sb
+    assert "vSwitch1" in structured_fw
+    assert "vSwitch1" in structured_sb
+
+
+def test_dvswitch_and_vmbr_headers_detected():
+    """DVSwitch and vmbr headers are recognized as active containers."""
+    tokens = [
+        tok("DVSwitch: dvSwitch0", 10, 50),
+        tok("PG-VLAN100", 20, 80),
+        tok("vmnic0", 300, 80),
+        tok("vmbr0", 10, 200),
+        tok("PG-Data", 20, 230),
+        tok("eno1 1G Full", 300, 230),
+    ]
+    containers = _step_b_card_centric_bind(tokens, ["DVSwitch:", "vmbr"])
+    names = [c[0] for c in containers]
+    assert "dvSwitch0" in names
+    assert "vmbr0" in names
+
+
+def test_empty_adapters_no_inheritance_card_centric():
+    """Container with no physical adapters should not inherit uplinks."""
+    tokens = [
+        tok("Standard Switch: vSwitch0", 10, 50),
+        tok("PG-Data", 20, 80),
+        tok("Physical Adapters", 300, 80),
+        tok("vmnic0", 310, 100),
+        tok("Standard Switch: vSwitch1", 10, 200),
+        tok("No physical network adapters", 20, 230),
+        tok("Standard Switch: vSwitch2", 10, 350),
+        tok("PG-VLAN", 20, 380),
+        tok("Physical Adapters", 300, 380),
+        tok("vmnic2", 310, 400),
+    ]
+    structured, _ = process_spatial_topology(tokens, SPATIAL_CONFIG)
+    lines = structured.splitlines()
+    in_vswitch1 = False
+    vswitch1_lines = []
+    for line in lines:
+        if "vSwitch1" in line and "CONTAINER" in line:
+            in_vswitch1 = True
+            continue
+        if line.startswith("=== CONTAINER:") and "vSwitch1" not in line:
+            in_vswitch1 = False
+            continue
+        if in_vswitch1:
+            vswitch1_lines.append(line)
+    vswitch1_text = "\n".join(vswitch1_lines)
+    assert "vmnic0" not in vswitch1_text, "vSwitch1 should not inherit vmnic0"
+    assert "vmnic2" not in vswitch1_text, "vSwitch1 should not inherit vmnic2"
+
+
+def test_failsafe_zero_cards_emits_alphanumeric_tokens():
+    """When 0 cards found, falls back to alphanumeric token stream."""
+    tokens = [
+        tok("Some random text", 10, 10),
+        tok("Another line here", 10, 30),
+        tok("192.168.1.1", 10, 50),
+    ]
+    structured, _ = process_spatial_topology(tokens, SPATIAL_CONFIG)
+    assert "Some random text" in structured
+    assert "Another line here" in structured
+
+
+def test_structured_output_format():
+    """Output follows === CONTAINER: {name} === format with sections."""
+    tokens = [
+        tok("Standard Switch: vSwitch0", 10, 50),
+        tok("PG-Data VLAN100", 20, 80),
+        tok("vmnic0 10G Full", 300, 80),
+    ]
+    structured, _ = process_spatial_topology(tokens, SPATIAL_CONFIG)
+    assert "=== CONTAINER: vSwitch0 ===" in structured
+    assert "[Port Groups & VMkernel]" in structured
+    assert "[Physical Adapters]" in structured
+
+
+def test_redaction_works_with_card_centric_pipeline():
+    """IPs, domains, and MACs are redacted within card-centric output."""
+    tokens = [
+        tok("Standard Switch: vSwitch0", 10, 50),
+        tok("PG-Data 192.168.1.1", 20, 80),
+        tok("vmnic0 aa:bb:cc:dd:ee:ff", 300, 80),
+    ]
+    _, rmap = process_spatial_topology(tokens, SPATIAL_CONFIG)
+    assert "<IP_1>" in rmap or any("IP_" in k for k in rmap)
+    assert "<MAC_1>" in rmap or any("MAC_" in k for k in rmap)
+
+
+def test_vmkernel_cards_identified_as_port_group_bucket():
+    """Tokens containing 'vmk' or 'VMkernel' go into port group bucket."""
+    tokens = [
+        tok("Standard Switch: vSwitch0", 10, 50),
+        tok("VMkernel Ports", 20, 80),
+        tok("vmk0 10.0.0.1", 20, 100),
+        tok("vmnic0", 300, 80),
+    ]
+    containers = _step_b_card_centric_bind(tokens, ["Standard Switch:"])
+    assert len(containers) == 1
+    _, pg_tokens, ul_tokens = containers[0]
+    pg_texts = [t["text"] for t in pg_tokens]
+    ul_texts = [t["text"] for t in ul_tokens]
+    assert any("vmk0" in t for t in pg_texts)
+    assert any("VMkernel" in t for t in pg_texts)
+    assert any("vmnic0" in t for t in ul_texts)
+
+
+def test_payload_length_validation():
+    """Output payload contains structured container blocks."""
+    tokens = [
+        tok("Standard Switch: vSwitch0", 10, 50),
+        tok("PG-Data VLAN100 192.168.1.1", 20, 80),
+        tok("vmnic0 10G Full aa:bb:cc:dd:ee:ff", 300, 80),
+        tok("Standard Switch: vSwitch1", 10, 200),
+        tok("PG-Mgmt VLAN200 10.0.0.1", 20, 230),
+        tok("vmnic1 1G Full", 300, 230),
+    ]
+    structured, _ = process_spatial_topology(tokens, SPATIAL_CONFIG)
+    # Should contain structured container blocks with redacted tokens.
+    assert "=== CONTAINER: vSwitch0 ===" in structured
+    assert "=== CONTAINER: vSwitch1 ===" in structured
+    assert "<IP_1>" in structured
+    assert "<MAC_1>" in structured
+
+
+# ===========================================================================
 # Main
 # ===========================================================================
 
@@ -375,6 +605,17 @@ def main():
         ("Payload validation long kept", test_payload_validation_long_kept),
         ("Switch name regex extraction", test_switch_name_regex),
         ("V-prefix active container", test_v_prefix_active_container),
+        ("Card-centric binding assigns to nearest switch above", test_card_centric_binding_assigns_cards_to_nearest_switch_above),
+        ("Card-centric discards tokens with no switch above", test_card_centric_discards_tokens_with_no_switch_above),
+        ("Collapsed switch ignored in upward binding", test_collapsed_switch_ignored_in_upward_binding),
+        ("Full width and sidebar parse identically", test_full_width_and_sidebar_parse_identically),
+        ("DVSwitch and vmbr headers detected", test_dvswitch_and_vmbr_headers_detected),
+        ("Empty adapters no inheritance card-centric", test_empty_adapters_no_inheritance_card_centric),
+        ("Failsafe zero cards emits alphanumeric tokens", test_failsafe_zero_cards_emits_alphanumeric_tokens),
+        ("Structured output format", test_structured_output_format),
+        ("Redaction works with card-centric pipeline", test_redaction_works_with_card_centric_pipeline),
+        ("VMkernel cards identified as port group bucket", test_vmkernel_cards_identified_as_port_group_bucket),
+        ("Payload length validation", test_payload_length_validation),
     ]
 
     passed = 0
