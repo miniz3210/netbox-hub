@@ -233,9 +233,19 @@ def process_spatial_topology(
 
     structured_text = "\n".join(output_lines).strip()
 
-    # Failsafe: if structured clustering produced empty output, fall back to
-    # flat concatenated text so the LLM always receives a parseable payload.
-    if not structured_text or len(containers) == 0:
+    # Failsafe: if all containers are __global__ (no active headers matched),
+    # fall back to flat concatenated text from non-sidebar tokens.
+    valid_containers = [c for c in containers if c[0] != "__global__"]
+    if len(valid_containers) == 0:
+        logger.warning(
+            "[SpatialEngine] No active containers identified via dynamic patterns. "
+            "Emitting full cleaned OCR token stream."
+        )
+        flat_lines = [t.get("text", "").strip() for t in filtered_tokens if t.get("text", "").strip()]
+        if flat_lines:
+            structured_text = "\n".join(flat_lines)
+    elif not structured_text:
+        # Original empty-structured fallback.
         logger.warning(
             "[SpatialEngine] Fallback triggered: empty spatial clustering. "
             "Falling back to cleaned flat text."
@@ -324,22 +334,48 @@ def _step_b_partition(
     container.  Headers starting with 'v' or 'V' (expanded downward arrow) or
     without symbols are treated as active containers.
 
+    Matching is space-agnostic: patterns like "Standard Switch:" match tokens
+    like "StandardSwitch:PRSpainFuenmayorAgeVLab".
+
     Returns list of (container_name, [tokens]) sorted top-to-bottom.
     """
     if not header_patterns:
         return [("__global__", list(tokens))]
 
+    # Normalize patterns for space-agnostic matching.
+    norm_patterns = []
+    for pat in header_patterns:
+        norm = re.sub(r'[\s:]', '', pat).lower()
+        if norm:
+            norm_patterns.append(norm)
+
+    if not norm_patterns:
+        return [("__global__", list(tokens))]
+
     # Find all container header tokens, excluding collapsed entries.
-    # Only accept tokens that match a header pattern AND are not collapsed.
     header_tokens: List[Dict] = []
     for t in tokens:
         text = str(t.get("text", "")).strip()
         if _is_collapsed_header(text):
             continue
-        if any(pat.lower() in text.lower() for pat in header_patterns):
-            header_tokens.append(t)
+        # Normalize token text (collapse whitespace only, preserve ':' for splitting)
+        norm_text = re.sub(r'[\s]', '', text).lower()
+        # Strip leading expanded markers ('v', 'v-') if the pattern doesn't start with them.
+        if norm_text.startswith(('v', 'v-')) and not any(
+            np.startswith(('v', 'v-')) for np in norm_patterns
+        ):
+            norm_text = norm_text[1:]
+        # Check if normalized text starts with any normalized pattern.
+        for npat in norm_patterns:
+            if norm_text.startswith(npat):
+                header_tokens.append(t)
+                break
 
     if not header_tokens:
+        logger.warning(
+            "[SpatialEngine] No active containers identified via dynamic patterns. "
+            "Emitting full cleaned OCR token stream."
+        )
         return [("__global__", list(tokens))]
 
     # Sort by global cumulative Y-coordinate ascending.
@@ -367,27 +403,65 @@ def _step_b_partition(
 def _extract_container_name(raw_text: str, header_patterns: List[str]) -> str:
     """Pull the container label out of a header token's text.
 
-    Uses a dedicated regex that strips trailing action verbs
-    (ADD NETWORKING, EDIT, MANAGE PHYSICAL ADAPTERS) and supports
-    names with spaces, hyphens, and 'v'/'V' prefixes.
+    Uses space-agnostic dynamic matching: normalizes both pattern and text,
+    strips the matched pattern prefix, then cleans UI control artifacts.
+    Falls back to the existing regex-based extraction.
     """
     text = str(raw_text).strip()
 
-    # Try the dedicated switch-name regex first.
+    # Try the dedicated switch-name regex first (preserves existing behavior).
     m = _SWITCH_NAME_RE.match(text)
     if m:
         name = m.group(1).strip()
         if name:
             return name
 
-    # Fallback: pattern-position split.
+    # Space-agnostic dynamic extraction.
+    norm_pat_stripped = re.sub(r'[\s:]', '', text).lower()
+    # Strip leading 'v'/'V' expanded marker if present and pattern doesn't.
+    if norm_pat_stripped.startswith(('v', 'v-')):
+        norm_pat_stripped = norm_pat_stripped[1:]
+
     for pat in header_patterns:
-        pat_clean = pat.rstrip(":").strip()
-        if pat_clean and pat_clean.lower() in text.lower():
-            parts = text.split(pat_clean, 1)
-            label = parts[-1].strip().lstrip(":").strip()
-            if label:
-                return label
+        npat = re.sub(r'[\s:]', '', pat).lower()
+        if not npat:
+            continue
+        # Determine how many chars of the original text to skip (the matched prefix).
+        # We need to map from normalized position back to original text position.
+        # Strategy: walk through original text, build normalized version, find match point.
+        orig_norm = ""
+        match_end_orig = -1
+        for i, ch in enumerate(text):
+            if ch == ' ' or ch == '\t' or ch == '\n' or ch == '\r':
+                continue
+            orig_norm += ch.lower()
+            if len(orig_norm) == len(npat):
+                if orig_norm == npat:
+                    match_end_orig = i + 1
+                    break
+                elif not orig_norm.startswith(npat):
+                    break
+        if match_end_orig < 0:
+            continue
+
+        # Extract raw name after the matched pattern prefix in original text.
+        remaining = text[match_end_orig:].lstrip(':').strip()
+
+        # Also check for colon-separated format: "Standard Switch: <name>"
+        if ':' in text:
+            colon_idx = text.index(':')
+            remaining = text[colon_idx + 1:].strip()
+
+        # Strip known common UI control artifacts dynamically.
+        clean_name = re.split(
+            r'\s*(?:ADD|EDIT|MANAGE|\.\.\.)',
+            remaining,
+            flags=re.IGNORECASE,
+        )[0].strip(' :->»▶')
+
+        if clean_name:
+            return clean_name
+
     return text
 
 
