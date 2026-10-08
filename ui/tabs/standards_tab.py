@@ -348,7 +348,7 @@ def _render_auto_correction_manager(active_model: str) -> None:
 
             col_save, col_reset = st.columns([1.2, 1.0])
             with col_save:
-                saved_ac = st.button("💾 Save & Apply Changes", key=f"ac_{category}_save", type="primary", use_container_width=True)
+                saved_ac = st.button("💾 Save & Apply Changes", key=f"ac_{category}_save", type="primary", width="stretch")
             with col_reset:
                 if st.button("🔄 Reset to Defaults", key=f"ac_reset_factory_{category}", width='stretch'):
                     reset_auto_corrections()
@@ -493,7 +493,7 @@ def _render_ipam_role_mapping_manager(active_model: str) -> None:
 
         col_save, col_reset = st.columns([1.2, 1.0])
         with col_save:
-            saved_ipam = st.button("💾 Save & Apply Changes", key="ipamrole_save", type="primary", use_container_width=True)
+            saved_ipam = st.button("💾 Save & Apply Changes", key="ipamrole_save", type="primary", width="stretch")
         with col_reset:
             if st.button("🔄 Reset to Defaults", key="ipamrole_reset", width='stretch'):
                 _reset_ipam_role_mappings()
@@ -686,7 +686,7 @@ def _render_site_code_mapping_manager(key_prefix: str = "std_scm") -> None:
 
         col_save, col_reset = st.columns([1.2, 1.0])
         with col_save:
-            saved_sitecode = st.button("💾 Save & Apply Changes", key=f"{key_prefix}_sitecode_save", type="primary", use_container_width=True)
+            saved_sitecode = st.button("💾 Save & Apply Changes", key=f"{key_prefix}_sitecode_save", type="primary", width="stretch")
         with col_reset:
             if st.button("🔄 Reset to Defaults", key=f"{key_prefix}_sitecode_reset", width='stretch'):
                 _reset_site_code_mappings()
@@ -1247,7 +1247,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
             c_up, c_dn, c_del = st.columns(3)
             if sel_choice in all_platforms and sel_choice != CREATE_OPTION:
                 cur_idx = all_platforms.index(sel_choice)
-                if c_up.button("⬆️", key="btn_plat_order_up", disabled=(cur_idx == 0), help="Move Platform Up", use_container_width=True):
+                if c_up.button("⬆️", key="btn_plat_order_up", disabled=(cur_idx == 0), help="Move Platform Up", width="stretch"):
                     all_platforms[cur_idx - 1], all_platforms[cur_idx] = all_platforms[cur_idx], all_platforms[cur_idx - 1]
                     rules["hypervisor_platform_order"] = all_platforms
                     save_naming_rules(rules, source="Reorder Hypervisor Platforms")
@@ -1260,7 +1260,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                     st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
                     st.rerun()
 
-                if c_dn.button("⬇️", key="btn_plat_order_dn", disabled=(cur_idx == len(all_platforms) - 1), help="Move Platform Down", use_container_width=True):
+                if c_dn.button("⬇️", key="btn_plat_order_dn", disabled=(cur_idx == len(all_platforms) - 1), help="Move Platform Down", width="stretch"):
                     all_platforms[cur_idx + 1], all_platforms[cur_idx] = all_platforms[cur_idx], all_platforms[cur_idx + 1]
                     rules["hypervisor_platform_order"] = all_platforms
                     save_naming_rules(rules, source="Reorder Hypervisor Platforms")
@@ -1273,7 +1273,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                     st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
                     st.rerun()
 
-                if c_del.button("🗑️", key="btn_plat_del", disabled=(len(all_platforms) <= 1), help=f"Delete platform '{sel_choice}'", use_container_width=True):
+                if c_del.button("🗑️", key="btn_plat_del", disabled=(len(all_platforms) <= 1), help=f"Delete platform '{sel_choice}'", width="stretch"):
                     hyp_presets.pop(sel_choice, None)
                     parsing_presets.pop(sel_choice, None)
                     rules["hypervisor_presets"] = hyp_presets
@@ -1300,7 +1300,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
             new_plat_name = st.text_input("New Platform Name", placeholder="e.g. Nutanix AHV, OpenStack").strip()
             c_add_btn, c_cancel_btn = st.columns([2, 2])
             with c_add_btn:
-                if st.button("➕ Create Platform", type="primary", use_container_width=True):
+                if st.button("➕ Create Platform", type="primary", width="stretch"):
                     if not new_plat_name:
                         st.error("Platform name cannot be empty.")
                     elif new_plat_name in all_platforms:
@@ -1324,7 +1324,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                         st.session_state["card_saved_banner"] = {"section": "hypervisor_platform_presets", "msg": f"✅ Platform '{new_plat_name}' created!", "ts": time.time()}
                         st.rerun()
             with c_cancel_btn:
-                if st.button("❌ Cancel", use_container_width=True):
+                if st.button("❌ Cancel", width="stretch"):
                     st.session_state["pending_hypervisor_platform"] = all_platforms[0]
                     st.rerun()
             return
@@ -1434,7 +1434,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
             with ac3:
                 new_t_hide = st.checkbox("Hide new template", value=False, key=f"new_hyp_hide_{active_plat}", label_visibility="collapsed")
             with ac4:
-                add_tpl = st.form_submit_button("➕ Add", use_container_width=True)
+                add_tpl = st.form_submit_button("➕ Add", width="stretch")
 
         if add_tpl:
             if new_t_code and new_t_pattern:
@@ -1548,7 +1548,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
             st.caption("Automatically generate parsing instructions and description patterns for new hypervisors.")
             c_ai_in, c_ai_btn = st.columns([4, 1.5], vertical_alignment="center")
             ai_plat_input = c_ai_in.text_input("Hypervisor / Platform", placeholder="e.g. Cisco NX-OS, OpenStack", label_visibility="collapsed", key="txt_ai_plat_gen")
-            if c_ai_btn.button("Generate Platform Rules", key="btn_gen_ai_plat_rules", use_container_width=True):
+            if c_ai_btn.button("Generate Platform Rules", key="btn_gen_ai_plat_rules", width="stretch"):
                 target_p = ai_plat_input.strip()
                 if not target_p:
                     st.warning("Please enter a platform name.")
@@ -1632,7 +1632,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
         st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
         col_save, col_reset = st.columns(2, vertical_alignment="center")
         with col_save:
-            if st.button("💾 Save & Apply Changes", key=f"btn_save_all_{active_plat}", type="primary", use_container_width=True):
+            if st.button("💾 Save & Apply Changes", key=f"btn_save_all_{active_plat}", type="primary", width="stretch"):
                 hyp_presets[active_plat] = updated_patterns
                 rules["hypervisor_presets"] = hyp_presets
 
@@ -1660,7 +1660,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 st.rerun()
 
         with col_reset:
-            if st.button("🔄 Reset to Defaults", key=f"btn_reset_all_{active_plat}", use_container_width=True):
+            if st.button("🔄 Reset to Defaults", key=f"btn_reset_all_{active_plat}", width="stretch"):
                 from config.naming_rules import DEFAULT_UNIFIED_PLATFORM_PRESETS
                 default_hyp = DEFAULT_HYPERVISOR_PRESETS.get(active_plat, [])
                 default_pars = DEFAULT_PARSING_PRESETS.get(active_plat, {})
@@ -2384,7 +2384,7 @@ def _render_vlan_description_mappings_editor(rules: dict) -> None:
 
         col_save, col_reset = st.columns([1.2, 1.0])
         with col_save:
-            saved = st.button("💾 Save & Apply Changes", key="vlandesc_save", type="primary", use_container_width=True)
+            saved = st.button("💾 Save & Apply Changes", key="vlandesc_save", type="primary", width="stretch")
         with col_reset:
             if st.button("🔄 Reset to Defaults", key="vlandesc_reset", width='stretch'):
                 rules = dict(rules)
@@ -2471,7 +2471,7 @@ def _vlan_presets_editor(rules: dict) -> None:
             c_up, c_dn, c_del = st.columns(3)
             if not is_custom and len(preset_names) > 1 and selected_group not in ("Custom / Empty Preset",):
                 cur_idx = preset_names.index(selected_group)
-                if c_up.button("⬆️", key="btn_vlan_grp_up", disabled=(cur_idx == 0), help="Move Group Up", use_container_width=True):
+                if c_up.button("⬆️", key="btn_vlan_grp_up", disabled=(cur_idx == 0), help="Move Group Up", width="stretch"):
                     preset_names[cur_idx - 1], preset_names[cur_idx] = preset_names[cur_idx], preset_names[cur_idx - 1]
                     rules["vlan_presets"] = {k: rules["vlan_presets"][k] for k in preset_names}
                     save_naming_rules(rules, source="Reorder VLAN Preset Groups")
@@ -2483,7 +2483,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                     st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
                     st.rerun()
 
-                if c_dn.button("⬇️", key="btn_vlan_grp_dn", disabled=(cur_idx == len(preset_names) - 1), help="Move Group Down", use_container_width=True):
+                if c_dn.button("⬇️", key="btn_vlan_grp_dn", disabled=(cur_idx == len(preset_names) - 1), help="Move Group Down", width="stretch"):
                     preset_names[cur_idx + 1], preset_names[cur_idx] = preset_names[cur_idx], preset_names[cur_idx + 1]
                     rules["vlan_presets"] = {k: rules["vlan_presets"][k] for k in preset_names}
                     save_naming_rules(rules, source="Reorder VLAN Preset Groups")
@@ -2495,7 +2495,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                     st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
                     st.rerun()
 
-                if c_del.button("🗑️", key="btn_vlan_grp_del", disabled=(len(preset_names) <= 1 or selected_group == "Custom / Empty Preset"), help=f"Delete preset group '{selected_group}'", use_container_width=True):
+                if c_del.button("🗑️", key="btn_vlan_grp_del", disabled=(len(preset_names) <= 1 or selected_group == "Custom / Empty Preset"), help=f"Delete preset group '{selected_group}'", width="stretch"):
                     vlan_presets.pop(selected_group, None)
                     rules["vlan_presets"] = vlan_presets
                     remaining = [p for p in preset_names if p != selected_group]
@@ -2514,7 +2514,7 @@ def _vlan_presets_editor(rules: dict) -> None:
             ).strip()
             c_create, c_cancel = st.columns(2)
             with c_create:
-                if st.button("➕ Create Group", type="primary", use_container_width=True):
+                if st.button("➕ Create Group", type="primary", width="stretch"):
                     if not new_grp_name:
                         st.error("Preset group name cannot be empty.")
                     elif new_grp_name in preset_names:
@@ -2536,7 +2536,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                         }
                         st.rerun()
             with c_cancel:
-                if st.button("Cancel", use_container_width=True):
+                if st.button("Cancel", width="stretch"):
                     valid_groups = [p for p in preset_names if p != "+ Create New Preset Group"]
                     fallback_grp = valid_groups[0] if valid_groups else "Branch Office VLAN Preset"
                     st.session_state["pending_vlan_group"] = fallback_grp
@@ -2908,12 +2908,12 @@ def render_standards_tab(active_model):
 
                 col_b1, col_b2 = st.columns([1, 1])
                 with col_b1:
-                    if st.button("📌 Solidify Current Rules as Baseline", use_container_width=True):
+                    if st.button("📌 Solidify Current Rules as Baseline", width="stretch"):
                         standards_mgr.solidify_baseline()
                         st.success("✅ Current configuration solidified as new baseline!")
                         st.rerun()
                 with col_b2:
-                    if st.button("🔄 Restore All Standards to Baseline", use_container_width=True):
+                    if st.button("🔄 Restore All Standards to Baseline", width="stretch"):
                         standards_mgr.restore_from_baseline()
                         st.warning("⚠️ All standards restored to baseline snapshot.")
                         st.rerun()
@@ -3001,7 +3001,7 @@ def render_standards_tab(active_model):
 
                 col_save, col_rst = st.columns([4, 1])
                 with col_save:
-                    saved_vars = st.button(f"💾 Save & Apply Changes", key=f"vars_save_{s_key}", type="primary", use_container_width=True)
+                    saved_vars = st.button(f"💾 Save & Apply Changes", key=f"vars_save_{s_key}", type="primary", width="stretch")
                 with col_rst:
                     if st.button("🔄 Reset Scope", key=f"reset_scope_{s_key}", type="secondary", width="stretch"):
                         from config.naming_rules import PATTERN_VARIABLES
@@ -3168,7 +3168,7 @@ def render_standards_tab(active_model):
             _display_cols = ["real_value", "token", "category", "created_at", "last_used_at"]
             _df = _df[_display_cols]
             _df.columns = ["Real Value", "Safe Token", "Category", "Created At", "Last Used At"]
-            st.dataframe(_df, use_container_width=True, hide_index=True)
+            st.dataframe(_df, width="stretch", hide_index=True)
         else:
             st.caption(
                 "Vault is currently empty. Tokens will appear here when text containing "

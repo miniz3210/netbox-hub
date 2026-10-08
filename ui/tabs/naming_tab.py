@@ -1207,9 +1207,9 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             )
             st.session_state["ocr_target_platform"] = target_platform
         with col_btn_an:
-            btn_analyze = st.button("🚀 Analyze & Auto-Populate", type="primary", use_container_width=True)
+            btn_analyze = st.button("🚀 Analyze & Auto-Populate", type="primary", width="stretch")
         with col_btn_clr:
-            btn_clear = st.button("🗑️ Clear All", use_container_width=True)
+            btn_clear = st.button("🗑️ Clear All", width="stretch")
         if btn_clear:
             st.session_state["staged_topology_imgs"] = []
             st.session_state["hypervisor_parsed_descriptions"] = []
@@ -1647,7 +1647,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
 
         edited_descriptions = st.data_editor(
             st.session_state["hypervisor_parsed_descriptions"],
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             num_rows="dynamic",
             key=f"hypervisor_data_editor_{st.session_state['hypervisor_editor_version']}"
