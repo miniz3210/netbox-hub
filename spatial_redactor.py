@@ -40,7 +40,15 @@ _MAC_HYPHEN_RE = re.compile(r"\b(?:(?:[0-9A-Fa-f]{2}-){5})[0-9A-Fa-f]{2}\b")
 _MAC_BARE_RE = re.compile(r"\b[0-9A-Fa-f]{12}\b")
 _MAC_RE = re.compile(rf"(?:{_MAC_COLON_RE.pattern}|{_MAC_HYPHEN_RE.pattern}|{_MAC_BARE_RE.pattern})")
 
-_COLLAPSED_PREFIX_RE = re.compile(r"^[\s>›]+")
+_COLLAPSED_PREFIX_RE = re.compile(r"^[\s>›»▶]+")
+
+_SWITCH_NAME_RE = re.compile(
+    r'(?:[vV\s]*)?'
+    r'Standard\s*Switch:\s*'
+    r'([^\n\r]+?)'
+    r'(?:\s+ADD\s+NETWORKING|\s+EDIT|\s+MANAGE\s+(?:PHYSICAL\s+ADAPTERS|ADAPTERS)?|\s+MANAGE|\s*$)',
+    re.IGNORECASE,
+)
 
 
 def _build_domain_re(patterns: List[str]) -> Optional[re.Pattern]:
@@ -128,17 +136,17 @@ def _token_center(box: List[float]) -> Tuple[float, float]:
 def _is_collapsed_header(text: str) -> bool:
     """Return True if the token text or its leading symbols indicate a collapsed section.
 
-    Collapsed ESXi tree nodes are prefixed with '>' or '›' (e.g. '> Standard Switch: vSwitchNutanix').
+    Collapsed ESXi tree nodes are prefixed with '>', '›', '»', or '▶'
+    (e.g. '> Standard Switch: vSwitchNutanix').
     These should NOT define active container boundaries.
     """
     stripped = text.strip()
     if not stripped:
         return False
-    # Check if the text starts with collapse markers (ignoring leading whitespace)
     prefix_match = _COLLAPSED_PREFIX_RE.match(stripped)
     if prefix_match:
         prefix = prefix_match.group(0)
-        if any(c in prefix for c in ('>', '›')):
+        if any(c in prefix for c in ('>', '›', '»', '▶')):
             return True
     return False
 
@@ -225,6 +233,21 @@ def process_spatial_topology(
 
     structured_text = "\n".join(output_lines).strip()
 
+    # Failsafe: if structured clustering produced empty output, fall back to
+    # flat concatenated text so the LLM always receives a parseable payload.
+    if not structured_text or len(containers) == 0:
+        logger.warning(
+            "[SpatialEngine] Fallback triggered: empty spatial clustering. "
+            "Falling back to cleaned flat text."
+        )
+        flat_lines = []
+        for t in ocr_tokens:
+            txt = str(t.get("text", "")).strip()
+            if txt:
+                flat_lines.append(txt)
+        if flat_lines:
+            structured_text = "\n".join(flat_lines)
+
     logger.info(
         "Spatial grouping applied. Redacted %d sensitive tokens locally.",
         total_redacted,
@@ -240,31 +263,46 @@ def _step_a_filter(
     tokens: List[Dict],
     anchor_patterns: List[str],
 ) -> List[Dict]:
-    """Discard tokens that lie to the left of the sidebar boundary anchor."""
+    """Discard tokens that lie to the left of the sidebar boundary anchor.
+
+    Adaptive sidebar cutoff: if the anchor token is at x < 150px (or < 12% of
+    canvas width), the sidebar is collapsed/absent and we keep ALL tokens.
+    Otherwise, discard tokens strictly to the left of the anchor title.
+    """
     if not anchor_patterns:
         return list(tokens)
 
-    # Find all matching tokens across all patterns; pick the one with the largest x
     matches = [
         t for t in tokens
         if any(
             pat.lower() in str(t.get("text", "")).lower()
             for pat in anchor_patterns
         )
-        and t.get("box") and len(t["box"]) >= 3
+        and t.get("box") and len(t["box"]) >= 2
     ]
     if not matches:
-        # Anchor not found — retain all tokens.
+        # Anchor not found (e.g. scrolled past) — retain all tokens.
         return list(tokens)
 
     anchor_match = max(matches, key=lambda t: float(t["box"][0]))
-    box = anchor_match["box"]
-    left_cutoff = box[0] - (box[2] * 0.15)
+    anchor_x = float(anchor_match["box"][0])
+    canvas_width = max(
+        (float(t["box"][0]) + float(t["box"][2]))
+        for t in tokens
+        if t.get("box") and len(t["box"]) >= 3
+    ) if tokens else 0
+    canvas_width = max(canvas_width, 1920.0)  # safety floor
 
+    if anchor_x < 150 or anchor_x < canvas_width * 0.12:
+        # Sidebar is collapsed or absent — keep every token.
+        return list(tokens)
+
+    # Sidebar exists. Discard tokens strictly to the left of the anchor title.
+    left_cutoff_x = max(0.0, anchor_x - 15.0)
     kept = [
         t for t in tokens
-        if (t.get("box") and len(t["box"]) >= 1
-            and float(t["box"][0]) >= left_cutoff)
+        if t.get("box") and len(t["box"]) >= 1
+        and float(t["box"][0]) >= left_cutoff_x
     ]
     return kept
 
@@ -281,15 +319,18 @@ def _step_b_partition(
     Group tokens into containers based on vertical intervals delimited by
     container-header tokens (e.g. "Standard Switch: vSwitch0").
 
-    Collapsed headers (prefixed with '>' or '›') are EXCLUDED — they only mark
-    the end of a previous switch, not the start of a new active container.
+    Collapsed headers (prefixed with '>', '›', '»', or '▶') are EXCLUDED — they
+    only mark the end of a previous switch, not the start of a new active
+    container.  Headers starting with 'v' or 'V' (expanded downward arrow) or
+    without symbols are treated as active containers.
 
     Returns list of (container_name, [tokens]) sorted top-to-bottom.
     """
     if not header_patterns:
         return [("__global__", list(tokens))]
 
-    # Find all container header tokens, excluding collapsed entries
+    # Find all container header tokens, excluding collapsed entries.
+    # Only accept tokens that match a header pattern AND are not collapsed.
     header_tokens: List[Dict] = []
     for t in tokens:
         text = str(t.get("text", "")).strip()
@@ -301,6 +342,7 @@ def _step_b_partition(
     if not header_tokens:
         return [("__global__", list(tokens))]
 
+    # Sort by global cumulative Y-coordinate ascending.
     header_tokens.sort(key=lambda t: float(t.get("box", [0, 0, 0, 0])[1]))
 
     containers: List[Tuple[str, List[Dict]]] = []
@@ -323,8 +365,22 @@ def _step_b_partition(
 
 
 def _extract_container_name(raw_text: str, header_patterns: List[str]) -> str:
-    """Pull the container label out of a header token's text."""
+    """Pull the container label out of a header token's text.
+
+    Uses a dedicated regex that strips trailing action verbs
+    (ADD NETWORKING, EDIT, MANAGE PHYSICAL ADAPTERS) and supports
+    names with spaces, hyphens, and 'v'/'V' prefixes.
+    """
     text = str(raw_text).strip()
+
+    # Try the dedicated switch-name regex first.
+    m = _SWITCH_NAME_RE.match(text)
+    if m:
+        name = m.group(1).strip()
+        if name:
+            return name
+
+    # Fallback: pattern-position split.
     for pat in header_patterns:
         pat_clean = pat.rstrip(":").strip()
         if pat_clean and pat_clean.lower() in text.lower():
@@ -346,8 +402,16 @@ def _step_c_column_split(
     """
     Split *tokens* into (port_groups, uplinks) using a vertical split at the
     x-position of the adapter-column anchor token.
+
+    If the container text contains "No physical network adapters" or
+    "No associated port groups", returns all tokens as port_groups (no uplinks).
     """
     if not adapter_patterns:
+        return list(tokens), []
+
+    # Check for empty-state markers first.
+    combined_text = " ".join(str(t.get("text", "")).lower() for t in tokens)
+    if "no physical network adapters" in combined_text or "no associated port groups" in combined_text:
         return list(tokens), []
 
     split_x: Optional[float] = None
@@ -356,7 +420,7 @@ def _step_c_column_split(
         if any(pat.lower() in text.lower() for pat in adapter_patterns):
             box = t.get("box")
             if box and len(box) >= 1:
-                split_x = float(box[0]) - 10.0
+                split_x = float(box[0]) - 15.0
                 break
 
     port_groups: List[Dict] = []

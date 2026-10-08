@@ -1352,6 +1352,14 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             except Exception:
                 cleaned_ocr_text = combined_raw_text
 
+            # Payload validation: prevent empty/sub-threshold payloads from reaching the LLM.
+            if len(cleaned_ocr_text.strip()) < 50:
+                logger.warning(
+                    "Payload too short (%d chars). Falling back to raw OCR text.",
+                    len(cleaned_ocr_text.strip()),
+                )
+                cleaned_ocr_text = combined_raw_text
+
             sanitized_combined, session_id = vault.sanitize(cleaned_ocr_text)
             st.session_state["latest_vault_session"] = session_id
 
