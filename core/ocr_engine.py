@@ -250,8 +250,7 @@ class LocalOCREngine:
         result, _ = engine(processed_bgr)
         detected_lines, all_confidences, all_raw_tokens = self._parse_result_with_boxes(result)
         import sys as _sys
-        _sys.stdout.write(f"[OCR ENGINE] Lines detected (Spatial): {len(detected_lines)}, preview: {detected_lines[:2] if detected_lines else []}\n")
-        _sys.stdout.flush()
+        _logger.debug("[OCR ENGINE] Lines detected (Spatial): %d", len(detected_lines))
         _logger.debug("[OCR DEBUG] Pass 1: %d lines", len(detected_lines))
         _flush()
 
@@ -261,8 +260,7 @@ class LocalOCREngine:
             result, _ = engine(enhanced_bgr)
             detected_lines, all_confidences, all_raw_tokens = self._parse_result_with_boxes(result)
             import sys as _sys
-            _sys.stdout.write(f"[OCR ENGINE] Lines detected (Pass 2 Spatial): {len(detected_lines)}, preview: {detected_lines[:2] if detected_lines else []}\n")
-            _sys.stdout.flush()
+            _logger.debug("[OCR ENGINE] Lines detected (Pass 2 Spatial): %d", len(detected_lines))
             _logger.debug("[OCR DEBUG] Pass 2 (enhanced): %d lines", len(detected_lines))
             _flush()
 

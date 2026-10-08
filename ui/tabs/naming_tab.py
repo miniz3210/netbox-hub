@@ -1437,23 +1437,15 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             if active_platform_tokens:
                 system_prompt += f"\n\nTARGET OUTPUT SCHEMA KEYS: Extract fields into matching lowercase keys: {', '.join(sorted(active_platform_tokens))}"
 
-            print(f"[DEBUG-1] Payload sent to LLM (Length: {len(sanitized_combined)}):")
-            print(sanitized_combined[:500])
-
             user_prompt = f"Parse this consolidated sanitized topology text:\n\n{sanitized_combined}"
             response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt, max_tokens=8192)
             progress_bar.progress(1.0, text="✅ Parsing and enriching results...")
-
-            print(f"[DEBUG-2] LLM Raw Response (Length: {len(response) if response else 0}):")
-            print(response)
 
             raw_items = _safe_parse_json_array(response)
             clean_records = []
             for item in raw_items:
                 if isinstance(item, dict) and not any(k in item for k in ("finish_reason", "index", "message", "role")):
                     clean_records.append({str(k).strip().lower(): str(v).strip() if v is not None else "" for k, v in item.items()})
-
-            print(f"[DEBUG-3] Parsed JSON records count: {len(clean_records)}")
 
             all_parsed_items = clean_records
             if session_id:

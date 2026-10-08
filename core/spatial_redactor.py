@@ -215,7 +215,7 @@ def process_spatial_topology(
 
     # Step A: Dynamic left boundary filter
     filtered_tokens = _step_a_filter(ocr_tokens, left_boundary_patterns)
-    print(f"[SPATIAL-FILTER] Input tokens: {len(ocr_tokens)}, Kept tokens: {len(filtered_tokens)}")
+    logger.debug("[SPATIAL-FILTER] Input tokens: %d, Kept tokens: %d", len(ocr_tokens), len(filtered_tokens))
 
     # Step B: Card-centric upward binding
     containers = _step_b_card_centric_bind(filtered_tokens, container_header_patterns)
