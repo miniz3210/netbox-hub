@@ -1206,25 +1206,13 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
         cur_sel = all_platforms[0]
 
     with st.container(border=True):
-        col_title, col_badge = st.columns([8, 2], vertical_alignment="center")
-        with col_title:
-            st.markdown(
-                '<div style="font-weight:700;font-size:1.15rem;display:flex;align-items:center;gap:8px;">'
-                '<span>☁️ HYPERVISOR PLATFORM PRESETS</span></div>',
-                unsafe_allow_html=True
-            )
-            st.caption("Manage hypervisor platforms, standardized NetBox description templates, token aliases, and AI parsing rules.")
-        with col_badge:
-            st.markdown(
-                f'<div style="text-align:right;"><span style="background:rgba(255,255,255,0.08);'
-                f'padding:3px 10px;border-radius:12px;font-size:0.8rem;color:#94a3b8;">'
-                f'{len(all_platforms)} platforms</span></div>',
-                unsafe_allow_html=True
-            )
-
-        banner = st.session_state.get("card_saved_banner")
-        if banner and banner.get("section") == "hypervisor_platform_presets" and (time.time() - banner.get("ts", 0) < 5.0):
-            st.success(banner.get("msg", "✅ Platform presets saved & applied!"))
+        _check_and_render_banner("hypervisor_platform_presets", duration_sec=10)
+        col_t1, col_t2 = st.columns([3, 1], vertical_alignment="center")
+        with col_t1:
+            st.markdown("#### ☁️ Hypervisor Platform Presets")
+        with col_t2:
+            st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em; color: #94a3b8;'>{len(all_platforms)} platforms</span></div>", unsafe_allow_html=True)
+        st.caption("Manage hypervisor platforms, standardized NetBox description templates, token aliases, and AI parsing rules.")
 
         st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
 
@@ -1720,11 +1708,11 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
 
     with st.container(border=True):
         _check_and_render_banner(section)
-        col_t1, col_t2 = st.columns([3, 1])
+        col_t1, col_t2 = st.columns([3, 1], vertical_alignment="center")
         with col_t1:
             st.markdown(f"#### {card_title}")
         with col_t2:
-            st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(presets)} presets</span></div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em; color: #94a3b8;'>{len(presets)} presets</span></div>", unsafe_allow_html=True)
         st.caption(card_caption)
 
         # Inject dynamic styling to guarantee Action buttons fit cleanly without squeezing
@@ -1982,11 +1970,11 @@ def _host_editor(rules: dict) -> None:
 
     with st.container(border=True):
         _check_and_render_banner("hosts")
-        col_t1, col_t2 = st.columns([3, 1])
+        col_t1, col_t2 = st.columns([3, 1], vertical_alignment="center")
         with col_t1:
             st.markdown("#### 💻 HOSTS TYPE PRESETS")
         with col_t2:
-            st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(host_presets)} presets</span></div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em; color: #94a3b8;'>{len(host_presets)} presets</span></div>", unsafe_allow_html=True)
         st.caption("Manage physical hypervisor host naming patterns and presets.")
 
         # Inject dynamic styling to guarantee Action buttons fit cleanly without squeezing
@@ -2161,11 +2149,11 @@ def _vm_editor(rules: dict) -> None:
 
     with st.container(border=True):
         _check_and_render_banner("vm_roles")
-        col_t1, col_t2 = st.columns([3, 1])
+        col_t1, col_t2 = st.columns([3, 1], vertical_alignment="center")
         with col_t1:
             st.markdown("#### 🖱️ VIRTUAL MACHINE PRESETS")
         with col_t2:
-            st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(vm_presets)} presets</span></div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em; color: #94a3b8;'>{len(vm_presets)} presets</span></div>", unsafe_allow_html=True)
         st.caption("Manage virtual machine roles (cvi, afs, sani, vlab) and their shared hostname template.")
 
         # Inject dynamic styling to guarantee Action buttons fit cleanly without squeezing
@@ -2845,9 +2833,6 @@ def render_standards_tab(active_model):
             _render_csv_schemas_editor(current_rules)
 
         elif _active_subtab == 1:
-            _check_and_render_banner("network_devices")
-            st.markdown("#### 🔧 Network & Security Devices")
-            st.caption("Manage device naming patterns and presets (SW, VS, FW, ION, WAP, RTR, VA).")
             _preset_type_editor("device", get_device_presets(current_rules), current_rules, prefix="branch",
                                 card_title="🔧 DEVICE TYPE PRESETS",
                                 card_caption="",
