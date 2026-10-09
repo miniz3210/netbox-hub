@@ -21,11 +21,17 @@ def init_db():
     if _db_init_done:
         return
     os.makedirs("data", exist_ok=True)
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
 
-        # Metadata Table (Tracks Sync Source & Last Sync Timestamp)
-        cursor.execute("""
+    # ── WAL hardening: enables concurrent reads during writes and faster I/O ──
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.execute("PRAGMA cache_size=-8000")  # 8 MB shared buffer cache
+    conn.commit()
+
+    # Metadata Table (Tracks Sync Source & Last Sync Timestamp)
+    cursor.execute("""
             CREATE TABLE IF NOT EXISTS sync_metadata (
                 module TEXT PRIMARY KEY,
                 source TEXT,
@@ -33,18 +39,18 @@ def init_db():
             )
         """)
 
-        # Sites / Scope Table
-        cursor.execute("""
+    # Sites / Scope Table
+    cursor.execute("""
             CREATE TABLE IF NOT EXISTS sites_records (
                 id INTEGER PRIMARY KEY,
                 name TEXT UNIQUE,
                 slug TEXT,
                 imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-        """)
+    """)
 
-        # Inventory Records (Devices, Hypervisors, VMs)
-        cursor.execute("""
+    # Inventory Records (Devices, Hypervisors, VMs)
+    cursor.execute("""
             CREATE TABLE IF NOT EXISTS inventory_records (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 category TEXT,
@@ -56,10 +62,10 @@ def init_db():
                 cluster TEXT,
                 imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-        """)
+    """)
 
-        # IPAM / Prefix Records
-        cursor.execute("""
+    # IPAM / Prefix Records
+    cursor.execute("""
             CREATE TABLE IF NOT EXISTS ipam_records (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 prefix_or_subnet TEXT,
@@ -72,10 +78,10 @@ def init_db():
                 record_type TEXT DEFAULT 'prefix',
                 imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-        """)
+    """)
 
-        # Azure CSV Upload Storage (persists across page refreshes)
-        cursor.execute("""
+    # Azure CSV Upload Storage (persists across page refreshes)
+    cursor.execute("""
             CREATE TABLE IF NOT EXISTS azure_csv_uploads (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 filename TEXT,
@@ -83,16 +89,16 @@ def init_db():
                 csv_data TEXT,
                 row_count INTEGER
             )
-        """)
+    """)
 
-        # Column migration check for existing DBs
-        cursor.execute("PRAGMA table_info(ipam_records)")
-        columns = [row[1] for row in cursor.fetchall()]
-        if "record_type" not in columns:
+    # Column migration check for existing DBs
+    cursor.execute("PRAGMA table_info(ipam_records)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if "record_type" not in columns:
             cursor.execute("ALTER TABLE ipam_records ADD COLUMN record_type TEXT DEFAULT 'prefix'")
 
-        # Interfaces Table (structured from NetBox backup)
-        cursor.execute("""
+    # Interfaces Table (structured from NetBox backup)
+    cursor.execute("""
             CREATE TABLE IF NOT EXISTS interfaces (
                 id INTEGER PRIMARY KEY,
                 device_id INTEGER,
@@ -109,13 +115,13 @@ def init_db():
                 site TEXT,
                 imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-        """)
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_interfaces_device ON interfaces(device_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_interfaces_name ON interfaces(name)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_interfaces_site ON interfaces(site)")
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_interfaces_device ON interfaces(device_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_interfaces_name ON interfaces(name)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_interfaces_site ON interfaces(site)")
 
-        # Cables Table (structured from NetBox backup)
-        cursor.execute("""
+    # Cables Table (structured from NetBox backup)
+    cursor.execute("""
             CREATE TABLE IF NOT EXISTS cables (
                 id INTEGER PRIMARY KEY,
                 label TEXT,
@@ -132,21 +138,22 @@ def init_db():
                 b_interface_name TEXT,
                 imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-        """)
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_cables_a_device ON cables(a_device_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_cables_b_device ON cables(b_device_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_cables_a_interface ON cables(a_interface_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_cables_b_interface ON cables(b_interface_id)")
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_cables_a_device ON cables(a_device_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_cables_b_device ON cables(b_device_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_cables_a_interface ON cables(a_interface_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_cables_b_interface ON cables(b_interface_id)")
 
-        # Create indexes for performance optimization
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_ipam_site ON ipam_records(site)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_ipam_vlan_id ON ipam_records(vlan_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_ipam_prefix ON ipam_records(prefix_or_subnet)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sites_slug ON sites_records(slug)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_inventory_category ON inventory_records(category)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_inventory_name ON inventory_records(name)")
+    # Create indexes for performance optimization
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ipam_site ON ipam_records(site)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ipam_vlan_id ON ipam_records(vlan_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ipam_prefix ON ipam_records(prefix_or_subnet)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sites_slug ON sites_records(slug)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inventory_category ON inventory_records(category)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inventory_name ON inventory_records(name)")
 
-        conn.commit()
+    conn.commit()
+    conn.close()
     _db_init_done = True
 
 # ── METADATA TRACKING ───────────────────────────────────────────────────
@@ -235,25 +242,42 @@ def lookup_scope_id(site_name: str) -> Optional[int]:
     if not site_name:
         return None
     init_db()
+    q = site_name.strip().lower()
+
+    # 1. Exact match via SQL — uses idx_sites_slug / name column directly
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        q = site_name.strip().lower()
-        
+        cursor.execute(
+            "SELECT id, name, slug FROM sites_records WHERE LOWER(name) = ? OR LOWER(slug) = ?",
+            (q, q)
+        )
+        row = cursor.fetchone()
+        if row:
+            return row["id"]
+
+        # 2. Starts-with match via SQL — leverages index on name column
+        cursor.execute(
+            "SELECT id, name, slug FROM sites_records WHERE LOWER(name) LIKE ? OR LOWER(slug) LIKE ?",
+            (f"{q}%", f"{q}%")
+        )
+        starts_rows = cursor.fetchall()
+
+    if starts_rows:
+        starts_rows.sort(key=lambda r: (
+            any(c in (r["name"] or "").lower() or c in (r["slug"] or "").lower()
+                for c in ("azure", "aws", "gcp", "cloud")),
+            len(r["name"] or "")
+        ))
+        return starts_rows[0]["id"]
+
+    # 3. Fallback: full scan for word-boundary and substring matches (small table)
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
         cursor.execute("SELECT id, name, slug FROM sites_records")
         all_sites = cursor.fetchall()
 
-    if not all_sites:
-        return None
-
-    # 1. Exact match on name or slug
-    for row in all_sites:
-        sname = row["name"]
-        sslug = row["slug"]
-        if (sname and sname.lower() == q) or (sslug and sslug.lower() == q):
-            return row["id"]
-
-    # 2. Exact word boundary match
     word_pattern = re.compile(rf'\b{re.escape(q)}\b', re.IGNORECASE)
     word_matches = []
     for row in all_sites:
@@ -266,19 +290,6 @@ def lookup_scope_id(site_name: str) -> Optional[int]:
     if word_matches:
         word_matches.sort(key=lambda x: (x[0], x[1]))
         return word_matches[0][2]
-
-    # 3. Starts-with match
-    starts_matches = []
-    for row in all_sites:
-        sname_str = row["name"] or ""
-        sslug_str = row["slug"] or ""
-        if sname_str.lower().startswith(q) or sslug_str.lower().startswith(q):
-            is_cloud = any(c in sname_str.lower() or c in sslug_str.lower() for c in ["azure", "aws", "gcp", "cloud"])
-            starts_matches.append((is_cloud, len(sname_str), row["id"]))
-
-    if starts_matches:
-        starts_matches.sort(key=lambda x: (x[0], x[1]))
-        return starts_matches[0][2]
 
     # 4. Substring match (for query length >= 4)
     if len(q) >= 4:
@@ -299,24 +310,43 @@ def lookup_site_supernet_from_db(site_name: str) -> Optional[str]:
     if not site_name:
         return None
     init_db()
+    clean = site_name.strip().lower()
+
+    # Phase 1: Index-friendly exact match on site column
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        
-        clean = site_name.strip().lower()
-        # Also search for site name as a word to avoid partial matches like "York" in "New York"
-        pattern_exact = clean
-        pattern_like = f"%{clean}%"
-        
-        # We want to find the largest prefix (lowest CIDR number) that is associated with this site.
-        # We search in site, description, role, and vlan_name.
         cursor.execute("""
-            SELECT prefix_or_subnet, description, role, site, vlan_name FROM ipam_records 
-            WHERE (LOWER(site) = ? OR LOWER(site) LIKE ? OR LOWER(description) LIKE ? OR LOWER(role) LIKE ? OR LOWER(vlan_name) LIKE ?)
-            AND prefix_or_subnet LIKE '%/%'
-        """, (pattern_exact, pattern_like, pattern_like, pattern_like, pattern_like))
+            SELECT prefix_or_subnet, description, role, site, vlan_name FROM ipam_records
+            WHERE LOWER(site) = ? AND prefix_or_subnet LIKE '%/%'
+        """, (clean,))
         rows = cursor.fetchall()
 
+    candidates = _score_supernet_candidates(rows, clean)
+    if candidates:
+        candidates.sort(key=lambda x: (-x["score"], x["mask"]))
+        return candidates[0]["prefix"]
+
+    # Phase 2: Fallback — substring scan (only if no exact match found)
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT prefix_or_subnet, description, role, site, vlan_name FROM ipam_records
+            WHERE (LOWER(site) LIKE ? OR LOWER(description) LIKE ? OR LOWER(role) LIKE ? OR LOWER(vlan_name) LIKE ?)
+            AND prefix_or_subnet LIKE '%/%'
+        """, (f"%{clean}%", f"%{clean}%", f"%{clean}%", f"%{clean}%"))
+        rows = cursor.fetchall()
+
+    candidates = _score_supernet_candidates(rows, clean)
+    if candidates:
+        candidates.sort(key=lambda x: (-x["score"], x["mask"]))
+        return candidates[0]["prefix"]
+    return None
+
+
+def _score_supernet_candidates(rows, clean: str) -> list:
+    """Score IPAM supernet candidates by relevance to the query string."""
     candidates = []
     for r in rows:
         p_str = r["prefix_or_subnet"]
@@ -324,13 +354,10 @@ def lookup_site_supernet_from_db(site_name: str) -> Optional[str]:
         role = (r["role"] or "").lower()
         site_val = (r["site"] or "").lower()
         vname = (r["vlan_name"] or "").lower()
-        
+
         if p_str and "/" in p_str:
             try:
-                prefix_parts = p_str.split("/")
-                mask = int(prefix_parts[1])
-                
-                # Scoring for relevance
+                mask = int(p_str.split("/")[1])
                 score = 0
                 if clean == site_val: score += 100
                 if "site subnet" in desc or "site subnet" in role: score += 50
@@ -338,20 +365,10 @@ def lookup_site_supernet_from_db(site_name: str) -> Optional[str]:
                 if "container" in desc or "container" in role: score += 30
                 if clean in site_val: score += 20
                 if clean in desc: score += 10
-                
-                candidates.append({
-                    "prefix": p_str,
-                    "mask": mask,
-                    "score": score
-                })
+                candidates.append({"prefix": p_str, "mask": mask, "score": score})
             except (ValueError, IndexError):
                 pass
-
-    if candidates:
-        # Sort by score (descending) then by mask (ascending, so /16 comes before /24)
-        candidates.sort(key=lambda x: (-x["score"], x["mask"]))
-        return candidates[0]["prefix"]
-    return None
+    return candidates
 
 # ── INVENTORY RECORDS ───────────────────────────────────────────────────
 
@@ -483,15 +500,22 @@ def get_records_by_category(category: str, site_filter: str = "") -> List[Dict[s
 
         clean_filter = site_filter.strip().lower()
         if clean_filter:
-            pattern = f"%{clean_filter}%"
+            # Use prefix match (index-friendly) first
             cursor.execute("""
-                SELECT * FROM inventory_records 
+                SELECT * FROM inventory_records
                 WHERE category = ? AND (LOWER(site) LIKE ? OR LOWER(name) LIKE ?)
                 ORDER BY id ASC
-            """, (category, pattern, pattern))
+            """, (category, f"{clean_filter}%", f"{clean_filter}%"))
             rows = cursor.fetchall()
-            if rows:
-                return [dict(r) for r in rows]
+            # Fall back to substring match only if prefix match returned nothing
+            if not rows:
+                cursor.execute("""
+                    SELECT * FROM inventory_records
+                    WHERE category = ? AND (LOWER(site) LIKE ? OR LOWER(name) LIKE ?)
+                    ORDER BY id ASC
+                """, (category, f"%{clean_filter}%", f"%{clean_filter}%"))
+                rows = cursor.fetchall()
+            return [dict(r) for r in rows]
 
         cursor.execute("SELECT * FROM inventory_records WHERE category = ? ORDER BY id ASC", (category,))
         rows = cursor.fetchall()
@@ -708,11 +732,19 @@ def get_site_summary() -> str:
 
 def get_ipam_records_by_site(site_name: str) -> List[Dict[str, Any]]:
     init_db()
+    clean = site_name.strip().lower()
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM ipam_records WHERE site = ? OR site LIKE ?", (site_name, f"%{site_name}%"))
+        # Exact match first (uses idx_ipam_site), then prefix match, then substring fallback
+        cursor.execute("SELECT * FROM ipam_records WHERE LOWER(site) = ?", (clean,))
         rows = cursor.fetchall()
+        if not rows:
+            cursor.execute("SELECT * FROM ipam_records WHERE LOWER(site) LIKE ?", (f"{clean}%",))
+            rows = cursor.fetchall()
+        if not rows:
+            cursor.execute("SELECT * FROM ipam_records WHERE LOWER(site) LIKE ?", (f"%{clean}%",))
+            rows = cursor.fetchall()
     return [dict(r) for r in rows]
 
 def lookup_vlan_description_from_db(role_name: str) -> Optional[str]:

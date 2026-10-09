@@ -2804,25 +2804,47 @@ def render_standards_tab(active_model):
     current_rules = load_naming_rules()
     SSM.set_naming_rules(current_rules)
 
-    tab_edit, tab_vars, tab_history = st.tabs(["📝 Edit Standards", "📘 Pattern Variables Reference", "📜 Change History"])
+    # ── Lazy-load outer tabs: only render the active one to avoid creating
+    #    ~60+ widget objects on every run when the user is viewing a different tab.
+    _STANDARDS_OUTER = ["edit", "vars", "history"]
+    if "standards_outer_tab" not in st.session_state:
+        st.session_state["standards_outer_tab"] = 0
+    _active_outer = st.session_state.get("standards_outer_tab", 0)
 
-    with tab_edit:
-        tab_ipam, tab_naming, tab_infra = st.tabs([
-            "🌐 IPAM Standards",
-            "🏷️ Naming Standards",
-            "⚙️ Infrastructure & System Baseline"
-        ])
+    _outer_labels = ["📝 Edit Standards", "📘 Pattern Variables", "📜 Change History"]
+    _outer_sel = st.radio(
+        "", options=_outer_labels, index=_active_outer, horizontal=True,
+        key="standards_outer_radio", label_visibility="collapsed",
+    )
+    _new_outer_idx = _outer_labels.index(_outer_sel)
+    if _new_outer_idx != _active_outer:
+        st.session_state["standards_outer_tab"] = _new_outer_idx
+        st.rerun()
 
-        with tab_ipam:
+    if _active_outer == 0:
+        # ── Lazy-load inner sub-tabs: only render the active sub-section.
+        _SUBTAB_KEYS = ("ipam", "naming", "infra")
+        if "standards_subtab" not in st.session_state:
+            st.session_state["standards_subtab"] = 0
+        _active_subtab = st.session_state.get("standards_subtab", 0)
+
+        _subtab_labels = ["🌐 IPAM Standards", "🏷️ Naming Standards", "⚙️ Infrastructure & Baseline"]
+        _sub_sel = st.radio(
+            "", options=_subtab_labels, index=_active_subtab, horizontal=True,
+            key="standards_subtab_radio", label_visibility="collapsed",
+        )
+        _new_sub_idx = _subtab_labels.index(_sub_sel)
+        if _new_sub_idx != _active_subtab:
+            st.session_state["standards_subtab"] = _new_sub_idx
+            st.rerun()
+
+        if _active_subtab == 0:
             _vlan_presets_editor(current_rules)
-
             _render_vlan_description_mappings_editor(current_rules)
-
             _render_ipam_role_mapping_manager(active_model)
-
             _render_csv_schemas_editor(current_rules)
 
-        with tab_naming:
+        elif _active_subtab == 1:
             _check_and_render_banner("network_devices")
             st.markdown("#### 🔧 Network & Security Devices")
             st.caption("Manage device naming patterns and presets (SW, VS, FW, ION, WAP, RTR, VA).")
@@ -2835,14 +2857,13 @@ def render_standards_tab(active_model):
                                 card_title="🔌 INTERFACE TYPE PRESETS",
                                 card_caption="Manage interface description presets (Uplink, LAG, Po, Access, FW Zone).",
                                 section="network_devices", section_label="Network & Security Devices")
-
             _host_editor(current_rules)
             st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
             _vm_editor(current_rules)
             st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
             _render_hypervisor_platform_presets_editor(current_rules, active_model)
 
-        with tab_infra:
+        elif _active_subtab == 2:
             with st.container(border=True):
                 _check_and_render_banner("yaml_guidelines")
                 st.markdown("#### 📋 NetBox YAML / Hardware Templates & Guidelines")
@@ -2923,11 +2944,12 @@ def render_standards_tab(active_model):
                 compiled_prompt = standards_mgr.compile_full_system_prompt()
                 st.code(compiled_prompt, language="markdown")
     
-    with tab_vars:
-        st.markdown("##### 📘 Pattern Variables Reference Guide")
-        st.caption("Unified registry of all pattern variables. Scoped by domain to eliminate naming collision between IPAM, Naming, and ESXi templates.")
-        
-        from config.naming_rules import get_grouped_pattern_variables, PATTERN_VARIABLES
+    elif _active_outer == 1:
+        with st.container():
+            st.markdown("##### 📘 Pattern Variables Reference Guide")
+            st.caption("Unified registry of all pattern variables. Scoped by domain to eliminate naming collision between IPAM, Naming, and ESXi templates.")
+            
+            from config.naming_rules import get_grouped_pattern_variables, PATTERN_VARIABLES
         grouped_vars = get_grouped_pattern_variables(current_rules)
         patterns_now = get_naming_patterns(current_rules)
 
@@ -3063,11 +3085,12 @@ def render_standards_tab(active_model):
         st.divider()
         st.caption("All variables defined here automatically power input boxes and template resolution across Naming, IPAM, and CSV generators.")
     
-    with tab_history:
-        st.markdown("##### 📜 Naming Standards Change History")
-        st.caption("View and restore previous versions of your naming standards. The last 10 changes are saved automatically.")
-        
-        history = load_history()
+    elif _active_outer == 2:
+        with st.container():
+            st.markdown("##### 📜 Naming Standards Change History")
+            st.caption("View and restore previous versions of your naming standards. The last 10 changes are saved automatically.")
+            
+            history = load_history()
         
         if not history:
             st.info("📭 No history available yet. Changes will be tracked once you save modifications.")

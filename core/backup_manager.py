@@ -1170,9 +1170,11 @@ def save_netbox_backup(file_bytes: Any, filename: str = "",
     except Exception as e:
         logger.warning(f"Failed to initialize schema registry: {e}")
     
-    # Phase 7: Save metadata, compressed backup JSON, and persistent disk copy
+    # Phase 7: Save metadata and compressed backup JSON to SQLite only.
+    # The uncompressed 88+ MB JSON is NOT written to disk — the compressed column
+    # in backup_metadata is the single source of truth for round-trip restore.
     if progress_callback:
-        progress_callback("Saving metadata and persistent backup...")
+        progress_callback("Saving metadata and compressed backup...")
 
     counts_payload = dict(object_counts)
     if source_info:
@@ -1185,13 +1187,6 @@ def save_netbox_backup(file_bytes: Any, filename: str = "",
 
     logger.info(f"Compressed backup JSON: {len(backup_json_bytes)/1024/1024:.1f} MB -> {len(backup_json_compressed)/1024/1024:.1f} MB")
 
-    # Persist the original JSON to disk for long-term archival
-    os.makedirs("data", exist_ok=True)
-    persistent_path = "data/netbox_master.json"
-    with open(persistent_path, "wb") as f:
-        f.write(backup_json_bytes)
-    logger.info(f"Persistent backup saved to {persistent_path} ({len(backup_json_bytes)/1024/1024:.1f} MB)")
-
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
@@ -1201,6 +1196,9 @@ def save_netbox_backup(file_bytes: Any, filename: str = "",
     """, (filename or "NetBox_Backup.json", uploaded_at, total, json.dumps(counts_payload), backup_json_compressed))
     conn.commit()
     conn.close()
+
+    # Prune stale full-backup JSON files left on disk from prior versions
+    _prune_stale_backup_files()
 
     set_sync_metadata("netbox_backup", BACKUP_SOURCE)
     set_sync_metadata("ipam", BACKUP_SOURCE)
@@ -1232,8 +1230,6 @@ def save_netbox_backup(file_bytes: Any, filename: str = "",
         "object_types": len(object_counts),
         "source_info": source_info,
         "uploaded_at": uploaded_at,
-        "filename": filename,
-        "persistent_path": persistent_path,
         "timings": {
             "total": total_time,
             "parse": parse_time,
@@ -1287,6 +1283,35 @@ def _convert_to_flat_format(backup_data: Dict[str, Any]) -> Dict[str, List[Dict[
                 flat_data[model_key] = value
         
         return flat_data
+
+
+# ── STALE BACKUP CLEANUP ───────────────────────────────────────────────
+
+def _prune_stale_backup_files() -> int:
+    """Remove stale NetBox_Full_Backup_*.json and netbox_master.json files from disk.
+
+    These files were written by previous app versions as uncompressed copies of the
+    backup payload. The compressed SQLite column in backup_metadata is now the single
+    source of truth, making these disk copies redundant and wasteful (each can be
+    ~89 MB). Returns the number of files deleted.
+    """
+    import glob
+    deleted = 0
+    data_dir = "data"
+    patterns = [
+        os.path.join(data_dir, "netbox_master.json"),
+        os.path.join(data_dir, "NetBox_Full_Backup_*.json"),
+        os.path.join(data_dir, "NetBox_Minimal_Backup_*.json"),
+    ]
+    for pattern in patterns:
+        for path in glob.glob(pattern):
+            try:
+                os.remove(path)
+                deleted += 1
+                logger.info(f"Pruned stale backup file: {path}")
+            except OSError:
+                pass
+    return deleted
 
 
 def restore_backup_to_session_state():

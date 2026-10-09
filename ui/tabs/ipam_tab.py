@@ -49,9 +49,16 @@ from core.shared_backup_state import SharedBackupState
 from utils.formatters import to_title_case_preserve_acronyms
 from ui.components import render_ai_chat, render_backup_uploader
 
+_last_site_lookup = {}  # tracks (site_name, scope_id, supernet) to avoid redundant DB queries
+
 def handle_site_change():
-    """Triggered on site name input change: automatically looks up and fills Scope ID & Supernet."""
+    """Triggered on site name input change: looks up Scope ID & Supernet once."""
     entered_site = st.session_state.get("ipam_site_in", "").strip()
+    cached = _last_site_lookup.get("site", "")
+    if entered_site == cached:
+        return  # no change since last lookup, skip
+    _last_site_lookup["site"] = entered_site
+
     if entered_site:
         matched_scope = lookup_scope_id(entered_site)
         matched_super = lookup_site_supernet_from_db(entered_site)
@@ -59,6 +66,8 @@ def handle_site_change():
             st.session_state["ipam_scope_in"] = str(matched_scope)
         if matched_super is not None:
             st.session_state["ipam_super_in"] = str(matched_super)
+        _last_site_lookup["scope"] = matched_scope
+        _last_site_lookup["supernet"] = matched_super
 
 def handle_ipam_file_upload():
     """Universal file upload handler using dynamic schema classification."""
@@ -504,18 +513,24 @@ def render_ipam_tab(active_model: str):
             on_change=handle_site_change
         )
 
-    # Check if site exists in database when site name is entered
-    site_found = False
-    if site_name:
-        site_found = bool(get_ipam_records_by_site(site_name))
-    st.session_state["ipam_site_found_in_db"] = site_found
+    # Use cached lookup results from on_change handler; fall back to fresh lookup
+    # only when the site name differs from what the handler last processed.
+    cached_site = _last_site_lookup.get("site", "")
+    if site_name and site_name != cached_site:
+        handle_site_change()  # force fresh lookup
 
-    auto_scope_id = lookup_scope_id(site_name) if site_name else None
-    auto_supernet = lookup_site_supernet_from_db(site_name) if site_name else None
+    auto_scope_id = _last_site_lookup.get("scope")
+    auto_supernet = _last_site_lookup.get("supernet")
 
+    # Only auto-fill supernet once — no st.rerun() to avoid cascading full-page re-renders
     if site_name and auto_supernet and not st.session_state.get("ipam_super_in"):
         st.session_state["ipam_super_in"] = str(auto_supernet)
-        st.rerun()
+
+    # Check if site exists in database (cached from handler; avoid extra full-table query)
+    site_found = bool(st.session_state.get("ipam_site_found_in_db", False))
+    if site_name and st.session_state.get("ipam_loaded_site") != site_name:
+        site_found = bool(get_ipam_records_by_site(site_name))
+        st.session_state["ipam_site_found_in_db"] = site_found
 
     with top2:
         st.text_input(
