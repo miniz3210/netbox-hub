@@ -1713,7 +1713,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
             st.markdown(f"#### {card_title}")
         with col_t2:
             st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em; color: #94a3b8;'>{len(presets)} presets</span></div>", unsafe_allow_html=True)
-        st.caption(card_caption)
+        st.caption(card_caption) if card_caption and card_caption.strip() else None
 
         # Inject dynamic styling to guarantee Action buttons fit cleanly without squeezing
         _inject_preset_table_style()
@@ -2834,14 +2834,13 @@ def render_standards_tab(active_model):
 
         elif _active_subtab == 1:
             _preset_type_editor("device", get_device_presets(current_rules), current_rules, prefix="branch",
-                                card_title="🔧 DEVICE TYPE PRESETS",
-                                card_caption="",
-                                section="network_devices", section_label="Network & Security Devices")
-            st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+                                 card_title="🔧 DEVICE TYPE PRESETS",
+                                 card_caption="Manage device naming patterns and presets (SW, VS, FW, ION, WAP, RTR, VA).",
+                                 section="device_presets", section_label="Device Type Presets")
             _preset_type_editor("interface", get_interface_presets(current_rules), current_rules, prefix="iface",
-                                card_title="🔌 INTERFACE TYPE PRESETS",
-                                card_caption="Manage interface description presets (Uplink, LAG, Po, Access, FW Zone).",
-                                section="network_devices", section_label="Network & Security Devices")
+                                 card_title="🔌 INTERFACE TYPE PRESETS",
+                                 card_caption="Manage interface description presets (Uplink, LAG, Po, Access, FW Zone).",
+                                 section="interface_presets", section_label="Interface Type Presets")
             _host_editor(current_rules)
             st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
             _vm_editor(current_rules)
