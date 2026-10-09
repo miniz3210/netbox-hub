@@ -1341,6 +1341,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
         # Section 1: NetBox Description Templates
         # ──────────────────────────────────────────────────────────────────────
         with st.expander(f"🏷️ 1. Description Templates ({len(plat_patterns)} templates)", expanded=True):
+            _check_and_render_banner(f"hypervisor_s1_{active_plat}", duration_sec=10)
             HYP_TPL_COLS = [1.2, 2.2, 4.4, 0.8, 1.4]
             c_h0, c_h1, c_h2, c_h3, c_h4 = st.columns(HYP_TPL_COLS, vertical_alignment="center")
             with c_h0:
@@ -1481,6 +1482,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
         alias_items = list(aliases.items())
 
         with st.expander(f"🔗 2. Platform Token Aliases ({len(alias_items)})", expanded=True):
+            _check_and_render_banner(f"hypervisor_s2_{active_plat}", duration_sec=10)
             st.caption("Map canonical tokens to their platform-specific aliases. When a token or any of its aliases appears in OCR output, all mapped values are synchronized bidirectionally.")
 
             col_canon, col_alias, col_del = st.columns([4.4, 4.4, 1.2], vertical_alignment="center")
@@ -1583,7 +1585,8 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
         # ──────────────────────────────────────────────────────────────────────
         # Section 2.5: Relative Spatial Anchors & Local Privacy Redaction
         # ──────────────────────────────────────────────────────────────────────
-        with st.expander("📐 2.5. Relative Spatial Anchors & Local Privacy Redaction", expanded=False):
+        with st.expander("📐 2.5. Relative Spatial Anchors & Local Privacy Redaction", expanded=st.session_state.get(f"exp_s25_{active_plat}", False)):
+            _check_and_render_banner(f"hypervisor_s25_{active_plat}", duration_sec=10)
             _render_spatial_anchors_redaction_editor(plat_parsing, active_plat)
             st.divider()
             col_save_s25, col_reset_s25 = st.columns(2, vertical_alignment="center")
@@ -1603,6 +1606,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                         "msg": f"✅ Section 2.5 (Spatial Anchors) for '{active_plat}' saved!",
                         "ts": time.time()
                     }
+                    st.session_state[f"exp_s25_{active_plat}"] = True
                     st.rerun()
             with col_reset_s25:
                 if st.button("🔄 Reset", key=f"btn_reset_s25_{active_plat}", width="stretch"):
@@ -1621,12 +1625,14 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                         "msg": f"✅ Section 2.5 reset to defaults for '{active_plat}'!",
                         "ts": time.time()
                     }
+                    st.session_state[f"exp_s25_{active_plat}"] = True
                     st.rerun()
 
         # ──────────────────────────────────────────────────────────────────────
         # Section 3: AI Parsing Rules & Invariants
         # ──────────────────────────────────────────────────────────────────────
-        with st.expander("🧠 3. AI Parsing Rules & Invariants", expanded=False):
+        with st.expander("🧠 3. AI Parsing Rules & Invariants", expanded=st.session_state.get(f"exp_s3_{active_plat}", False)):
+            _check_and_render_banner(f"hypervisor_s3_{active_plat}", duration_sec=10)
             st.caption("Complete system instructions injected into the LLM prompt during OCR topology parsing. Covers OCR normalization, token de-concatenation, topology inheritance, and mandatory atomic JSON attributes.")
 
             inst_val = plat_parsing.get("instructions", "")
@@ -1729,6 +1735,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                         "msg": f"✅ Section 3 (AI Parsing Rules) for '{active_plat}' saved!",
                         "ts": time.time()
                     }
+                    st.session_state[f"exp_s3_{active_plat}"] = True
                     st.rerun()
             with col_reset_s3:
                 if st.button("🔄 Reset", key=f"btn_reset_s3_{active_plat}", width="stretch"):
@@ -1747,6 +1754,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                         "msg": f"✅ Section 3 reset to defaults for '{active_plat}'!",
                         "ts": time.time()
                     }
+                    st.session_state[f"exp_s3_{active_plat}"] = True
                     st.rerun()
 
         # ──────────────────────────────────────────────────────────────────────
@@ -1754,7 +1762,8 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
         # ──────────────────────────────────────────────────────────────────────
         export_prompt_val = plat_parsing.get("export_prompt") or DEFAULT_PARSING_PRESETS.get(active_plat, {}).get("export_prompt", "")
 
-        with st.expander("📘 4. Platform Architecture & Specification Guide", expanded=False):
+        with st.expander("📘 4. Platform Architecture & Specification Guide", expanded=st.session_state.get(f"exp_s4_{active_plat}", False)):
+            _check_and_render_banner(f"hypervisor_s4_{active_plat}", duration_sec=10)
             st.caption("Reference guide for defining a new hypervisor platform. Follow sections 1–3 in order, then copy the template below to bootstrap a new platform.")
             st.markdown("""
 **How to define a new platform:**
@@ -1802,6 +1811,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                         "msg": f"✅ Section 4 reset to defaults for '{active_plat}'!",
                         "ts": time.time()
                     }
+                    st.session_state[f"exp_s4_{active_plat}"] = True
                     st.rerun()
 
             st.divider()
@@ -1831,6 +1841,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                         "msg": f"✅ Section 4 (Export Prompt) for '{active_plat}' saved!",
                         "ts": time.time()
                     }
+                    st.session_state[f"exp_s4_{active_plat}"] = True
                     st.rerun()
 
 
