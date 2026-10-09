@@ -1758,90 +1758,95 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                     st.rerun()
 
         # ──────────────────────────────────────────────────────────────────────
-        # Section 4: Platform Architecture & Specification Guide
+        # Section 4: AI Onboarding Blueprint (Read-Only Guide)
         # ──────────────────────────────────────────────────────────────────────
-        export_prompt_val = plat_parsing.get("export_prompt") or DEFAULT_PARSING_PRESETS.get(active_plat, {}).get("export_prompt", "")
-
-        with st.expander("📘 4. Platform Architecture & Specification Guide", expanded=st.session_state.get(f"exp_s4_{active_plat}", False)):
+        with st.expander("📘 4. AI Onboarding Blueprint Guide", expanded=st.session_state.get(f"exp_s4_{active_plat}", False)):
             _check_and_render_banner(f"hypervisor_s4_{active_plat}", duration_sec=10)
-            st.caption("Reference guide for defining a new hypervisor platform. Follow sections 1–3 in order, then copy the template below to bootstrap a new platform.")
+            st.markdown(
+                "<p style='color:#94a3b8;margin-top:-8px;margin-bottom:16px;'>"
+                "A complete reference for onboarding any hypervisor platform into NetBox Hub. "
+                "Use the blueprint prompt below to generate all 4 configuration sections for a new platform."
+                "</p>"
+            )
             st.markdown("""
-**How to define a new platform:**
+**The AI Onboarding Blueprint has 4 components:**
 
-1. **🏷️ 1. Description Templates** — Define NetBox description pattern templates (e.g. `<vmnic> - <v_switch> <purpose>`).
-2. **🔗 2. Platform Token Aliases** — Map canonical tokens (`parent`, `interface`, `speed`) to platform-specific aliases.
-3. **📐 2.5. Spatial Anchors & Redaction** — Configure spatial grouping anchors and local privacy redaction rules.
-4. **🧠 3. AI Parsing Rules & Invariants** — Write the system prompt instructions that guide the LLM during OCR topology parsing.
-5. **External AI Prompt** — Optionally customize the export prompt used by the standalone AI assistant.
-""")
-            col_copy_tpl, col_reset_s4 = st.columns(2, vertical_alignment="center")
-            with col_copy_tpl:
-                if st.button("📋 Copy Specification Template", key=f"btn_copy_tpl_{active_plat}", width="stretch"):
-                    tpl = (
-                        f"## Platform: {active_plat}\n\n"
-                        f"### 1. Description Templates\n"
-                        f"- Pattern: `<interface> - <parent> <purpose>`\n\n"
-                        f"### 2. Platform Token Aliases\n"
-                        f"- parent → v_switch, vswitch, dvswitch\n"
-                        f"- interface → vmnic, vmk, port_group\n"
-                        f"- speed → speed, link_speed\n\n"
-                        f"### 3. AI Parsing Instructions\n"
-                        f"[PLATFORM ARCHITECTURE: {active_plat.upper()}]\n\n"
-                        f"1. OCR TEXT & NORMALIZATION:\n"
-                        f"- Normalize adapter names and port labels...\n\n"
-                        f"2. TOPOLOGY INHERITANCE:\n"
-                        f"- All physical adapters belong to their parent switch...\n\n"
-                        f"3. MANDATORY JSON ATTRIBUTES:\n"
-                        f"- interface, parent, purpose, uplink_role, slot, speed\n"
-                    )
-                    st.code(tpl, language="markdown")
-                    st.toast("Specification template copied to clipboard area above.")
-            with col_reset_s4:
-                if st.button("🔄 Reset Section 4", key=f"btn_reset_s4_{active_plat}", width="stretch"):
-                    default_pars = DEFAULT_PARSING_PRESETS.get(active_plat, {})
-                    if isinstance(default_pars, dict):
-                        plat_parsing["export_prompt"] = default_pars.get("export_prompt", "")
-                    parsing_presets[active_plat] = plat_parsing
-                    rules["topology_parsing_presets"] = parsing_presets
-                    save_naming_rules(rules, source=f"Reset Section 4 for {active_plat}")
-                    SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
-                    _clear_session_state_prefixes(f"txt_export_prompt_{active_plat}")
-                    st.session_state["card_saved_banner"] = {
-                        "section": f"hypervisor_s4_{active_plat}",
-                        "msg": f"✅ Section 4 reset to defaults for '{active_plat}'!",
-                        "ts": time.time()
-                    }
-                    st.session_state[f"exp_s4_{active_plat}"] = True
-                    st.rerun()
+### 🏷️ 1. Description Templates
+Interface naming patterns for NetBox objects. Each template maps a generic pattern to a specific network element type:
+- **Uplink**: Physical uplink naming (e.g. `<vmnic> - <v_switch> <purpose>`)
+- **Bridge**: Linux/virtual switch bridges (e.g. `<bridge> - <purpose>`)
+- **PortGroup**: Port group or VLAN interface names (e.g. `PG-<port_group>`)
+- **Default**: Fallback pattern for unclassified interfaces
+
+### 🔗 2. Platform Token Aliases
+Vendor-specific terminology mapped to canonical JSON keys so the parser normalizes diverse labels:
+- `parent` → [switch, bridge, v_switch, bond]
+- `interface` → [eth, nic, vmnic, port, bond]
+- `speed` → [speed, link_speed, throughput]
+
+### 📐 2.5. Spatial Anchors & Redaction
+Screenshot container headers and local privacy masking for OCR-driven topology extraction:
+- **Container headers** (`container_header`): Text that begins a logical network group (e.g. "Virtual Switch", "Network Bridge")
+- **Adapter columns** (`adapter_column`): Column headers identifying physical adapter lists (e.g. "Physical Adapters", "Interfaces")
+- **Redaction rules**: Deterministic masking of IPv4, MAC addresses, and internal domain names before data leaves the device
+
+### 🧠 3. AI Parsing Rules & Invariants
+LLM system instructions and atomic attribute requirements for topology parsing:
+- OCR text cleaning and vendor prefix normalization
+- Topology parent-child inheritance rules
+- Mandatory JSON attributes: `interface`, `parent`, `purpose`, `uplink_role`, `slot`, `speed`
+""", unsafe_allow_html=True)
 
             st.divider()
-            st.markdown("**External AI Prompt Template**")
-            exp_prompt_val_ui = st.text_area(
-                "Export Prompt",
-                value=export_prompt_val,
-                height=180,
-                key=f"txt_export_prompt_{active_plat}",
-                label_visibility="collapsed"
-            )
-            col_save_s4, _ = st.columns(2, vertical_alignment="center")
-            with col_save_s4:
-                if st.button("💾 Save Export Prompt", key=f"btn_save_s4_{active_plat}", type="primary", width="stretch"):
-                    plat_parsing["export_prompt"] = exp_prompt_val_ui
-                    parsing_presets[active_plat] = plat_parsing
-                    rules["topology_parsing_presets"] = parsing_presets
-                    save_naming_rules(rules, source=f"Save Section 4 for {active_plat}")
-                    fresh = SSM.get_cached_naming_rules() or load_naming_rules()
-                    rules.clear()
-                    rules.update(fresh)
-                    SSM.set_naming_rules(fresh.copy())
-                    SSM.refresh_naming_rules()
-                    st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
-                    st.session_state["card_saved_banner"] = {
-                        "section": f"hypervisor_s4_{active_plat}",
-                        "msg": f"✅ Section 4 (Export Prompt) for '{active_plat}' saved!",
-                        "ts": time.time()
-                    }
-                    st.session_state[f"exp_s4_{active_plat}"] = True
+
+            col_blueprint, col_reset_s4 = st.columns([3, 1], vertical_alignment="center")
+            with col_blueprint:
+                if st.button(
+                    "📋 Copy AI Blueprint Prompt",
+                    key=f"btn_blueprint_{active_plat}",
+                    type="primary",
+                    width="stretch",
+                    help="Generate a complete prompt to paste into ChatGPT/Claude for onboarding a new platform.",
+                ):
+                    blueprint_prompt = (
+                        "You are an enterprise network virtualization architect. "
+                        f"I need to onboard a new hypervisor/virtualization platform into NetBox Hub: \"{active_plat}\".\n\n"
+                        "Please generate the complete configuration specification for this platform "
+                        "strictly following the schema below.\n\n"
+                        "Respond with a JSON object containing:\n\n"
+                        "1. \"templates\": List of NetBox description patterns, e.g.:\n"
+                        "  [\n"
+                        '    {\"code\": \"Uplink\", \"label\": \"Physical Uplink\", '
+                        '\"pattern\": \"<interface> - <parent> <purpose>\"},\n'
+                        '    {\"code\": \"Default\", \"label\": \"Default Interface\", '
+                        '\"pattern\": \"<interface> (<purpose>)\"}\n'
+                        "  ]\n\n"
+                        "2. \"aliases\": Dictionary mapping canonical keys "
+                        "('parent', 'interface', 'speed') to vendor terms:\n"
+                        "  {\n"
+                        '    \"parent\": [\"switch\", \"bridge\"],\n'
+                        '    \"interface\": [\"eth\", \"nic\"],\n'
+                        '    \"speed\": [\"speed\", \"link_speed\"]\n'
+                        "  }\n\n"
+                        "3. \"spatial_anchors\": List of anchor definitions for UI screenshot grouping:\n"
+                        "  [\n"
+                        '    {\"role\": \"container_header\", '
+                        '"patterns\": [\"Virtual Switch\", \"Network Bridge\"]},\n'
+                        '    {\"role\": \"adapter_column\", '
+                        '"patterns\": [\"Physical Adapters\", \"Interfaces\"]}\n'
+                        "  ]\n\n"
+                        "4. \"instructions\": Comprehensive English parsing invariants covering:\n"
+                        "  - OCR text cleaning and vendor prefix normalization\n"
+                        "  - Topology parent-child inheritance\n"
+                        "  - Mandatory JSON attributes: interface, parent, purpose, "
+                        "uplink_role, slot, speed\n"
+                    )
+                    st.code(blueprint_prompt, language="text")
+                    st.caption("*Copy the prompt above and paste it into ChatGPT, Claude, or any LLM to generate the full onboarding spec for* `" + active_plat + "`*.*")
+
+            with col_reset_s4:
+                if st.button("🔄 Reset Guide View", key=f"btn_reset_s4_{active_plat}", width="stretch"):
+                    st.session_state[f"exp_s4_{active_plat}"] = False
                     st.rerun()
 
 
