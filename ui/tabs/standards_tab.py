@@ -1454,7 +1454,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                     }
                     st.rerun()
             with col_reset_s1:
-                if st.button("🔄 Reset", key=f"btn_reset_s1_{active_plat}", width="stretch"):
+                if st.button("🔄 Reset to Defaults", key=f"btn_reset_s1_{active_plat}", width="stretch"):
                     default_hyp = DEFAULT_HYPERVISOR_PRESETS.get(active_plat, [])
                     hyp_presets[active_plat] = [dict(t) for t in default_hyp]
                     rules["hypervisor_presets"] = hyp_presets
@@ -1560,7 +1560,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                     }
                     st.rerun()
             with col_reset_s2:
-                if st.button("🔄 Reset", key=f"btn_reset_s2_{active_plat}", width="stretch"):
+                if st.button("🔄 Reset to Defaults", key=f"btn_reset_s2_{active_plat}", width="stretch"):
                     default_pars = DEFAULT_PARSING_PRESETS.get(active_plat, {})
                     if isinstance(default_pars, dict):
                         plat_parsing["aliases"] = dict(default_pars.get("aliases", {}))
@@ -1609,7 +1609,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                     st.session_state[f"exp_s25_{active_plat}"] = True
                     st.rerun()
             with col_reset_s25:
-                if st.button("🔄 Reset", key=f"btn_reset_s25_{active_plat}", width="stretch"):
+                if st.button("🔄 Reset to Defaults", key=f"btn_reset_s25_{active_plat}", width="stretch"):
                     default_pars = DEFAULT_PARSING_PRESETS.get(active_plat, {})
                     if isinstance(default_pars, dict):
                         default_sp = default_pars.get("spatial_anchors_and_redaction", {})
@@ -1738,7 +1738,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                     st.session_state[f"exp_s3_{active_plat}"] = True
                     st.rerun()
             with col_reset_s3:
-                if st.button("🔄 Reset", key=f"btn_reset_s3_{active_plat}", width="stretch"):
+                if st.button("🔄 Reset to Defaults", key=f"btn_reset_s3_{active_plat}", width="stretch"):
                     default_pars = DEFAULT_PARSING_PRESETS.get(active_plat, {})
                     if isinstance(default_pars, dict):
                         plat_parsing["instructions"] = default_pars.get("instructions", "")
@@ -1762,12 +1762,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
         # ──────────────────────────────────────────────────────────────────────
         with st.expander("📘 4. AI Onboarding Blueprint Guide", expanded=st.session_state.get(f"exp_s4_{active_plat}", False)):
             _check_and_render_banner(f"hypervisor_s4_{active_plat}", duration_sec=10)
-            st.markdown(
-                "<p style='color:#94a3b8;margin-top:-8px;margin-bottom:16px;'>"
-                "A complete reference for onboarding any hypervisor platform into NetBox Hub. "
-                "Use the blueprint prompt below to generate all 4 configuration sections for a new platform."
-                "</p>"
-            )
+            st.caption("A complete reference for onboarding any hypervisor platform into NetBox Hub. Use the blueprint prompt below to generate all 4 configuration sections for a new platform.")
             st.markdown("""
 **The AI Onboarding Blueprint has 4 components:**
 
@@ -3055,7 +3050,7 @@ def _render_hardware_baseline_editor(rules: dict, active_model: str | None = Non
                         }
                         st.rerun()
                 with col_r:
-                    if st.button("🔄 Reset", key=f"hb_reset_{cat_key}", width="stretch"):
+                    if st.button("🔄 Reset to Defaults", key=f"hb_reset_{cat_key}", width="stretch"):
                         rules["hardware_baseline_standards"] = get_hardware_baseline_standards(load_naming_rules())
                         save_naming_rules(rules, source=f"Hardware Baseline: Reset {cat_key}")
                         fresh = SSM.get_cached_naming_rules() or load_naming_rules()
