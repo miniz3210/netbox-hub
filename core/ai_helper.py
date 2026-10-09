@@ -37,6 +37,7 @@ from core.backup_manager import (
     get_choice_values_for_field,
     is_backup_active,
     search_backup_records,
+    verify_full_database,
 )
 import sqlite3
 
@@ -279,18 +280,22 @@ def build_session_backup_context(prompt: str, max_rows: int = 50) -> str:
 def build_backup_context(prompt: str, site_filter: str = None, max_rows: int = 60) -> str:
     """Build AI context from the uploaded NetBox master backup (JSON).
 
-    Returns an empty string when no backup is uploaded or the operator disabled it.
+    Returns an empty string when no backup is uploaded.
+    When the backup is disabled (enabled=0), data is still available but
+    marked as excluded so the AI knows it may not be authoritative.
     """
     from core.shared_backup_state import SharedBackupState
-    
+
     # Check both database backup and SharedBackupState
-    has_db_backup = is_backup_active()
+    # Use has_loaded() instead of is_backup_active() so disabled backups
+    # still provide data (the enabled flag only controls automatic inclusion)
+    meta = get_backup_metadata()
+    has_db_backup = meta.get("loaded", False)
     has_session_backup = SharedBackupState.has_backup()
-    
+
     if not has_db_backup and not has_session_backup:
         return ""
 
-    meta = get_backup_metadata() if has_db_backup else {}
     counts = get_backup_object_counts() if has_db_backup else {}
 
     context: List[str] = []
@@ -299,6 +304,22 @@ def build_backup_context(prompt: str, site_filter: str = None, max_rows: int = 6
     uploaded_at = meta.get("uploaded_at") or "Unknown"
     record_count = meta.get("record_count", 0)
     context.append(f"Source File: {filename} | Uploaded: {uploaded_at} | Objects: {record_count}")
+
+    # Include structured table counts for interfaces and cables
+    try:
+        from core.query_executor import get_table_schema
+        structured_info = []
+        for tbl in ("interfaces", "cables"):
+            try:
+                schema = get_table_schema(tbl)
+                if schema.get("row_count", 0) > 0:
+                    structured_info.append(f"{tbl}: {schema['row_count']} rows")
+            except Exception:
+                pass
+        if structured_info:
+            context.append(f"Structured Tables: {', '.join(structured_info)}")
+    except Exception:
+        pass
 
     source = meta.get("source_info") or {}
     if source:
@@ -713,7 +734,7 @@ def build_comprehensive_ipam_context(prompt: str, site_filter: str = None) -> st
     
     # Site-specific IPAM data
     if target_site:
-        site_ipam = get_ipam_records_by_site(target_site)
+        site_ipam = get_ipam_records_by_site(target_site)[:200]
         if site_ipam:
             context.append(f"\n=== VLANs and Prefixes for Site: {target_site} ===")
             for record in site_ipam[:100]:  # Show up to 100 records
@@ -772,13 +793,18 @@ def build_comprehensive_ipam_context(prompt: str, site_filter: str = None) -> st
     return sanitized_text
 
 def build_comprehensive_naming_context(prompt: str, site_filter: str = None) -> str:
-    """Build comprehensive naming/inventory context for AI assistant."""
+    """Build comprehensive naming/inventory context for AI assistant.
+
+    All record fetches are hard-capped to prevent token overflow when the
+    database contains thousands of devices / VLANs / prefixes.
+    """
     context = []
-    
+    MAX_PREVIEW = 50  # per-category cap for "all records" preview
+
     # Database statistics
-    all_devices = get_records_by_category("device")
-    all_hypervisors = get_records_by_category("hypervisor")
-    all_vms = get_records_by_category("vm")
+    all_devices = get_records_by_category("device")[:MAX_PREVIEW]
+    all_hypervisors = get_records_by_category("hypervisor")[:MAX_PREVIEW]
+    all_vms = get_records_by_category("vm")[:MAX_PREVIEW]
     
     context.append(f"Database Statistics:")
     context.append(f"- Total Devices: {len(all_devices)}")
@@ -1022,12 +1048,17 @@ _SYSTEM_NOTICE_TEMPLATE = (
 )
 
 
-def _fetch_device_context(name: str, site_filter: str = "") -> List[Dict[str, Any]]:
+def _fetch_device_context(name: str, site_filter: str = "", limit: int = 200) -> List[Dict[str, Any]]:
     """Return full backup + inventory records for *name* (device/VM/interfaces/IPs).
 
     Searches both ``backup_records`` (for NetBox objects like interfaces and IP
     addresses associated with the device) and ``inventory_records`` (for the
-    device/VM profile itself).
+    device/VM profile itself.
+
+    Args:
+        name: Device/VM name to search for.
+        site_filter: Optional site name to narrow the search.
+        limit: Maximum total rows to return (hard cap to prevent token overflow).
     """
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -1041,20 +1072,23 @@ def _fetch_device_context(name: str, site_filter: str = "") -> List[Dict[str, An
         params.append(f"%{site_filter.strip().lower()}%")
 
     # 1. Backup records — device, interfaces, IPs, VRFs, NAT, etc.
+    # Allocate budget: 60% for backup, 40% for inventory
+    backup_limit = min(limit * 3 // 5, limit)
     cursor.execute(
         f"SELECT object_type, object_label, name, site, summary FROM backup_records "
         f"WHERE (LOWER(name) LIKE ? OR search_blob LIKE ?){where_site} "
-        f"ORDER BY object_type, name",
+        f"ORDER BY object_type, name LIMIT {backup_limit}",
         params + [pattern] + (params[1:] if site_filter else []),
     )
     for row in cursor.fetchall():
         rows.append(dict(row))
 
-    # 2. Inventory records — device/VM profile
+    # 2. Inventory records — device/VM profile (remaining budget)
+    inventory_limit = max(1, limit - len(rows))
     cursor.execute(
         f"SELECT category, name, model_or_role, site, cluster, description "
         f"FROM inventory_records WHERE LOWER(name) LIKE ?{where_site} "
-        f"ORDER BY category, name",
+        f"ORDER BY category, name LIMIT {inventory_limit}",
         params,
     )
     for row in cursor.fetchall():
@@ -1105,7 +1139,7 @@ def try_fuzzy_hostname_lookup(
     vault._get_or_create_token(best_name, "HOST", None)
 
     # Fetch full device context for the matched hostname
-    context_rows = _fetch_device_context(best_name, site_filter=site_filter)
+    context_rows = _fetch_device_context(best_name, site_filter=site_filter, limit=100)
 
     if not context_rows:
         # No context available — fall back to suggestion-only message

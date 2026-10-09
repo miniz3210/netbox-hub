@@ -50,7 +50,9 @@ def _build_targeted_context(intent: IntentRouting, user_query: str = "", max_row
     
     NEW: Includes relationship inference for cluster-host-VM queries.
     """
-    if not is_backup_active():
+    from core.backup_manager import get_backup_metadata
+    meta = get_backup_metadata()
+    if not meta.get("loaded", False):
         return "No NetBox backup data available."
     
     context_parts = []

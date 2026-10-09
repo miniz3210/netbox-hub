@@ -20,7 +20,9 @@ from core.backup_manager import (
     get_choice_set_summary,
     save_netbox_backup,
     set_backup_enabled,
+    verify_full_database,
 )
+from core.query_executor import execute_query, list_queryable_tables, export_query_to_csv, export_query_to_json
 from core.shared_backup_state import SharedBackupState
 from core.vault import SanitizerVault
 
@@ -1028,6 +1030,133 @@ def _render_csv_upload_section(scope_key: str, csv_uploader_key: str) -> None:
         )
 
 
+def _render_sql_query_tool(scope_key: str, meta: dict) -> None:
+    """Render a SQL query tool for structured tables with pagination and export."""
+    if not meta["loaded"]:
+        return
+
+    with st.expander(f"🔍 SQL Query Tool (full dataset — no row limit)", expanded=False):
+        st.caption(
+            "Execute SQL queries against structured tables (interfaces, cables, sites, IPAM, inventory). "
+            "No arbitrary LIMIT is applied. Use LIMIT in your SQL if you want pagination. "
+            "Export results to CSV or JSON."
+        )
+
+        # Show verification status
+        try:
+            ver = verify_full_database()
+            if ver["verified"]:
+                st.success(f"✅ Database verified: {ver['totals'].get('interfaces', 0)} interfaces, {ver['totals'].get('cables', 0)} cables")
+            else:
+                st.warning("⚠️ Database verification incomplete — some tables may be empty")
+        except Exception as e:
+            st.error(f"Verification failed: {e}")
+
+        # Table info
+        try:
+            tables = list_queryable_tables()
+            col_t1, col_t2, col_t3 = st.columns(3)
+            for i, t in enumerate(tables):
+                with [col_t1, col_t2, col_t3][i % 3]:
+                    st.metric(t["table"].title(), f"{t['row_count']:,} rows", t["column_names"][0] if t["column_names"] else "")
+        except Exception:
+            pass
+
+        # Query input
+        default_queries = [
+            "SELECT COUNT(*) AS total FROM interfaces",
+            "SELECT device_name, COUNT(*) AS iface_count FROM interfaces GROUP BY device_name ORDER BY iface_count DESC LIMIT 20",
+            "SELECT * FROM interfaces WHERE enabled = 1 LIMIT 20",
+            "SELECT * FROM cables LIMIT 20",
+            "SELECT i.device_name, i.name, i.type, i.mac_address FROM interfaces i JOIN cables c ON i.id = c.a_interface_id LIMIT 20",
+        ]
+
+        query = st.text_area(
+            "SQL Query",
+            value=default_queries[0],
+            height=80,
+            key=f"sql_query_{scope_key}",
+            help="Enter any SELECT statement. No arbitrary row limit is applied.",
+        )
+
+        col_q, col_fmt, col_go = st.columns([3, 1, 1])
+        with col_q:
+            quick = st.selectbox(
+                "Quick queries",
+                options=default_queries,
+                index=0,
+                key=f"sql_quick_{scope_key}",
+                label_visibility="collapsed",
+            )
+        with col_fmt:
+            fmt = st.selectbox(
+                "Format",
+                options=["json", "summary"],
+                key=f"sql_fmt_{scope_key}",
+                label_visibility="collapsed",
+            )
+        with col_go:
+            run_btn = st.button("▶ Run", type="primary", key=f"sql_run_{scope_key}")
+
+        if run_btn and query.strip():
+            with st.spinner("Executing query..."):
+                result = execute_query(query, output_format=fmt)
+
+            if result["status"] == "error":
+                st.error(f"❌ Query error: {result.get('error', 'Unknown error')}")
+            else:
+                st.markdown(f"✅ **{result['row_count']:,} rows** returned")
+
+                if fmt == "json" and result.get("rows"):
+                    # Paginated display
+                    total = result["row_count"]
+                    page_size = 50
+                    max_pages = max(1, (total + page_size - 1) // page_size)
+                    page = st.slider("Page", 1, max_pages, 1, key=f"sql_page_{scope_key}")
+                    start = (page - 1) * page_size
+                    end = min(start + page_size, total)
+                    st.markdown(f"Showing rows {start + 1}–{end} of {total:,}")
+
+                    import pandas as pd
+                    df = pd.DataFrame(result["rows"])
+                    st.dataframe(df, use_container_width=True, height=400)
+
+                    # Column stats
+                    if not st.checkbox("Show column statistics", key=f"sql_stats_{scope_key}"):
+                        pass
+                    else:
+                        for col in result["columns"]:
+                            non_null = sum(1 for r in result["rows"] if r.get(col) is not None and str(r.get(col)) != "")
+                            st.caption(f"**{col}**: {non_null}/{total} non-null ({non_null*100/max(total,1):.0f}%)")
+
+                elif fmt == "summary" and result.get("summary"):
+                    st.code(result["summary"], language="text")
+
+                # Export buttons
+                exp_col1, exp_col2 = st.columns(2)
+                with exp_col1:
+                    if st.button("📥 Export CSV", key=f"sql_csv_{scope_key}", disabled=total > 50000):
+                        if total > 50000:
+                            st.warning("Export limited to 50,000 rows. Add a LIMIT clause to your query.")
+                        else:
+                            export_result = export_query_to_csv(query, f"data/sql_export_{scope_key}.csv")
+                            if export_result["status"] == "ok":
+                                st.success(f"Exported {export_result['rows_exported']:,} rows to CSV")
+                with exp_col2:
+                    if st.button("📥 Export JSON", key=f"sql_json_{scope_key}", disabled=total > 50000):
+                        if total > 50000:
+                            st.warning("Export limited to 50,000 rows. Add a LIMIT clause to your query.")
+                        else:
+                            export_result = export_query_to_json(query, f"data/sql_export_{scope_key}.json")
+                            if export_result["status"] == "ok":
+                                st.success(f"Exported {export_result['rows_exported']:,} rows to JSON")
+
+                # Raw data toggle
+                if result.get("rows") and st.checkbox("Show raw data", key=f"sql_raw_{scope_key}"):
+                    import json
+                    st.code(json.dumps(result["rows"][:100], indent=2, default=str), language="json")
+
+
 def render_backup_uploader(scope_key: str) -> dict:
     """
     Main orchestrator for NetBox backup and CSV upload UI.
@@ -1062,12 +1191,15 @@ def render_backup_uploader(scope_key: str) -> dict:
     
     # Step 1: JSON Backup Upload
     _render_json_backup_section(scope_key, meta, json_uploader_key, checkbox_key, result_key, error_key)
-    
+
     # Display backup contents
     _render_backup_contents_section(scope_key, meta)
-    
+
     # Display custom field choice sets
     _render_choice_sets_section()
+
+    # SQL Query Tool
+    _render_sql_query_tool(scope_key, meta)
     
     # Step 2: CSV Upload (moved to bottom per user request)
     _render_csv_upload_section(scope_key, csv_uploader_key)

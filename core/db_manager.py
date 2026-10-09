@@ -91,6 +91,53 @@ def init_db():
         if "record_type" not in columns:
             cursor.execute("ALTER TABLE ipam_records ADD COLUMN record_type TEXT DEFAULT 'prefix'")
 
+        # Interfaces Table (structured from NetBox backup)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS interfaces (
+                id INTEGER PRIMARY KEY,
+                device_id INTEGER,
+                device_name TEXT,
+                name TEXT,
+                label TEXT,
+                type TEXT,
+                enabled INTEGER DEFAULT 0,
+                mgmt_only INTEGER DEFAULT 0,
+                mode TEXT,
+                mtu INTEGER,
+                mac_address TEXT,
+                description TEXT,
+                site TEXT,
+                imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_interfaces_device ON interfaces(device_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_interfaces_name ON interfaces(name)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_interfaces_site ON interfaces(site)")
+
+        # Cables Table (structured from NetBox backup)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS cables (
+                id INTEGER PRIMARY KEY,
+                label TEXT,
+                status TEXT,
+                type TEXT,
+                description TEXT,
+                a_device_id INTEGER,
+                a_device_name TEXT,
+                a_interface_id INTEGER,
+                a_interface_name TEXT,
+                b_device_id INTEGER,
+                b_device_name TEXT,
+                b_interface_id INTEGER,
+                b_interface_name TEXT,
+                imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_cables_a_device ON cables(a_device_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_cables_b_device ON cables(b_device_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_cables_a_interface ON cables(a_interface_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_cables_b_interface ON cables(b_interface_id)")
+
         # Create indexes for performance optimization
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_ipam_site ON ipam_records(site)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_ipam_vlan_id ON ipam_records(vlan_id)")
