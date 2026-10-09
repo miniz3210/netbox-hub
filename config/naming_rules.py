@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import copy
 from typing import Dict, List
 from datetime import datetime
 from config.constants import RULES_FILE, RULES_HISTORY_FILE, MAX_HISTORY_ENTRIES
@@ -32,6 +33,30 @@ DEFAULT_NAMING_PATTERNS = {
         "interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)"
     ),
     "vlan_name_pattern": "<role>",
+}
+
+# Structured hardware baseline standards replacing the legacy single-string
+# ``netbox_server_yaml`` key.  Each category carries its own schema fields and,
+# for module-type hardware, an explicit interface-naming pattern.
+DEFAULT_HARDWARE_BASELINE_STANDARDS = {
+    "server": {
+        "display_name": "Server",
+        "console_ports": "Serial (de-9)",
+        "module_bays": "PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3",
+        "interfaces": "OOB Management ONLY (1000base-t, mgmt_only: true)",
+    },
+    "module_nic": {
+        "display_name": "Module / NIC",
+        "interface_pattern": "{module}/Port{index}",
+        "default_port_count": 2,
+        "port_start_index": 1,
+    },
+    "storage_san": {
+        "display_name": "Storage / SAN",
+        "interface_pattern": "{module}/Port{index}",
+        "default_port_count": 4,
+        "port_start_index": 1,
+    },
 }
 
 # Canonical hypervisor-scoped variable names used for seeding and re-scoping.
@@ -817,6 +842,22 @@ def _normalize_rules(raw: dict) -> dict:
 
     merged["csv_schemas"] = get_csv_schemas(raw)
 
+    # ── Hardware Baseline Standards (structured, per-category) ────────────────
+    merged["hardware_baseline_standards"] = _normalize_hardware_baseline(raw)
+    # Back-fill legacy ``netbox_server_yaml`` from the "server" category for
+    # callers that still read the old flat key.
+    _hb = merged.get("hardware_baseline_standards", {})
+    _server_cfg = _hb.get("server") if isinstance(_hb, dict) else {}
+    if isinstance(_server_cfg, dict):
+        server_parts = []
+        for _k in ("console_ports", "module_bays", "interfaces"):
+            _v = _server_cfg.get(_k)
+            if isinstance(_v, str) and _v.strip():
+                # Normalise the key to the legacy hyphenated form on output.
+                _lk = _k.replace("_", "-")
+                server_parts.append(f"{_lk}: {_v}")
+        merged.setdefault("netbox_server_yaml", "; ".join(server_parts))
+
     # Normalize topology_parsing_presets: historically stored as list in some
     # YAML/disk files; always coerce to canonical dict keyed by platform name.
     _raw_tpp = raw.get("topology_parsing_presets")
@@ -942,6 +983,65 @@ def get_esxi_network_presets(rules: dict) -> list:
     """Return the ESXi network description presets list from a rules dict."""
     raw = rules.get("esxi_network_presets")
     return _normalize_presets(raw, ESXI_NETWORK_PRESETS)
+
+
+def _normalize_hardware_baseline(raw: dict) -> dict:
+    """Normalize ``hardware_baseline_standards`` from raw rules.
+
+    Merges user edits on top of ``DEFAULT_HARDWARE_BASELINE_STANDARDS`` so that
+    any missing category falls back to the factory default while preserving
+    explicit user values.
+    """
+    raw_hb = raw.get("hardware_baseline_standards")
+    if not isinstance(raw_hb, dict):
+        import copy
+        return copy.deepcopy(DEFAULT_HARDWARE_BASELINE_STANDARDS)
+
+    merged = {}
+    for cat_key, default_cfg in DEFAULT_HARDWARE_BASELINE_STANDARDS.items():
+        user_cfg = raw_hb.get(cat_key)
+        if isinstance(user_cfg, dict):
+            merged[cat_key] = {**default_cfg, **user_cfg}
+        else:
+            merged[cat_key] = dict(default_cfg)
+    return merged
+
+
+def get_hardware_baseline_standards(rules: dict) -> dict:
+    """Return the structured hardware baseline standards dict (defaults if missing)."""
+    raw = rules.get("hardware_baseline_standards")
+    if not isinstance(raw, dict) or not raw:
+        return copy.deepcopy(DEFAULT_HARDWARE_BASELINE_STANDARDS)
+    # Ensure every default category exists; merge user overrides.
+    merged = {}
+    for cat_key, default_cfg in DEFAULT_HARDWARE_BASELINE_STANDARDS.items():
+        user_cfg = raw.get(cat_key)
+        if isinstance(user_cfg, dict):
+            merged[cat_key] = {**default_cfg, **user_cfg}
+        else:
+            merged[cat_key] = dict(default_cfg)
+    return merged
+
+
+def get_module_interface_pattern(rules: dict = None) -> str:
+    """Return the module interface-naming pattern from hardware baseline standards.
+
+    Reads the ``module_nic`` category's ``interface_pattern`` (default
+    ``{module}/Port{index}``).  Falls back to ``netbox_server_yaml`` for
+    backward compatibility when the structured model is absent.
+    """
+    if rules is None:
+        rules = load_naming_rules()
+    hb = get_hardware_baseline_standards(rules)
+    module_cfg = hb.get("module_nic", {})
+    pattern = module_cfg.get("interface_pattern", "{module}/Port{index}")
+    if isinstance(pattern, str) and pattern.strip():
+        return pattern.strip()
+    # Backward-compat: try to extract from the legacy flat string.
+    legacy = rules.get("netbox_server_yaml", "")
+    if isinstance(legacy, str) and legacy.strip():
+        return legacy.strip()
+    return "{module}/Port{index}"
 
 
 def get_hardware_slot_mappings(rules: dict = None) -> dict:
@@ -1493,6 +1593,25 @@ def export_rules_as_prompt(rules: Dict[str, str]) -> str:
 5. Available Pattern Variables:
 {var_lines}
 
-6. NetBox Hardware YAML Schema:
+6. NetBox Hardware Baseline Standards (per category):
+{_format_hardware_baseline_prompt(rules)}
+
+7. NetBox Hardware YAML Schema (legacy flat form):
 - {p.get('netbox_server_yaml', '')}
 """
+
+
+def _format_hardware_baseline_prompt(rules: dict) -> str:
+    """Format the structured hardware baseline standards for prompt injection."""
+    hb = get_hardware_baseline_standards(rules)
+    lines = []
+    for cat_key, cfg in hb.items():
+        if not isinstance(cfg, dict):
+            continue
+        display = cfg.get("display_name") or cat_key.replace("_", " ").title()
+        lines.append(f"- {display} ({cat_key}):")
+        for field, val in cfg.items():
+            if field == "display_name" or not isinstance(val, str) or not val.strip():
+                continue
+            lines.append(f"    * {field}: {val}")
+    return "\n".join(lines)

@@ -17,6 +17,7 @@ from config.naming_rules import (
     DEFAULT_HOST_TYPE_PRESETS, DEFAULT_VM_PRESETS,
     DEFAULT_RULES, DEFAULT_VLAN_PRESETS, DEFAULT_VLAN_DESCRIPTION_MAPPINGS,
     get_ipam_role_mappings, DEFAULT_IPAM_ROLE_MAPPINGS,
+    get_hardware_baseline_standards, DEFAULT_HARDWARE_BASELINE_STANDARDS,
 )
 from core.naming_engine import generate_naming_pattern, generate_autocorrect_rule
 from core.session_manager import SessionStateManager as SSM
@@ -1165,6 +1166,10 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
     ``export_prompt``.  The ``hypervisor_presets`` dict still holds the
     NetBox description templates (patterns) – these are saved together
     atomically with the aliases and instructions.
+
+    Each logical section is wrapped in its own expander with independent
+    ``💾 Save & Apply Changes`` / ``🔄 Reset`` buttons so banner leakage
+    across sections is eliminated.
     """
     active_model = active_model or st.session_state.get("active_model", "")
     hyp_presets = rules.get("hypervisor_presets") or {}
@@ -1337,357 +1342,501 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
         if not plat_parsing.get("export_prompt"):
             plat_parsing["export_prompt"] = default_fallback.get("export_prompt", "")
 
-        st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
-        st.markdown(
-            f"<div style='display:flex; justify-content:space-between; align-items:center; margin-top:12px; margin-bottom:8px;'>"
-            f"<span style='font-size:1.05rem; font-weight:600;'>1. NetBox Description Templates</span>"
-            f"<span style='background:rgba(255,255,255,0.08); padding:2px 8px; border-radius:10px; font-size:0.75rem; color:#94a3b8;'>{len(plat_patterns)} templates</span>"
-            f"</div>",
-            unsafe_allow_html=True
-        )
+        # ──────────────────────────────────────────────────────────────────────
+        # Section 1: NetBox Description Templates
+        # ──────────────────────────────────────────────────────────────────────
+        with st.expander(f"🏷️ 1. Description Templates ({len(plat_patterns)} templates)", expanded=True):
+            HYP_TPL_COLS = [1.2, 2.2, 4.4, 0.8, 1.4]
+            c_h0, c_h1, c_h2, c_h3, c_h4 = st.columns(HYP_TPL_COLS, vertical_alignment="center")
+            with c_h0:
+                st.markdown("**Code**")
+            with c_h1:
+                st.markdown("**Label**")
+            with c_h2:
+                st.markdown("**Pattern Template**")
+            with c_h3:
+                st.markdown("**Hide**")
+            with c_h4:
+                st.markdown("<span class='action-header'>**Action**</span>", unsafe_allow_html=True)
 
-        HYP_TPL_COLS = [1.2, 2.2, 4.4, 0.8, 1.4]
-        c_h0, c_h1, c_h2, c_h3, c_h4 = st.columns(HYP_TPL_COLS, vertical_alignment="center")
-        with c_h0:
-            st.markdown("**Code**")
-        with c_h1:
-            st.markdown("**Label**")
-        with c_h2:
-            st.markdown("**Pattern Template**")
-        with c_h3:
-            st.markdown("**Hide**")
-        with c_h4:
-            st.markdown("<span class='action-header'>**Action**</span>", unsafe_allow_html=True)
+            updated_patterns = []
+            rows_to_delete = []
+            move_up_idx = None
+            move_down_idx = None
 
-        updated_patterns = []
-        rows_to_delete = []
-        move_up_idx = None
-        move_down_idx = None
+            for idx, row in enumerate(plat_patterns):
+                c0, c1, c2, c3, c4 = st.columns(HYP_TPL_COLS, vertical_alignment="center")
+                c_code = c0.text_input("Code", value=row.get("code", ""), key=f"hyp_code_{active_plat}_{idx}", label_visibility="collapsed")
+                c_lbl = c1.text_input("Label", value=row.get("label", ""), key=f"hyp_lbl_{active_plat}_{idx}", label_visibility="collapsed")
+                c_pat = c2.text_input("Pattern", value=row.get("pattern", ""), key=f"hyp_pat_{active_plat}_{idx}", label_visibility="collapsed")
+                c_hide = c3.checkbox(f"Hide {row.get('code', '')}", value=bool(row.get("hidden", False)), key=f"hyp_hide_{active_plat}_{idx}", label_visibility="collapsed")
 
-        for idx, row in enumerate(plat_patterns):
-            c0, c1, c2, c3, c4 = st.columns(HYP_TPL_COLS, vertical_alignment="center")
-            c_code = c0.text_input("Code", value=row.get("code", ""), key=f"hyp_code_{active_plat}_{idx}", label_visibility="collapsed")
-            c_lbl = c1.text_input("Label", value=row.get("label", ""), key=f"hyp_lbl_{active_plat}_{idx}", label_visibility="collapsed")
-            c_pat = c2.text_input("Pattern", value=row.get("pattern", ""), key=f"hyp_pat_{active_plat}_{idx}", label_visibility="collapsed")
-            c_hide = c3.checkbox(f"Hide {row.get('code', '')}", value=bool(row.get("hidden", False)), key=f"hyp_hide_{active_plat}_{idx}", label_visibility="collapsed")
+                with c4:
+                    btn_c1, btn_c2, btn_c3 = st.columns(3)
+                    if idx > 0:
+                        if btn_c1.button("⬆️", key=f"hyp_up_{active_plat}_{idx}", help="Move Up"):
+                            move_up_idx = idx
+                    if idx < len(plat_patterns) - 1:
+                        if btn_c2.button("⬇️", key=f"hyp_dn_{active_plat}_{idx}", help="Move Down"):
+                            move_down_idx = idx
+                    if btn_c3.button("🗑️", key=f"hyp_del_{active_plat}_{idx}", help="Delete Template"):
+                        rows_to_delete.append(idx)
 
-            with c4:
-                btn_c1, btn_c2, btn_c3 = st.columns(3)
-                if idx > 0:
-                    if btn_c1.button("⬆️", key=f"hyp_up_{active_plat}_{idx}", help="Move Up"):
-                        move_up_idx = idx
-                if idx < len(plat_patterns) - 1:
-                    if btn_c2.button("⬇️", key=f"hyp_dn_{active_plat}_{idx}", help="Move Down"):
-                        move_down_idx = idx
-                if btn_c3.button("🗑️", key=f"hyp_del_{active_plat}_{idx}", help="Delete Template"):
-                    rows_to_delete.append(idx)
+                updated_patterns.append({"code": c_code, "label": c_lbl, "pattern": c_pat, "hidden": bool(c_hide)})
 
-            updated_patterns.append({"code": c_code, "label": c_lbl, "pattern": c_pat, "hidden": bool(c_hide)})
-
-        if rows_to_delete:
-            for r_idx in sorted(rows_to_delete, reverse=True):
-                updated_patterns.pop(r_idx)
-            plat_patterns = updated_patterns
-            hyp_presets[active_plat] = plat_patterns
-            rules["hypervisor_presets"] = hyp_presets
-            save_naming_rules(rules, source=f"Delete template in {active_plat}")
-            SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
-            st.rerun()
-
-        if move_up_idx is not None:
-            updated_patterns[move_up_idx - 1], updated_patterns[move_up_idx] = updated_patterns[move_up_idx], updated_patterns[move_up_idx - 1]
-            hyp_presets[active_plat] = updated_patterns
-            rules["hypervisor_presets"] = hyp_presets
-            save_naming_rules(rules, source=f"Reorder templates in {active_plat}")
-            SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
-            st.rerun()
-
-        if move_down_idx is not None:
-            updated_patterns[move_down_idx + 1], updated_patterns[move_down_idx] = updated_patterns[move_down_idx], updated_patterns[move_down_idx + 1]
-            hyp_presets[active_plat] = updated_patterns
-            rules["hypervisor_presets"] = hyp_presets
-            save_naming_rules(rules, source=f"Reorder templates in {active_plat}")
-            SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
-            st.rerun()
-
-        st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
-        with st.form(key=f"hyp_tpl_add_{active_plat}", clear_on_submit=True):
-            ac0, ac1, ac2, ac3, ac4 = st.columns(HYP_TPL_COLS, vertical_alignment="center")
-            with ac0:
-                new_t_code = st.text_input("New Code", placeholder="e.g. Trunk", key=f"new_hyp_code_{active_plat}", label_visibility="collapsed")
-            with ac1:
-                new_t_label = st.text_input("New Label", placeholder="e.g. Trunk Adapter", key=f"new_hyp_lbl_{active_plat}", label_visibility="collapsed")
-            with ac2:
-                new_t_pattern = st.text_input("New Pattern", placeholder="<interface> (<vlan> VLAN)", key=f"new_hyp_pat_{active_plat}", label_visibility="collapsed")
-            with ac3:
-                new_t_hide = st.checkbox("Hide new template", value=False, key=f"new_hyp_hide_{active_plat}", label_visibility="collapsed")
-            with ac4:
-                add_tpl = st.form_submit_button("➕ Add", width="stretch")
-
-        if add_tpl:
-            if new_t_code and new_t_pattern:
-                updated_patterns.append({
-                    "code": new_t_code,
-                    "label": new_t_label or new_t_code,
-                    "pattern": new_t_pattern,
-                    "hidden": bool(new_t_hide),
-                })
-                hyp_presets[active_plat] = updated_patterns
+            # Immediate delete/reorder actions (they save themselves)
+            if rows_to_delete:
+                for r_idx in sorted(rows_to_delete, reverse=True):
+                    updated_patterns.pop(r_idx)
+                plat_patterns = updated_patterns
+                hyp_presets[active_plat] = plat_patterns
                 rules["hypervisor_presets"] = hyp_presets
-                save_naming_rules(rules, source=f"Add template to {active_plat}")
+                save_naming_rules(rules, source=f"Delete template in {active_plat}")
                 SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
                 st.rerun()
 
-        st.markdown("<div style='height: 16px; border-bottom: 1px solid rgba(255,255,255,0.07);'></div>", unsafe_allow_html=True)
+            if move_up_idx is not None:
+                updated_patterns[move_up_idx - 1], updated_patterns[move_up_idx] = updated_patterns[move_up_idx], updated_patterns[move_up_idx - 1]
+                hyp_presets[active_plat] = updated_patterns
+                rules["hypervisor_presets"] = hyp_presets
+                save_naming_rules(rules, source=f"Reorder templates in {active_plat}")
+                SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
+                st.rerun()
 
-        # ── Section 2: Platform Token Aliases ────────────────────────────────
+            if move_down_idx is not None:
+                updated_patterns[move_down_idx + 1], updated_patterns[move_down_idx] = updated_patterns[move_down_idx], updated_patterns[move_down_idx + 1]
+                hyp_presets[active_plat] = updated_patterns
+                rules["hypervisor_presets"] = hyp_presets
+                save_naming_rules(rules, source=f"Reorder templates in {active_plat}")
+                SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
+                st.rerun()
+
+            with st.form(key=f"hyp_tpl_add_{active_plat}", clear_on_submit=True):
+                ac0, ac1, ac2, ac3, ac4 = st.columns(HYP_TPL_COLS, vertical_alignment="center")
+                with ac0:
+                    new_t_code = st.text_input("New Code", placeholder="e.g. Trunk", key=f"new_hyp_code_{active_plat}", label_visibility="collapsed")
+                with ac1:
+                    new_t_label = st.text_input("New Label", placeholder="e.g. Trunk Adapter", key=f"new_hyp_lbl_{active_plat}", label_visibility="collapsed")
+                with ac2:
+                    new_t_pattern = st.text_input("New Pattern", placeholder="<interface> (<vlan> VLAN)", key=f"new_hyp_pat_{active_plat}", label_visibility="collapsed")
+                with ac3:
+                    new_t_hide = st.checkbox("Hide new template", value=False, key=f"new_hyp_hide_{active_plat}", label_visibility="collapsed")
+                with ac4:
+                    add_tpl = st.form_submit_button("➕ Add", width="stretch")
+
+            if add_tpl:
+                if new_t_code and new_t_pattern:
+                    updated_patterns.append({
+                        "code": new_t_code,
+                        "label": new_t_label or new_t_code,
+                        "pattern": new_t_pattern,
+                        "hidden": bool(new_t_hide),
+                    })
+                    hyp_presets[active_plat] = updated_patterns
+                    rules["hypervisor_presets"] = hyp_presets
+                    save_naming_rules(rules, source=f"Add template to {active_plat}")
+                    SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
+                    st.rerun()
+
+            st.divider()
+            col_save_s1, col_reset_s1 = st.columns(2, vertical_alignment="center")
+            with col_save_s1:
+                if st.button("💾 Save & Apply Changes", key=f"btn_save_s1_{active_plat}", type="primary", width="stretch"):
+                    hyp_presets[active_plat] = updated_patterns
+                    rules["hypervisor_presets"] = hyp_presets
+                    save_naming_rules(rules, source=f"Save Section 1 for {active_plat}")
+                    fresh = SSM.get_cached_naming_rules() or load_naming_rules()
+                    rules.clear()
+                    rules.update(fresh)
+                    SSM.set_naming_rules(fresh.copy())
+                    SSM.refresh_naming_rules()
+                    st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
+                    st.session_state["card_saved_banner"] = {
+                        "section": f"hypervisor_s1_{active_plat}",
+                        "msg": f"✅ Section 1 (Description Templates) for '{active_plat}' saved!",
+                        "ts": time.time()
+                    }
+                    st.rerun()
+            with col_reset_s1:
+                if st.button("🔄 Reset", key=f"btn_reset_s1_{active_plat}", width="stretch"):
+                    default_hyp = DEFAULT_HYPERVISOR_PRESETS.get(active_plat, [])
+                    hyp_presets[active_plat] = [dict(t) for t in default_hyp]
+                    rules["hypervisor_presets"] = hyp_presets
+                    save_naming_rules(rules, source=f"Reset Section 1 for {active_plat}")
+                    SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
+                    _clear_session_state_prefixes(
+                        f"hyp_code_{active_plat}_", f"hyp_lbl_{active_plat}_",
+                        f"hyp_pat_{active_plat}_", f"hyp_hide_{active_plat}_",
+                        f"new_hyp_code_{active_plat}", f"new_hyp_lbl_{active_plat}",
+                        f"new_hyp_pat_{active_plat}", f"new_hyp_hide_{active_plat}",
+                    )
+                    st.session_state["card_saved_banner"] = {
+                        "section": f"hypervisor_s1_{active_plat}",
+                        "msg": f"✅ Section 1 reset to defaults for '{active_plat}'!",
+                        "ts": time.time()
+                    }
+                    st.rerun()
+
+        # ──────────────────────────────────────────────────────────────────────
+        # Section 2: Platform Token Aliases
+        # ──────────────────────────────────────────────────────────────────────
         aliases = plat_parsing.get("aliases", {})
         if not isinstance(aliases, dict):
             aliases = {}
         alias_items = list(aliases.items())
 
-        st.markdown(
-            f"<div style='display:flex; justify-content:space-between; align-items:center; margin-top:12px; margin-bottom:4px;'>"
-            f"<span style='font-size:1.05rem; font-weight:600;'>2. Platform Token Aliases</span>"
-            f"<span style='background:rgba(255,255,255,0.08); padding:2px 8px; border-radius:10px; font-size:0.75rem; color:#94a3b8;'>{len(alias_items)} aliases</span>"
-            f"</div>",
-            unsafe_allow_html=True
-        )
-        st.caption("Map canonical tokens to their platform-specific aliases. When a token or any of its aliases appears in OCR output, all mapped values are synchronized bidirectionally.")
+        with st.expander(f"🔗 2. Platform Token Aliases ({len(alias_items)})", expanded=True):
+            st.caption("Map canonical tokens to their platform-specific aliases. When a token or any of its aliases appears in OCR output, all mapped values are synchronized bidirectionally.")
 
-        col_canon, col_alias, col_del = st.columns([4.4, 4.4, 1.2], vertical_alignment="center")
-        with col_canon:
-            st.markdown("**Canonical Token**")
-        with col_alias:
-            st.markdown("**Platform Aliases (comma-separated)**")
-        with col_del:
-            pass
+            col_canon, col_alias, col_del = st.columns([4.4, 4.4, 1.2], vertical_alignment="center")
+            with col_canon:
+                st.markdown("**Canonical Token**")
+            with col_alias:
+                st.markdown("**Platform Aliases (comma-separated)**")
+            with col_del:
+                pass
 
-        updated_aliases = {}
-        for idx, (canonical, alias_list) in enumerate(alias_items):
-            alias_str = ", ".join(alias_list) if isinstance(alias_list, list) else str(alias_list)
-            c_col, a_col, d_col = st.columns([4.4, 4.4, 1.2], vertical_alignment="center")
-            with c_col:
-                new_canon = st.text_input(
-                    "Canonical Token", value=canonical,
-                    key=f"plat_alias_canon_{active_plat}_{idx}",
-                    label_visibility="collapsed",
-                ).strip()
-            with a_col:
-                new_alias = st.text_input(
-                    "Aliases", value=alias_str,
-                    key=f"plat_alias_val_{active_plat}_{idx}",
-                    label_visibility="collapsed",
-                ).strip()
-            with d_col:
-                if _render_centered_del_btn(f"plat_alias_del_{active_plat}_{idx}", "Delete alias mapping"):
-                    updated_aliases.pop(canonical, None)
-            if new_canon:
-                alias_list_new = [a.strip() for a in new_alias.split(",") if a.strip()] if new_alias else []
-                updated_aliases[new_canon] = alias_list_new
+            updated_aliases = {}
+            for idx, (canonical, alias_list) in enumerate(alias_items):
+                alias_str = ", ".join(alias_list) if isinstance(alias_list, list) else str(alias_list)
+                c_col, a_col, d_col = st.columns([4.4, 4.4, 1.2], vertical_alignment="center")
+                with c_col:
+                    new_canon = st.text_input(
+                        "Canonical Token", value=canonical,
+                        key=f"plat_alias_canon_{active_plat}_{idx}",
+                        label_visibility="collapsed",
+                    ).strip()
+                with a_col:
+                    new_alias = st.text_input(
+                        "Aliases", value=alias_str,
+                        key=f"plat_alias_val_{active_plat}_{idx}",
+                        label_visibility="collapsed",
+                    ).strip()
+                with d_col:
+                    if _render_centered_del_btn(f"plat_alias_del_{active_plat}_{idx}", "Delete alias mapping"):
+                        updated_aliases.pop(canonical, None)
+                if new_canon:
+                    alias_list_new = [a.strip() for a in new_alias.split(",") if a.strip()] if new_alias else []
+                    updated_aliases[new_canon] = alias_list_new
 
-        # Inline add-row form for aliases (clear_on_submit avoids layout crashes)
-        with st.form(key=f"plat_alias_add_{active_plat}", clear_on_submit=True):
-            ca1, ca2, ca3 = st.columns([4.4, 4.4, 1.2], vertical_alignment="center")
-            with ca1:
-                new_canon = st.text_input("New Canonical", value="", key=f"plat_new_canon_{active_plat}", placeholder="e.g. parent", label_visibility="collapsed")
-            with ca2:
-                new_alias = st.text_input("New Aliases", value="", key=f"plat_new_alias_{active_plat}", placeholder="e.g. v_switch, bridge", label_visibility="collapsed")
-            with ca3:
-                add_alias = st.form_submit_button("➕ Add", width='stretch', help="Add new alias mapping")
-            if add_alias:
-                if new_canon.strip():
-                    alias_list_new = [a.strip() for a in new_alias.split(",") if a.strip()] if new_alias.strip() else []
-                    updated_aliases[new_canon.strip()] = alias_list_new
+            # Inline add-row form for aliases (clear_on_submit avoids layout crashes)
+            with st.form(key=f"plat_alias_add_{active_plat}", clear_on_submit=True):
+                ca1, ca2, ca3 = st.columns([4.4, 4.4, 1.2], vertical_alignment="center")
+                with ca1:
+                    new_canon = st.text_input("New Canonical", value="", key=f"plat_new_canon_{active_plat}", placeholder="e.g. parent", label_visibility="collapsed")
+                with ca2:
+                    new_alias = st.text_input("New Aliases", value="", key=f"plat_new_alias_{active_plat}", placeholder="e.g. v_switch, bridge", label_visibility="collapsed")
+                with ca3:
+                    add_alias = st.form_submit_button("➕ Add", width='stretch', help="Add new alias mapping")
+                if add_alias:
+                    if new_canon.strip():
+                        alias_list_new = [a.strip() for a in new_alias.split(",") if a.strip()] if new_alias.strip() else []
+                        updated_aliases[new_canon.strip()] = alias_list_new
+                        plat_parsing["aliases"] = updated_aliases
+                        parsing_presets[active_plat] = plat_parsing
+                        rules["topology_parsing_presets"] = parsing_presets
+                        save_naming_rules(rules, source=f"Platform Presets: Add alias {active_plat}")
+                        SSM.set_naming_rules(rules.copy())
+                        st.session_state["card_saved_banner"] = {"section": f"hypervisor_s2_{active_plat}", "msg": "✅ Alias added & applied!", "ts": time.time()}
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ Enter a canonical token name.")
+
+            st.divider()
+            col_save_s2, col_reset_s2 = st.columns(2, vertical_alignment="center")
+            with col_save_s2:
+                if st.button("💾 Save & Apply Changes", key=f"btn_save_s2_{active_plat}", type="primary", width="stretch"):
                     plat_parsing["aliases"] = updated_aliases
                     parsing_presets[active_plat] = plat_parsing
                     rules["topology_parsing_presets"] = parsing_presets
-                    save_naming_rules(rules, source=f"Platform Presets: Add alias {active_plat}")
-                    SSM.set_naming_rules(rules.copy())
-                    st.session_state["card_saved_banner"] = {"section": "hypervisor_platform_presets", "msg": "✅ Alias added & applied!", "ts": time.time()}
+                    save_naming_rules(rules, source=f"Save Section 2 for {active_plat}")
+                    fresh = SSM.get_cached_naming_rules() or load_naming_rules()
+                    rules.clear()
+                    rules.update(fresh)
+                    SSM.set_naming_rules(fresh.copy())
+                    SSM.refresh_naming_rules()
+                    st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
+                    st.session_state["card_saved_banner"] = {
+                        "section": f"hypervisor_s2_{active_plat}",
+                        "msg": f"✅ Section 2 (Token Aliases) for '{active_plat}' saved!",
+                        "ts": time.time()
+                    }
                     st.rerun()
-                else:
-                    st.warning("⚠️ Enter a canonical token name.")
+            with col_reset_s2:
+                if st.button("🔄 Reset", key=f"btn_reset_s2_{active_plat}", width="stretch"):
+                    default_pars = DEFAULT_PARSING_PRESETS.get(active_plat, {})
+                    if isinstance(default_pars, dict):
+                        plat_parsing["aliases"] = dict(default_pars.get("aliases", {}))
+                    else:
+                        plat_parsing["aliases"] = {}
+                    parsing_presets[active_plat] = plat_parsing
+                    rules["topology_parsing_presets"] = parsing_presets
+                    save_naming_rules(rules, source=f"Reset Section 2 for {active_plat}")
+                    SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
+                    _clear_session_state_prefixes(
+                        f"plat_alias_canon_{active_plat}_", f"plat_alias_val_{active_plat}_",
+                        f"plat_alias_del_{active_plat}_", f"plat_new_canon_{active_plat}",
+                        f"plat_new_alias_{active_plat}",
+                    )
+                    st.session_state["card_saved_banner"] = {
+                        "section": f"hypervisor_s2_{active_plat}",
+                        "msg": f"✅ Section 2 reset to defaults for '{active_plat}'!",
+                        "ts": time.time()
+                    }
+                    st.rerun()
 
-        st.markdown("<div style='height: 16px; border-bottom: 1px solid rgba(255,255,255,0.07);'></div>", unsafe_allow_html=True)
+        # ──────────────────────────────────────────────────────────────────────
+        # Section 2.5: Relative Spatial Anchors & Local Privacy Redaction
+        # ──────────────────────────────────────────────────────────────────────
+        with st.expander("📐 2.5. Relative Spatial Anchors & Local Privacy Redaction", expanded=False):
+            _render_spatial_anchors_redaction_editor(plat_parsing, active_plat)
+            st.divider()
+            col_save_s25, col_reset_s25 = st.columns(2, vertical_alignment="center")
+            with col_save_s25:
+                if st.button("💾 Save & Apply Changes", key=f"btn_save_s25_{active_plat}", type="primary", width="stretch"):
+                    parsing_presets[active_plat] = plat_parsing
+                    rules["topology_parsing_presets"] = parsing_presets
+                    save_naming_rules(rules, source=f"Save Section 2.5 for {active_plat}")
+                    fresh = SSM.get_cached_naming_rules() or load_naming_rules()
+                    rules.clear()
+                    rules.update(fresh)
+                    SSM.set_naming_rules(fresh.copy())
+                    SSM.refresh_naming_rules()
+                    st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
+                    st.session_state["card_saved_banner"] = {
+                        "section": f"hypervisor_s25_{active_plat}",
+                        "msg": f"✅ Section 2.5 (Spatial Anchors) for '{active_plat}' saved!",
+                        "ts": time.time()
+                    }
+                    st.rerun()
+            with col_reset_s25:
+                if st.button("🔄 Reset", key=f"btn_reset_s25_{active_plat}", width="stretch"):
+                    default_pars = DEFAULT_PARSING_PRESETS.get(active_plat, {})
+                    if isinstance(default_pars, dict):
+                        default_sp = default_pars.get("spatial_anchors_and_redaction", {})
+                        if default_sp:
+                            plat_parsing["spatial_anchors_and_redaction"] = dict(default_sp)
+                    parsing_presets[active_plat] = plat_parsing
+                    rules["topology_parsing_presets"] = parsing_presets
+                    save_naming_rules(rules, source=f"Reset Section 2.5 for {active_plat}")
+                    SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
+                    _clear_session_state_prefixes(f"spat_")
+                    st.session_state["card_saved_banner"] = {
+                        "section": f"hypervisor_s25_{active_plat}",
+                        "msg": f"✅ Section 2.5 reset to defaults for '{active_plat}'!",
+                        "ts": time.time()
+                    }
+                    st.rerun()
 
-        # ── Section 2.5: Dynamic Relative Spatial Anchors & Zero-Leakage Local Redaction ──
-        _render_spatial_anchors_redaction_editor(plat_parsing, active_plat)
+        # ──────────────────────────────────────────────────────────────────────
+        # Section 3: AI Parsing Rules & Invariants
+        # ──────────────────────────────────────────────────────────────────────
+        with st.expander("🧠 3. AI Parsing Rules & Invariants", expanded=False):
+            st.caption("Complete system instructions injected into the LLM prompt during OCR topology parsing. Covers OCR normalization, token de-concatenation, topology inheritance, and mandatory atomic JSON attributes.")
 
-        st.markdown("<div style='height: 16px; border-bottom: 1px solid rgba(255,255,255,0.07);'></div>", unsafe_allow_html=True)
+            inst_val = plat_parsing.get("instructions", "")
+            instructions_input = st.text_area(
+                "Parsing Instructions (English System Prompt Rules)",
+                value=inst_val,
+                height=340,
+                key=f"txt_instructions_{active_plat}",
+                help="Platform-specific extraction and reconciliation rules injected during OCR topology parsing."
+            )
 
-        # ── Section 3: AI Parsing Rules & Invariants ────────────────────────
-        st.markdown("###### 3. AI Parsing Rules & Invariants")
-        st.caption("Complete system instructions injected into the LLM prompt during OCR topology parsing. Covers OCR normalization, token de-concatenation, topology inheritance, and mandatory atomic JSON attributes.")
+            # ── AI Assistant: Generate Platform Rules ────────────────────────
+            with st.expander("✨ AI Assistant: Generate Platform Rules", expanded=False):
+                st.caption("Automatically generate parsing instructions and description patterns for new hypervisors.")
+                c_ai_in, c_ai_btn = st.columns([4, 1.5], vertical_alignment="center")
+                ai_plat_input = c_ai_in.text_input("Hypervisor / Platform", placeholder="e.g. Cisco NX-OS, OpenStack", label_visibility="collapsed", key="txt_ai_plat_gen")
+                if c_ai_btn.button("Generate Platform Rules", key="btn_gen_ai_plat_rules", width="stretch"):
+                    target_p = ai_plat_input.strip()
+                    if not target_p:
+                        st.warning("Please enter a platform name.")
+                    else:
+                        with st.spinner(f"Generating rules for {target_p}..."):
+                            try:
+                                ai_prompt = (
+                                    f"Generate network topology parsing instructions and NetBox description patterns for hypervisor/platform: '{target_p}'.\n"
+                                    "Respond strictly with a JSON object with two keys:\n"
+                                    "1. 'instructions': A well-structured, multi-line English specification for OCR topology diagrams. "
+                                    "Must use clear headings, double newlines between sections, and clean bullet points. Follow this structure strictly:\n\n"
+                                    f"[PLATFORM ARCHITECTURE: {target_p.upper()}]\n\n"
+                                    "1. OCR TEXT & NORMALIZATION:\n"
+                                    "- Normalize adapter names and port labels...\n"
+                                    "- Strip vendor-specific generic prefixes...\n\n"
+                                    "2. TOPOLOGY INHERITANCE & ZERO ORPHAN POLICY:\n"
+                                    "- Topological parent-child mapping rules...\n"
+                                    "- Rules for active vs standby uplinks...\n\n"
+                                    "3. MANDATORY ATOMIC JSON ATTRIBUTES:\n"
+                                    "- interface: Clean interface identifier only...\n"
+                                    "- parent: Connected switch/bridge name...\n\n"
+                                    "2. 'export_prompt': A well-formatted, multi-line prompt template for external AI (ChatGPT/Claude), "
+                                    "using blank lines between bullet points and paragraphs.\n"
+                                    "Do not include markdown fences outside the JSON."
+                                )
+                                res_raw = call_ai(ai_prompt, active_model)
+                                clean_json = re.sub(r"^```json\s*|^```\s*|```$", "", res_raw.strip(), flags=re.MULTILINE)
+                                data = json.loads(clean_json)
 
-        inst_val = plat_parsing.get("instructions", "")
-        instructions_input = st.text_area(
-            "Parsing Instructions (English System Prompt Rules)",
-            value=inst_val,
-            height=340,
-            key=f"txt_instructions_{active_plat}",
-            help="Platform-specific extraction and reconciliation rules injected during OCR topology parsing."
-        )
+                                gen_instructions = data.get("instructions", f"[PLATFORM ARCHITECTURE: {target_p.upper()}]")
+                                gen_export_prompt = data.get("export_prompt", f"You are an expert engineer for {target_p}...")
 
-        st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+                                if target_p not in hyp_presets:
+                                    hyp_presets[target_p] = [
+                                        {"code": "Uplink", "label": "Physical Uplink", "pattern": "<interface> - <parent> <purpose>"},
+                                        {"code": "Default", "label": "Default Interface", "pattern": "<interface> (<purpose>)"}
+                                    ]
+                                parsing_presets[target_p] = {
+                                    "platform": target_p,
+                                    "instructions": gen_instructions,
+                                    "export_prompt": gen_export_prompt
+                                }
+                                rules["hypervisor_presets"] = hyp_presets
+                                rules["topology_parsing_presets"] = parsing_presets
 
-        # ── AI Assistant: Generate Platform Rules ────────────────────────────
-        with st.expander("✨ AI Assistant: Generate Platform Rules", expanded=False):
-            st.caption("Automatically generate parsing instructions and description patterns for new hypervisors.")
-            c_ai_in, c_ai_btn = st.columns([4, 1.5], vertical_alignment="center")
-            ai_plat_input = c_ai_in.text_input("Hypervisor / Platform", placeholder="e.g. Cisco NX-OS, OpenStack", label_visibility="collapsed", key="txt_ai_plat_gen")
-            if c_ai_btn.button("Generate Platform Rules", key="btn_gen_ai_plat_rules", width="stretch"):
-                target_p = ai_plat_input.strip()
-                if not target_p:
-                    st.warning("Please enter a platform name.")
-                else:
-                    with st.spinner(f"Generating rules for {target_p}..."):
-                        try:
-                            ai_prompt = (
-                                f"Generate network topology parsing instructions and NetBox description patterns for hypervisor/platform: '{target_p}'.\n"
-                                "Respond strictly with a JSON object with two keys:\n"
-                                "1. 'instructions': A well-structured, multi-line English specification for OCR topology diagrams. "
-                                "Must use clear headings, double newlines between sections, and clean bullet points. Follow this structure strictly:\n\n"
-                                f"[PLATFORM ARCHITECTURE: {target_p.upper()}]\n\n"
-                                "1. OCR TEXT & NORMALIZATION:\n"
-                                "- Normalize adapter names and port labels...\n"
-                                "- Strip vendor-specific generic prefixes...\n\n"
-                                "2. TOPOLOGY INHERITANCE & ZERO ORPHAN POLICY:\n"
-                                "- Topological parent-child mapping rules...\n"
-                                "- Rules for active vs standby uplinks...\n\n"
-                                "3. MANDATORY ATOMIC JSON ATTRIBUTES:\n"
-                                "- interface: Clean interface identifier only...\n"
-                                "- parent: Connected switch/bridge name...\n\n"
-                                "2. 'export_prompt': A well-formatted, multi-line prompt template for external AI (ChatGPT/Claude), "
-                                "using blank lines between bullet points and paragraphs.\n"
-                                "Do not include markdown fences outside the JSON."
-                            )
-                            res_raw = call_ai(ai_prompt, active_model)
-                            clean_json = re.sub(r"^```json\s*|^```\s*|```$", "", res_raw.strip(), flags=re.MULTILINE)
-                            data = json.loads(clean_json)
+                                save_naming_rules(rules, source=f"AI Generated {target_p}")
+                                fresh_rules = SSM.get_cached_naming_rules() or load_naming_rules()
+                                rules.clear()
+                                rules.update(fresh_rules)
+                                SSM.set_naming_rules(fresh_rules.copy())
+                                SSM.refresh_naming_rules()
 
-                            gen_instructions = data.get("instructions", f"[PLATFORM ARCHITECTURE: {target_p.upper()}]")
-                            gen_export_prompt = data.get("export_prompt", f"You are an expert engineer for {target_p}...")
+                                st.session_state.pop(f"txt_instructions_{target_p}", None)
+                                st.session_state.pop(f"txt_export_prompt_{target_p}", None)
 
-                            if target_p not in hyp_presets:
-                                hyp_presets[target_p] = [
-                                    {"code": "Uplink", "label": "Physical Uplink", "pattern": "<interface> - <parent> <purpose>"},
-                                    {"code": "Default", "label": "Default Interface", "pattern": "<interface> (<purpose>)"}
-                                ]
-                            parsing_presets[target_p] = {
-                                "platform": target_p,
-                                "instructions": gen_instructions,
-                                "export_prompt": gen_export_prompt
-                            }
-                            rules["hypervisor_presets"] = hyp_presets
-                            rules["topology_parsing_presets"] = parsing_presets
+                                st.session_state["pending_hypervisor_platform"] = target_p
+                                st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
+                                st.session_state["card_saved_banner"] = {
+                                    "section": f"hypervisor_s3_{active_plat}",
+                                    "msg": f"Generated and loaded rules for '{target_p}'!",
+                                    "ts": time.time()
+                                }
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Failed to generate platform rules: {e}")
 
-                            save_naming_rules(rules, source=f"AI Generated {target_p}")
-                            fresh_rules = SSM.get_cached_naming_rules() or load_naming_rules()
-                            rules.clear()
-                            rules.update(fresh_rules)
-                            SSM.set_naming_rules(fresh_rules.copy())
-                            SSM.refresh_naming_rules()
+            st.divider()
+            col_save_s3, col_reset_s3 = st.columns(2, vertical_alignment="center")
+            with col_save_s3:
+                if st.button("💾 Save & Apply Changes", key=f"btn_save_s3_{active_plat}", type="primary", width="stretch"):
+                    plat_parsing["instructions"] = instructions_input
+                    parsing_presets[active_plat] = plat_parsing
+                    rules["topology_parsing_presets"] = parsing_presets
+                    save_naming_rules(rules, source=f"Save Section 3 for {active_plat}")
+                    fresh = SSM.get_cached_naming_rules() or load_naming_rules()
+                    rules.clear()
+                    rules.update(fresh)
+                    SSM.set_naming_rules(fresh.copy())
+                    SSM.refresh_naming_rules()
+                    st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
+                    st.session_state["card_saved_banner"] = {
+                        "section": f"hypervisor_s3_{active_plat}",
+                        "msg": f"✅ Section 3 (AI Parsing Rules) for '{active_plat}' saved!",
+                        "ts": time.time()
+                    }
+                    st.rerun()
+            with col_reset_s3:
+                if st.button("🔄 Reset", key=f"btn_reset_s3_{active_plat}", width="stretch"):
+                    default_pars = DEFAULT_PARSING_PRESETS.get(active_plat, {})
+                    if isinstance(default_pars, dict):
+                        plat_parsing["instructions"] = default_pars.get("instructions", "")
+                    else:
+                        plat_parsing["instructions"] = ""
+                    parsing_presets[active_plat] = plat_parsing
+                    rules["topology_parsing_presets"] = parsing_presets
+                    save_naming_rules(rules, source=f"Reset Section 3 for {active_plat}")
+                    SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
+                    _clear_session_state_prefixes(f"txt_instructions_{active_plat}")
+                    st.session_state["card_saved_banner"] = {
+                        "section": f"hypervisor_s3_{active_plat}",
+                        "msg": f"✅ Section 3 reset to defaults for '{active_plat}'!",
+                        "ts": time.time()
+                    }
+                    st.rerun()
 
-                            st.session_state.pop(f"txt_instructions_{target_p}", None)
-                            st.session_state.pop(f"txt_export_prompt_{target_p}", None)
+        # ──────────────────────────────────────────────────────────────────────
+        # Section 4: Platform Architecture & Specification Guide
+        # ──────────────────────────────────────────────────────────────────────
+        export_prompt_val = plat_parsing.get("export_prompt") or DEFAULT_PARSING_PRESETS.get(active_plat, {}).get("export_prompt", "")
 
-                            st.session_state["pending_hypervisor_platform"] = target_p
-                            st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
-                            st.session_state["card_saved_banner"] = {
-                                "section": "hypervisor_platform_presets",
-                                "msg": f"Generated and loaded rules for '{target_p}'!",
-                                "ts": time.time()
-                            }
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Failed to generate platform rules: {e}")
+        with st.expander("📘 4. Platform Architecture & Specification Guide", expanded=False):
+            st.caption("Reference guide for defining a new hypervisor platform. Follow sections 1–3 in order, then copy the template below to bootstrap a new platform.")
+            st.markdown("""
+**How to define a new platform:**
 
-        st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+1. **🏷️ 1. Description Templates** — Define NetBox description pattern templates (e.g. `<vmnic> - <v_switch> <purpose>`).
+2. **🔗 2. Platform Token Aliases** — Map canonical tokens (`parent`, `interface`, `speed`) to platform-specific aliases.
+3. **📐 2.5. Spatial Anchors & Redaction** — Configure spatial grouping anchors and local privacy redaction rules.
+4. **🧠 3. AI Parsing Rules & Invariants** — Write the system prompt instructions that guide the LLM during OCR topology parsing.
+5. **External AI Prompt** — Optionally customize the export prompt used by the standalone AI assistant.
+""")
+            col_copy_tpl, col_reset_s4 = st.columns(2, vertical_alignment="center")
+            with col_copy_tpl:
+                if st.button("📋 Copy Specification Template", key=f"btn_copy_tpl_{active_plat}", width="stretch"):
+                    tpl = (
+                        f"## Platform: {active_plat}\n\n"
+                        f"### 1. Description Templates\n"
+                        f"- Pattern: `<interface> - <parent> <purpose>`\n\n"
+                        f"### 2. Platform Token Aliases\n"
+                        f"- parent → v_switch, vswitch, dvswitch\n"
+                        f"- interface → vmnic, vmk, port_group\n"
+                        f"- speed → speed, link_speed\n\n"
+                        f"### 3. AI Parsing Instructions\n"
+                        f"[PLATFORM ARCHITECTURE: {active_plat.upper()}]\n\n"
+                        f"1. OCR TEXT & NORMALIZATION:\n"
+                        f"- Normalize adapter names and port labels...\n\n"
+                        f"2. TOPOLOGY INHERITANCE:\n"
+                        f"- All physical adapters belong to their parent switch...\n\n"
+                        f"3. MANDATORY JSON ATTRIBUTES:\n"
+                        f"- interface, parent, purpose, uplink_role, slot, speed\n"
+                    )
+                    st.code(tpl, language="markdown")
+                    st.toast("Specification template copied to clipboard area above.")
+            with col_reset_s4:
+                if st.button("🔄 Reset Section 4", key=f"btn_reset_s4_{active_plat}", width="stretch"):
+                    default_pars = DEFAULT_PARSING_PRESETS.get(active_plat, {})
+                    if isinstance(default_pars, dict):
+                        plat_parsing["export_prompt"] = default_pars.get("export_prompt", "")
+                    parsing_presets[active_plat] = plat_parsing
+                    rules["topology_parsing_presets"] = parsing_presets
+                    save_naming_rules(rules, source=f"Reset Section 4 for {active_plat}")
+                    SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
+                    _clear_session_state_prefixes(f"txt_export_prompt_{active_plat}")
+                    st.session_state["card_saved_banner"] = {
+                        "section": f"hypervisor_s4_{active_plat}",
+                        "msg": f"✅ Section 4 reset to defaults for '{active_plat}'!",
+                        "ts": time.time()
+                    }
+                    st.rerun()
 
-        # ── Section 4: Export Prompt for External AI ──────────────────────────
-        st.markdown("###### 4. Export Prompt for External AI")
-
-        default_exp_prompt = plat_parsing.get("export_prompt") or DEFAULT_PARSING_PRESETS.get(active_plat, {}).get("export_prompt", "")
-        exp_prompt_val = st.text_area(
-            "External AI Prompt Template",
-            value=default_exp_prompt,
-            height=180,
-            key=f"txt_export_prompt_{active_plat}",
-            label_visibility="collapsed"
-        )
-
-        st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
-        col_save, col_reset = st.columns(2, vertical_alignment="center")
-        with col_save:
-            if st.button("💾 Save & Apply Changes", key=f"btn_save_all_{active_plat}", type="primary", width="stretch"):
-                hyp_presets[active_plat] = updated_patterns
-                rules["hypervisor_presets"] = hyp_presets
-
-                plat_parsing["platform"] = active_plat
-                plat_parsing["aliases"] = updated_aliases
-                plat_parsing["instructions"] = instructions_input
-                plat_parsing["export_prompt"] = exp_prompt_val
-                parsing_presets[active_plat] = plat_parsing
-                rules["topology_parsing_presets"] = parsing_presets
-                rules["hypervisor_platform_order"] = all_platforms
-
-                save_naming_rules(rules, source=f"Save All Presets for {active_plat}")
-                fresh_rules = SSM.get_cached_naming_rules() or load_naming_rules()
-                rules.clear()
-                rules.update(fresh_rules)
-                SSM.set_naming_rules(fresh_rules.copy())
-                SSM.refresh_naming_rules()
-
-                st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
-                st.session_state["card_saved_banner"] = {
-                    "section": "hypervisor_platform_presets",
-                    "msg": f"✅ Platform '{active_plat}' presets & rules successfully saved!",
-                    "ts": time.time()
-                }
-                st.rerun()
-
-        with col_reset:
-            if st.button("🔄 Reset to Defaults", key=f"btn_reset_all_{active_plat}", width="stretch"):
-                from config.naming_rules import DEFAULT_UNIFIED_PLATFORM_PRESETS
-                default_hyp = DEFAULT_HYPERVISOR_PRESETS.get(active_plat, [])
-                default_pars = DEFAULT_PARSING_PRESETS.get(active_plat, {})
-                if isinstance(default_pars, str):
-                    default_pars = {"platform": active_plat, "aliases": {}, "instructions": default_pars, "export_prompt": ""}
-                elif not isinstance(default_pars, dict):
-                    default_pars = {}
-                hyp_presets[active_plat] = [dict(t) for t in default_hyp]
-                plat_parsing_defaults = {
-                    "platform": active_plat,
-                    "aliases": dict(default_pars.get("aliases", {})),
-                    "instructions": default_pars.get("instructions", ""),
-                    "export_prompt": default_pars.get("export_prompt", ""),
-                }
-                parsing_presets[active_plat] = plat_parsing_defaults
-                rules["hypervisor_presets"] = hyp_presets
-                rules["topology_parsing_presets"] = parsing_presets
-                save_naming_rules(rules, source=f"Reset to Defaults for {active_plat}")
-                fresh_rules = SSM.get_cached_naming_rules() or load_naming_rules()
-                rules.clear()
-                rules.update(fresh_rules)
-                SSM.set_naming_rules(fresh_rules.copy())
-                SSM.refresh_naming_rules()
-                _clear_session_state_prefixes(
-                    f"hyp_code_{active_plat}_", f"hyp_lbl_{active_plat}_",
-                    f"hyp_pat_{active_plat}_", f"hyp_hide_{active_plat}_",
-                    f"new_hyp_code_{active_plat}", f"new_hyp_lbl_{active_plat}",
-                    f"new_hyp_pat_{active_plat}", f"new_hyp_hide_{active_plat}",
-                    f"plat_alias_canon_{active_plat}_", f"plat_alias_val_{active_plat}_",
-                    f"plat_alias_del_{active_plat}_", f"plat_new_canon_{active_plat}",
-                    f"plat_new_alias_{active_plat}", f"txt_instructions_{active_plat}",
-                    f"txt_export_prompt_{active_plat}",
-                )
-                st.session_state["card_saved_banner"] = {
-                    "section": "hypervisor_platform_presets",
-                    "msg": f"✅ Platform '{active_plat}' reset to defaults!",
-                    "ts": time.time()
-                }
-                st.rerun()
+            st.divider()
+            st.markdown("**External AI Prompt Template**")
+            exp_prompt_val_ui = st.text_area(
+                "Export Prompt",
+                value=export_prompt_val,
+                height=180,
+                key=f"txt_export_prompt_{active_plat}",
+                label_visibility="collapsed"
+            )
+            col_save_s4, _ = st.columns(2, vertical_alignment="center")
+            with col_save_s4:
+                if st.button("💾 Save Export Prompt", key=f"btn_save_s4_{active_plat}", type="primary", width="stretch"):
+                    plat_parsing["export_prompt"] = exp_prompt_val_ui
+                    parsing_presets[active_plat] = plat_parsing
+                    rules["topology_parsing_presets"] = parsing_presets
+                    save_naming_rules(rules, source=f"Save Section 4 for {active_plat}")
+                    fresh = SSM.get_cached_naming_rules() or load_naming_rules()
+                    rules.clear()
+                    rules.update(fresh)
+                    SSM.set_naming_rules(fresh.copy())
+                    SSM.refresh_naming_rules()
+                    st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
+                    st.session_state["card_saved_banner"] = {
+                        "section": f"hypervisor_s4_{active_plat}",
+                        "msg": f"✅ Section 4 (Export Prompt) for '{active_plat}' saved!",
+                        "ts": time.time()
+                    }
+                    st.rerun()
 
 
 def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card_title: str, card_caption: str,
@@ -2766,6 +2915,215 @@ def _notify_preset_changed() -> None:
     st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
 
 
+def _render_hardware_baseline_editor(rules: dict, active_model: str | None = None):
+    """Render the structured Hardware Baseline Standards editor.
+
+    Replaces the legacy single-string ``netbox_server_yaml`` text area with a
+    category-based editor that supports server, module_nic, storage_san, and
+    custom categories. Each category has its own save/reset buttons to avoid
+    cross-card banner leakage.
+    """
+    from config.naming_rules import compute_delta, add_to_history
+    active_model = active_model or st.session_state.get("active_model", "")
+
+    with st.container(border=True):
+        _check_and_render_banner("yaml_guidelines")
+        col_t1, col_t2 = st.columns([3, 1], vertical_alignment="center")
+        with col_t1:
+            st.markdown("#### 📋 NetBox YAML / Hardware Templates & Guidelines")
+        with col_t2:
+            hb = get_hardware_baseline_standards(rules)
+            st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em; color: #94a3b8;'>{len(hb)} categories</span></div>", unsafe_allow_html=True)
+        st.caption("Define per-category hardware YAML schema and interface naming patterns. These standards are enforced by the Hardware Catalog Generator when producing Module and Device YAMLs.")
+
+        st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
+
+        # ── AI Assistant ──────────────────────────────────────────────────────
+        with st.expander("✨ AI Assistant: Generate Hardware YAML Spec", expanded=False):
+            ai_desc = st.text_input(
+                "Describe the hardware YAML spec",
+                key="custom_ai_desc_hb",
+                placeholder="e.g. Generate server hardware YAML for a Dell R740 with dual 25G NICs and 4x 2.5in drive bays",
+            )
+            if st.button("Generate Hardware YAML Spec with AI", key="custom_ai_gen_hb", width='stretch'):
+                if ai_desc.strip():
+                    with st.spinner(f"Generating spec using {active_model}..."):
+                        try:
+                            generated = generate_naming_pattern(ai_desc.strip(), active_model)
+                            st.session_state["hb_ai_result"] = generated
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ AI spec generation failed: {e}")
+                else:
+                    st.warning("⚠️ Please describe the hardware YAML spec first.")
+            ai_result = st.session_state.get("hb_ai_result", "")
+            if ai_result:
+                st.code(ai_result, language="yaml")
+                if st.button("Apply to Server Category", key="apply_ai_to_server", width='stretch'):
+                    server_cfg = hb.get("server", {})
+                    server_cfg["auto_generated_spec"] = ai_result
+                    hb["server"] = server_cfg
+                    rules["hardware_baseline_standards"] = hb
+                    save_naming_rules(rules, source="Hardware Baseline: Apply AI Spec")
+                    SSM.set_naming_rules(rules.copy())
+                    st.session_state.pop("hb_ai_result", None)
+                    st.session_state["card_saved_banner"] = {"section": "yaml_guidelines", "msg": "✅ AI-generated spec applied to Server category!", "ts": time.time()}
+                    st.rerun()
+
+        st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+
+        # ── Render each category editor ───────────────────────────────────────
+        edited_hb = {}
+        for cat_key, default_cfg in DEFAULT_HARDWARE_BASELINE_STANDARDS.items():
+            current_cfg = dict(hb.get(cat_key, default_cfg))
+            display_name = current_cfg.get("display_name", cat_key.replace("_", " ").title())
+
+            with st.expander(f"🔹 {display_name} ({cat_key})", expanded=(cat_key == "server")):
+                _check_and_render_banner(f"hb_{cat_key}")
+
+                # ── Server / generic fields ───────────────────────────────
+                if cat_key in ("server", "storage_san"):
+                    cp_console = st.text_input(
+                        "Console Ports",
+                        value=current_cfg.get("console_ports", ""),
+                        key=f"hb_{cat_key}_console",
+                        help="Console port description (e.g. Serial (de-9))",
+                    )
+                    cp_module_bays = st.text_input(
+                        "Module Bays",
+                        value=current_cfg.get("module_bays", ""),
+                        key=f"hb_{cat_key}_module_bays",
+                        help="Comma-separated module bay names (e.g. PSU1, PSU2, PCIe1)",
+                    )
+                    cp_interfaces = st.text_input(
+                        "Interfaces",
+                        value=current_cfg.get("interfaces", ""),
+                        key=f"hb_{cat_key}_interfaces",
+                        help="Interface description (e.g. OOB Management ONLY (1000base-t, mgmt_only: true))",
+                    )
+                    edited_hb[cat_key] = {
+                        **current_cfg,
+                        "display_name": display_name,
+                        "console_ports": cp_console,
+                        "module_bays": cp_module_bays,
+                        "interfaces": cp_interfaces,
+                    }
+                else:
+                    # module_nic and other categories: focus on interface_pattern
+                    pass
+
+                # ── Module / NIC interface pattern ──────────────────────────
+                if cat_key in ("module_nic", "storage_san"):
+                    ip_pattern = st.text_input(
+                        "Interface Naming Pattern",
+                        value=current_cfg.get("interface_pattern", "{module}/Port{index}"),
+                        key=f"hb_{cat_key}_ipat",
+                        help="Template for interface names. Use {module} for the model name and {index} for sequential port numbers. Default: {module}/Port{index}",
+                    )
+                    ip_port_count = st.number_input(
+                        "Default Port Count",
+                        min_value=1,
+                        max_value=64,
+                        value=int(current_cfg.get("default_port_count", 2)),
+                        key=f"hb_{cat_key}_portcount",
+                        help="Number of ports to generate by default",
+                    )
+                    ip_port_start = st.number_input(
+                        "Port Index Start",
+                        min_value=0,
+                        max_value=99,
+                        value=int(current_cfg.get("port_start_index", 1)),
+                        key=f"hb_{cat_key}_portstart",
+                        help="Starting index for port numbering",
+                    )
+                    edited_hb[cat_key] = {
+                        **current_cfg,
+                        "display_name": display_name,
+                        "interface_pattern": ip_pattern,
+                        "default_port_count": ip_port_count,
+                        "port_start_index": ip_port_start,
+                    }
+
+                # Show preview of generated names
+                if cat_key in ("module_nic", "storage_san"):
+                    try:
+                        pattern = edited_hb[cat_key].get("interface_pattern", "{module}/Port{index}")
+                        pname = st.session_state.get("m_model", "X550") or "TESTMODULE"
+                        count = int(edited_hb[cat_key].get("default_port_count", 2))
+                        start = int(edited_hb[cat_key].get("port_start_index", 1))
+                        preview_names = []
+                        for i in range(start, start + count):
+                            preview_names.append(pattern.replace("{module}", pname).replace("{index}", str(i)))
+                        st.caption(f"Preview (model='{pname}'): **{', '.join(preview_names)}**")
+                    except Exception:
+                        pass
+
+                st.divider()
+                col_s, col_r = st.columns(2)
+                with col_s:
+                    if st.button("💾 Save & Apply Changes", key=f"hb_save_{cat_key}", type="primary", width="stretch"):
+                        old_hb = get_hardware_baseline_standards(rules)
+                        rules["hardware_baseline_standards"] = edited_hb
+                        save_naming_rules(rules, source=f"Hardware Baseline: {cat_key}")
+                        fresh = SSM.get_cached_naming_rules() or load_naming_rules()
+                        rules.clear()
+                        rules.update(fresh)
+                        SSM.set_naming_rules(fresh.copy())
+                        SSM.refresh_naming_rules()
+                        st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
+                        st.session_state["card_saved_banner"] = {
+                            "section": f"hb_{cat_key}",
+                            "msg": f"✅ {display_name} category saved & applied!",
+                            "ts": time.time()
+                        }
+                        st.rerun()
+                with col_r:
+                    if st.button("🔄 Reset", key=f"hb_reset_{cat_key}", width="stretch"):
+                        rules["hardware_baseline_standards"] = get_hardware_baseline_standards(load_naming_rules())
+                        save_naming_rules(rules, source=f"Hardware Baseline: Reset {cat_key}")
+                        fresh = SSM.get_cached_naming_rules() or load_naming_rules()
+                        rules.clear()
+                        rules.update(fresh)
+                        SSM.set_naming_rules(fresh.copy())
+                        SSM.refresh_naming_rules()
+                        st.session_state["card_saved_banner"] = {
+                            "section": f"hb_{cat_key}",
+                            "msg": f"✅ {display_name} reset to defaults!",
+                            "ts": time.time()
+                        }
+                        st.rerun()
+
+        # ── Legacy flat-field fallback (preserved for backward compat) ─────────
+        st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+        with st.expander("📜 Legacy Flat Field (backward compatibility)", expanded=False):
+            st.caption("The legacy ``netbox_server_yaml`` string is automatically derived from the Server category above. You can edit it directly here if needed, but changes will be overwritten by the structured editor on next save.")
+            legacy_text = rules.get("netbox_server_yaml", "")
+            legacy_input = st.text_area(
+                "Legacy netbox_server_yaml",
+                value=legacy_text,
+                height=80,
+                key="form_yaml_legacy_hb",
+            )
+            col_save_legacy, col_reset_legacy = st.columns(2)
+            with col_save_legacy:
+                if st.button("💾 Save Legacy Field", type="primary", width='stretch'):
+                    rules = load_naming_rules()
+                    rules["netbox_server_yaml"] = legacy_input
+                    save_naming_rules(rules, source="YAML Guidelines Legacy Save")
+                    SSM.set_naming_rules(rules.copy())
+                    st.session_state["card_saved_banner"] = {"section": "yaml_guidelines", "msg": "✅ Legacy netbox_server_yaml field saved!", "ts": time.time()}
+                    st.rerun()
+            with col_reset_legacy:
+                if st.button("🔄 Reset Legacy", width='stretch'):
+                    default_yaml = DEFAULT_RULES.get("netbox_server_yaml", DEFAULT_NAMING_PATTERNS.get("netbox_server_yaml", ""))
+                    rules = load_naming_rules()
+                    rules["netbox_server_yaml"] = default_yaml
+                    save_naming_rules(rules, source="YAML Guidelines Legacy Reset")
+                    SSM.set_naming_rules(rules.copy())
+                    st.session_state["card_saved_banner"] = {"section": "yaml_guidelines", "msg": "✅ Legacy field reset to defaults!", "ts": time.time()}
+                    st.rerun()
+
+
 def render_standards_tab(active_model):
     st.subheader("📖 Infrastructure Naming Standards Configuration")
     st.caption("Define and manage your organization's naming conventions. All patterns configured here are automatically applied in the Naming tab.")
@@ -2857,52 +3215,7 @@ def render_standards_tab(active_model):
             _render_hypervisor_platform_presets_editor(current_rules, active_model)
 
         elif _active_subtab == 2:
-            with st.container(border=True):
-                _check_and_render_banner("yaml_guidelines")
-                st.markdown("#### 📋 NetBox YAML / Hardware Templates & Guidelines")
-                st.caption("Document and enforce the NetBox server hardware YAML schema used across your environment.")
-                with st.expander("✨ AI Assistant: Generate NetBox Server YAML Specs", expanded=False):
-                    ai_desc = st.text_input(
-                        "Describe the NetBox server hardware YAML spec",
-                        key="custom_ai_desc",
-                        placeholder="e.g. Generate server hardware YAML for a Dell R740 with dual 25G NICs and 4x 2.5in drive bays",
-                    )
-                    if st.button("Generate NetBox Server YAML Specs with AI", key="custom_ai_gen", width='stretch'):
-                        if ai_desc.strip():
-                            with st.spinner(f"Generating spec using {active_model}..."):
-                                try:
-                                    generated = generate_naming_pattern(ai_desc.strip(), active_model)
-                                    st.session_state["form_yaml"] = generated
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"❌ AI spec generation failed: {e}")
-                        else:
-                            st.warning("⚠️ Please describe the server hardware YAML spec first.")
-                st.text_area(
-                    "NetBox Server YAML Guidelines",
-                    value=current_rules.get("netbox_server_yaml", ""),
-                    height=120,
-                    key="form_yaml",
-                )
-                col_save_yaml, col_reset_yaml = st.columns(2)
-                with col_save_yaml:
-                    if st.button("💾 Save Guidelines", type="primary", width='stretch'):
-                        yaml_text = st.session_state.get("form_yaml", "")
-                        rules = load_naming_rules()
-                        rules["netbox_server_yaml"] = yaml_text
-                        save_naming_rules(rules, source="YAML Guidelines Save")
-                        SSM.set_naming_rules(rules.copy())
-                        st.session_state["card_saved_banner"] = {"section": "yaml_guidelines", "msg": "✅ NetBox Server & Hardware YAML Guidelines saved & applied!", "ts": time.time()}
-                        st.rerun()
-                with col_reset_yaml:
-                    if st.button("🔄 Reset to Defaults", width='stretch'):
-                        default_yaml = DEFAULT_RULES.get("netbox_server_yaml", DEFAULT_NAMING_PATTERNS.get("netbox_server_yaml", ""))
-                        rules = load_naming_rules()
-                        rules["netbox_server_yaml"] = default_yaml
-                        save_naming_rules(rules, source="YAML Guidelines Reset")
-                        SSM.set_naming_rules(rules.copy())
-                        st.session_state["card_saved_banner"] = {"section": "yaml_guidelines", "msg": "✅ NetBox Server & Hardware YAML Guidelines reset to defaults!", "ts": time.time()}
-                        st.rerun()
+            _render_hardware_baseline_editor(current_rules, active_model)
 
             _check_and_render_banner("auto_correction")
             st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)

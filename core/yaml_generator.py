@@ -1,6 +1,33 @@
 import re
 from typing import Optional
 from core.ai_client import call_ai
+from config.naming_rules import load_naming_rules, get_hardware_baseline_standards
+
+
+def _get_module_interface_pattern() -> str:
+    """Return the user-configured module interface naming pattern."""
+    try:
+        rules = load_naming_rules()
+        hb = get_hardware_baseline_standards(rules)
+        module_cfg = hb.get("module_nic", {})
+        pattern = module_cfg.get("interface_pattern", "{module}/Port{index}")
+        if isinstance(pattern, str) and pattern.strip():
+            return pattern.strip()
+    except Exception:
+        pass
+    return "{module}/Port{index}"
+
+
+def _build_module_port_names(module_name: str, pattern: str, port_count: int = 2) -> list:
+    """Build a list of interface names from the pattern and port count.
+
+    The pattern uses ``{module}`` and ``{index}`` placeholders.
+    ``{index}`` is replaced with integers starting from 1.
+    """
+    names = []
+    for i in range(1, port_count + 1):
+        names.append(pattern.replace("{module}", module_name).replace("{index}", str(i)))
+    return names
 
 def clean_ai_yaml(text: str) -> str:
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
@@ -386,7 +413,22 @@ Output ONLY the YAML. Start with --- and include NO explanations or markdown.
     return clean_ai_yaml(call_ai(prompt, model_name))
 
 def generate_module_yaml(mfg: str, model: str, part_num: str, model_name: str, ref_pattern: Optional[str] = None) -> str:
-    pattern_rule = f"MUST strictly use: `name: '{ref_pattern}'`" if ref_pattern else "MUST strictly use: `name: '{module}/Port1'`, `name: '{module}/Port2'`, etc. NEVER omit the literal '{module}' token."
+    # Read the user-configured interface pattern from hardware baseline standards
+    interface_pattern = _get_module_interface_pattern()
+    hb = {}
+    try:
+        rules = load_naming_rules()
+        hb = get_hardware_baseline_standards(rules)
+    except Exception:
+        pass
+    module_cfg = hb.get("module_nic", {})
+    default_port_count = int(module_cfg.get("default_port_count", 2))
+    port_start_index = int(module_cfg.get("port_start_index", 1))
+
+    # Build concrete interface names from the pattern for the prompt
+    concrete_names = _build_module_port_names(model, interface_pattern, default_port_count)
+    names_example = ", ".join(f"'{n}'" for n in concrete_names)
+
     prompt = f"""
 Search official datasheets and generate a NetBox Module-Type YAML definition.
 Manufacturer: {mfg}
@@ -402,17 +444,51 @@ CRITICAL RULES:
    - SFP+ 10GbE -> `10gbase-x-sfpp`
    - SFP28 25GbE -> `25gbase-x-sfp28`
    - 1GbE RJ-45 / SFP -> `1000base-t` / `1000base-x-sfp`
-5. Interface Naming: {pattern_rule}
+5. Interface Naming — STRICT ENFORCEMENT:
+   You MUST name every interface using EXACTLY this pattern: {interface_pattern}
+   The placeholder {{module}} is replaced by the model name: "{model}"
+   The placeholder {{index}} is replaced by sequential integers starting at {port_start_index}.
+   Your interfaces MUST be named exactly: {names_example}
+   NEVER use patterns like 'Ethernet/{{module}}/1', 'Port1', 'eth0', 'Gi1/0/1', or any other format.
+   If a reference pattern was detected from an existing catalog entry, it OVERRIDES the default: use '{ref_pattern}' instead of the template above.
 6. DO NOT invent URLs. DO NOT output 'comments'. Output ONLY raw valid YAML.
 """
     result = clean_ai_yaml(call_ai(prompt, model_name))
-    if "{module}" not in result:
+
+    # Post-process: if the AI did not use the required pattern, rewrite interface names
+    if interface_pattern not in result and (ref_pattern is None or ref_pattern not in result):
+        # Extract any bare port/number patterns and rewrite them
         result = re.sub(
             r"name:\s*['\"]?(?:(?:Ethernet|Port|eth|GigabitEthernet|Te|Gi)[/_ -]*)?(?:\d+/)?(\d+)['\"]?",
-            r"name: '{module}/Port\1'",
+            lambda m: f"name: '{model}/Port{m.group(1)}'",
             result,
             flags=re.IGNORECASE
         )
+        # Also catch bare numbers that look like interface indices
+        result = re.sub(
+            rf"name:\s*['\"]?{re.escape(model)}['\"]?\s*/\s*Port\d+['\"]?",
+            lambda m: m.group(0),  # keep already-correct ones
+            result,
+            flags=re.IGNORECASE
+        )
+
+    # Final safety net: ensure the pattern appears at least once
+    if interface_pattern not in result and (ref_pattern is None or ref_pattern not in result):
+        # Rewrite all name: fields that don't match the pattern
+        def _fix_name(line):
+            m = re.match(r"^\s*-?\s*name:\s*['\"]?([^'\"\n]+)['\"]?", line)
+            if m:
+                val = m.group(1).strip()
+                if "{module}" not in val and "Port" in val:
+                    return re.sub(
+                        r"name:\s*['\"]?.*['\"]?",
+                        f"name: '{model}/Port1'",
+                        line
+                    )
+            return line
+        lines = result.split('\n')
+        result = '\n'.join(_fix_name(l) for l in lines)
+
     return result
 
 def generate_rack_yaml(mfg: str, model: str, model_name: str) -> str:
