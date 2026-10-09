@@ -1713,7 +1713,8 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
             st.markdown(f"#### {card_title}")
         with col_t2:
             st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em; color: #94a3b8;'>{len(presets)} presets</span></div>", unsafe_allow_html=True)
-        st.caption(card_caption) if card_caption and card_caption.strip() else None
+        if card_caption and card_caption.strip():
+            st.caption(card_caption)
 
         # Inject dynamic styling to guarantee Action buttons fit cleanly without squeezing
         _inject_preset_table_style()
@@ -2801,8 +2802,12 @@ def render_standards_tab(active_model):
 
     _outer_labels = ["📝 Edit Standards", "📘 Pattern Variables", "📜 Change History"]
     _outer_sel = st.radio(
-        "", options=_outer_labels, index=_active_outer, horizontal=True,
-        key="standards_outer_radio", label_visibility="collapsed",
+        "Standards Navigation",
+        options=_outer_labels,
+        index=_active_outer,
+        horizontal=True,
+        key="standards_outer_radio",
+        label_visibility="collapsed",
     )
     _new_outer_idx = _outer_labels.index(_outer_sel)
     if _new_outer_idx != _active_outer:
@@ -2818,8 +2823,12 @@ def render_standards_tab(active_model):
 
         _subtab_labels = ["🌐 IPAM Standards", "🏷️ Naming Standards", "⚙️ Infrastructure & Baseline"]
         _sub_sel = st.radio(
-            "", options=_subtab_labels, index=_active_subtab, horizontal=True,
-            key="standards_subtab_radio", label_visibility="collapsed",
+            "Standards Category",
+            options=_subtab_labels,
+            index=_active_subtab,
+            horizontal=True,
+            key="standards_subtab_radio",
+            label_visibility="collapsed",
         )
         _new_sub_idx = _subtab_labels.index(_sub_sel)
         if _new_sub_idx != _active_subtab:
