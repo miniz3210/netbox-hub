@@ -862,6 +862,26 @@
       ]
     }
   },
+  "hardware_baseline_standards": {
+    "server": {
+      "display_name": "Server",
+      "console_ports": "Serial (de-9)",
+      "module_bays": "PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3",
+      "interfaces": "OOB Management ONLY (1000base-t, mgmt_only: true)"
+    },
+    "module_nic": {
+      "display_name": "Module / NIC",
+      "interface_pattern": "{module}/Port{index}",
+      "default_port_count": 2,
+      "port_start_index": 1
+    },
+    "storage_san": {
+      "display_name": "Storage / SAN",
+      "interface_pattern": "{module}/Port{index}",
+      "default_port_count": 4,
+      "port_start_index": 1
+    }
+  },
   "topology_parsing_presets": {
     "VMware ESXi": {
       "platform": "VMware ESXi",

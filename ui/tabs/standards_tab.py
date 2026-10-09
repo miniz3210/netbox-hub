@@ -1019,143 +1019,138 @@ def _render_spatial_anchors_redaction_editor(
         domain_pats = []
     domain_pats_str = ", ".join(domain_pats)
 
-    with st.container(border=True):
+    _check_and_render_banner(f"hypervisor_s25_{active_plat}", duration_sec=10)
+    st.caption(
+        "Configure dynamic relative spatial boundaries (resolution-agnostic) and "
+        "on-device deterministic data redaction. When enabled, OCR tokens are grouped "
+        "by virtual-switch containers using anchor-based geometry instead of fixed "
+        "pixel offsets, and sensitive values (IPs, domains, MACs) are replaced locally "
+        "with deterministic tokens before the payload reaches any external LLM."
+    )
+
+    enabled_ui = st.checkbox(
+        "Enable Relative Spatial Grouping & Local Redaction",
+        value=bool(enabled),
+        key=f"spat_enabled_{active_plat}",
+        help="When enabled, OCR tokens are spatially grouped and sensitive data is redacted locally.",
+    )
+
+    sp_cfg_out = dict(sp_cfg)
+    sp_cfg_out["enabled"] = enabled_ui
+
+    if enabled_ui:
+        # ── Dynamic Anchor Rows (identical UX to Section 2) ──────────────
         st.markdown(
-            '<div style="font-weight:700;font-size:1.05rem;">'
-            '2.5. Relative Spatial Anchors &amp; Local Privacy Redaction</div>',
+            "<div style='display:flex; justify-content:space-between; align-items:center; margin-top:8px; margin-bottom:4px;'>"
+            "<span style='font-size:0.95rem; font-weight:600;'>Anchor Roles &amp; Patterns</span>"
+            "</div>",
             unsafe_allow_html=True,
         )
-        st.caption(
-            "Configure dynamic relative spatial boundaries (resolution-agnostic) and "
-            "on-device deterministic data redaction. When enabled, OCR tokens are grouped "
-            "by virtual-switch containers using anchor-based geometry instead of fixed "
-            "pixel offsets, and sensitive values (IPs, domains, MACs) are replaced locally "
-            "with deterministic tokens before the payload reaches any external LLM."
-        )
+        st.caption("Each row defines a spatial anchor role with one or more text patterns. Patterns are matched case-insensitively against OCR token text.")
 
-        enabled_ui = st.checkbox(
-            "Enable Relative Spatial Grouping & Local Redaction",
-            value=bool(enabled),
-            key=f"spat_enabled_{active_plat}",
-            help="When enabled, OCR tokens are spatially grouped and sensitive data is redacted locally.",
-        )
+        ANC_COLS = [2.0, 5.3, 1.2]
+        ac_role, ac_pat, ac_act = st.columns(ANC_COLS, vertical_alignment="center")
+        with ac_role:
+            st.markdown("**Anchor Role**")
+        with ac_pat:
+            st.markdown("**Anchor Patterns (comma-separated)**")
+        with ac_act:
+            pass
 
-        sp_cfg_out = dict(sp_cfg)
-        sp_cfg_out["enabled"] = enabled_ui
+        updated_anchors = []
+        for idx, anchor_entry in enumerate(anchors_list):
+            role = anchor_entry.get("role", "")
+            patterns = anchor_entry.get("patterns", [])
+            if not isinstance(patterns, list):
+                patterns = [str(patterns)]
+            pat_str = ", ".join(patterns)
 
-        if enabled_ui:
-            # ── Dynamic Anchor Rows (identical UX to Section 2) ──────────────
-            st.markdown(
-                "<div style='display:flex; justify-content:space-between; align-items:center; margin-top:8px; margin-bottom:4px;'>"
-                "<span style='font-size:0.95rem; font-weight:600;'>Anchor Roles &amp; Patterns</span>"
-                "</div>",
-                unsafe_allow_html=True,
-            )
-            st.caption("Each row defines a spatial anchor role with one or more text patterns. Patterns are matched case-insensitively against OCR token text.")
+            rc, rp, ra = st.columns(ANC_COLS, vertical_alignment="center")
+            with rc:
+                new_role = st.text_input(
+                    "Anchor Role", value=role,
+                    key=f"spat_role_{active_plat}_{idx}",
+                    label_visibility="collapsed",
+                ).strip()
+            with rp:
+                new_pat = st.text_input(
+                    "Patterns", value=pat_str,
+                    key=f"spat_pat_{active_plat}_{idx}",
+                    label_visibility="collapsed",
+                ).strip()
+            with ra:
+                if _render_centered_del_btn(f"spat_del_{active_plat}_{idx}", "Delete anchor row"):
+                    continue  # skip re-adding this row
+            if new_role:
+                pat_list = [p.strip() for p in new_pat.split(",") if p.strip()] if new_pat else []
+                updated_anchors.append({"role": new_role, "patterns": pat_list})
 
-            ANC_COLS = [2.0, 5.3, 1.2]
-            ac_role, ac_pat, ac_act = st.columns(ANC_COLS, vertical_alignment="center")
-            with ac_role:
-                st.markdown("**Anchor Role**")
-            with ac_pat:
-                st.markdown("**Anchor Patterns (comma-separated)**")
-            with ac_act:
-                pass
-
-            updated_anchors = []
-            for idx, anchor_entry in enumerate(anchors_list):
-                role = anchor_entry.get("role", "")
-                patterns = anchor_entry.get("patterns", [])
-                if not isinstance(patterns, list):
-                    patterns = [str(patterns)]
-                pat_str = ", ".join(patterns)
-
-                rc, rp, ra = st.columns(ANC_COLS, vertical_alignment="center")
-                with rc:
-                    new_role = st.text_input(
-                        "Anchor Role", value=role,
-                        key=f"spat_role_{active_plat}_{idx}",
-                        label_visibility="collapsed",
-                    ).strip()
-                with rp:
-                    new_pat = st.text_input(
-                        "Patterns", value=pat_str,
-                        key=f"spat_pat_{active_plat}_{idx}",
-                        label_visibility="collapsed",
-                    ).strip()
-                with ra:
-                    if _render_centered_del_btn(f"spat_del_{active_plat}_{idx}", "Delete anchor row"):
-                        continue  # skip re-adding this row
-                if new_role:
-                    pat_list = [p.strip() for p in new_pat.split(",") if p.strip()] if new_pat else []
-                    updated_anchors.append({"role": new_role, "patterns": pat_list})
-
-            # Inline add-row form (clear_on_submit avoids layout crashes)
-            with st.form(key=f"spat_add_form_{active_plat}", clear_on_submit=True):
-                ca1, ca2, ca3 = st.columns(ANC_COLS, vertical_alignment="center")
-                with ca1:
-                    new_role = st.text_input(
-                        "New Role", value="", key=f"spat_new_role_{active_plat}",
-                        placeholder="e.g. container_header", label_visibility="collapsed",
-                    )
-                with ca2:
-                    new_pat = st.text_input(
-                        "New Patterns", value="", key=f"spat_new_pat_{active_plat}",
-                        placeholder="e.g. Standard Switch:, DVSwitch:", label_visibility="collapsed",
-                    )
-                with ca3:
-                    add_anchor = st.form_submit_button("➕ Add", width='stretch', help="Add new anchor row")
-                if add_anchor:
-                    if new_role.strip():
-                        pat_list = [p.strip() for p in new_pat.split(",") if p.strip()] if new_pat.strip() else []
-                        updated_anchors.append({"role": new_role.strip(), "patterns": pat_list})
-                        st.session_state[f"_spat_pending_add_{active_plat}"] = True
-                        st.rerun()
-                    else:
-                        st.warning("⚠️ Enter an anchor role name.")
-
-            st.divider()
-
-            # ── Redaction Controls ────────────────────────────────────────────
-            redact_ipv4_ui = st.checkbox(
-                "Redact IPv4 addresses",
-                value=bool(redact_ipv4),
-                key=f"spat_redact_ip_{active_plat}",
-            )
-            redact_domains_ui = st.checkbox(
-                "Redact internal domains",
-                value=bool(redact_domains),
-                key=f"spat_redact_domain_{active_plat}",
-            )
-            redact_mac_ui = st.checkbox(
-                "Redact MAC addresses",
-                value=bool(redact_mac),
-                key=f"spat_redact_mac_{active_plat}",
-            )
-
-            if redact_domains_ui:
-                domain_pats_ui = st.text_input(
-                    "Domain Suffix Patterns (comma-separated regex)",
-                    value=domain_pats_str,
-                    key=f"spat_domain_pats_{active_plat}",
-                    help="Regex patterns matching internal domain suffixes to redact (e.g. '.adds, .local').",
+        # Inline add-row form (clear_on_submit avoids layout crashes)
+        with st.form(key=f"spat_add_form_{active_plat}", clear_on_submit=True):
+            ca1, ca2, ca3 = st.columns(ANC_COLS, vertical_alignment="center")
+            with ca1:
+                new_role = st.text_input(
+                    "New Role", value="", key=f"spat_new_role_{active_plat}",
+                    placeholder="e.g. container_header", label_visibility="collapsed",
                 )
-            else:
-                domain_pats_ui = domain_pats_str
+            with ca2:
+                new_pat = st.text_input(
+                    "New Patterns", value="", key=f"spat_new_pat_{active_plat}",
+                    placeholder="e.g. Standard Switch:, DVSwitch:", label_visibility="collapsed",
+                )
+            with ca3:
+                add_anchor = st.form_submit_button("➕ Add", width='stretch', help="Add new anchor row")
+            if add_anchor:
+                if new_role.strip():
+                    pat_list = [p.strip() for p in new_pat.split(",") if p.strip()] if new_pat.strip() else []
+                    updated_anchors.append({"role": new_role.strip(), "patterns": pat_list})
+                    st.session_state[f"_spat_pending_add_{active_plat}"] = True
+                    st.rerun()
+                else:
+                    st.warning("⚠️ Enter an anchor role name.")
 
-            sp_cfg_out.update({
-                "redact_ipv4": redact_ipv4_ui,
-                "redact_domains": redact_domains_ui,
-                "redact_mac": redact_mac_ui,
-                "domain_patterns": [
-                    p.strip() for p in domain_pats_ui.split(",") if p.strip()
-                ] if redact_domains_ui else [],
-            })
+        st.divider()
+
+        # ── Redaction Controls ────────────────────────────────────────────
+        redact_ipv4_ui = st.checkbox(
+            "Redact IPv4 addresses",
+            value=bool(redact_ipv4),
+            key=f"spat_redact_ip_{active_plat}",
+        )
+        redact_domains_ui = st.checkbox(
+            "Redact internal domains",
+            value=bool(redact_domains),
+            key=f"spat_redact_domain_{active_plat}",
+        )
+        redact_mac_ui = st.checkbox(
+            "Redact MAC addresses",
+            value=bool(redact_mac),
+            key=f"spat_redact_mac_{active_plat}",
+        )
+
+        if redact_domains_ui:
+            domain_pats_ui = st.text_input(
+                "Domain Suffix Patterns (comma-separated regex)",
+                value=domain_pats_str,
+                key=f"spat_domain_pats_{active_plat}",
+                help="Regex patterns matching internal domain suffixes to redact (e.g. '.adds, .local').",
+            )
         else:
-            # Preserve anchor settings while the feature is disabled.
-            sp_cfg_out.setdefault("anchors", anchors_list)
+            domain_pats_ui = domain_pats_str
 
-        plat_parsing["spatial_anchors_and_redaction"] = sp_cfg_out
+        sp_cfg_out.update({
+            "redact_ipv4": redact_ipv4_ui,
+            "redact_domains": redact_domains_ui,
+            "redact_mac": redact_mac_ui,
+            "domain_patterns": [
+                p.strip() for p in domain_pats_ui.split(",") if p.strip()
+            ] if redact_domains_ui else [],
+        })
+    else:
+        # Preserve anchor settings while the feature is disabled.
+        sp_cfg_out.setdefault("anchors", anchors_list)
+
+    plat_parsing["spatial_anchors_and_redaction"] = sp_cfg_out
 
 
 def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | None = None):
@@ -2938,40 +2933,6 @@ def _render_hardware_baseline_editor(rules: dict, active_model: str | None = Non
 
         st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
 
-        # ── AI Assistant ──────────────────────────────────────────────────────
-        with st.expander("✨ AI Assistant: Generate Hardware YAML Spec", expanded=False):
-            ai_desc = st.text_input(
-                "Describe the hardware YAML spec",
-                key="custom_ai_desc_hb",
-                placeholder="e.g. Generate server hardware YAML for a Dell R740 with dual 25G NICs and 4x 2.5in drive bays",
-            )
-            if st.button("Generate Hardware YAML Spec with AI", key="custom_ai_gen_hb", width='stretch'):
-                if ai_desc.strip():
-                    with st.spinner(f"Generating spec using {active_model}..."):
-                        try:
-                            generated = generate_naming_pattern(ai_desc.strip(), active_model)
-                            st.session_state["hb_ai_result"] = generated
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ AI spec generation failed: {e}")
-                else:
-                    st.warning("⚠️ Please describe the hardware YAML spec first.")
-            ai_result = st.session_state.get("hb_ai_result", "")
-            if ai_result:
-                st.code(ai_result, language="yaml")
-                if st.button("Apply to Server Category", key="apply_ai_to_server", width='stretch'):
-                    server_cfg = hb.get("server", {})
-                    server_cfg["auto_generated_spec"] = ai_result
-                    hb["server"] = server_cfg
-                    rules["hardware_baseline_standards"] = hb
-                    save_naming_rules(rules, source="Hardware Baseline: Apply AI Spec")
-                    SSM.set_naming_rules(rules.copy())
-                    st.session_state.pop("hb_ai_result", None)
-                    st.session_state["card_saved_banner"] = {"section": "yaml_guidelines", "msg": "✅ AI-generated spec applied to Server category!", "ts": time.time()}
-                    st.rerun()
-
-        st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
-
         # ── Render each category editor ───────────────────────────────────────
         edited_hb = {}
         for cat_key, default_cfg in DEFAULT_HARDWARE_BASELINE_STANDARDS.items():
@@ -3092,36 +3053,6 @@ def _render_hardware_baseline_editor(rules: dict, active_model: str | None = Non
                             "ts": time.time()
                         }
                         st.rerun()
-
-        # ── Legacy flat-field fallback (preserved for backward compat) ─────────
-        st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
-        with st.expander("📜 Legacy Flat Field (backward compatibility)", expanded=False):
-            st.caption("The legacy ``netbox_server_yaml`` string is automatically derived from the Server category above. You can edit it directly here if needed, but changes will be overwritten by the structured editor on next save.")
-            legacy_text = rules.get("netbox_server_yaml", "")
-            legacy_input = st.text_area(
-                "Legacy netbox_server_yaml",
-                value=legacy_text,
-                height=80,
-                key="form_yaml_legacy_hb",
-            )
-            col_save_legacy, col_reset_legacy = st.columns(2)
-            with col_save_legacy:
-                if st.button("💾 Save Legacy Field", type="primary", width='stretch'):
-                    rules = load_naming_rules()
-                    rules["netbox_server_yaml"] = legacy_input
-                    save_naming_rules(rules, source="YAML Guidelines Legacy Save")
-                    SSM.set_naming_rules(rules.copy())
-                    st.session_state["card_saved_banner"] = {"section": "yaml_guidelines", "msg": "✅ Legacy netbox_server_yaml field saved!", "ts": time.time()}
-                    st.rerun()
-            with col_reset_legacy:
-                if st.button("🔄 Reset Legacy", width='stretch'):
-                    default_yaml = DEFAULT_RULES.get("netbox_server_yaml", DEFAULT_NAMING_PATTERNS.get("netbox_server_yaml", ""))
-                    rules = load_naming_rules()
-                    rules["netbox_server_yaml"] = default_yaml
-                    save_naming_rules(rules, source="YAML Guidelines Legacy Reset")
-                    SSM.set_naming_rules(rules.copy())
-                    st.session_state["card_saved_banner"] = {"section": "yaml_guidelines", "msg": "✅ Legacy field reset to defaults!", "ts": time.time()}
-                    st.rerun()
 
 
 def render_standards_tab(active_model):
