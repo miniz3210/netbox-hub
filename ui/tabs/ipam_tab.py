@@ -51,6 +51,7 @@ from ui.components import render_ai_chat, render_backup_uploader
 
 _last_site_lookup = {}  # tracks (site_name, scope_id, supernet) to avoid redundant DB queries
 
+
 def handle_site_change():
     """Triggered on site name input change: looks up Scope ID & Supernet once."""
     entered_site = st.session_state.get("ipam_site_in", "").strip()
@@ -68,6 +69,7 @@ def handle_site_change():
             st.session_state["ipam_super_in"] = str(matched_super)
         _last_site_lookup["scope"] = matched_scope
         _last_site_lookup["supernet"] = matched_super
+
 
 def handle_ipam_file_upload():
     """Universal file upload handler using dynamic schema classification."""
@@ -91,13 +93,11 @@ def handle_ipam_file_upload():
                 st.error(err)
         
         if results['total_records'] > 0:
-            # Generate detailed toast message
             model_breakdown = ", ".join([
                 f"{count} {model.split('.')[-1]}"
                 for model, count in sorted(results['by_model'].items())
             ])
             
-            # Check for unclassified files
             has_unclassified = any('unclassified' in model for model in results['by_model'].keys())
             
             if has_unclassified:
@@ -110,24 +110,18 @@ def handle_ipam_file_upload():
             else:
                 st.toast(f"✅ Ingested {results['total_records']} records: {model_breakdown}", icon="🚀")
             
-            # Update SharedBackupState for dynamic backup display
             uploaded_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            # Build source file list for display
             source_files = ", ".join([f.name for f in uploaded_files])
             for model_key, count in results['by_model'].items():
-                # Map model keys to endpoint paths for SharedBackupState
                 endpoint = model_key.replace('.', '/')
                 SharedBackupState.add_csv_override(endpoint, count, source_files, uploaded_at)
             
-            # Clear uploader by incrementing key
             st.session_state["uploader_key"] = st.session_state.get("uploader_key", 0) + 1
         elif not results['errors']:
-            # No data ingested and no errors - clear uploader anyway
             st.session_state["uploader_key"] = st.session_state.get("uploader_key", 0) + 1
             
     except Exception as e:
         st.error(f"❌ Upload failed: {str(e)}")
-        # Show helpful message if schema registry not initialized
         if "schema registry" in str(e).lower() or "classify" in str(e).lower():
             st.info(
                 "💡 **Tip:** Upload a NetBox backup JSON first to initialize the schema registry, "
@@ -138,7 +132,6 @@ def handle_ipam_file_upload():
 def handle_ipam_db_reset():
     clear_ipam_records()
     
-    # Also clear CSV entries from SharedBackupState
     from core.shared_backup_state import SharedBackupState
     SharedBackupState.clear_csv_only()
     
@@ -154,17 +147,11 @@ def handle_ipam_db_reset():
 
 
 def build_vlan_description(site_name: str, role: str, vlan_id, vlan_name: str = "", vlan_presets=None, vlan_desc_mappings=None, role_mappings=None) -> str:
-    """Resolve the 'VLAN Description' tag from the dynamic Role -> Description
-    mappings configured in the Standards Tab.
-
-    Looks up the role against ``vlan_desc_mappings``; if a match exists its
-    mapped value is returned (e.g. "Guests" -> "VIN_Guest"). Otherwise the
-    Role name itself is returned. There are no hardcoded lookup dictionaries.
-    """
     clean_role = str(role or "").strip()
     if vlan_presets is None:
         vlan_presets = get_vlan_presets(load_naming_rules())
     return resolve_vlan_description(vlan_id, clean_role, vlan_presets, vlan_desc_mappings, role_mappings)
+
 
 def load_ipam_records_from_db(site_name: str) -> bool:
     """Load IPAM allocation rows for a site straight from the local database.
@@ -174,7 +161,6 @@ def load_ipam_records_from_db(site_name: str) -> bool:
     site_name = (site_name or "").strip()
     records = get_ipam_records_by_site(site_name) if site_name else []
 
-    # Drop stale editor deltas so edits from the previous site are not replayed
     if "ipam_data_editor_live" in st.session_state:
         del st.session_state["ipam_data_editor_live"]
 
@@ -204,10 +190,8 @@ def load_ipam_records_from_db(site_name: str) -> bool:
     target_preset = best_group or {"items": [], "vlan_name_pattern": "<role>", "prefix_pattern": ""}
     order_map = {p['vid']: i for i, p in enumerate(target_preset.get("items", []))}
 
-    # Sort records by order in preset, then by vlan_id (handle None values)
     def sort_key(r):
         vlan_id = r.get('vlan_id')
-        # If vlan_id is None, treat it as 9999 for sorting (put at end)
         if vlan_id is None:
             return (999, 9999)
         return (order_map.get(vlan_id, 999), vlan_id)
@@ -217,9 +201,6 @@ def load_ipam_records_from_db(site_name: str) -> bool:
     def _clean(value) -> str:
         return str(value or "").strip()
 
-    # Merge the VLAN row and the prefix row that NetBox stores separately for the
-    # same VLAN ID: the 'vlan' record holds the real VLAN description while the
-    # 'prefix' record holds the prefix description.
     merged: Dict[int, Dict[str, str]] = {}
     order: List[int] = []
     for r in records:
@@ -255,7 +236,6 @@ def load_ipam_records_from_db(site_name: str) -> bool:
             if desc and not entry["prefix_desc"]:
                 entry["prefix_desc"] = desc
         else:
-            # Unknown record type: use it only as a fallback for both fields
             if desc and not entry["vlan_desc"]:
                 entry["vlan_desc"] = desc
             if desc and not entry["prefix_desc"]:
@@ -266,7 +246,6 @@ def load_ipam_records_from_db(site_name: str) -> bool:
     g_prefix_pat = target_preset.get("prefix_pattern", "")
     for vid in order:
         entry = merged[vid]
-        # Keep the raw DB text so it is never replaced by generated descriptions
         new_rows.append({
             "VLAN ID": vid,
             "Role": entry["role"],
@@ -285,11 +264,11 @@ def load_ipam_records_from_db(site_name: str) -> bool:
     st.session_state["ipam_loaded_from_db"] = True
     return True
 
+
 def on_preset_change():
     selected = st.session_state.get("ipam_preset_selector")
     site_name = st.session_state.get("ipam_site_in", "").strip()
 
-    # Reset DB load flag; the loader re-sets it when records are found
     st.session_state["ipam_loaded_from_db"] = False
 
     if selected == "🗄️ Load From DB (Existing Site)":
@@ -332,13 +311,13 @@ def on_preset_change():
             })
         st.session_state["ipam_persisted_rows"] = new_rows
 
+
 def build_ipam_system_prompt(prompt, site_name, supernet_in, existing_prefixes, max_scope_id):
     """Build the grounded IPAM system prompt for the AI Assistant."""
     from core.ai_helper import build_comprehensive_ipam_context
 
     comprehensive_context = build_comprehensive_ipam_context(prompt, site_filter=site_name)
 
-    # Combine DB prefixes with the prefixes currently in the allocation editor
     ui_prefixes = []
     for r in st.session_state.get("ipam_persisted_rows", []):
         sub = str(r.get("Subnet (CIDR)", "") or "").strip()
@@ -347,11 +326,9 @@ def build_ipam_system_prompt(prompt, site_name, supernet_in, existing_prefixes, 
 
     combined_prefixes = list(dict.fromkeys(existing_prefixes + ui_prefixes))
 
-    # Extract requested mask (e.g., /24) from user prompt if specified
     mask_match = re.search(r"/(\d{1,2})", prompt)
     req_mask = int(mask_match.group(1)) if mask_match else 24
 
-    # Determine target supernet for pre-calculation
     target_networks = []
     cidr_matches = re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?\b", prompt)
     if supernet_in:
@@ -414,9 +391,204 @@ You have DIRECT ACCESS to the complete IPAM database. Analyze the user's request
 8. Be concise but comprehensive - show all relevant data
 9. When counting items (e.g., "how many VLANs"), provide the exact number from the data above
 10. If a "NETBOX MASTER BACKUP" section is present it is the full NetBox export:
-   - Treat it as authoritative for any object type (sites, racks, devices, interfaces, IPs, VMs, clusters, tenants, circuits, VRFs)
-   - Use its "total in backup" figures when stating counts
-   - Quote the exact records listed rather than generalizing"""
+    - Treat it as authoritative for any object type (sites, racks, devices, interfaces, IPs, VMs, clusters, tenants, circuits, VRFs)
+    - Use its "total in backup" figures when stating counts
+    - Quote the exact records listed rather than generalizing"""
+
+
+# ---------------------------------------------------------------------------
+# Ingest & Audit Master IPAM Drawer
+# ---------------------------------------------------------------------------
+
+def _audit_cache_key(filename: str, size: int) -> str:
+    return f"{filename}_{size}"
+
+
+def _render_ingest_audit_drawer(total_sites: int, total_vlans: int, total_prefixes: int):
+    """Unified ingest-and-audit drawer replacing the legacy backup-only expander."""
+    from core.ipam_excel_diff import parse_file_bytes, classify_records
+    from core.db_manager import get_all_site_names, get_existing_prefix_strings
+
+    db_has_data = (total_sites + total_vlans + total_prefixes) > 0
+    status_emoji = "🟢" if db_has_data else "⚪"
+    db_hint = f" ({total_sites} sites, {total_vlans} VLANs, {total_prefixes} prefixes in DB)" if db_has_data else " (Default Examples)"
+
+    with st.expander(f"📥 Ingest & Audit Master IPAM (Backup JSON / Excel / CSV) {status_emoji}{db_hint}", expanded=False):
+
+        # --- Schema registry notice (legacy path, still useful) ---------------
+        from core.universal_schema_registry import UniversalSchemaRegistry
+        registry = UniversalSchemaRegistry.load_from_session_state()
+        if registry and registry.model_signatures:
+            st.success(
+                f"✅ **Schema Registry Active:** {len(registry.model_signatures)} NetBox models loaded. CSV files will be automatically classified.",
+                icon="🔍"
+            )
+        else:
+            st.warning(
+                "⚠️ **Schema Registry Not Initialized:** Upload a NetBox backup JSON below to enable automatic classification.",
+                icon="⚠️"
+            )
+
+        if db_has_data:
+            meta_sites = get_sync_metadata("netbox_sites")
+            meta_vlans = get_sync_metadata("netbox_VLANs")
+            meta_prefixes = get_sync_metadata("netbox_prefixes")
+            sources = [m['source'] for m in [meta_sites, meta_vlans, meta_prefixes] if m['source'] != "None"]
+            st.markdown(f"**DB Status:** `Source: {sources[0] if sources else 'Manual CSV Upload'}`")
+
+        # --- File uploader ---------------------------------------------------
+        file_types = [".xlsx", ".xls", ".csv", ".json"]
+        uploaded_file = st.file_uploader(
+            "Upload IPAM Excel / CSV / JSON",
+            type=file_types,
+            key="ipam_audit_uploader",
+            help="Multi-sheet Excel, flat CSV, or NetBox backup JSON accepted. "
+                 "Headers are discovered dynamically; site defaults to sheet name.",
+        )
+
+        # --- Action buttons --------------------------------------------------
+        col_clear, col_refresh = st.columns(2)
+        with col_clear:
+            if st.button("🗑️ Clear IPAM Data", key="btn_clear_ipam_audit"):
+                clear_ipam_records()
+                SharedBackupState.clear_csv_only()
+                for k in ["ipam_persisted_rows", "ipam_scope_in", "ipam_site_in", "ipam_super_in",
+                          "ipam_audit_result", "ipam_site_options"]:
+                    st.session_state.pop(k, None)
+                st.toast("🗑️ IPAM audit cache cleared.", icon="🧹")
+                st.rerun()
+        with col_refresh:
+            if st.button("🔄 Refresh Audit", key="btn_refresh_ipam_audit"):
+                if "ipam_audit_result" in st.session_state:
+                    st.rerun()
+
+        # --- Parse & cache ---------------------------------------------------
+        audit_result = None
+        if uploaded_file is not None:
+            cache_key = _audit_cache_key(uploaded_file.name, uploaded_file.size)
+            cached = st.session_state.get(cache_key)
+            if cached is None:
+                try:
+                    bytes_buf = io.BytesIO(uploaded_file.read())
+                    rules = load_naming_rules()
+                    records = parse_file_bytes(bytes_buf, filename=uploaded_file.name, rules=rules)
+                    matched, pending, conflicts, metrics = classify_records(records)
+                    audit_result = {
+                        "matched": matched,
+                        "pending_add": pending,
+                        "conflicts": conflicts,
+                        "metrics": metrics,
+                        "filename": uploaded_file.name,
+                    }
+                    st.session_state[cache_key] = audit_result
+                    # Also store under canonical key so downstream UI reads it
+                    st.session_state["ipam_audit_result"] = audit_result
+                except Exception as exc:
+                    st.error(f"❌ Parse failed: {exc}")
+            else:
+                audit_result = cached
+
+        # --- Render cached / live result -------------------------------------
+        result = audit_result or st.session_state.get("ipam_audit_result")
+        if result is None:
+            st.caption("Upload an Excel, CSV, or JSON file to run the audit.")
+            render_backup_uploader("ipam")
+            return
+
+        metrics = result["metrics"]
+        df_matched = result["matched"]
+        df_pending = result["pending_add"]
+        df_conflicts = result["conflicts"]
+
+        # --- Metric cards ----------------------------------------------------
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric("Total Parsed", metrics["total_parsed"])
+        with c2:
+            st.metric("✅ In NetBox DB", metrics["matched"])
+        with c3:
+            st.metric("❌ Need to Add", metrics["pending_add"])
+        with c4:
+            st.metric("⚠️ Conflicts", metrics["conflicts"] + metrics["unmapped_sites"])
+
+        # --- Quick-action: site loader ---------------------------------------
+        all_sites = get_all_site_names()
+        parsed_site_options: List[str] = sorted({
+            str(r.get("site", "")).strip()
+            for r in (result.get("_records_raw") or [])
+        } - {""}) or all_sites
+        if parsed_site_options:
+            with st.expander("🔍 Quick Action: Load Site into Subnet Allocation Editor", expanded=False):
+                st.markdown(
+                    "Select any site discovered in the uploaded file to auto-fill the "
+                    "**Branch / Site Name** field and jump directly to live editing."
+                )
+                site_sel = st.selectbox(
+                    "Load Site",
+                    options=[""] + parsed_site_options + all_sites,
+                    key="ipam_audit_site_selector",
+                    help="Auto-fills ipam_site_in for immediate editing.",
+                )
+                if site_sel:
+                    st.session_state["ipam_site_in"] = site_sel
+                    st.toast(f"Loaded site **{site_sel}** into Subnet Allocation Editor.", icon="📌")
+                    st.rerun()
+
+        # --- Tabbed audit view -----------------------------------------------
+        tab_add, tab_conflicts, tab_matched = st.tabs([
+            f"❌ Need to Add ({metrics['pending_add']})",
+            f"⚠️ Conflicts & Unmapped ({metrics['conflicts'] + metrics['unmapped_sites']})",
+            f"✅ Existing in DB ({metrics['matched']})",
+        ])
+
+        with tab_add:
+            if df_pending.empty:
+                st.info("No records need to be added — all entries exist in the database.")
+            else:
+                st.markdown("**Records ready for NetBox bulk import.**")
+                st.dataframe(df_pending, use_container_width=True, hide_index=True)
+                col_pf, col_vl = st.columns(2)
+                with col_pf:
+                    buf = io.BytesIO()
+                    cols_pf = [c for c in ["subnet", "vlan_id", "vlan_name", "site", "description", "ip_address"] if c in df_pending.columns]
+                    df_pending[cols_pf].to_csv(buf, index=False)
+                    buf.seek(0)
+                    st.download_button(
+                        "📥 Download netbox-ipam-prefixes-import.csv",
+                        data=buf,
+                        file_name="netbox-ipam-prefixes-import.csv",
+                        mime="text/csv",
+                    )
+                with col_vl:
+                    buf2 = io.BytesIO()
+                    cols_vl = [c for c in ["vlan_id", "vlan_name", "site", "description", "subnet"] if c in df_pending.columns]
+                    df_pending[cols_vl].to_csv(buf2, index=False)
+                    buf2.seek(0)
+                    st.download_button(
+                        "📥 Download netbox-ipam-vlans-import.csv",
+                        data=buf2,
+                        file_name="netbox-ipam-vlans-import.csv",
+                        mime="text/csv",
+                    )
+
+        with tab_conflicts:
+            if df_conflicts.empty:
+                st.success("No conflicts detected.")
+            else:
+                st.markdown("**Records with mismatched Site / VLAN attributes or unmapped sites.**")
+                st.dataframe(df_conflicts, use_container_width=True, hide_index=True)
+
+        with tab_matched:
+            if df_matched.empty:
+                st.info("No records matched existing database entries.")
+            else:
+                st.markdown("**Records that already exist in NetBox DB with consistent attributes.**")
+                st.dataframe(df_matched, use_container_width=True, hide_index=True)
+
+        # --- Fallback: legacy backup uploader remains accessible -------------
+        st.divider()
+        render_backup_uploader("ipam")
+
 
 def render_ipam_tab(active_model: str):
     st.subheader("🌐 IPAM & Site Subnet Provisioning Engine")
@@ -435,47 +607,12 @@ def render_ipam_tab(active_model: str):
                 import logging
                 logging.getLogger(__name__).warning(f"Failed to restore backup on tab load: {e}")
 
-    # 1. Ingestion Toolbar
+    # 1. Ingest & Audit Master Drawer
     total_ipam_recs = get_total_ipam_count()
     total_sites_recs = get_total_sites_count()
     total_vlans_recs = get_total_vlans_count()
     total_prefixes_recs = get_total_prefixes_count()
-    total_db_count = total_ipam_recs + total_sites_recs
-    meta = get_sync_metadata("ipam")
-
-    status_tag = f"🟢 ({total_sites_recs} sites, {total_vlans_recs} VLANs, {total_prefixes_recs} prefixes in DB)" if total_db_count > 0 else "⚪ (Default Examples)"
-    tick_sites = " ✅" if total_sites_recs > 0 else ""
-    tick_vlans = " ✅" if total_vlans_recs > 0 else ""
-    tick_prefixes = " ✅" if total_prefixes_recs > 0 else ""
-
-    with st.expander(f"📥 Ingest NetBox Site Data (Backup / CSV) {status_tag}", expanded=False):
-        # Schema Registry Status Check
-        from core.universal_schema_registry import UniversalSchemaRegistry
-        registry = UniversalSchemaRegistry.load_from_session_state()
-        
-        if registry and registry.model_signatures:
-            model_count = len(registry.model_signatures)
-            st.success(f"✅ **Schema Registry Active:** {model_count} NetBox models loaded. CSV files will be automatically classified.", icon="🔍")
-        else:
-            st.warning(
-                "⚠️ **Schema Registry Not Initialized:** CSV files will be stored in 'unclassified' tables. "
-                "Upload a NetBox backup JSON below to enable automatic classification.",
-                icon="⚠️"
-            )
-        
-        if total_db_count > 0:
-            # Get the most recent source from any of the files
-            meta_sites = get_sync_metadata("netbox_sites")
-            meta_vlans = get_sync_metadata("netbox_VLANs")
-            meta_prefixes = get_sync_metadata("netbox_prefixes")
-            
-            # Use the most recent source that's not "None"
-            sources = [m['source'] for m in [meta_sites, meta_vlans, meta_prefixes] if m['source'] != "None"]
-            display_source = sources[0] if sources else "Manual CSV Upload"
-            
-            st.markdown(f"**DB Status:** `Source: {display_source}`")
-
-        render_backup_uploader("ipam")
+    _render_ingest_audit_drawer(total_sites_recs, total_vlans_recs, total_prefixes_recs)
 
     # 2. Site Inputs and Dynamic Lookups
     if "ipam_site_in" not in st.session_state:
@@ -485,7 +622,6 @@ def render_ipam_tab(active_model: str):
     if "ipam_super_in" not in st.session_state:
         st.session_state["ipam_super_in"] = ""
 
-    # Get variables needed for AI Assistant
     max_scope_id = get_max_scope_id()
     scope_eg = f"e.g. {max_scope_id + 1}" if max_scope_id is not None else "e.g. 42"
     site_name = st.session_state.get("ipam_site_in", "").strip()
@@ -513,20 +649,16 @@ def render_ipam_tab(active_model: str):
             on_change=handle_site_change
         )
 
-    # Use cached lookup results from on_change handler; fall back to fresh lookup
-    # only when the site name differs from what the handler last processed.
     cached_site = _last_site_lookup.get("site", "")
     if site_name and site_name != cached_site:
-        handle_site_change()  # force fresh lookup
+        handle_site_change()
 
     auto_scope_id = _last_site_lookup.get("scope")
     auto_supernet = _last_site_lookup.get("supernet")
 
-    # Only auto-fill supernet once — no st.rerun() to avoid cascading full-page re-renders
     if site_name and auto_supernet and not st.session_state.get("ipam_super_in"):
         st.session_state["ipam_super_in"] = str(auto_supernet)
 
-    # Check if site exists in database (cached from handler; avoid extra full-table query)
     site_found = bool(st.session_state.get("ipam_site_found_in_db", False))
     if site_name and st.session_state.get("ipam_loaded_site") != site_name:
         site_found = bool(get_ipam_records_by_site(site_name))
@@ -580,7 +712,6 @@ def render_ipam_tab(active_model: str):
         db_mode = selected_preset == "🗄️ Load From DB (Existing Site)"
 
         with c_refresh:
-            # Refresh sits right next to the preset selector, active in DB mode
             st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
             if db_mode:
                 if st.button("🔄", key="btn_refresh_ipam", help=f"Reload '{site_name or 'site'}' data from database"):
@@ -590,14 +721,12 @@ def render_ipam_tab(active_model: str):
                         st.toast(f"⚠️ No records found for '{site_name}'.", icon="⚠️")
                     st.rerun()
         with c_status:
-            # Always show compact status indicator
             st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
             if site_found:
                 st.markdown("✅", help="Site found in DB - Select 'Load From DB' to load data")
             else:
                 st.caption("⚪")
 
-    # Auto-reload when the site name changed while DB mode is active
     if db_mode and site_name and st.session_state.get("ipam_loaded_site") != site_name:
         load_ipam_records_from_db(site_name)
         st.rerun()
@@ -605,12 +734,9 @@ def render_ipam_tab(active_model: str):
     if "ipam_persisted_rows" not in st.session_state:
         st.session_state["ipam_persisted_rows"] = []
 
-    # Sync editor deltas
     raw_rows = [dict(r) for r in st.session_state["ipam_persisted_rows"]]
     editor_state = st.session_state.get("ipam_data_editor_live", {})
 
-    # VLAN Description resolution is driven purely by the dynamic Standards Tab
-    # presets loaded here (no hardcoded lookup dictionaries).
     active_vlan_presets = get_vlan_presets(rules)
     vlan_desc_mappings = get_vlan_description_mappings(rules)
     role_rules = get_ipam_role_mappings(rules)
@@ -623,24 +749,15 @@ def render_ipam_tab(active_model: str):
     for row_idx_str, changes in edited_cells.items():
         row_idx = int(row_idx_str)
         if row_idx < len(raw_rows):
-            # A direct edit to the "VLAN Description" cell is a manual override.
-            # Flag it so later re-renders (or edits to other columns) never
-            # recalculate over the user-entered value.
             if "VLAN Description" in changes:
                 raw_rows[row_idx]["_vlan_desc_manual"] = True
 
             manual_desc = raw_rows[row_idx].get("_vlan_desc_manual", False)
 
-            # Role and VLAN ID edits must use the current site and row values.
-            # Looking up by role alone can return a stale description from another
-            # site (for example, "Auckland Management -- VLAN 5").
             if "Role" in changes:
-                # Auto-correct the role to its canonical casing, e.g. "guest" /
-                # "Guest" -> "Guests", "corp wifi" -> "Corporate WiFi".
                 changes["Role"] = normalize_role_name(changes["Role"], role_rules)
                 name_pattern = raw_rows[row_idx].get("_name_pattern", "")
                 if name_pattern and "VLAN Name" not in changes:
-                    # Recalculate VLAN Name from the pattern template dynamically
                     site_display = format_branch_display(site_name)
                     changes["VLAN Name"] = resolve_vlan_name(
                         site_display,
@@ -711,7 +828,6 @@ def render_ipam_tab(active_model: str):
         if sub_str:
             allocated_subnets.append(sub_str)
         
-        # Evaluate subnet for usable range and status
         eval_res = evaluate_subnet_row(
             sub_str, 
             r.get("VLAN ID"), 
@@ -725,14 +841,11 @@ def render_ipam_tab(active_model: str):
         r["Usable Range"] = eval_res["usable_range"]
         r["Status"] = eval_res["status"]
         
-        # Prefix Description: prefer the raw NetBox text for DB-loaded rows,
-        # generate it only for preset rows and rows added in the editor.
         if loaded_from_db and "_db_prefix_desc" in r:
             r["Prefix Description"] = r.get("_db_prefix_desc") or ""
         else:
             r["Prefix Description"] = eval_res["desc"]
 
-    # Real-time Available Subnets and Capacity
     with cap_placeholder.container():
         if supernet_in and "/" in supernet_in:
             try:

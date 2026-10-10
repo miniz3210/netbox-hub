@@ -1,0 +1,582 @@
+"""
+Master IPAM Excel Diff Engine — NetBox Hub v4.3
+
+High-performance in-memory parser and audit engine for multi-sheet Excel/IPAM
+inventories.  Dynamically discovers sheet names and column headers, normalises
+records against local naming-standard rules, and classifies every row into one
+of four buckets (matched / pending_add / conflicts / unmapped_sites) using
+O(1) hash-set lookups against the local SQLite DB state.
+
+Zero cloud / LLM leakage.  Pure local processing with openpyxl + sqlite3 +
+ipaddress + pandas.
+"""
+
+from __future__ import annotations
+
+import io
+import json
+import re
+import sqlite3
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
+
+import ipaddress
+import openpyxl
+import pandas as pd
+
+from config.constants import DATABASE_PATH
+from config.naming_rules import (
+    get_site_code_rules,
+    get_ipam_role_mappings,
+    get_vlan_description_mappings,
+    load_naming_rules,
+)
+from core.ipam_engine import (
+    slugify,
+    normalize_role_name,
+    resolve_vlan_description,
+)
+from core.db_manager import (
+    get_existing_prefix_strings,
+    get_all_site_names,
+    init_db as db_init,
+)
+
+# ---------------------------------------------------------------------------
+# Header-alias maps (lower-cased, no hard-coded column counts)
+# ---------------------------------------------------------------------------
+
+_HEADER_ALIASES: Dict[str, List[str]] = {
+    "ip": ["ip", "address", "ipv4", "host"],
+    "subnet": ["subnet", "network", "cidr", "prefix"],
+    "vlan_id": ["vlan id", "vid", "vlan_id", "vlan"],
+    "vlan_name": ["vlan name", "role", "name", "purpose", "description"],
+    "site": ["site", "location"],
+}
+
+_NORMALISE_RE = re.compile(r"[\s\-]+")
+
+
+def _norm_key(h: str) -> str:
+    return _NORMALISE_RE.sub("_", h.strip().lower()).strip("_")
+
+
+# ---------------------------------------------------------------------------
+# ExcelIPAMParser
+# ---------------------------------------------------------------------------
+
+
+class ExcelIPAMParser:
+    """Stream multi-sheet Excel/CSV workbooks into normalised IPAM records."""
+
+    def __init__(
+        self,
+        file_bytes: io.BytesIO,
+        filename: str = "",
+        rules: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        self.file_bytes = file_bytes
+        self.filename = filename
+        self.rules = rules or load_naming_rules()
+        self._wb: Optional[openpyxl.Workbook] = None
+
+    # -- private helpers -----------------------------------------------------
+
+    @staticmethod
+    def _find_header_row(
+        rows_iter: Any, max_scan: int = 5
+    ) -> Tuple[Optional[List[str]], int]:
+        """Scan the first *max_scan* rows for a usable header row.
+
+        Returns the header values and the 0-based index of the header row
+        within the scanned window.  Once a recognisable header is found the
+        scan stops early so that subsequent data rows are not silently
+        consumed by the discovery pass.
+        """
+        collected: List[Tuple[int, List[str]]] = []
+        for i, row in enumerate(rows_iter):
+            if i >= max_scan:
+                break
+            if row is None:
+                continue
+            vals = [str(c).strip() if c is not None else "" for c in row]
+            if any(v for v in vals):
+                collected.append((i, vals))
+                # Stop as soon as we find a row containing a recognised alias —
+                # don't burn through the rest of the scan window.
+                normed = [_norm_key(v) for v in vals]
+                if any(
+                    nk in ("ip", "address", "ipv4", "host", "subnet", "network",
+                           "cidr", "prefix", "vlan", "vid", "vlan_id")
+                    for nk in normed
+                ):
+                    return vals, i
+        if not collected:
+            return None, -1
+        # Fallback: use the very first non-empty row.
+        return collected[0][1], collected[0][0]
+
+    def _build_header_map(self, headers: List[str]) -> Dict[str, int]:
+        normed_headers = [_norm_key(h) for h in headers]
+        mapping: Dict[str, int] = {}
+        for canonical, aliases in _HEADER_ALIASES.items():
+            norm_aliases = {_norm_key(a) for a in aliases}
+            for idx, nh in enumerate(normed_headers):
+                if nh in norm_aliases and canonical not in mapping:
+                    mapping[canonical] = idx
+        return mapping
+
+    @staticmethod
+    def _normalise_ip(raw: str) -> str:
+        if not raw or raw.lower() in ("nan", "none", "null", ""):
+            return ""
+        try:
+            return str(ipaddress.IPv4Address(raw.strip()))
+        except (ipaddress.AddressValueError, ValueError):
+            return ""
+
+    @staticmethod
+    def _normalise_subnet(raw: str) -> str:
+        if not raw or raw.lower() in ("nan", "none", "null", ""):
+            return ""
+        s = raw.strip()
+        dot_m = re.match(r"^((?:\d{1,3}\.){3}\d{1,3})\.(\d{1,2})$", s)
+        if dot_m:
+            s = f"{dot_m.group(1)}/{dot_m.group(2)}"
+        try:
+            return str(ipaddress.IPv4Network(s, strict=False))
+        except (ipaddress.AddressValueError, ValueError):
+            return ""
+
+    def _normalise_site(self, raw_site: str, default_site: str) -> str:
+        site = (raw_site or default_site).strip()
+        if not site or site.lower() in ("nan", "none", "null", ""):
+            return default_site
+        exact = get_site_code_rules(self.rules).get("exact_mappings", {})
+        key = re.sub(r"[\s\-_]+", " ", site).strip().lower()
+        for pat, code in exact.items():
+            pat_str = str(pat).strip().lower()
+            if key == pat_str or key.startswith(pat_str + " "):
+                return str(code).upper()
+        return slugify(site)
+
+    def _normalise_role(self, raw_role: str) -> str:
+        return normalize_role_name(raw_role, get_ipam_role_mappings(self.rules))
+
+    def _make_record(
+        self,
+        ip_raw: str,
+        subnet_raw: str,
+        vlan_id_raw: str,
+        vlan_name_raw: str,
+        site_raw: str,
+        default_site: str,
+        source_sheet: str,
+    ) -> Optional[Dict[str, Any]]:
+        subnet_clean = self._normalise_subnet(subnet_raw)
+        ip_clean = self._normalise_ip(ip_raw)
+
+        if not subnet_clean and not ip_clean:
+            return None
+
+        site_norm = self._normalise_site(site_raw, default_site)
+        role_norm = self._normalise_role(vlan_name_raw)
+        vlan_desc = resolve_vlan_description(
+            vlan_id_raw, role_norm,
+            vlan_desc_mappings=get_vlan_description_mappings(self.rules),
+        )
+
+        return {
+            "ip_address": ip_clean,
+            "subnet": subnet_clean,
+            "vlan_id": vlan_id_raw if vlan_id_raw not in ("", "nan", "NaN") else "",
+            "vlan_name": role_norm or vlan_name_raw,
+            "site": site_norm,
+            "description": vlan_desc,
+            "source_sheet": source_sheet,
+            "ingested_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+
+    # -- public --------------------------------------------------------------
+
+    def parse(self) -> List[Dict[str, Any]]:
+        """Open workbook (or CSV fallback) in streaming read-only mode and
+        return a flat list of normalised IPAM records across all sheets."""
+        self._wb = openpyxl.load_workbook(
+            self.file_bytes, read_only=True, data_only=True
+        )
+        all_records: List[Dict[str, Any]] = []
+        seen_keys: set = set()
+
+        for sheet_name in self._wb.sheetnames:
+            try:
+                ws = self._wb[sheet_name]
+            except KeyError:
+                continue
+            rows_iter = ws.iter_rows(values_only=True)
+
+            header_values, header_row_idx = self._find_header_row(rows_iter)
+            if header_values is None:
+                continue
+
+            header_map = self._build_header_map(header_values)
+            if "ip" not in header_map and "subnet" not in header_map:
+                continue
+
+            default_site = sheet_name.strip()
+
+            for row in rows_iter:
+                if row is None:
+                    continue
+                vals = list(row)
+                while len(vals) < len(header_values):
+                    vals.append("")
+
+                ip_raw = str(vals[header_map["ip"]]).strip() if "ip" in header_map else ""
+                subnet_raw = str(vals[header_map["subnet"]]).strip() if "subnet" in header_map else ""
+                vlan_id_raw = str(vals[header_map["vlan_id"]]).strip() if "vlan_id" in header_map else ""
+                vlan_name_raw = str(vals[header_map["vlan_name"]]).strip() if "vlan_name" in header_map else ""
+                site_raw = str(vals[header_map["site"]]).strip() if "site" in header_map else default_site
+
+                rec = self._make_record(
+                    ip_raw, subnet_raw, vlan_id_raw, vlan_name_raw,
+                    site_raw, default_site, sheet_name,
+                )
+                if rec is None:
+                    continue
+
+                key = (rec["subnet"], rec["ip_address"])
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                all_records.append(rec)
+
+        if self._wb:
+            self._wb.close()
+            self._wb = None
+        return all_records
+
+
+# ---------------------------------------------------------------------------
+# CSV / JSON fallback parsers
+# ---------------------------------------------------------------------------
+
+
+def _records_from_dataframe(
+    df: pd.DataFrame,
+    rules: Dict[str, Any],
+    default_site: str,
+    source: str,
+) -> List[Dict[str, Any]]:
+    """Map a flat DataFrame (CSV/JSON payload) onto normalised IPAM records
+    using the same header-alias discovery as the Excel parser."""
+    parser = ExcelIPAMParser(io.BytesIO(), filename=source, rules=rules)
+    headers = [str(c) for c in df.columns]
+    header_map = parser._build_header_map(headers)
+
+    if "ip" not in header_map and "subnet" not in header_map:
+        return []
+
+    records: List[Dict[str, Any]] = []
+    seen_keys: set = set()
+    for _, row in df.iterrows():
+        vals = []
+        for h in headers:
+            v = row.get(h)
+            vals.append("" if v is None or (isinstance(v, float) and pd.isna(v)) else str(v))
+
+        ip_raw = vals[header_map["ip"]].strip() if "ip" in header_map else ""
+        subnet_raw = vals[header_map["subnet"]].strip() if "subnet" in header_map else ""
+        vlan_id_raw = vals[header_map["vlan_id"]].strip() if "vlan_id" in header_map else ""
+        vlan_name_raw = vals[header_map["vlan_name"]].strip() if "vlan_name" in header_map else ""
+        site_raw = vals[header_map["site"]].strip() if "site" in header_map else default_site
+
+        rec = parser._make_record(
+            ip_raw, subnet_raw, vlan_id_raw, vlan_name_raw,
+            site_raw, default_site, source,
+        )
+        if rec is None:
+            continue
+        key = (rec["subnet"], rec["ip_address"])
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        records.append(rec)
+    return records
+
+
+def _records_from_json(
+    raw: Any,
+    rules: Dict[str, Any],
+    source: str,
+) -> List[Dict[str, Any]]:
+    """Extract records from a NetBox-style JSON payload.
+
+    Accepts either a flat list of objects or a dict containing a ``prefixes``
+    / ``ip-addresses`` / ``vlans`` array (NetBox backup export shape).
+    """
+    if isinstance(raw, dict):
+        candidates = []
+        for key in ("prefixes", "ip_addresses", "ip-addresses", "vlans", "records", "results"):
+            val = raw.get(key)
+            if isinstance(val, list):
+                candidates.extend(val)
+        if not candidates:
+            candidates = [raw]
+        raw = candidates
+
+    if not isinstance(raw, list):
+        return []
+
+    rows: List[Dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        rows.append({
+            "address": item.get("address", item.get("ip_address", item.get("prefix", ""))),
+            "subnet": item.get("prefix", item.get("subnet", item.get("network", ""))),
+            "vlan_id": item.get("vid", item.get("vlan_id", item.get("vlan", ""))),
+            "vlan_name": item.get("role", item.get("name", item.get("vlan_name", ""))),
+            "site": item.get("site", item.get("location", "")),
+        })
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return []
+    return _records_from_dataframe(df, rules, default_site=source, source=source)
+
+
+def parse_file_bytes(
+    file_bytes: io.BytesIO,
+    filename: str = "",
+    rules: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
+    """Dispatch to the right parser based on the uploaded file extension.
+
+    Supported: ``.xlsx`` / ``.xls`` (Excel), ``.csv`` (pandas), ``.json``
+    (NetBox backup).  Returns a flat list of normalised IPAM records.
+    """
+    rules = rules or load_naming_rules()
+    lower = filename.lower()
+    if lower.endswith((".xlsx", ".xls")):
+        return ExcelIPAMParser(file_bytes, filename=filename, rules=rules).parse()
+    if lower.endswith(".csv"):
+        df = pd.read_csv(io.BytesIO(file_bytes.read()))
+        return _records_from_dataframe(df, rules, default_site=filename, source=filename)
+    if lower.endswith(".json"):
+        raw = json.loads(file_bytes.read().decode("utf-8"))
+        return _records_from_json(raw, rules, source=filename)
+    raise ValueError(f"Unsupported file type: {filename}")
+
+
+# ---------------------------------------------------------------------------
+# In-Memory Audit Engine
+# ---------------------------------------------------------------------------
+
+
+def _build_db_index() -> Tuple[set, set, set, Dict[str, List[Dict[str, Any]]]]:
+    """Query local DB once and build hash sets for O(1) lookups.
+
+    Returns:
+        (existing_prefixes, existing_ips, existing_sites, db_record_map)
+    """
+    db_init()
+    prefixes = set(get_existing_prefix_strings())
+    sites = set(str(s).strip().lower() for s in get_all_site_names() if s)
+    ip_set: set = set()
+    record_map: Dict[str, List[Dict[str, Any]]] = {}
+    try:
+        with sqlite3.connect(DATABASE_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM ipam_records WHERE prefix_or_subnet != ''")
+            for row in cur.fetchall():
+                prefix = str(row["prefix_or_subnet"]).strip()
+                if not prefix:
+                    continue
+                ip_set.add(prefix)
+                if "/" in prefix:
+                    record_map.setdefault(prefix, []).append({
+                        "site": str(row["site"] or "").strip(),
+                        "vlan_id": str(row["vlan_id"] or "").strip(),
+                        "vlan_name": str(row["vlan_name"] or "").strip(),
+                        "role": str(row["role"] or "").strip(),
+                        "description": str(row["description"] or "").strip(),
+                        "record_type": str(row["record_type"] or "").strip(),
+                    })
+    except Exception:
+        pass
+    return prefixes, ip_set, sites, record_map
+
+
+def _index_is_provided(idx):
+    """Return True when a non-empty hash index has been explicitly supplied."""
+    return idx is not None and len(idx) > 0
+
+
+def classify_records(
+    records: List[Dict[str, Any]],
+    existing_prefixes: Optional[set] = None,
+    existing_ips: Optional[set] = None,
+    existing_sites: Optional[set] = None,
+    db_record_map: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, int]]:
+    """Classify parsed IPAM records into matched / pending_add / conflicts /
+    unmapped_sites using in-memory hash sets.
+
+    Returns:
+        (matched_df, pending_add_df, conflicts_df, metrics)
+    """
+    if existing_prefixes is None or existing_ips is None or existing_sites is None:
+        existing_prefixes, existing_ips, existing_sites, db_record_map = _build_db_index()
+
+    matched_rows: List[Dict[str, Any]] = []
+    pending_rows: List[Dict[str, Any]] = []
+    conflict_rows: List[Dict[str, Any]] = []
+    unmapped_sites: set = set()
+
+    for rec in records:
+        subnet = rec.get("subnet", "").strip()
+        ip = rec.get("ip_address", "").strip()
+        site = rec.get("site", "").strip()
+        vlan_id = str(rec.get("vlan_id", "") or "").strip()
+
+        # 1. Unmapped site check — only active when a non-empty site index is given
+        if _index_is_provided(existing_sites) and site.lower() not in existing_sites:
+            unmapped_sites.add(site)
+            conflict_rows.append({
+                **rec,
+                "conflict_reason": f"Site unmapped: {site}",
+                "category": "unmapped_site",
+            })
+            continue
+
+        # 2. Absent from DB → pending add
+        has_prefix_idx = _index_is_provided(existing_prefixes)
+        has_ip_idx = _index_is_provided(existing_ips)
+        in_db = (
+            (has_prefix_idx and subnet in existing_prefixes)
+            or (has_ip_idx and ip and ip in existing_ips)
+        )
+        if not in_db:
+            pending_rows.append({**rec, "category": "pending_add"})
+            continue
+
+        # 3. Present in DB → check attribute consistency
+        attrs = (db_record_map or {}).get(subnet, []) if subnet else []
+        if not attrs:
+            # No attribute data stored for this prefix — cannot prove a
+            # mismatch, so treat as matched.
+            matched_rows.append({**rec, "category": "matched"})
+            continue
+
+        reason = _attribute_conflict_reason(rec, attrs)
+        if reason:
+            conflict_rows.append({
+                **rec,
+                "conflict_reason": reason,
+                "category": "conflict",
+            })
+        else:
+            matched_rows.append({**rec, "category": "matched"})
+
+    matched_df = _df(matched_rows, ["ip_address", "subnet", "vlan_id", "vlan_name",
+                                    "site", "description", "source_sheet",
+                                    "ingested_at", "category"])
+    pending_df = _df(pending_rows, ["ip_address", "subnet", "vlan_id", "vlan_name",
+                                    "site", "description", "source_sheet",
+                                    "ingested_at", "category"])
+    conflicts_df = _df(conflict_rows, ["ip_address", "subnet", "vlan_id", "vlan_name",
+                                       "site", "description", "source_sheet",
+                                       "ingested_at", "category", "conflict_reason"])
+
+    metrics = {
+        "total_parsed": len(records),
+        "matched": len(matched_rows),
+        "pending_add": len(pending_rows),
+        "conflicts": len(conflict_rows),
+        "unmapped_sites": len(unmapped_sites),
+        "unmapped_site_list": sorted(unmapped_sites),
+    }
+    return matched_df, pending_df, conflicts_df, metrics
+
+
+def _df(rows: List[Dict[str, Any]], columns: List[str]) -> pd.DataFrame:
+    if rows:
+        return pd.DataFrame(rows)
+    return pd.DataFrame(columns=columns)
+
+
+def _attribute_conflict_reason(
+    rec: Dict[str, Any], db_attrs: List[Dict[str, Any]]
+) -> str:
+    """Return a human-readable conflict reason when the parsed record's site or
+    VLAN ID differs from every stored attribute set for the same prefix."""
+    excel_site = str(rec.get("site", "")).strip().lower()
+    excel_vlan = str(rec.get("vlan_id", "") or "").strip()
+
+    reasons: List[str] = []
+    if excel_site:
+        site_mismatch = all(
+            excel_site != str(a.get("site", "")).strip().lower()
+            for a in db_attrs if a.get("site")
+        )
+        if site_mismatch:
+            reasons.append("Site mismatch")
+    if excel_vlan:
+        vlan_mismatch = all(
+            excel_vlan != str(a.get("vlan_id", "") or "").strip()
+            for a in db_attrs if a.get("vlan_id")
+        )
+        if vlan_mismatch:
+            reasons.append("VLAN ID mismatch")
+    return "; ".join(reasons)
+
+
+def export_pending_csvs(
+    pending_df: pd.DataFrame,
+) -> Tuple[io.BytesIO, io.BytesIO]:
+    """Build NetBox-import-ready CSV byte streams for pending-add records."""
+    prefixes_cols = ["subnet", "vlan_id", "vlan_name", "site", "description",
+                     "ip_address"]
+    vlans_cols = ["vlan_id", "vlan_name", "site", "description", "subnet"]
+
+    prefix_buf = io.BytesIO()
+    if not pending_df.empty:
+        pending_df[[c for c in prefixes_cols if c in pending_df.columns]].to_csv(
+            prefix_buf, index=False
+        )
+    prefix_buf.seek(0)
+
+    vlan_buf = io.BytesIO()
+    if not pending_df.empty:
+        pending_df[[c for c in vlans_cols if c in pending_df.columns]].to_csv(
+            vlan_buf, index=False
+        )
+    vlan_buf.seek(0)
+
+    return prefix_buf, vlan_buf
+
+
+def run_audit(
+    file_bytes: io.BytesIO,
+    filename: str = "",
+    rules: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Top-level entry point: parse → classify → return structured result.
+
+    Returns dict with keys:
+        matched, pending_add, conflicts, metrics,
+        prefixes_csv, vlans_csv, parsed_at
+    """
+    records = parse_file_bytes(file_bytes, filename=filename, rules=rules)
+    matched, pending, conflicts, metrics = classify_records(records)
+    prefixes_csv, vlans_csv = export_pending_csvs(pending)
+    return {
+        "matched": matched,
+        "pending_add": pending,
+        "conflicts": conflicts,
+        "metrics": metrics,
+        "prefixes_csv": prefixes_csv,
+        "vlans_csv": vlans_csv,
+        "parsed_at": datetime.utcnow().isoformat(timespec="seconds"),
+    }

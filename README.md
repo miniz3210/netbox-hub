@@ -6,16 +6,18 @@
 
 A Streamlit-based hub for managing NetBox IPAM, device naming conventions, and infrastructure data — with offline-first architecture and zero cloud leakage.
 
-## v4.3 — Offline IPAM Diff & Ingestion Engine
+## v4.3 — Multi-Sheet Excel IPAM Ingestion & Diff Engine
 
 ### New Features
-* **Offline IPAM Diff Engine** (`scripts/diff_ipam_sqlite.py`): Standalone CLI tool that compares Excel-based IP/VLAN inventories against the local SQLite vault and produces deterministic `ipam_matched.csv`, `ipam_pending_add.csv`, and `ipam_conflicts.csv` outputs — no cloud or LLM calls.
-* **Multi-Sheet Excel Parser** (`ExcelIPAMParser`): Handles 42-sheet workbooks with dynamic header discovery, supporting column name variations (`ip`/`IP`, `subnet`/`network`/`CIDR`, `VLAN ID`/`VID`, etc.).
-* **Local SQLite Manager** (`LocalSQLiteManager`): Connects directly to `data/sanitizer_vault.db`, auto-creates the `ipam_inventory` table if absent, and queries existing records keyed by IP or subnet.
+* **Multi-Sheet Excel Parser (`core.ipam_excel_diff.ExcelIPAMParser`)**: High-performance `openpyxl` streaming parser with dynamic header discovery across all sheets. Supports arbitrary sheet counts and column-name variations (`ip`/`address`/`ipv4`, `subnet`/`cidr`/`prefix`, `vlan id`/`vid`/`vlan`, etc.). Fallback site = sheet name when column is absent.
+* **Standards-Driven Normalization**: Site names normalized via `get_site_code_rules(rules)["exact_mappings"]` with `slugify()` fallback. Roles normalized via `core.ipam_engine.normalize_role_name()` using `get_ipam_role_mappings(rules)`. VLAN descriptions resolved via `core.ipam_engine.resolve_vlan_description()`.
+* **In-Memory Audit Engine**: Queries existing DB state once, builds hash sets for $O(1)$ lookups. Classifies records into `matched`, `pending_add`, `conflicts`, and `unmapped_sites`. Returns clean Pandas DataFrames and metric summaries.
+* **UI Ingest & Audit Drawer**: Unified toolbar in the IPAM tab with file upload (`.xlsx`, `.xls`, `.csv`, `.json`), metric cards, tabbed audit view (Pending Add / Conflicts / Matched), export download buttons, and site selector for live editing.
 
 ### Improvements
 * Version bumped to **4.3** across `config/constants.py`, `data/naming_rules.yaml` (schema metadata), and CHANGELOG.
-* Naming rules schema now carries `_meta.version` and `_meta.schema_version` for pipeline compatibility checks.
+* Removed legacy standalone script `scripts/diff_ipam_sqlite.py` — replaced by in-memory core engine.
+* Removed legacy test `tests/test_ipam_diff.py` — replaced by `tests/test_ipam_excel_diff.py`.
 
 ---
 
@@ -39,15 +41,6 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-### Running the IPAM Diff Script
-
-```bash
-python scripts/diff_ipam_sqlite.py \
-  --excel "AW IPs & VLANs_Final (2).xlsx" \
-  --db data/sanitizer_vault.db \
-  --out-dir data/ipam_diff_output
-```
-
 ### Running Tests
 
 ```bash
@@ -59,27 +52,18 @@ pytest tests/ -v
 ## Architecture
 
 ```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  Excel Input    │────▶│  ExcelIPAMParser │────▶│  LocalSQLiteMgr │
-│  (multi-sheet)  │     │  (offline)       │     │  (sqlite vault) │
-└─────────────────┘     └──────────────────┘     └────────┬────────┘
-                                                          │
-                    ┌─────────────────────────────────────┘
-                    │
-                    ▼
-         ┌────────────────────────┐
-         │  Deterministic Diff    │
-         │  ─ Matched / Add /     │
-         │    Conflict            │
-         └────────────────────────┘
-                    │
-                    ▼
-         ┌────────────────────────┐
-         │  Output CSVs           │
-         │  ─ ipam_matched.csv    │
-         │  ─ ipam_pending_add.csv│
-         │  ─ ipam_conflicts.csv  │
-         └────────────────────────┘
+┌──────────────────┐     ┌───────────────────────────┐     ┌──────────────────┐
+│  Excel/CSV/JSON  │────▶│  ExcelIPAMParser          │────▶│  In-Memory       │
+│  (multi-sheet)   │     │  (streaming, openpyxl)    │     │  Audit Engine    │
+└──────────────────┘     └───────────┬───────────────┘     └────────┬─────────┘
+                                     │                              │
+                     ┌───────────────┼──────────────────────────────┘
+                     │               │
+                     ▼               ▼
+          ┌──────────────────┐  ┌────────────────────┐
+          │  DB State (SQLite│  │  Output DataFrames  │
+          │   hash sets)     │  │  + Metric Summary   │
+          └──────────────────┘  └────────────────────┘
 ```
 
 **Design Principles:**
@@ -95,10 +79,10 @@ pytest tests/ -v
 |--------|-------------|
 | `config/constants.py` | Application version and path constants |
 | `config/naming_rules.py` | Naming convention engine, schema loader, migration |
+| `core/ipam_excel_diff.py` | Multi-sheet Excel parser, in-memory audit engine, classification |
 | `core/ipam_engine.py` | IPAM overlap detection, subnet allocation, CIDR validation |
 | `core/db_manager.py` | SQLite database manager for NetBox data |
-| `core/vault.py` | Local sanitization vault (IP/CIDR/domain tokenization) |
-| `scripts/diff_ipam_sqlite.py` | Offline Excel → SQLite IPAM diff (v4.3) |
+| `ui/tabs/ipam_tab.py` | Streamlit IPAM tab with Ingest & Audit Drawer UI |
 
 ---
 
