@@ -54,6 +54,45 @@ def _cached_get_reference_records(category_key, site_filter="", name_filter=""):
     return items
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def _interface_ref_examples_cached(intf_code: str, _ts: str = ""):
+    from core.shared_backup_state import SharedBackupState
+
+    _, defaults = _interface_ref(intf_code)
+    rx = INTERFACE_REF_PATTERNS.get(intf_code, INTERFACE_REF_PATTERNS["Uplink"])
+
+    objects = []
+    for endpoint in ("dcim/interfaces", "dcim_interfaces", "dcim/interface-templates"):
+        try:
+            objs = SharedBackupState.get_objects_by_type(endpoint)
+        except Exception:
+            objs = []
+        if objs:
+            objects = objs
+            break
+
+    matches = []
+    for obj in objects:
+        if not isinstance(obj, dict):
+            continue
+        desc = str(obj.get("description") or "").strip()
+        if not desc:
+            continue
+        if rx.search(desc):
+            device = obj.get("device") or obj.get("device_name") or obj.get("virtual_machine") or ""
+            if isinstance(device, dict):
+                device = device.get("name") or device.get("display") or ""
+            if_name = obj.get("name") or obj.get("interface") or ""
+            matches.append(f'{device} | {if_name}: "{desc}"')
+
+    matches = matches[:15]
+    if matches:
+        header = f"🟢 NetBox Interface Descriptions ({len(matches)}):"
+        return header, "\n".join(matches)
+
+    return f"🟡 Default Examples — No ingested interface descriptions found matching this type.", defaults
+
+
 def build_naming_system_prompt(prompt: str) -> str:
     """Build the grounded naming/inventory system prompt for the AI Assistant."""
     from core.ai_helper import build_comprehensive_naming_context
