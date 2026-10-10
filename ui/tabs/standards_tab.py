@@ -396,11 +396,6 @@ def _render_ipam_role_mapping_manager(active_model: str) -> None:
     rules = load_naming_rules()
     role_rules = list(get_ipam_role_mappings(rules))
 
-    st.caption(
-        "Each row is a regex pattern → canonical role pair. Edit inline or use "
-        "the AI generator below to create new rules."
-    )
-
     with st.form(key="ipam_role_edit_form", clear_on_submit=False):
         pass  # placeholder removed
 
@@ -2380,13 +2375,6 @@ VLAND_MAPPINGS_COLS = [4.0, 5.0, 1.2]
 def _render_vlan_description_mappings_editor(rules: dict) -> None:
 
     mappings = dict(get_vlan_description_mappings(rules))
-
-    st.caption(
-        "Map each VLAN Role to its NetBox VLAN Description tag. When a role "
-        "matches, its mapped value is used; otherwise the Role name itself is "
-        "returned. These mappings are consulted by the IPAM tab's dynamic "
-        "resolution logic."
-    )
 
     with st.form(key="vlandesc_edit_form", clear_on_submit=False):
         pass  # placeholder removed — see below
