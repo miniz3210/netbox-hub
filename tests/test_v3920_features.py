@@ -56,8 +56,8 @@ def section(title: str):
 # PART 1: VERSION BUMP
 # ============================================================================
 def test_version_bump():
-    section("TEST 0: Version Bump → v3.9.21")
-    assert_true(APP_VERSION == "v3.9.21", f"APP_VERSION == 'v3.9.21' (got {APP_VERSION!r})")
+    section("TEST 0: Version Bump → v4.3")
+    assert_true(APP_VERSION == "4.3", f"APP_VERSION == '4.3' (got {APP_VERSION!r})")
 
 
 # ============================================================================
@@ -394,7 +394,7 @@ def test_fetch_device_context_queries_both_tables():
 # ============================================================================
 if __name__ == "__main__":
     print("=" * 60)
-    print("  NetBox Hub v3.9.21 — Unit Test Suite")
+    print("  NetBox Hub v4.3 — Unit Test Suite")
     print("=" * 60)
 
     test_version_bump()
