@@ -1756,7 +1756,7 @@ LLM system instructions and atomic attribute requirements for topology parsing:
 
 
 def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card_title: str, card_caption: str,
-                         section: str = "presets", section_label: str = "Presets") -> None:
+                         section: str = "presets", section_label: str = "Presets", expanded: bool = False) -> None:
     patterns = dict(rules.get("naming_patterns") or {})
     key_field = "device_presets" if kind == "device" else (
         "interface_presets" if kind == "interface" else (
@@ -1771,7 +1771,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
         return
     _pending_swap_key = f"_pending_swap_{kind}"
 
-    with st.container(border=True):
+    with st.expander(f"{card_title} ({len(presets)} presets)", expanded=expanded):
         col_t1, col_t2 = st.columns([3, 1], vertical_alignment="center")
         with col_t1:
             st.markdown(f"#### {card_title}")
@@ -2478,12 +2478,13 @@ def _render_vlan_description_mappings_editor(rules: dict) -> None:
 def _vlan_presets_editor(rules: dict) -> None:
     vlan_presets = get_vlan_presets(rules)
 
-    with st.container(border=True):
+    total_count = sum(len(g.get("items", [])) for g in vlan_presets.values())
+
+    with st.expander(f"🌐 VLAN ALLOCATION PRESETS ({total_count} presets)", expanded=True):
         col_t1, col_t2 = st.columns([3, 1])
         with col_t1:
             st.markdown("#### 🌐 VLAN ALLOCATION PRESETS")
         with col_t2:
-            total_count = sum(len(g.get("items", [])) for g in vlan_presets.values())
             st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{total_count} presets</span></div>", unsafe_allow_html=True)
         st.caption("Manage reusable VLAN allocation groups. Each group has default patterns applied to all its items. VLAN Description tags are configured in the dedicated mappings expander below.")
 
@@ -3038,7 +3039,7 @@ def render_standards_tab(active_model):
             _preset_type_editor("device", get_device_presets(current_rules), current_rules, prefix="branch",
                                  card_title="🔧 DEVICE TYPE PRESETS",
                                  card_caption="Manage device naming patterns and presets (SW, VS, FW, ION, WAP, RTR, VA).",
-                                 section="device_presets", section_label="Device Type Presets")
+                                 section="device_presets", section_label="Device Type Presets", expanded=True)
             with st.expander("🔌 INTERFACE TYPE PRESETS", expanded=False):
                 _preset_type_editor("interface", get_interface_presets(current_rules), current_rules, prefix="iface",
                                      card_title="🔌 INTERFACE TYPE PRESETS",

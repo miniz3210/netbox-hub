@@ -981,31 +981,25 @@
           "link_speed"
         ]
       }
-    },
-    "Oracle Cloud": {
-      "platform": "Oracle Cloud",
-      "aliases": {},
-      "instructions": "[PLATFORM ARCHITECTURE: ORACLE CLOUD]\n1. Extract network topology into atomic attributes.",
-      "export_prompt": "You are an expert network engineer specializing in Oracle Cloud..."
     }
   },
   "hypervisor_presets": {
     "VMware ESXi": [
       {
         "code": "Uplink",
-        "label": "Physical Uplink",
+        "label": "Physical Uplink: PCIeX/PortY",
         "pattern": "<vmnic> - <v_switch> <purpose> <uplink_role>",
         "hidden": false
       },
       {
         "code": "PortGroup",
-        "label": "Port Group",
+        "label": "Port Group: PG-",
         "pattern": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
         "hidden": false
       },
       {
         "code": "VMkernel",
-        "label": "VMkernel",
+        "label": "VMkernel: vmk",
         "pattern": "<purpose> (<v_switch>)",
         "hidden": false
       },
@@ -1037,18 +1031,6 @@
       }
     ],
     "Microsoft Azure": [
-      {
-        "code": "Uplink",
-        "label": "Physical Uplink",
-        "pattern": "<interface> - <parent> <purpose>"
-      },
-      {
-        "code": "Default",
-        "label": "Default Interface",
-        "pattern": "<interface> (<purpose>)"
-      }
-    ],
-    "Oracle Cloud": [
       {
         "code": "Uplink",
         "label": "Physical Uplink",
