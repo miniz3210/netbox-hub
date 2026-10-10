@@ -509,7 +509,7 @@ def _render_ingest_audit_drawer(total_sites: int, total_vlans: int, total_prefix
         with c3:
             st.metric("❌ Need to Add", metrics["pending_add"])
         with c4:
-            st.metric("⚠️ Conflicts", metrics["conflicts"] + metrics["unmapped_sites"])
+            st.metric("⚠️ Conflicts", metrics["conflicts"])
 
         # --- Quick-action: site loader ---------------------------------------
         all_sites = get_all_site_names()
@@ -537,7 +537,7 @@ def _render_ingest_audit_drawer(total_sites: int, total_vlans: int, total_prefix
         # --- Tabbed audit view -----------------------------------------------
         tab_add, tab_conflicts, tab_matched = st.tabs([
             f"❌ Need to Add ({metrics['pending_add']})",
-            f"⚠️ Conflicts & Unmapped ({metrics['conflicts'] + metrics['unmapped_sites']})",
+            f"⚠️ Conflicts ({metrics['conflicts']})",
             f"✅ Existing in DB ({metrics['matched']})",
         ])
 

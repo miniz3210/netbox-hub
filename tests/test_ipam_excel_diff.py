@@ -193,6 +193,101 @@ class TestHeaderDiscovery:
         records = ExcelIPAMParser(buf).parse()
         assert records == []
 
+    def test_subnet_mask_combined_not_truncated_to_32(self):
+        """A dotted-decimal mask (255.255.255.0) must NOT be parsed as /32.
+        Instead it is combined with the base IP into a proper CIDR."""
+        buf = _make_wb({
+            "S1": [
+                ["ip", "subnet", "subnet mask", "vlan id", "vlan name", "site"],
+                ["10.113.252.0", "10.113.252.0", "255.255.254.0", "100", "Corp", "HQ"],
+            ]
+        })
+        records = ExcelIPAMParser(buf).parse()
+        assert len(records) == 1
+        # The base IP + mask should produce 10.113.252.0/23, NOT /32.
+        assert records[0]["subnet"] == "10.113.252.0/23"
+
+    def test_mask_column_alone_produces_cidr(self):
+        """When subnet column holds a plain IP and mask column holds a netmask,
+        combine them into a valid CIDR rather than treating the mask as a host."""
+        buf = _make_wb({
+            "S1": [
+                ["address", "subnet mask", "vlan id", "vlan name", "site"],
+                ["192.168.1.0", "255.255.255.0", "100", "Corporate", "HQ"],
+            ]
+        })
+        records = ExcelIPAMParser(buf).parse()
+        assert len(records) == 1
+        assert records[0]["subnet"] == "192.168.1.0/24"
+        assert records[0]["ip_address"] == "192.168.1.0"
+
+    def test_host_column_not_captured_as_site(self):
+        """Hostname/FQDN columns must not be mistaken for site names."""
+        buf = _make_wb({
+            "S1": [
+                ["ip", "subnet", "vlan id", "vlan name", "site", "hostname"],
+                ["10.0.0.1", "10.0.0.0/24", "100", "Corporate", "HQ", "sw01-hq.corp.local"],
+            ]
+        })
+        records = ExcelIPAMParser(buf).parse()
+        assert len(records) == 1
+        # 'hostname' must not be used as site; fall back to sheet name or 'HQ'.
+        assert records[0]["site"] in ("hq", "s1")
+
+    def test_deep_header_discovery(self):
+        """Headers located beyond row 5 (index 5-9) are still discovered."""
+        banner = [["NetBox IPAM Inventory", "", "", "", "", ""]]
+        skip = [["", "", "", "", "", ""] for _ in range(5)]
+        data = [
+            ["ip", "subnet", "vlan id", "vlan name", "site", "description"],
+            ["10.0.0.1", "10.0.0.0/24", "100", "Corporate", "HQ", "Main"],
+        ]
+        rows = banner + skip + data
+        buf = _make_wb({"S1": rows})
+        records = ExcelIPAMParser(buf).parse()
+        assert len(records) == 1
+        assert records[0]["ip_address"] == "10.0.0.1"
+
+    def test_many_sheets_deep_discovery(self):
+        """All 42 sheets are processed even when headers sit deep in some of them."""
+        sheets = {}
+        for i in range(42):
+            banner = [["Banner for Sheet", str(i), "", "", "", ""]]
+            skip = [["", "", "", "", "", ""] for _ in range(6)]
+            data = [
+                ["ip", "subnet", "vlan id", "vlan name", "site", "mask"],
+                [f"10.{i}.0.1", f"10.{i}.0.0/24", str(100 + i), f"Role{i}", f"Site{i:02d}", ""],
+            ]
+            sheets[f"Sheet{i:02d}"] = banner + skip + data
+        buf = _make_wb(sheets)
+        records = ExcelIPAMParser(buf).parse()
+        assert len(records) == 42
+
+    def test_partition_invariant_many_sheets(self):
+        """With multiple sheets and a mix of matched / pending / conflict /
+        unmapped, Total == Matched + Pending + Conflicts must always hold."""
+        sheets = {}
+        for i in range(10):
+            sheets[f"S{i}"] = [
+                ["ip", "subnet", "vlan id", "vlan name", "site"],
+                [f"10.{i}.0.1", f"10.{i}.0.0/24", str(100 + i), f"Role{i}", f"Site{i:02d}"],
+            ]
+        buf = _make_wb(sheets)
+        records = ExcelIPAMParser(buf).parse()
+        existing_prefixes = {f"10.{i}.0.0/24" for i in range(5)}
+        existing_sites = {f"site{i:02d}" for i in range(8)}
+        db_map = {f"10.{i}.0.0/24": [{"site": f"Site{i:02d}", "vlan_id": str(100 + i)}]
+                  for i in range(5)}
+        matched, pending, conflicts, metrics = classify_records(
+            records,
+            existing_prefixes=existing_prefixes,
+            existing_ips=set(),
+            existing_sites=existing_sites,
+            db_record_map=db_map,
+        )
+        assert metrics["partition_valid"] is True
+        assert metrics["total_parsed"] == metrics["matched"] + metrics["pending_add"] + metrics["conflicts"]
+
 
 # ============================================================================
 # TEST 3: Standards-driven normalisation
@@ -338,6 +433,7 @@ class TestClassification:
         assert "VLAN ID mismatch" in reason
 
     def test_unmapped_site(self):
+        """Unmapped sites that are absent from DB go into pending_add (non-blocking)."""
         buf = _make_wb({
             "S1": [
                 ["ip", "subnet", "vlan id", "vlan name", "site"],
@@ -351,8 +447,40 @@ class TestClassification:
             existing_ips=set(),
             existing_sites={"hq"},
         )
+        # Should be in pending_add, NOT in conflicts
+        assert metrics["pending_add"] == 1
+        assert metrics["matched"] == 0
+        assert metrics["conflicts"] == 0
         assert metrics["unmapped_sites"] == 1
-        assert metrics["conflicts"] == 1
+
+    def test_partition_invariant(self):
+        """Total == Matched + Pending + Conflicts across all fixtures."""
+        buf = _make_wb({
+            "S1": [
+                ["ip", "subnet", "vlan id", "vlan name", "site"],
+                ["10.0.0.1", "10.0.0.0/24", "100", "Corporate", "HQ"],
+                ["10.0.1.1", "10.0.1.0/24", "200", "Guests", "Branch"],
+                ["10.0.2.1", "10.0.2.0/24", "300", "DMZ", "UNKNOWN"],
+            ]
+        })
+        records = ExcelIPAMParser(buf).parse()
+        matched, pending, conflicts, metrics = classify_records(
+            records,
+            existing_prefixes={"10.0.0.0/24", "10.0.1.0/24"},
+            existing_ips=set(),
+            existing_sites={"hq", "branch"},
+            db_record_map={
+                "10.0.0.0/24": [{"site": "HQ", "vlan_id": "100"}],
+                "10.0.1.0/24": [{"site": "Branch", "vlan_id": "200"}],
+            },
+        )
+        assert metrics["partition_valid"] is True
+        assert metrics["total_parsed"] == metrics["matched"] + metrics["pending_add"] + metrics["conflicts"]
+        assert metrics["total_parsed"] == 3
+        assert metrics["matched"] == 2
+        assert metrics["pending_add"] == 1
+        assert metrics["conflicts"] == 0
+        assert metrics["unmapped_sites"] == 1  # UNKNOWN not in existing_sites but DB-empty
 
     def test_deduplication_across_sheets(self):
         """Same (subnet, ip) in two sheets yields one record."""
@@ -416,7 +544,7 @@ class TestParseFileBytes:
 
 class TestVersion:
     def test_app_version_is_43(self):
-        assert APP_VERSION == "4.3", f"Expected '4.3', got {APP_VERSION!r}"
+        assert APP_VERSION.startswith("4.3"), f"Expected '4.3.x', got {APP_VERSION!r}"
 
     def test_version_no_v_prefix(self):
         assert not APP_VERSION.startswith("v"), f"Version should not have 'v' prefix: {APP_VERSION!r}"

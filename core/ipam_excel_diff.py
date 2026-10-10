@@ -43,6 +43,32 @@ from core.db_manager import (
 )
 
 # ---------------------------------------------------------------------------
+# Semantic column disambiguation helpers — NO hard-coded sheet / vendor / site
+# names.  All matching is purely token-based against lower-cased column headers.
+# ---------------------------------------------------------------------------
+
+_NETWORK_ATTR_TOKENS = frozenset({
+    "ip", "network", "subnet", "vlan", "prefix", "cidr",
+})
+
+_SUBNET_NEGATIVE_TOKENS = frozenset({
+    "mask", "netmask", "length", "name", "desc", "description",
+})
+
+_MASK_POSITIVE_TOKENS = frozenset({"mask", "netmask"})
+
+_IP_NEGATIVE_TOKENS = frozenset({
+    "gateway", "vlan", "mask", "netmask", "subnet", "prefix", "cidr",
+})
+
+_SITE_POSITIVE_TOKENS = frozenset({"site", "location", "branch"})
+
+_SITE_NEGATIVE_TOKENS = frozenset({
+    "device", "host", "hostname", "server", "fqdn", "app", "vpn",
+    "description", "desc", "name", "purpose",
+})
+
+# ---------------------------------------------------------------------------
 # Header-alias maps (lower-cased, no hard-coded column counts)
 # ---------------------------------------------------------------------------
 
@@ -51,7 +77,7 @@ _HEADER_ALIASES: Dict[str, List[str]] = {
     "subnet": ["subnet", "network", "cidr", "prefix"],
     "vlan_id": ["vlan id", "vid", "vlan_id", "vlan"],
     "vlan_name": ["vlan name", "role", "name", "purpose", "description"],
-    "site": ["site", "location"],
+    "site": ["site", "location", "branch"],
 }
 
 _NORMALISE_RE = re.compile(r"[\s\-]+")
@@ -59,6 +85,98 @@ _NORMALISE_RE = re.compile(r"[\s\-]+")
 
 def _norm_key(h: str) -> str:
     return _NORMALISE_RE.sub("_", h.strip().lower()).strip("_")
+
+
+def _col_norm(name: str) -> str:
+    """Normalise a column header for semantic matching."""
+    return _norm_key(name)
+
+
+def _is_subnet_col(normed: str) -> bool:
+    """True when *normed* is a subnet/network column per the spec."""
+    has_network = any(tok in normed for tok in ("subnet", "network", "cidr", "prefix"))
+    has_negative = any(tok in normed for tok in _SUBNET_NEGATIVE_TOKENS)
+    return has_network and not has_negative
+
+
+def _is_mask_col(normed: str) -> bool:
+    """True when *normed* is a mask/netmask column per the spec."""
+    return any(tok in normed for tok in _MASK_POSITIVE_TOKENS)
+
+
+def _is_ip_col(normed: str) -> bool:
+    """True when *normed* is an IP/host column per the spec."""
+    has_ip = any(tok in normed for tok in ("ip", "address", "host"))
+    has_negative = any(tok in normed for tok in _IP_NEGATIVE_TOKENS)
+    return has_ip and not has_negative
+
+
+def _is_site_col(normed: str) -> bool:
+    """True when *normed* is a site/location/branch column per the spec."""
+    has_site = any(tok in normed for tok in _SITE_POSITIVE_TOKENS)
+    has_negative = any(tok in normed for tok in _SITE_NEGATIVE_TOKENS)
+    return has_site and not has_negative
+
+def _is_vlan_name_col(normed: str) -> bool:
+    """True when *normed* is a vlan-name / role column per the spec."""
+    if not normed:
+        return False
+    return (
+        ("vlan" in normed and "name" in normed)
+        or ("role" in normed and "vlan" not in normed)
+        or normed in ("vlan_name", "vlanname", "name_", "purpose_", "description_")
+    )
+
+
+def _has_network_attr(normed: str) -> bool:
+    return any(tok in normed for tok in _NETWORK_ATTR_TOKENS)
+
+
+def _is_valid_ipv4(val: str) -> bool:
+    """Return True when *val* is a dotted-decimal IPv4 address or CIDR."""
+    if not val:
+        return False
+    try:
+        ipaddress.IPv4Address(val.strip())
+        return True
+    except (ipaddress.AddressValueError, ValueError):
+        pass
+    try:
+        ipaddress.IPv4Network(val.strip(), strict=False)
+        return True
+    except (ipaddress.AddressValueError, ValueError):
+        return False
+
+
+def _is_valid_mask(val: str) -> bool:
+    """Return True when *val* is a valid dotted-decimal subnet mask
+    (contiguous bit-string such as ``255.255.255.0``)."""
+    if not val:
+        return False
+    s = val.strip()
+    try:
+        addr = ipaddress.IPv4Address(s)
+        i = int(addr)
+        # A valid mask has all leading 1-bits followed by all 0-bits.
+        b = format(i, '032b')
+        return b == '1' * b.count('1') + '0' * b.count('0')
+    except (ipaddress.AddressValueError, ValueError):
+        return False
+
+
+def _combine_ip_and_mask(base_ip: str, mask_str: str) -> str:
+    """Combine a base IPv4 address and a dotted-decimal netmask into a CIDR string.
+
+    Returns the CIDR string (e.g. ``"10.113.252.0/23"``) or empty string on
+    failure.  Never produces a bogus ``/32`` for a mask value.
+    """
+    if not base_ip or not mask_str:
+        return ""
+    try:
+        network = ipaddress.IPv4Network(f"{base_ip.strip()}/{mask_str.strip()}", strict=False)
+        return str(network)
+    except (ipaddress.AddressValueError, ValueError):
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -84,14 +202,18 @@ class ExcelIPAMParser:
 
     @staticmethod
     def _find_header_row(
-        rows_iter: Any, max_scan: int = 5
+        rows_iter: Any, max_scan: int = 10
     ) -> Tuple[Optional[List[str]], int]:
         """Scan the first *max_scan* rows for a usable header row.
 
-        Returns the header values and the 0-based index of the header row
-        within the scanned window.  Once a recognisable header is found the
-        scan stops early so that subsequent data rows are not silently
-        consumed by the discovery pass.
+        Enterprise workbooks often place title banners in rows 1-3, so the scan
+        window runs up to row 10 (0-based index 9).  A row qualifies as a header
+        when it contains at least one network attribute token (``ip``,
+        ``network``, ``subnet``, ``vlan``, ``prefix``, ``cidr``).  Returns the
+        header values and the 0-based index of the header row within the scanned
+        window.  Once a recognisable header is found the scan stops early so
+        that subsequent data rows are not silently consumed by the discovery
+        pass.
         """
         collected: List[Tuple[int, List[str]]] = []
         for i, row in enumerate(rows_iter):
@@ -102,14 +224,10 @@ class ExcelIPAMParser:
             vals = [str(c).strip() if c is not None else "" for c in row]
             if any(v for v in vals):
                 collected.append((i, vals))
-                # Stop as soon as we find a row containing a recognised alias —
-                # don't burn through the rest of the scan window.
+                # Stop as soon as we find a row containing a recognised
+                # network attribute — don't burn through the scan window.
                 normed = [_norm_key(v) for v in vals]
-                if any(
-                    nk in ("ip", "address", "ipv4", "host", "subnet", "network",
-                           "cidr", "prefix", "vlan", "vid", "vlan_id")
-                    for nk in normed
-                ):
+                if any(_has_network_attr(nk) for nk in normed):
                     return vals, i
         if not collected:
             return None, -1
@@ -117,13 +235,47 @@ class ExcelIPAMParser:
         return collected[0][1], collected[0][0]
 
     def _build_header_map(self, headers: List[str]) -> Dict[str, int]:
-        normed_headers = [_norm_key(h) for h in headers]
+        normed_headers = [_col_norm(h) for h in headers]
         mapping: Dict[str, int] = {}
-        for canonical, aliases in _HEADER_ALIASES.items():
-            norm_aliases = {_norm_key(a) for a in aliases}
-            for idx, nh in enumerate(normed_headers):
-                if nh in norm_aliases and canonical not in mapping:
-                    mapping[canonical] = idx
+
+        for idx, nh in enumerate(normed_headers):
+            if not nh or nh in mapping.values() and nh:
+                pass
+            if _is_subnet_col(nh) and "subnet" not in mapping:
+                mapping["subnet"] = idx
+                continue
+            if _is_mask_col(nh) and "mask" not in mapping:
+                mapping["mask"] = idx
+                continue
+            if _is_ip_col(nh) and "ip" not in mapping:
+                mapping["ip"] = idx
+                continue
+            if _is_site_col(nh) and "site" not in mapping:
+                mapping["site"] = idx
+                continue
+            if _col_norm(nh) in ("vid", "vlan_id", "vlan_id_") or (
+                "vlan" in nh and "name" not in nh and "id" in nh
+            ):
+                if "vlan_id" not in mapping:
+                    mapping["vlan_id"] = idx
+                    continue
+            if _is_vlan_name_col(nh) and "vlan_name" not in mapping:
+                mapping["vlan_name"] = idx
+
+        # Alias fallback for canonical short headers that semantic tokens
+        # may have skipped (e.g. a bare ``vlan`` column).
+        norm_aliases = {
+            _norm_key(a)
+            for canon, aliases in _HEADER_ALIASES.items()
+            for a in aliases
+        }
+        for idx, nh in enumerate(normed_headers):
+            if nh in norm_aliases and "ip" not in mapping and _is_ip_col(nh):
+                mapping["ip"] = idx
+            elif nh in norm_aliases and "subnet" not in mapping and _is_subnet_col(nh):
+                mapping["subnet"] = idx
+            elif nh in norm_aliases and "site" not in mapping and _is_site_col(nh):
+                mapping["site"] = idx
         return mapping
 
     @staticmethod
@@ -167,17 +319,33 @@ class ExcelIPAMParser:
         self,
         ip_raw: str,
         subnet_raw: str,
+        mask_raw: str,
         vlan_id_raw: str,
         vlan_name_raw: str,
         site_raw: str,
         default_site: str,
         source_sheet: str,
     ) -> Optional[Dict[str, Any]]:
-        subnet_clean = self._normalise_subnet(subnet_raw)
         ip_clean = self._normalise_ip(ip_raw)
 
-        if not subnet_clean and not ip_clean:
-            return None
+        # When a valid mask column exists, ALWAYS derive the subnet from
+        # ip + mask rather than trusting the subnet column on its own.
+        # This prevents a plain IP like 10.113.252.0 from becoming /32.
+        if mask_raw and _is_valid_mask(mask_raw):
+            base_ip = self._normalise_ip(ip_raw)
+            if not base_ip and subnet_raw:
+                base_ip = self._normalise_ip(subnet_raw)
+            if base_ip:
+                subnet_clean = _combine_ip_and_mask(base_ip, mask_raw)
+            else:
+                return None
+            # No ip-only fallback when a mask column is present.
+            if not subnet_clean:
+                return None
+        else:
+            subnet_clean = self._normalise_subnet(subnet_raw)
+            if not subnet_clean and not ip_clean:
+                return None
 
         site_norm = self._normalise_site(site_raw, default_site)
         role_norm = self._normalise_role(vlan_name_raw)
@@ -234,12 +402,13 @@ class ExcelIPAMParser:
 
                 ip_raw = str(vals[header_map["ip"]]).strip() if "ip" in header_map else ""
                 subnet_raw = str(vals[header_map["subnet"]]).strip() if "subnet" in header_map else ""
+                mask_raw = str(vals[header_map["mask"]]).strip() if "mask" in header_map else ""
                 vlan_id_raw = str(vals[header_map["vlan_id"]]).strip() if "vlan_id" in header_map else ""
                 vlan_name_raw = str(vals[header_map["vlan_name"]]).strip() if "vlan_name" in header_map else ""
                 site_raw = str(vals[header_map["site"]]).strip() if "site" in header_map else default_site
 
                 rec = self._make_record(
-                    ip_raw, subnet_raw, vlan_id_raw, vlan_name_raw,
+                    ip_raw, subnet_raw, mask_raw, vlan_id_raw, vlan_name_raw,
                     site_raw, default_site, sheet_name,
                 )
                 if rec is None:
@@ -287,12 +456,13 @@ def _records_from_dataframe(
 
         ip_raw = vals[header_map["ip"]].strip() if "ip" in header_map else ""
         subnet_raw = vals[header_map["subnet"]].strip() if "subnet" in header_map else ""
+        mask_raw = vals[header_map["mask"]].strip() if "mask" in header_map else ""
         vlan_id_raw = vals[header_map["vlan_id"]].strip() if "vlan_id" in header_map else ""
         vlan_name_raw = vals[header_map["vlan_name"]].strip() if "vlan_name" in header_map else ""
         site_raw = vals[header_map["site"]].strip() if "site" in header_map else default_site
 
         rec = parser._make_record(
-            ip_raw, subnet_raw, vlan_id_raw, vlan_name_raw,
+            ip_raw, subnet_raw, mask_raw, vlan_id_raw, vlan_name_raw,
             site_raw, default_site, source,
         )
         if rec is None:
@@ -440,7 +610,25 @@ def classify_records(
         site = rec.get("site", "").strip()
         vlan_id = str(rec.get("vlan_id", "") or "").strip()
 
-        # 1. Unmapped site check — only active when a non-empty site index is given
+        # 1. Absent from DB → pending add (unmapped sites are ingestible here).
+        has_prefix_idx = _index_is_provided(existing_prefixes)
+        has_ip_idx = _index_is_provided(existing_ips)
+        in_db = (
+            (has_prefix_idx and subnet in existing_prefixes)
+            or (has_ip_idx and ip and ip in existing_ips)
+        )
+        if not in_db:
+            # 2. Unmapped site — non-blocking, placed in pending_add with tag.
+            if _index_is_provided(existing_sites) and site.lower() not in existing_sites:
+                unmapped_sites.add(site)
+                tagged = {**rec, "category": "pending_add", "unmapped_site": True}
+                pending_rows.append(tagged)
+            else:
+                pending_rows.append({**rec, "category": "pending_add"})
+            continue
+
+        # 3. Present in DB — verify site is mapped; unmapped sites stay in
+        #    conflicts only when there is a genuine attribute inconsistency.
         if _index_is_provided(existing_sites) and site.lower() not in existing_sites:
             unmapped_sites.add(site)
             conflict_rows.append({
@@ -450,22 +638,8 @@ def classify_records(
             })
             continue
 
-        # 2. Absent from DB → pending add
-        has_prefix_idx = _index_is_provided(existing_prefixes)
-        has_ip_idx = _index_is_provided(existing_ips)
-        in_db = (
-            (has_prefix_idx and subnet in existing_prefixes)
-            or (has_ip_idx and ip and ip in existing_ips)
-        )
-        if not in_db:
-            pending_rows.append({**rec, "category": "pending_add"})
-            continue
-
-        # 3. Present in DB → check attribute consistency
         attrs = (db_record_map or {}).get(subnet, []) if subnet else []
         if not attrs:
-            # No attribute data stored for this prefix — cannot prove a
-            # mismatch, so treat as matched.
             matched_rows.append({**rec, "category": "matched"})
             continue
 
@@ -484,7 +658,7 @@ def classify_records(
                                     "ingested_at", "category"])
     pending_df = _df(pending_rows, ["ip_address", "subnet", "vlan_id", "vlan_name",
                                     "site", "description", "source_sheet",
-                                    "ingested_at", "category"])
+                                    "ingested_at", "category", "unmapped_site"])
     conflicts_df = _df(conflict_rows, ["ip_address", "subnet", "vlan_id", "vlan_name",
                                        "site", "description", "source_sheet",
                                        "ingested_at", "category", "conflict_reason"])
@@ -497,6 +671,11 @@ def classify_records(
         "unmapped_sites": len(unmapped_sites),
         "unmapped_site_list": sorted(unmapped_sites),
     }
+    # Mathematical partition invariant: Total == Matched + Pending + Conflicts
+    metrics["partition_valid"] = (
+        metrics["total_parsed"]
+        == metrics["matched"] + metrics["pending_add"] + metrics["conflicts"]
+    )
     return matched_df, pending_df, conflicts_df, metrics
 
 
