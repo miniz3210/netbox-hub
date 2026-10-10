@@ -2,7 +2,7 @@ import os
 import json
 import re
 import copy
-import time
+
 
 import streamlit as st
 from config.constants import RULES_FILE
@@ -110,36 +110,6 @@ def _clear_session_state_prefixes(*prefixes: str) -> None:
             st.session_state.pop(k, None)
 
 
-def _check_and_render_banner(section_id: str, msg_template: str = "", duration_sec: int = 10) -> bool:
-    """Check session state for a banner matching *section_id* and render it if still valid."""
-    banner_data = st.session_state.get("card_saved_banner")
-    if not banner_data or banner_data.get("section") != section_id:
-        return False
-    now = time.time()
-    elapsed = now - banner_data.get("ts", 0)
-    if elapsed <= duration_sec:
-        msg = banner_data.get("msg", msg_template)
-        if msg:
-            st.markdown(
-                """
-                <style>
-                @keyframes autoDismissFade {
-                    0% { opacity: 1; max-height: 120px; margin-bottom: 1rem; }
-                    75% { opacity: 1; max-height: 120px; margin-bottom: 1rem; }
-                    100% { opacity: 0; max-height: 0; margin-bottom: 0; padding-top: 0; padding-bottom: 0; overflow: hidden; display: none; }
-                }
-                div[data-testid="stAlert"], div[data-baseweb="notification"] {
-                    animation: autoDismissFade 10s forwards !important;
-                }
-                </style>
-                """,
-                unsafe_allow_html=True
-            )
-            st.success(msg)
-        st.session_state.pop("card_saved_banner", None)
-        return True
-    st.session_state.pop("card_saved_banner", None)
-    return False
 
 
 def _inject_preset_table_style() -> None:
@@ -262,11 +232,7 @@ def _persist_variables(rules: dict, variables: dict, section_key: str = "shared"
     save_naming_rules(rules, source="Variable Manager")
     SSM.set_naming_rules(rules.copy())
     st.session_state["variables_saved"] = True
-    st.session_state["card_saved_banner"] = {
-        "section": f"vars_{section_key}",
-        "msg": f"✅ {section_key.title()} Variables saved & applied!",
-        "ts": time.time()
-    }
+    st.toast(f"✅ {section_key.title()} Variables saved & applied!", icon="💾")
     st.rerun()
 
 
@@ -286,7 +252,6 @@ def _render_auto_correction_manager(active_model: str) -> None:
             "vmware": "🔍 OCR Text Cleaning & Syntax Rules",
         }.get(category, f"🛠️ Auto-Correction Rules — {category}")
         with st.expander(category_title, expanded=False):
-            _check_and_render_banner(f"auto_correction_{category}")
             st.caption(
                 "Each row is a regex pattern → replacement pair. Edit inline or use "
                 "the AI generator below to create new rules."
@@ -432,7 +397,6 @@ def _render_ipam_role_mapping_manager(active_model: str) -> None:
     role_rules = list(get_ipam_role_mappings(rules))
 
     with st.container(border=True):
-        _check_and_render_banner("auto_correction")
         st.markdown("#### 🏷️ IPAM Role Mapping Rules (Alias to Canonical Role)")
         st.caption(
             "Each row is a regex pattern → canonical role pair. Edit inline or use "
@@ -580,7 +544,7 @@ def _persist_ipam_role_mappings(rules: dict) -> None:
         delta = {"ipam_role_mappings": {"old": list(old_val), "new": list(new_val)}}
     add_to_history(delta, source="IPAM Role Mapping Rules: Management UI")
     SSM.refresh_naming_rules()
-    st.session_state["card_saved_banner"] = {"section": "auto_correction", "msg": "✅ IPAM Role Mapping Rules saved & applied!", "ts": time.time()}
+    st.toast("✅ IPAM Role Mapping Rules saved & applied!", icon="💾")
     st.rerun()
 
 
@@ -600,7 +564,7 @@ def _reset_ipam_role_mappings() -> None:
     add_to_history(delta, source="IPAM Role Mapping Rules: Reset to Defaults")
     _clear_session_state_prefixes("ipamrole_")
     SSM.refresh_naming_rules()
-    st.session_state["card_saved_banner"] = {"section": "auto_correction", "msg": "✅ IPAM Role Mapping Rules reset to defaults!", "ts": time.time()}
+    st.toast("✅ IPAM Role Mapping Rules reset to defaults!", icon="🔄")
     st.rerun()
 
 
@@ -630,7 +594,6 @@ def _render_site_code_mapping_manager(key_prefix: str = "std_scm") -> None:
     from config.naming_rules import get_site_code_rules
 
     with st.expander("📍 Site Code Mapping Rules (City / Location to Code)", expanded=False):
-        _check_and_render_banner("auto_correction")
         st.caption(
             "Each row maps a city/location pattern → site code. The Naming tab's Site Code "
             "Assistant uses these exact mappings directly. A location that matches a pattern is "
@@ -740,7 +703,7 @@ def _persist_site_code_mappings(rules: dict) -> None:
                                     "new": dict(rules.get("site_code_rules") or {})}}
     add_to_history(delta, source="Site Code Mapping Rules: Management UI")
     SSM.refresh_naming_rules()
-    st.session_state["card_saved_banner"] = {"section": "auto_correction", "msg": "✅ Site Code Mapping Rules saved & applied!", "ts": time.time()}
+    st.toast("✅ Site Code Mapping Rules saved & applied!", icon="💾")
     st.rerun()
 
 
@@ -782,7 +745,7 @@ def _reset_site_code_mappings() -> None:
     _clear_session_state_prefixes("sitecode_")
     st.session_state.pop("site_code_mappings_modified", None)
     SSM.refresh_naming_rules()
-    st.session_state["card_saved_banner"] = {"section": "auto_correction", "msg": "✅ Site Code Mapping Rules reset to defaults!", "ts": time.time()}
+    st.toast("✅ Site Code Mapping Rules reset to defaults!", icon="🔄")
     st.rerun()
 
 
@@ -805,8 +768,7 @@ def _persist_auto_corrections(data: dict, category: str = "") -> None:
         delta = {"auto_correction_rules": {"old": None, "new": data}}
     add_to_history(delta, source="Auto-Correction: Management UI")
     st.session_state["autocorrect_rules_cache"] = data
-    banner_section = f"auto_correction_{category}" if category else "auto_correction"
-    st.session_state["card_saved_banner"] = {"section": banner_section, "msg": "✅ Syntax Auto-Correction Rules saved & applied!", "ts": time.time()}
+    st.toast("✅ Syntax Auto-Correction Rules saved & applied!", icon="💾")
     st.rerun()
 
 
@@ -817,7 +779,7 @@ def _save_presets(rules: dict, section: str = "presets", section_label: str = "P
     rules.update(fresh)
     SSM.set_naming_rules(fresh.copy())
     SSM.refresh_naming_rules()
-    st.session_state["card_saved_banner"] = {"section": section, "msg": f"✅ {section_label} saved & applied!", "ts": time.time()}
+    st.toast(f"✅ {section_label} saved & applied!", icon="💾")
     st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
     # Clear all preset widget input keys while safely preserving group selections and system flags
     _clear_session_state_prefixes("device_pre_", "interface_pre_", "host_", "vm_", "esxi_network_pre_",
@@ -830,7 +792,7 @@ def _save_presets(rules: dict, section: str = "presets", section_label: str = "P
 def _save_csv_schemas(rules: dict) -> None:
     save_naming_rules(rules, source="CSV Schemas Manager")
     SSM.set_naming_rules(rules.copy())
-    st.session_state["card_saved_banner"] = {"section": "csv_schemas", "msg": "✅ NetBox Bulk Import CSV Schemas saved & applied!", "ts": time.time()}
+    st.toast("✅ NetBox Bulk Import CSV Schemas saved & applied!", icon="💾")
     _clear_session_state_prefixes("csv_sch_")
     st.rerun()
 
@@ -839,7 +801,7 @@ def _reset_csv_schemas(rules: dict) -> None:
     rules["csv_schemas"] = copy.deepcopy(DEFAULT_CSV_SCHEMAS)
     save_naming_rules(rules, source="CSV Schemas Reset")
     SSM.set_naming_rules(rules.copy())
-    st.session_state["card_saved_banner"] = {"section": "csv_schemas", "msg": "✅ NetBox Bulk Import CSV Schemas reset to defaults!", "ts": time.time()}
+    st.toast("✅ NetBox Bulk Import CSV Schemas reset to defaults!", icon="🔄")
     _clear_session_state_prefixes("csv_sch_")
     st.rerun()
 
@@ -848,7 +810,6 @@ def _render_csv_schemas_editor(rules: dict) -> None:
     schemas = get_csv_schemas(rules)
 
     with st.expander("📊 NetBox Bulk Import CSV Schemas", expanded=False):
-        _check_and_render_banner("csv_schemas")
         st.caption("Customize headers and dynamic cell templates for the 4 offline NetBox bulk import CSVs (Site, VLAN Group, VLANs, Prefixes). Supports Universal Context tokens like `<site>`, `<vid>`, `<prefix>`, `<role>`, etc.")
 
         schema_meta = [
@@ -915,7 +876,7 @@ def _render_csv_schemas_editor(rules: dict) -> None:
 def _save_vlan_desc_mappings(rules: dict, section: str = "vlan_desc_mappings", section_label: str = "VLAN Description Mappings") -> None:
     save_naming_rules(rules, source="VLAN Description Mappings Manager")
     SSM.set_naming_rules(rules.copy())
-    st.session_state["card_saved_banner"] = {"section": section, "msg": f"✅ {section_label} saved & applied!", "ts": time.time()}
+    st.toast(f"✅ {section_label} saved & applied!", icon="💾")
     _clear_session_state_prefixes("vlandesc_")
     st.rerun()
 
@@ -1019,7 +980,6 @@ def _render_spatial_anchors_redaction_editor(
         domain_pats = []
     domain_pats_str = ", ".join(domain_pats)
 
-    _check_and_render_banner(f"hypervisor_s25_{active_plat}", duration_sec=10)
     st.caption(
         "Configure dynamic relative spatial boundaries (resolution-agnostic) and "
         "on-device deterministic data redaction. When enabled, OCR tokens are grouped "
@@ -1206,7 +1166,6 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
         cur_sel = all_platforms[0]
 
     with st.container(border=True):
-        _check_and_render_banner("hypervisor_platform_presets", duration_sec=10)
         col_t1, col_t2 = st.columns([3, 1], vertical_alignment="center")
         with col_t1:
             st.markdown("#### ☁️ Hypervisor Platform Presets")
@@ -1276,11 +1235,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
 
                     st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
                     st.session_state["pending_hypervisor_platform"] = all_platforms[0]
-                    st.session_state["card_saved_banner"] = {
-                        "section": "hypervisor_platform_presets",
-                        "msg": f"✅ Deleted platform '{sel_choice}'!",
-                        "ts": time.time()
-                    }
+                    st.toast(f"✅ Deleted platform '{sel_choice}'!", icon="🔄")
                     st.rerun()
 
         if sel_choice == CREATE_OPTION:
@@ -1309,7 +1264,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                         save_naming_rules(rules, source=f"Create Platform {new_plat_name}")
                         SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
                         st.session_state["sel_unified_platform"] = new_plat_name
-                        st.session_state["card_saved_banner"] = {"section": "hypervisor_platform_presets", "msg": f"✅ Platform '{new_plat_name}' created!", "ts": time.time()}
+                        st.toast(f"✅ Platform '{new_plat_name}' created!", icon="💾")
                         st.rerun()
             with c_cancel_btn:
                 if st.button("❌ Cancel", width="stretch"):
@@ -1340,8 +1295,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
         # ──────────────────────────────────────────────────────────────────────
         # Section 1: NetBox Description Templates
         # ──────────────────────────────────────────────────────────────────────
-        with st.expander(f"🏷️ 1. Description Templates ({len(plat_patterns)} templates)", expanded=True):
-            _check_and_render_banner(f"hypervisor_s1_{active_plat}", duration_sec=10)
+        with st.expander(f"🏷️ 1. Description Templates ({len(plat_patterns)} templates)", expanded=False):
             HYP_TPL_COLS = [1.2, 2.2, 4.4, 0.8, 1.4]
             c_h0, c_h1, c_h2, c_h3, c_h4 = st.columns(HYP_TPL_COLS, vertical_alignment="center")
             with c_h0:
@@ -1447,11 +1401,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                     SSM.set_naming_rules(fresh.copy())
                     SSM.refresh_naming_rules()
                     st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
-                    st.session_state["card_saved_banner"] = {
-                        "section": f"hypervisor_s1_{active_plat}",
-                        "msg": f"✅ Section 1 (Description Templates) for '{active_plat}' saved!",
-                        "ts": time.time()
-                    }
+                    st.toast(f"✅ Section 1 (Description Templates) for '{active_plat}' saved & applied!", icon="💾")
                     st.rerun()
             with col_reset_s1:
                 if st.button("🔄 Reset to Defaults", key=f"btn_reset_s1_{active_plat}", width="stretch"):
@@ -1466,11 +1416,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                         f"new_hyp_code_{active_plat}", f"new_hyp_lbl_{active_plat}",
                         f"new_hyp_pat_{active_plat}", f"new_hyp_hide_{active_plat}",
                     )
-                    st.session_state["card_saved_banner"] = {
-                        "section": f"hypervisor_s1_{active_plat}",
-                        "msg": f"✅ Section 1 reset to defaults for '{active_plat}'!",
-                        "ts": time.time()
-                    }
+                    st.toast(f"✅ Section 1 reset to defaults for '{active_plat}'!", icon="🔄")
                     st.rerun()
 
         # ──────────────────────────────────────────────────────────────────────
@@ -1481,8 +1427,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
             aliases = {}
         alias_items = list(aliases.items())
 
-        with st.expander(f"🔗 2. Platform Token Aliases ({len(alias_items)})", expanded=True):
-            _check_and_render_banner(f"hypervisor_s2_{active_plat}", duration_sec=10)
+        with st.expander(f"🔗 2. Platform Token Aliases ({len(alias_items)})", expanded=False):
             st.caption("Map canonical tokens to their platform-specific aliases. When a token or any of its aliases appears in OCR output, all mapped values are synchronized bidirectionally.")
 
             col_canon, col_alias, col_del = st.columns([4.4, 4.4, 1.2], vertical_alignment="center")
@@ -1534,7 +1479,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                         rules["topology_parsing_presets"] = parsing_presets
                         save_naming_rules(rules, source=f"Platform Presets: Add alias {active_plat}")
                         SSM.set_naming_rules(rules.copy())
-                        st.session_state["card_saved_banner"] = {"section": f"hypervisor_s2_{active_plat}", "msg": "✅ Alias added & applied!", "ts": time.time()}
+                        st.toast("✅ Alias added & applied!", icon="💾")
                         st.rerun()
                     else:
                         st.warning("⚠️ Enter a canonical token name.")
@@ -1553,11 +1498,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                     SSM.set_naming_rules(fresh.copy())
                     SSM.refresh_naming_rules()
                     st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
-                    st.session_state["card_saved_banner"] = {
-                        "section": f"hypervisor_s2_{active_plat}",
-                        "msg": f"✅ Section 2 (Token Aliases) for '{active_plat}' saved!",
-                        "ts": time.time()
-                    }
+                    st.toast(f"✅ Section 2 (Token Aliases) for '{active_plat}' saved & applied!", icon="💾")
                     st.rerun()
             with col_reset_s2:
                 if st.button("🔄 Reset to Defaults", key=f"btn_reset_s2_{active_plat}", width="stretch"):
@@ -1575,18 +1516,13 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                         f"plat_alias_del_{active_plat}_", f"plat_new_canon_{active_plat}",
                         f"plat_new_alias_{active_plat}",
                     )
-                    st.session_state["card_saved_banner"] = {
-                        "section": f"hypervisor_s2_{active_plat}",
-                        "msg": f"✅ Section 2 reset to defaults for '{active_plat}'!",
-                        "ts": time.time()
-                    }
+                    st.toast(f"✅ Section 2 reset to defaults for '{active_plat}'!", icon="🔄")
                     st.rerun()
 
         # ──────────────────────────────────────────────────────────────────────
         # Section 2.5: Relative Spatial Anchors & Local Privacy Redaction
         # ──────────────────────────────────────────────────────────────────────
-        with st.expander("📐 2.5. Relative Spatial Anchors & Local Privacy Redaction", expanded=st.session_state.get(f"exp_s25_{active_plat}", False)):
-            _check_and_render_banner(f"hypervisor_s25_{active_plat}", duration_sec=10)
+        with st.expander("📐 2.5. Relative Spatial Anchors & Local Privacy Redaction", expanded=False):
             _render_spatial_anchors_redaction_editor(plat_parsing, active_plat)
             st.divider()
             col_save_s25, col_reset_s25 = st.columns(2, vertical_alignment="center")
@@ -1601,12 +1537,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                     SSM.set_naming_rules(fresh.copy())
                     SSM.refresh_naming_rules()
                     st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
-                    st.session_state["card_saved_banner"] = {
-                        "section": f"hypervisor_s25_{active_plat}",
-                        "msg": f"✅ Section 2.5 (Spatial Anchors) for '{active_plat}' saved!",
-                        "ts": time.time()
-                    }
-                    st.session_state[f"exp_s25_{active_plat}"] = True
+                    st.toast(f"✅ Section 2.5 (Spatial Anchors) for '{active_plat}' saved & applied!", icon="💾")
                     st.rerun()
             with col_reset_s25:
                 if st.button("🔄 Reset to Defaults", key=f"btn_reset_s25_{active_plat}", width="stretch"):
@@ -1620,19 +1551,13 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                     save_naming_rules(rules, source=f"Reset Section 2.5 for {active_plat}")
                     SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
                     _clear_session_state_prefixes(f"spat_")
-                    st.session_state["card_saved_banner"] = {
-                        "section": f"hypervisor_s25_{active_plat}",
-                        "msg": f"✅ Section 2.5 reset to defaults for '{active_plat}'!",
-                        "ts": time.time()
-                    }
-                    st.session_state[f"exp_s25_{active_plat}"] = True
+                    st.toast(f"✅ Section 2.5 reset to defaults for '{active_plat}'!", icon="🔄")
                     st.rerun()
 
         # ──────────────────────────────────────────────────────────────────────
         # Section 3: AI Parsing Rules & Invariants
         # ──────────────────────────────────────────────────────────────────────
-        with st.expander("🧠 3. AI Parsing Rules & Invariants", expanded=st.session_state.get(f"exp_s3_{active_plat}", False)):
-            _check_and_render_banner(f"hypervisor_s3_{active_plat}", duration_sec=10)
+        with st.expander("🧠 3. AI Parsing Rules & Invariants", expanded=False):
             st.caption("Complete system instructions injected into the LLM prompt during OCR topology parsing. Covers OCR normalization, token de-concatenation, topology inheritance, and mandatory atomic JSON attributes.")
 
             inst_val = plat_parsing.get("instructions", "")
@@ -1707,11 +1632,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
 
                                 st.session_state["pending_hypervisor_platform"] = target_p
                                 st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
-                                st.session_state["card_saved_banner"] = {
-                                    "section": f"hypervisor_s3_{active_plat}",
-                                    "msg": f"Generated and loaded rules for '{target_p}'!",
-                                    "ts": time.time()
-                                }
+                                st.toast(f"✅ Generated and loaded rules for '{target_p}'!", icon="💾")
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Failed to generate platform rules: {e}")
@@ -1730,12 +1651,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                     SSM.set_naming_rules(fresh.copy())
                     SSM.refresh_naming_rules()
                     st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
-                    st.session_state["card_saved_banner"] = {
-                        "section": f"hypervisor_s3_{active_plat}",
-                        "msg": f"✅ Section 3 (AI Parsing Rules) for '{active_plat}' saved!",
-                        "ts": time.time()
-                    }
-                    st.session_state[f"exp_s3_{active_plat}"] = True
+                    st.toast(f"✅ Section 3 (AI Parsing Rules) for '{active_plat}' saved & applied!", icon="💾")
                     st.rerun()
             with col_reset_s3:
                 if st.button("🔄 Reset to Defaults", key=f"btn_reset_s3_{active_plat}", width="stretch"):
@@ -1749,19 +1665,13 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                     save_naming_rules(rules, source=f"Reset Section 3 for {active_plat}")
                     SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
                     _clear_session_state_prefixes(f"txt_instructions_{active_plat}")
-                    st.session_state["card_saved_banner"] = {
-                        "section": f"hypervisor_s3_{active_plat}",
-                        "msg": f"✅ Section 3 reset to defaults for '{active_plat}'!",
-                        "ts": time.time()
-                    }
-                    st.session_state[f"exp_s3_{active_plat}"] = True
+                    st.toast(f"✅ Section 3 reset to defaults for '{active_plat}'!", icon="🔄")
                     st.rerun()
 
         # ──────────────────────────────────────────────────────────────────────
         # Section 4: AI Onboarding Blueprint (Read-Only Guide)
         # ──────────────────────────────────────────────────────────────────────
-        with st.expander("📘 4. AI Onboarding Blueprint Guide", expanded=st.session_state.get(f"exp_s4_{active_plat}", False)):
-            _check_and_render_banner(f"hypervisor_s4_{active_plat}", duration_sec=10)
+        with st.expander("📘 4. AI Onboarding Blueprint Guide", expanded=False):
             st.caption("A complete reference for onboarding any hypervisor platform into NetBox Hub. Use the blueprint prompt below to generate all 4 configuration sections for a new platform.")
             st.markdown("""
 **The AI Onboarding Blueprint has 4 components:**
@@ -1862,7 +1772,6 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
     _pending_swap_key = f"_pending_swap_{kind}"
 
     with st.container(border=True):
-        _check_and_render_banner(section)
         col_t1, col_t2 = st.columns([3, 1], vertical_alignment="center")
         with col_t1:
             st.markdown(f"#### {card_title}")
@@ -2125,7 +2034,6 @@ def _host_editor(rules: dict) -> None:
     patterns = dict(rules.get("naming_patterns") or {})
 
     with st.container(border=True):
-        _check_and_render_banner("hosts")
         col_t1, col_t2 = st.columns([3, 1], vertical_alignment="center")
         with col_t1:
             st.markdown("#### 💻 HOSTS TYPE PRESETS")
@@ -2256,7 +2164,7 @@ def _host_editor(rules: dict) -> None:
         rules["naming_patterns"] = reset_patterns
         save_naming_rules(rules, source="Hosts Type Presets: Reset to Defaults")
         SSM.set_naming_rules(rules.copy())
-        st.session_state["card_saved_banner"] = {"section": "hosts", "msg": "✅ Hosts Type Presets reset to defaults!", "ts": time.time()}
+        st.toast("✅ Hosts Type Presets reset to defaults!", icon="🔄")
         st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
         st.session_state.pop("host_preset_min_one", None)
         st.session_state.pop("_host_vm_del_idx", None)
@@ -2304,7 +2212,6 @@ def _vm_editor(rules: dict) -> None:
     tpl = patterns.get("vm_host", "")
 
     with st.container(border=True):
-        _check_and_render_banner("vm_roles")
         col_t1, col_t2 = st.columns([3, 1], vertical_alignment="center")
         with col_t1:
             st.markdown("#### 🖱️ VIRTUAL MACHINE PRESETS")
@@ -2423,7 +2330,7 @@ def _vm_editor(rules: dict) -> None:
         rules["naming_patterns"] = vm_patterns
         save_naming_rules(rules, source="VM Presets: Reset to Defaults")
         SSM.set_naming_rules(rules.copy())
-        st.session_state["card_saved_banner"] = {"section": "vm_roles", "msg": "✅ VM Role Presets reset to defaults!", "ts": time.time()}
+        st.toast("✅ VM Role Presets reset to defaults!", icon="🔄")
         st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
         _clear_session_state_prefixes("host_", "vm_", "preset_", "host_preset", "vm_preset")
         st.rerun()
@@ -2461,7 +2368,6 @@ VLAND_MAPPINGS_COLS = [4.0, 5.0, 1.2]
 
 def _render_vlan_description_mappings_editor(rules: dict) -> None:
     with st.container(border=True):
-        _check_and_render_banner("vlan_desc_mappings")
         st.markdown("#### 🏷️ VLAN Description Mappings (Role → Description)")
 
         mappings = dict(get_vlan_description_mappings(rules))
@@ -2573,7 +2479,6 @@ def _vlan_presets_editor(rules: dict) -> None:
     vlan_presets = get_vlan_presets(rules)
 
     with st.container(border=True):
-        _check_and_render_banner("vlan_presets")
         col_t1, col_t2 = st.columns([3, 1])
         with col_t1:
             st.markdown("#### 🌐 VLAN ALLOCATION PRESETS")
@@ -2673,11 +2578,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                         save_naming_rules(rules, source=f"Create VLAN Group {new_grp_name}")
                         SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
                         st.session_state["pending_vlan_group"] = new_grp_name
-                        st.session_state["card_saved_banner"] = {
-                            "section": "vlan_presets",
-                            "msg": f"✅ VLAN Group '{new_grp_name}' created!",
-                            "ts": time.time()
-                        }
+                        st.toast(f"✅ VLAN Group '{new_grp_name}' created!", icon="💾")
                         st.rerun()
             with c_cancel:
                 if st.button("Cancel", width="stretch"):
@@ -2933,7 +2834,6 @@ def _render_hardware_baseline_editor(rules: dict, active_model: str | None = Non
     active_model = active_model or st.session_state.get("active_model", "")
 
     with st.container(border=True):
-        _check_and_render_banner("yaml_guidelines")
         col_t1, col_t2 = st.columns([3, 1], vertical_alignment="center")
         with col_t1:
             st.markdown("#### 📋 NetBox YAML / Hardware Templates & Guidelines")
@@ -2950,8 +2850,7 @@ def _render_hardware_baseline_editor(rules: dict, active_model: str | None = Non
             current_cfg = dict(hb.get(cat_key, default_cfg))
             display_name = current_cfg.get("display_name", cat_key.replace("_", " ").title())
 
-            with st.expander(f"🔹 {display_name} ({cat_key})", expanded=(cat_key == "server")):
-                _check_and_render_banner(f"hb_{cat_key}")
+            with st.expander(f"🔹 {display_name} ({cat_key})", expanded=False):
 
                 # ── Server / generic fields ───────────────────────────────
                 if cat_key in ("server", "storage_san"):
@@ -3043,11 +2942,7 @@ def _render_hardware_baseline_editor(rules: dict, active_model: str | None = Non
                         SSM.set_naming_rules(fresh.copy())
                         SSM.refresh_naming_rules()
                         st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
-                        st.session_state["card_saved_banner"] = {
-                            "section": f"hb_{cat_key}",
-                            "msg": f"✅ {display_name} category saved & applied!",
-                            "ts": time.time()
-                        }
+                        st.toast(f"✅ {display_name} category saved & applied!", icon="💾")
                         st.rerun()
                 with col_r:
                     if st.button("🔄 Reset to Defaults", key=f"hb_reset_{cat_key}", width="stretch"):
@@ -3058,11 +2953,7 @@ def _render_hardware_baseline_editor(rules: dict, active_model: str | None = Non
                         rules.update(fresh)
                         SSM.set_naming_rules(fresh.copy())
                         SSM.refresh_naming_rules()
-                        st.session_state["card_saved_banner"] = {
-                            "section": f"hb_{cat_key}",
-                            "msg": f"✅ {display_name} reset to defaults!",
-                            "ts": time.time()
-                        }
+                        st.toast(f"✅ {display_name} reset to defaults!", icon="🔄")
                         st.rerun()
 
 
@@ -3159,11 +3050,9 @@ def render_standards_tab(active_model):
         elif _active_subtab == 2:
             _render_hardware_baseline_editor(current_rules, active_model)
 
-            _check_and_render_banner("auto_correction")
             st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
 
             with st.container(border=True):
-                _check_and_render_banner("auto_correction")
                 st.markdown("#### 🛠️ Auto-Correction & Syntax Rules")
                 st.caption("Regex-based text cleaning rules for OCR noise removal and interface port shortening. Used for user-input error prevention.")
                 _render_auto_correction_manager(active_model)
@@ -3213,7 +3102,6 @@ def render_standards_tab(active_model):
         for scope_code, title, desc, s_key in scope_meta:
             scope_items = grouped_vars.get(s_key, {})
             with st.container(border=True):
-                _check_and_render_banner(f"vars_{s_key}")
                 col_t1, col_t2 = st.columns([3, 1])
                 with col_t1:
                     st.markdown(f"#### {title}")
@@ -3278,7 +3166,7 @@ def render_standards_tab(active_model):
                         default_scope_vars = {k: v for k, v in PATTERN_VARIABLES.items() if v.get("scope") == s_key}
                         scope_edited_vars.update(default_scope_vars)
                         all_edited_vars.update(scope_edited_vars)
-                        st.session_state["card_saved_banner"] = {"section": f"vars_{s_key}", "msg": f"✅ {s_key.title()} Variables reset to defaults!", "ts": time.time()}
+                        st.toast(f"✅ {s_key.title()} Variables reset to defaults!", icon="🔄")
                         _persist_variables(current_rules, all_edited_vars, section_key=s_key)
 
                 if saved_vars:
