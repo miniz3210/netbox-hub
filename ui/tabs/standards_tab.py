@@ -1163,10 +1163,15 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
     if cur_sel not in dropdown_options:
         cur_sel = all_platforms[0]
 
-    col_t2 = st.columns([1])[0]
-    with col_t2:
-        st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em; color: #94a3b8;'>{len(all_platforms)} platforms</span></div>", unsafe_allow_html=True)
-    st.caption("Manage hypervisor platforms, standardized NetBox description templates, token aliases, and AI parsing rules.")
+    c_hdr_left, c_hdr_right = st.columns([0.82, 0.18])
+    with c_hdr_left:
+        st.caption("Manage hypervisor platforms, standardized NetBox description templates, token aliases, and AI parsing rules.")
+    with c_hdr_right:
+        st.markdown(
+            f"<div style='text-align:right;color:#94a3b8;font-size:0.85rem;padding-top:2px;'>"
+            f"{len(all_platforms)} platforms</div>",
+            unsafe_allow_html=True
+        )
 
     st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
 
@@ -1769,13 +1774,18 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
 
     expander_context = st.expander(card_title, expanded=expanded) if wrap_expander else st.container()
     with expander_context:
-        # Preset count badge (right-aligned, below title)
-        c1, c2 = st.columns([0.85, 0.15])
-        with c1:
-            if card_caption and card_caption.strip():
-                st.caption(card_caption)
-        with c2:
-            st.markdown(f"<div style='text-align:right;color:#94a3b8;font-size:0.85rem;'>{len(presets)} presets</div>", unsafe_allow_html=True)
+        # Preset count badge (right-aligned, same row as caption) — only when we own the expander
+        if wrap_expander:
+            c_hdr_left, c_hdr_right = st.columns([0.82, 0.18])
+            with c_hdr_left:
+                if card_caption and card_caption.strip():
+                    st.caption(card_caption)
+            with c_hdr_right:
+                st.markdown(
+                    f"<div style='text-align:right;color:#94a3b8;font-size:0.85rem;padding-top:2px;'>"
+                    f"{len(presets)} presets</div>",
+                    unsafe_allow_html=True
+                )
 
         # Inject dynamic styling to guarantee Action buttons fit cleanly without squeezing
         _inject_preset_table_style()
@@ -2030,10 +2040,15 @@ def _host_editor(rules: dict) -> None:
     vm_presets = [p for p in all_presets if p.get("pattern_key") == "vm_host"]
     patterns = dict(rules.get("naming_patterns") or {})
 
-    col_t2 = st.columns([1])[0]
-    with col_t2:
-        st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em; color: #94a3b8;'>{len(host_presets)} presets</span></div>", unsafe_allow_html=True)
-    st.caption("Manage physical hypervisor host naming patterns and presets.")
+    c_hdr_left, c_hdr_right = st.columns([0.82, 0.18])
+    with c_hdr_left:
+        st.caption("Manage physical hypervisor host naming patterns and presets.")
+    with c_hdr_right:
+        st.markdown(
+            f"<div style='text-align:right;color:#94a3b8;font-size:0.85rem;padding-top:2px;'>"
+            f"{len(host_presets)} presets</div>",
+            unsafe_allow_html=True
+        )
 
     # Inject dynamic styling to guarantee Action buttons fit cleanly without squeezing
     _inject_preset_table_style()
@@ -2205,10 +2220,15 @@ def _vm_editor(rules: dict) -> None:
     patterns = dict(rules.get("naming_patterns") or {})
     tpl = patterns.get("vm_host", "")
 
-    col_t2 = st.columns([1])[0]
-    with col_t2:
-        st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em; color: #94a3b8;'>{len(vm_presets)} presets</span></div>", unsafe_allow_html=True)
-    st.caption("Manage virtual machine roles (cvi, afs, sani, vlab) and their shared hostname template.")
+    c_hdr_left, c_hdr_right = st.columns([0.82, 0.18])
+    with c_hdr_left:
+        st.caption("Manage virtual machine roles (cvi, afs, sani, vlab) and their shared hostname template.")
+    with c_hdr_right:
+        st.markdown(
+            f"<div style='text-align:right;color:#94a3b8;font-size:0.85rem;padding-top:2px;'>"
+            f"{len(vm_presets)} presets</div>",
+            unsafe_allow_html=True
+        )
 
     # Inject dynamic styling to guarantee Action buttons fit cleanly without squeezing
     _inject_preset_table_style()
@@ -2469,11 +2489,16 @@ def _vlan_presets_editor(rules: dict) -> None:
 
     total_count = sum(len(g.get("items", [])) for g in vlan_presets.values())
 
-    with st.expander(f"🌐 VLAN ALLOCATION PRESETS ({total_count} presets)", expanded=True):
-        col_t2 = st.columns([1])[0]
-        with col_t2:
-            st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{total_count} presets</span></div>", unsafe_allow_html=True)
-        st.caption("Manage reusable VLAN allocation groups. Each group has default patterns applied to all its items. VLAN Description tags are configured in the dedicated mappings expander below.")
+    with st.expander(f"🌐 VLAN ALLOCATION PRESETS", expanded=True):
+        c_hdr_left, c_hdr_right = st.columns([0.82, 0.18])
+        with c_hdr_left:
+            st.caption("Manage reusable VLAN allocation groups. Each group has default patterns applied to all its items. VLAN Description tags are configured in the dedicated mappings expander below.")
+        with c_hdr_right:
+            st.markdown(
+                f"<div style='text-align:right;color:#94a3b8;font-size:0.85rem;padding-top:2px;'>"
+                f"{total_count} presets</div>",
+                unsafe_allow_html=True
+            )
 
         _inject_preset_table_style()
 
@@ -3017,29 +3042,65 @@ def render_standards_tab(active_model):
         if _active_subtab == 0:
             _vlan_presets_editor(current_rules)
             with st.expander("🏷️ VLAN Description Mappings (Role → Description)", expanded=False):
+                c_hdr_left, c_hdr_right = st.columns([0.82, 0.18])
+                with c_hdr_left:
+                    st.caption(
+                        "Map each VLAN Role to its NetBox VLAN Description tag. When a role "
+                        "matches, its mapped value is used; otherwise the Role name itself is "
+                        "returned. These mappings are consulted by the IPAM tab's dynamic "
+                        "resolution logic."
+                    )
+                with c_hdr_right:
+                    mappings_count = len(dict(get_vlan_description_mappings(current_rules)))
+                    st.markdown(
+                        f"<div style='text-align:right;color:#94a3b8;font-size:0.85rem;padding-top:2px;'>"
+                        f"{mappings_count} mappings</div>",
+                        unsafe_allow_html=True
+                    )
                 _render_vlan_description_mappings_editor(current_rules)
             with st.expander("🏷️ IPAM Role Mapping Rules (Alias to Canonical Role)", expanded=False):
+                c_hdr_left, c_hdr_right = st.columns([0.82, 0.18])
+                with c_hdr_left:
+                    st.caption(
+                        "Each row is a regex pattern → canonical role pair. Edit inline or use "
+                        "the AI generator below to create new rules."
+                    )
+                with c_hdr_right:
+                    ipam_rules = list(get_ipam_role_mappings(current_rules))
+                    st.markdown(
+                        f"<div style='text-align:right;color:#94a3b8;font-size:0.85rem;padding-top:2px;'>"
+                        f"{len(ipam_rules)} rules</div>",
+                        unsafe_allow_html=True
+                    )
                 _render_ipam_role_mapping_manager(active_model)
             _render_csv_schemas_editor(current_rules)
 
         elif _active_subtab == 1:
             with st.expander("🔧 DEVICE TYPE PRESETS", expanded=False):
-                c1, c2 = st.columns([0.85, 0.15])
-                with c1:
+                c_hdr_left, c_hdr_right = st.columns([0.82, 0.18])
+                with c_hdr_left:
                     st.caption("Manage device naming patterns and presets (SW, VS, FW, ION, WAP, RTR, VA).")
-                with c2:
-                    st.markdown(f"<div style='text-align:right;color:#94a3b8;font-size:0.85rem;'>{len(get_device_presets(current_rules))} presets</div>", unsafe_allow_html=True)
+                with c_hdr_right:
+                    st.markdown(
+                        f"<div style='text-align:right;color:#94a3b8;font-size:0.85rem;padding-top:2px;'>"
+                        f"{len(get_device_presets(current_rules))} presets</div>",
+                        unsafe_allow_html=True
+                    )
                 _preset_type_editor("device", get_device_presets(current_rules), current_rules, prefix="branch",
                                      card_title="🔧 DEVICE TYPE PRESETS",
                                      card_caption="",
                                      section="device_presets", section_label="Device Type Presets", expanded=True,
                                      wrap_expander=False)
             with st.expander("🔌 INTERFACE TYPE PRESETS", expanded=False):
-                c1, c2 = st.columns([0.85, 0.15])
-                with c1:
+                c_hdr_left, c_hdr_right = st.columns([0.82, 0.18])
+                with c_hdr_left:
                     st.caption("Manage interface description presets (Uplink, LAG, Po, Access, FW Zone).")
-                with c2:
-                    st.markdown(f"<div style='text-align:right;color:#94a3b8;font-size:0.85rem;'>{len(get_interface_presets(current_rules))} presets</div>", unsafe_allow_html=True)
+                with c_hdr_right:
+                    st.markdown(
+                        f"<div style='text-align:right;color:#94a3b8;font-size:0.85rem;padding-top:2px;'>"
+                        f"{len(get_interface_presets(current_rules))} presets</div>",
+                        unsafe_allow_html=True
+                    )
                 _preset_type_editor("interface", get_interface_presets(current_rules), current_rules, prefix="iface",
                                      card_title="🔌 INTERFACE TYPE PRESETS",
                                      card_caption="",
