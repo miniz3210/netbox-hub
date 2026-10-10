@@ -866,11 +866,11 @@ def _render_csv_schemas_editor(rules: dict) -> None:
 
         col_save, col_reset = st.columns(2)
         with col_save:
-            if st.button("💾 Save CSV Schemas", key="csv_schemas_save", type="primary", width="stretch"):
+            if st.button("💾 Save & Apply Changes", key="csv_schemas_save", type="primary", width="stretch"):
                 rules["csv_schemas"] = edited_schemas
                 _save_csv_schemas(rules)
         with col_reset:
-            if st.button("🔄 Reset Schemas to Defaults", key="csv_schemas_reset", width="stretch"):
+            if st.button("🔄 Reset to Defaults", key="csv_schemas_reset", width="stretch"):
                 _reset_csv_schemas(rules)
 
 def _save_vlan_desc_mappings(rules: dict, section: str = "vlan_desc_mappings", section_label: str = "VLAN Description Mappings") -> None:
@@ -1750,7 +1750,7 @@ LLM system instructions and atomic attribute requirements for topology parsing:
                     st.caption("*Copy the prompt above and paste it into ChatGPT, Claude, or any LLM to generate the full onboarding spec for* `" + active_plat + "`*.*")
 
             with col_reset_s4:
-                if st.button("🔄 Reset Guide View", key=f"btn_reset_s4_{active_plat}", width="stretch"):
+                if st.button("🔄 Reset to Defaults", key=f"btn_reset_s4_{active_plat}", width="stretch"):
                     st.session_state[f"exp_s4_{active_plat}"] = False
                     st.rerun()
 
@@ -3028,8 +3028,10 @@ def render_standards_tab(active_model):
 
         if _active_subtab == 0:
             _vlan_presets_editor(current_rules)
-            _render_vlan_description_mappings_editor(current_rules)
-            _render_ipam_role_mapping_manager(active_model)
+            with st.expander("🏷️ VLAN Description Mappings (Role → Description)", expanded=False):
+                _render_vlan_description_mappings_editor(current_rules)
+            with st.expander("🏷️ IPAM Role Mapping Rules (Alias to Canonical Role)", expanded=False):
+                _render_ipam_role_mapping_manager(active_model)
             _render_csv_schemas_editor(current_rules)
 
         elif _active_subtab == 1:
@@ -3037,15 +3039,17 @@ def render_standards_tab(active_model):
                                  card_title="🔧 DEVICE TYPE PRESETS",
                                  card_caption="Manage device naming patterns and presets (SW, VS, FW, ION, WAP, RTR, VA).",
                                  section="device_presets", section_label="Device Type Presets")
-            _preset_type_editor("interface", get_interface_presets(current_rules), current_rules, prefix="iface",
-                                 card_title="🔌 INTERFACE TYPE PRESETS",
-                                 card_caption="Manage interface description presets (Uplink, LAG, Po, Access, FW Zone).",
-                                 section="interface_presets", section_label="Interface Type Presets")
-            _host_editor(current_rules)
-            st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
-            _vm_editor(current_rules)
-            st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
-            _render_hypervisor_platform_presets_editor(current_rules, active_model)
+            with st.expander("🔌 INTERFACE TYPE PRESETS", expanded=False):
+                _preset_type_editor("interface", get_interface_presets(current_rules), current_rules, prefix="iface",
+                                     card_title="🔌 INTERFACE TYPE PRESETS",
+                                     card_caption="Manage interface description presets (Uplink, LAG, Po, Access, FW Zone).",
+                                     section="interface_presets", section_label="Interface Type Presets")
+            with st.expander("💻 HOSTS TYPE PRESETS", expanded=False):
+                _host_editor(current_rules)
+            with st.expander("🖱️ VIRTUAL MACHINE PRESETS", expanded=False):
+                _vm_editor(current_rules)
+            with st.expander("☁️ Hypervisor Platform Presets", expanded=False):
+                _render_hypervisor_platform_presets_editor(current_rules, active_model)
 
         elif _active_subtab == 2:
             _render_hardware_baseline_editor(current_rules, active_model)
@@ -3101,7 +3105,7 @@ def render_standards_tab(active_model):
 
         for scope_code, title, desc, s_key in scope_meta:
             scope_items = grouped_vars.get(s_key, {})
-            with st.container(border=True):
+            with st.expander(f"{title} ({len(scope_items)} variables)", expanded=False):
                 col_t1, col_t2 = st.columns([3, 1])
                 with col_t1:
                     st.markdown(f"#### {title}")
@@ -3161,7 +3165,7 @@ def render_standards_tab(active_model):
                 with col_save:
                     saved_vars = st.button(f"💾 Save & Apply Changes", key=f"vars_save_{s_key}", type="primary", width="stretch")
                 with col_rst:
-                    if st.button("🔄 Reset Scope", key=f"reset_scope_{s_key}", type="secondary", width="stretch"):
+                    if st.button("🔄 Reset to Defaults", key=f"reset_scope_{s_key}", type="secondary", width="stretch"):
                         from config.naming_rules import PATTERN_VARIABLES
                         default_scope_vars = {k: v for k, v in PATTERN_VARIABLES.items() if v.get("scope") == s_key}
                         scope_edited_vars.update(default_scope_vars)
@@ -3210,7 +3214,7 @@ def render_standards_tab(active_model):
                 st.markdown("##### 🔄 Reset All Variables")
                 st.caption("Restore all variables across all scopes back to system factory defaults.")
             with col_r2:
-                if st.button("Reset to Defaults", key="var_reset_all", type="secondary", width='stretch'):
+                if st.button("🔄 Reset to Defaults", key="var_reset_all", type="secondary", width='stretch'):
                     _persist_variables(current_rules, dict(PATTERN_VARIABLES))
 
         with st.expander("🧩 Active Patterns", expanded=False):
