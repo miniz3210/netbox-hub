@@ -37,6 +37,23 @@ from config.naming_rules import (
     get_esxi_network_presets, compute_suggested_site_code,
 )
 
+@st.cache_data(ttl=60, show_spinner=False)
+def _cached_fetch_toolbar_stats():
+    tot = get_total_record_count()
+    dev = len(get_records_by_category("device")) + len(get_records_by_category("hypervisor"))
+    vms = len(get_records_by_category("vm"))
+    return tot, dev, vms
+
+
+def _cached_get_reference_records(category_key, site_filter="", name_filter=""):
+    """Cache reference records to avoid full-table SQLite scans on every widget interaction."""
+    items = get_records_by_category(category_key, site_filter=site_filter)
+    if name_filter:
+        nfu = name_filter.upper()
+        items = [r for r in items if r.get('name', '').upper().startswith(nfu)]
+    return items
+
+
 def build_naming_system_prompt(prompt: str) -> str:
     """Build the grounded naming/inventory system prompt for the AI Assistant."""
     from core.ai_helper import build_comprehensive_naming_context
@@ -178,17 +195,12 @@ def handle_csv_reset():
     st.toast("🗑️ Database Cleared. Restored default examples.", icon="🧹")
 
 def display_reference_box(category_key: str, default_lines: str, label: str, site_filter: str = "", name_filter: str = ""):
-    real_items = get_records_by_category(category_key, site_filter=site_filter)
-    
-    # Apply additional name-based filtering if provided (e.g., WAP, FW, SW prefix)
-    if name_filter and real_items:
-        name_filter_upper = name_filter.upper()
-        real_items = [r for r in real_items if r.get('name', '').upper().startswith(name_filter_upper)]
-    
+    real_items = _cached_get_reference_records(category_key, site_filter=site_filter, name_filter=name_filter)
+
     filter_hint = f" matching '{site_filter.upper()}'" if site_filter else ""
     if name_filter:
         filter_hint += f" (prefix: {name_filter})"
-    
+
     with st.expander(f"💡 Click to view reference {label} examples ({len(real_items) if real_items else 'Default'} records{filter_hint})", expanded=False):
         if real_items:
             st.markdown(f"##### 🟢 NetBox Ingested Data ({len(real_items)} records{filter_hint}):")
@@ -203,7 +215,7 @@ def display_reference_box(category_key: str, default_lines: str, label: str, sit
                     meta_parts.append(f"Site: {r['site']}")
                 if r.get('description'):
                     meta_parts.append(r['description'])
-                
+
                 meta_str = f"  ({', '.join(meta_parts)})" if meta_parts else ""
                 formatted.append(f"{r['name']}{meta_str}")
             st.code("\n".join(formatted), language="text")
@@ -225,14 +237,7 @@ def render_compact_toolbar(active_model):
                 import logging
                 logging.getLogger(__name__).warning(f"Failed to restore backup on tab load: {e}")
     
-    @st.cache_data(ttl=30, show_spinner=False)
-    def _fetch_cached_toolbar_stats():
-        tot = get_total_record_count()
-        dev = len(get_records_by_category("device")) + len(get_records_by_category("hypervisor"))
-        vms = len(get_records_by_category("vm"))
-        return tot, dev, vms
-
-    total_recs, device_count, vm_count = _fetch_cached_toolbar_stats()
+    total_recs, device_count, vm_count = _cached_fetch_toolbar_stats()
     
     status_tag = f"🟢 ({device_count} Devices, {vm_count} VMs in DB)" if total_recs > 0 else "⚪ (Default Examples)"
     tick_devices = " ✅" if device_count > 0 else ""
@@ -387,41 +392,8 @@ def _interface_ref_examples(intf_code):
     so every entry occupies its own monospace row matching Column 1's reference box.
     """
     from core.shared_backup_state import SharedBackupState
-
-    _, defaults = _interface_ref(intf_code)
-
-    rx = INTERFACE_REF_PATTERNS.get(intf_code, INTERFACE_REF_PATTERNS["Uplink"])
-
-    objects = []
-    for endpoint in ("dcim/interfaces", "dcim_interfaces", "dcim/interface-templates"):
-        try:
-            objs = SharedBackupState.get_objects_by_type(endpoint)
-        except Exception:
-            objs = []
-        if objs:
-            objects = objs
-            break
-
-    matches = []
-    for obj in objects:
-        if not isinstance(obj, dict):
-            continue
-        desc = str(obj.get("description") or "").strip()
-        if not desc:
-            continue
-        if rx.search(desc):
-            device = obj.get("device") or obj.get("device_name") or obj.get("virtual_machine") or ""
-            if isinstance(device, dict):
-                device = device.get("name") or device.get("display") or ""
-            if_name = obj.get("name") or obj.get("interface") or ""
-            matches.append(f"{device} | {if_name}: \"{desc}\"")
-
-    matches = matches[:15]
-    if matches:
-        header = f"🟢 NetBox Interface Descriptions ({len(matches)}):"
-        return header, "\n".join(matches)
-
-    return f"🟡 Default Examples — No ingested interface descriptions found matching this type.", defaults
+    _ts = id(SharedBackupState.get_objects_by_type("dcim/interfaces") or [])
+    return _interface_ref_examples_cached(intf_code, _ts)
 
 
 def _safe_parse_json_array(response: str) -> list:
@@ -488,7 +460,10 @@ def render_naming_tab(active_model):
     st.subheader("🏷️ Standardized Infrastructure Naming Generator", help="Generate and validate standardized hostnames and interface descriptions. All preset-driven patterns are configured in the Standards Tab.")
     st.caption("Generate and validate standardized hostnames for network devices, servers, VMs, and ESXi configurations using AI-powered naming conventions aligned with your NetBox inventory data.")
 
-    naming_rules = SSM.get_naming_rules(load_naming_rules())
+    naming_rules = SSM.get_naming_rules()
+    if not naming_rules:
+        naming_rules = load_naming_rules()
+        SSM.set_naming_rules(naming_rules)
     naming_patterns = get_naming_patterns(naming_rules)
     variables = get_pattern_variables(naming_rules)
     render_compact_toolbar(active_model)
@@ -671,7 +646,10 @@ def _esxi_network_presets_fn(rules, naming_patterns):
 
 
 def _asset_class_2(case_mode, active_model, naming_patterns, variables, global_site=""):
-    naming_rules = SSM.get_naming_rules(load_naming_rules())
+    naming_rules = SSM.get_naming_rules()
+    if not naming_rules:
+        naming_rules = load_naming_rules()
+        SSM.set_naming_rules(naming_rules)
     presets = _host_vm_presets(naming_rules, naming_patterns)
 
     host_keys = [code for code, _label, key in presets if key != "vm_host"]
