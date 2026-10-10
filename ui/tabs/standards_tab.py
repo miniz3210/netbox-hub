@@ -1751,7 +1751,8 @@ LLM system instructions and atomic attribute requirements for topology parsing:
 
 
 def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card_title: str, card_caption: str,
-                         section: str = "presets", section_label: str = "Presets", expanded: bool = False) -> None:
+                          section: str = "presets", section_label: str = "Presets", expanded: bool = False,
+                          wrap_expander: bool = True) -> None:
     patterns = dict(rules.get("naming_patterns") or {})
     key_field = "device_presets" if kind == "device" else (
         "interface_presets" if kind == "interface" else (
@@ -1766,9 +1767,15 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
         return
     _pending_swap_key = f"_pending_swap_{kind}"
 
-    with st.expander(f"{card_title} ({len(presets)} presets)", expanded=expanded):
-        if card_caption and card_caption.strip():
-            st.caption(card_caption)
+    expander_context = st.expander(card_title, expanded=expanded) if wrap_expander else st.container()
+    with expander_context:
+        # Preset count badge (right-aligned, below title)
+        c1, c2 = st.columns([0.85, 0.15])
+        with c1:
+            if card_caption and card_caption.strip():
+                st.caption(card_caption)
+        with c2:
+            st.markdown(f"<div style='text-align:right;color:#94a3b8;font-size:0.85rem;'>{len(presets)} presets</div>", unsafe_allow_html=True)
 
         # Inject dynamic styling to guarantee Action buttons fit cleanly without squeezing
         _inject_preset_table_style()
@@ -3016,15 +3023,28 @@ def render_standards_tab(active_model):
             _render_csv_schemas_editor(current_rules)
 
         elif _active_subtab == 1:
-            _preset_type_editor("device", get_device_presets(current_rules), current_rules, prefix="branch",
-                                 card_title="🔧 DEVICE TYPE PRESETS",
-                                 card_caption="Manage device naming patterns and presets (SW, VS, FW, ION, WAP, RTR, VA).",
-                                 section="device_presets", section_label="Device Type Presets", expanded=True)
+            with st.expander("🔧 DEVICE TYPE PRESETS", expanded=False):
+                c1, c2 = st.columns([0.85, 0.15])
+                with c1:
+                    st.caption("Manage device naming patterns and presets (SW, VS, FW, ION, WAP, RTR, VA).")
+                with c2:
+                    st.markdown(f"<div style='text-align:right;color:#94a3b8;font-size:0.85rem;'>{len(get_device_presets(current_rules))} presets</div>", unsafe_allow_html=True)
+                _preset_type_editor("device", get_device_presets(current_rules), current_rules, prefix="branch",
+                                     card_title="🔧 DEVICE TYPE PRESETS",
+                                     card_caption="",
+                                     section="device_presets", section_label="Device Type Presets", expanded=True,
+                                     wrap_expander=False)
             with st.expander("🔌 INTERFACE TYPE PRESETS", expanded=False):
+                c1, c2 = st.columns([0.85, 0.15])
+                with c1:
+                    st.caption("Manage interface description presets (Uplink, LAG, Po, Access, FW Zone).")
+                with c2:
+                    st.markdown(f"<div style='text-align:right;color:#94a3b8;font-size:0.85rem;'>{len(get_interface_presets(current_rules))} presets</div>", unsafe_allow_html=True)
                 _preset_type_editor("interface", get_interface_presets(current_rules), current_rules, prefix="iface",
                                      card_title="🔌 INTERFACE TYPE PRESETS",
-                                     card_caption="Manage interface description presets (Uplink, LAG, Po, Access, FW Zone).",
-                                     section="interface_presets", section_label="Interface Type Presets")
+                                     card_caption="",
+                                     section="interface_presets", section_label="Interface Type Presets",
+                                     wrap_expander=False)
             with st.expander("💻 HOSTS TYPE PRESETS", expanded=False):
                 _host_editor(current_rules)
             with st.expander("🖱️ VIRTUAL MACHINE PRESETS", expanded=False):
