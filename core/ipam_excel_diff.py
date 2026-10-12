@@ -335,6 +335,8 @@ class ExcelIPAMParser:
         site_raw: str,
         default_site: str,
         source_sheet: str,
+        extra_row: Optional[List[Any]] = None,
+        header_map: Optional[Dict[str, int]] = None,
     ) -> Optional[Dict[str, Any]]:
         ip_clean = self._normalise_ip(ip_raw)
 
@@ -357,12 +359,29 @@ class ExcelIPAMParser:
             if not subnet_clean and not ip_clean:
                 return None
 
-        site_norm = self._normalise_site(site_raw, default_site)
+        # Strict site vs description disambiguation: if the cell value in the
+        # mapped "site" column contains device/VPN markers, route it to
+        # description and fall back the site to the sheet name.
+        device_markers = frozenset([
+            "palo", "fw", "vpn", "as400", "ibm", "app", "auth",
+            "server", "router", "switch", "firewall", "host",
+        ])
+        site_val_lower = site_raw.lower()
+        has_device_marker = any(m in site_val_lower for m in device_markers)
+        if has_device_marker and "site" in (header_map or {}):
+            site_norm = self._normalise_site("", default_site)
+            # Append the raw value as description context
+            desc_extra = f"{site_raw} " if site_raw else ""
+        else:
+            site_norm = self._normalise_site(site_raw, default_site)
+            desc_extra = ""
+
         role_norm = self._normalise_role(vlan_name_raw)
         vlan_desc = resolve_vlan_description(
             vlan_id_raw, role_norm,
             vlan_desc_mappings=get_vlan_description_mappings(self.rules),
         )
+        description = f"{desc_extra}{vlan_desc}".strip() if desc_extra else vlan_desc
 
         return {
             "ip_address": ip_clean,
@@ -370,12 +389,75 @@ class ExcelIPAMParser:
             "vlan_id": vlan_id_raw if vlan_id_raw not in ("", "nan", "NaN") else "",
             "vlan_name": role_norm or vlan_name_raw,
             "site": site_norm,
-            "description": vlan_desc,
+            "description": description,
             "source_sheet": source_sheet,
             "ingested_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
 
     # -- public --------------------------------------------------------------
+
+    @staticmethod
+    def _detect_parallel_blocks(
+        header_values: List[str],
+        header_map: Dict[str, int],
+        total_cols: int,
+    ) -> List[Tuple[Dict[str, int], int, int]]:
+        """Detect repeated header patterns indicating parallel tables.
+
+        Returns a list of (sub_header_map, start_col, end_col) tuples.
+        If no parallelism is detected, returns [(header_map, 0, total_cols)].
+        """
+        if total_cols < 4 or len(header_values) < 4:
+            return [(header_map, 0, total_cols)]
+
+        # Count occurrences of each canonical column type across columns
+        col_types = []
+        for idx in range(total_cols):
+            normed = _col_norm(header_values[idx]) if idx < len(header_values) else ""
+            types = []
+            if _is_subnet_col(normed):
+                types.append("subnet")
+            if _is_mask_col(normed):
+                types.append("mask")
+            if _is_ip_col(normed):
+                types.append("ip")
+            if _is_site_col(normed):
+                types.append("site")
+            if normed in ("vid", "vlan_id", "vlan_id_") or (
+                "vlan" in normed and "name" not in normed and "id" in normed
+            ):
+                types.append("vlan_id")
+            if _is_vlan_name_col(normed):
+                types.append("vlan_name")
+            col_types.append(types)
+
+        # Find repeating groups: a block boundary exists where a full subnet+ip
+        # pair reappears after having appeared before.
+        seen_pairs: set = set()
+        boundaries: List[int] = []
+        for idx in range(total_cols):
+            pair = tuple(sorted(col_types[idx]))
+            if pair in seen_pairs and len(seen_pairs) >= 2:
+                boundaries.append(idx)
+                break
+            seen_pairs.add(pair)
+
+        if not boundaries:
+            return [(header_map, 0, total_cols)]
+
+        # Split into two blocks
+        split_at = boundaries[0]
+        blocks = []
+        for start, end in [(0, split_at), (split_at, total_cols)]:
+            sub_headers = header_values[start:end]
+            sub_map: Dict[str, int] = {}
+            for k, v in header_map.items():
+                if start <= v < end:
+                    sub_map[k] = v - start
+            if "ip" in sub_map or "subnet" in sub_map:
+                blocks.append((sub_map, start, end))
+
+        return blocks if blocks else [(header_map, 0, total_cols)]
 
     def parse(self) -> List[Dict[str, Any]]:
         """Open workbook (or CSV fallback) in streaming read-only mode and
@@ -403,32 +485,42 @@ class ExcelIPAMParser:
 
             default_site = sheet_name.strip()
 
-            for row in rows_iter:
-                if row is None:
-                    continue
-                vals = list(row)
-                while len(vals) < len(header_values):
-                    vals.append("")
+            # Horizontal parallel table slicing
+            total_cols = len(header_values)
+            blocks = self._detect_parallel_blocks(header_values, header_map, total_cols)
 
-                ip_raw = str(vals[header_map["ip"]]).strip() if "ip" in header_map else ""
-                subnet_raw = str(vals[header_map["subnet"]]).strip() if "subnet" in header_map else ""
-                mask_raw = str(vals[header_map["mask"]]).strip() if "mask" in header_map else ""
-                vlan_id_raw = str(vals[header_map["vlan_id"]]).strip() if "vlan_id" in header_map else ""
-                vlan_name_raw = str(vals[header_map["vlan_name"]]).strip() if "vlan_name" in header_map else ""
-                site_raw = str(vals[header_map["site"]]).strip() if "site" in header_map else default_site
+            for block_map, block_start, block_end in blocks:
+                for row in rows_iter:
+                    if row is None:
+                        continue
+                    vals = list(row)
+                    while len(vals) < block_end:
+                        vals.append("")
 
-                rec = self._make_record(
-                    ip_raw, subnet_raw, mask_raw, vlan_id_raw, vlan_name_raw,
-                    site_raw, default_site, sheet_name,
-                )
-                if rec is None:
-                    continue
+                    # Translate block-relative column indices to absolute
+                    abs_map = {k: v + block_start for k, v in block_map.items()}
 
-                key = (rec["subnet"], rec["ip_address"])
-                if key in seen_keys:
-                    continue
-                seen_keys.add(key)
-                all_records.append(rec)
+                    ip_raw = str(vals[abs_map["ip"]]).strip() if "ip" in abs_map else ""
+                    subnet_raw = str(vals[abs_map["subnet"]]).strip() if "subnet" in abs_map else ""
+                    mask_raw = str(vals[abs_map["mask"]]).strip() if "mask" in abs_map else ""
+                    vlan_id_raw = str(vals[abs_map["vlan_id"]]).strip() if "vlan_id" in abs_map else ""
+                    vlan_name_raw = str(vals[abs_map["vlan_name"]]).strip() if "vlan_name" in abs_map else ""
+                    site_raw = str(vals[abs_map["site"]]).strip() if "site" in abs_map else default_site
+
+                    rec = self._make_record(
+                        ip_raw, subnet_raw, mask_raw, vlan_id_raw, vlan_name_raw,
+                        site_raw, default_site, sheet_name,
+                        extra_row=list(row),
+                        header_map=block_map,
+                    )
+                    if rec is None:
+                        continue
+
+                    key = (rec["subnet"], rec["ip_address"])
+                    if key in seen_keys:
+                        continue
+                    seen_keys.add(key)
+                    all_records.append(rec)
 
         if self._wb:
             self._wb.close()
@@ -474,6 +566,8 @@ def _records_from_dataframe(
         rec = parser._make_record(
             ip_raw, subnet_raw, mask_raw, vlan_id_raw, vlan_name_raw,
             site_raw, default_site, source,
+            extra_row=vals,
+            header_map=header_map,
         )
         if rec is None:
             continue
@@ -800,27 +894,30 @@ def _attribute_conflict_reason(
 
 def export_pending_csvs(
     pending_df: pd.DataFrame,
-) -> Tuple[str, str]:
-    """Build NetBox-import-ready CSV strings for pending-add records."""
+) -> Tuple[io.BytesIO, io.BytesIO]:
+    """Build NetBox-import-ready CSV buffers for pending-add records.
+
+    Returns two ``BytesIO`` objects (prefixes, vlans) already seeked to 0 so
+    callers can invoke ``.getvalue()`` or ``.read()`` without further state
+    management.
+    """
     prefixes_cols = ["subnet", "vlan_id", "vlan_name", "site", "description",
                      "ip_address"]
     vlans_cols = ["vlan_id", "vlan_name", "site", "description", "subnet"]
 
-    prefix_str = ""
+    prefix_buf = io.BytesIO()
     if not pending_df.empty:
-        buf = io.BytesIO()
-        pending_df[[c for c in prefixes_cols if c in pending_df.columns]].to_csv(buf, index=False)
-        buf.seek(0)
-        prefix_str = buf.read().decode("utf-8")
+        cols = [c for c in prefixes_cols if c in pending_df.columns]
+        pending_df[cols].to_csv(prefix_buf, index=False)
+    prefix_buf.seek(0)
 
-    vlan_str = ""
+    vlan_buf = io.BytesIO()
     if not pending_df.empty:
-        buf = io.BytesIO()
-        pending_df[[c for c in vlans_cols if c in pending_df.columns]].to_csv(buf, index=False)
-        buf.seek(0)
-        vlan_str = buf.read().decode("utf-8")
+        cols = [c for c in vlans_cols if c in pending_df.columns]
+        pending_df[cols].to_csv(vlan_buf, index=False)
+    vlan_buf.seek(0)
 
-    return prefix_str, vlan_str
+    return prefix_buf, vlan_buf
 
 
 def run_audit(
@@ -836,13 +933,13 @@ def run_audit(
     """
     records = parse_file_bytes(file_bytes, filename=filename, rules=rules)
     matched, pending, conflicts, metrics = classify_records(records)
-    prefixes_csv, vlans_csv = export_pending_csvs(pending)
+    prefixes_buf, vlans_buf = export_pending_csvs(pending)
     return {
         "matched": matched,
         "pending_add": pending,
         "conflicts": conflicts,
         "metrics": metrics,
-        "prefixes_csv": prefixes_csv,
-        "vlans_csv": vlans_csv,
+        "prefixes_csv": prefixes_buf,
+        "vlans_csv": vlans_buf,
         "parsed_at": datetime.utcnow().isoformat(timespec="seconds"),
     }

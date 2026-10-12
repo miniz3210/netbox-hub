@@ -499,13 +499,26 @@ def _render_reconciliation_tab():
         inspector = SharedBackupState.get_inspector()
         backup_status = "🟢 NetBox Backup Loaded" if inspector else "⚪ SQLite Fallback"
 
+        # Compute "Missing in Excel" — records present in NetBox backup but absent from parsed Excel
+        missing_in_excel = 0
+        try:
+            from core.ipam_excel_diff import _build_backup_index
+            nb_prefixes, _, _, _ = _build_backup_index()
+            if nb_prefixes:
+                parsed_subnets = {
+                    str(r.get("subnet", "")).strip()
+                    for r in result.get("_records_raw", [])
+                } - {""}
+                missing_in_excel = len(nb_prefixes - parsed_subnets)
+        except Exception:
+            pass
+
         c1, c2, c3, c4 = st.columns(4)
         with c1:
             st.metric("Total Analyzed", metrics["total_parsed"])
         with c2:
             st.metric("❌ Need to Add to NetBox", metrics["pending_add"])
         with c3:
-            missing_in_excel = metrics["conflicts"]
             st.metric("📥 Missing in Excel", missing_in_excel)
         with c4:
             st.metric("✅ In Sync", metrics["matched"])
@@ -608,38 +621,46 @@ def _render_reconciliation_tab():
     st.markdown("### 📦 Export & Sync Bundles")
 
     if result is not None:
-        prefixes_csv, vlans_csv = export_pending_csvs(result["pending_add"])
+        prefixes_buf, vlans_buf = export_pending_csvs(result["pending_add"])
 
         col_pf, col_vl = st.columns(2)
         with col_pf:
             st.download_button(
                 label="📥 Download NetBox Prefixes Import CSV",
-                data=prefixes_csv.encode("utf-8"),
+                data=prefixes_buf.getvalue(),
                 file_name="netbox-ipam-prefixes-import.csv",
                 mime="text/csv",
                 key="ipam_recon_dl_prefixes",
             )
-            if prefixes_csv:
-                st.code(prefixes_csv[:500] + ("..." if len(prefixes_csv) > 500 else ""), language="csv")
+            if prefixes_buf.tell() > 0:
+                prefixes_buf.seek(0)
+                preview = prefixes_buf.read().decode("utf-8")
+                st.code(preview[:500] + ("..." if len(preview) > 500 else ""), language="csv")
             else:
                 st.caption("No prefix records to export.")
 
         with col_vl:
             st.download_button(
                 label="📥 Download NetBox VLANs Import CSV",
-                data=vlans_csv.encode("utf-8"),
+                data=vlans_buf.getvalue(),
                 file_name="netbox-ipam-vlans-import.csv",
                 mime="text/csv",
                 key="ipam_recon_dl_vlans",
             )
-            if vlans_csv:
-                st.code(vlans_csv[:500] + ("..." if len(vlans_csv) > 500 else ""), language="csv")
+            if vlans_buf.tell() > 0:
+                vlans_buf.seek(0)
+                preview = vlans_buf.read().decode("utf-8")
+                st.code(preview[:500] + ("..." if len(preview) > 500 else ""), language="csv")
             else:
                 st.caption("No VLAN records to export.")
 
+        missing_buf = io.BytesIO()
+        if not result["pending_add"].empty:
+            result["pending_add"].to_csv(missing_buf, index=False)
+        missing_buf.seek(0)
         st.download_button(
             label="📥 Download NetBox-to-Excel Missing Records CSV (Backfill)",
-            data=result["pending_add"].to_csv(index=False).encode("utf-8"),
+            data=missing_buf.getvalue(),
             file_name="netbox-to-excel-missing-records.csv",
             mime="text/csv",
             key="ipam_recon_dl_missing",
