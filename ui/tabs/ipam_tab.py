@@ -426,7 +426,6 @@ def _render_reconciliation_tab():
         export_pending_csvs,
         build_reconciliation_result,
         build_import_csvs,
-        build_import_json,
         build_import_zip,
     )
     from core.db_manager import get_all_site_names, get_sync_metadata
@@ -795,26 +794,42 @@ def _render_reconciliation_tab():
         csv_buffers = build_import_csvs(bundle)
 
         # Filter to only user-selected rows per table
-        def _filter_selected(df, key):
+        def _filter_selected(df: pd.DataFrame) -> pd.DataFrame:
+            """Filter rows where 'Selected' or 'Import?' column is True.
+            Handles missing, empty, or non-boolean columns safely."""
             if df is None or df.empty:
                 return pd.DataFrame() if df is None else df.copy()
-            if "Selected" in df.columns:
-                mask = df["Selected"].fillna(False).astype(bool)
+            col = "Selected" if "Selected" in df.columns else ("Import?" if "Import?" in df.columns else None)
+            if col is not None:
+                mask = df[col].fillna(False).astype(bool)
                 return df[mask].copy()
             return df.copy()
 
-        sel_sites = _filter_selected(
-            st.session_state.get("recon_selected_sites"), "sites"
-        )
-        sel_vlans = _filter_selected(
-            st.session_state.get("recon_selected_vlans"), "vlans"
-        )
-        sel_prefixes = _filter_selected(
-            st.session_state.get("recon_selected_prefixes"), "prefixes"
-        )
-        sel_ips = _filter_selected(
-            st.session_state.get("recon_selected_ips"), "ips"
-        )
+        sel_sites = _filter_selected(st.session_state.get("recon_selected_sites"))
+        sel_vlans = _filter_selected(st.session_state.get("recon_selected_vlans"))
+        sel_prefixes = _filter_selected(st.session_state.get("recon_selected_prefixes"))
+        sel_ips = _filter_selected(st.session_state.get("recon_selected_ips"))
+
+        sel_site_count = len(sel_sites) if sel_sites is not None and not sel_sites.empty else 0
+        sel_vlan_count = len(sel_vlans) if sel_vlans is not None and not sel_vlans.empty else 0
+        sel_prefix_count = len(sel_prefixes) if sel_prefixes is not None and not sel_prefixes.empty else 0
+        sel_ip_count = len(sel_ips) if sel_ips is not None and not sel_ips.empty else 0
+        sel_vg_count = sel_site_count  # VLAN groups derived from sites
+
+        # Live summary metrics bar
+        st.markdown("**Selection Summary**")
+        m1, m2, m3, m4, m5 = st.columns(5)
+        with m1:
+            st.metric("Sites", sel_site_count)
+        with m2:
+            st.metric("VLAN Groups", sel_vg_count)
+        with m3:
+            st.metric("VLANs", sel_vlan_count)
+        with m4:
+            st.metric("Prefixes", sel_prefix_count)
+        with m5:
+            st.metric("IP Addresses", sel_ip_count)
+        st.divider()
 
         # Build selection-aware bundle
         selection_bundle = {
@@ -862,122 +877,63 @@ def _render_reconciliation_tab():
 
         st.markdown("**Dependency-Ordered Import Pipeline** — Import in order: Sites → VLAN Groups → VLANs → Prefixes → IP Addresses.")
 
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.markdown("**1. Sites (`dcim.site`)**")
-            if "01_sites.csv" in csv_buffers:
-                buf = csv_buffers["01_sites.csv"]
-                if buf.tell() > 0:
-                    buf.seek(0)
-                    preview = buf.read().decode("utf-8")
-                    st.code(preview[:400] + ("..." if len(preview) > 400 else ""), language="csv")
+        # Two-column action panel
+        action_col1, action_col2 = st.columns(2)
+        with action_col1:
+            st.markdown("**📥 Download Export Bundles (Offline & Archive)**")
+            csv_buffers = build_import_csvs(selection_bundle)
+            with st.container():
                 st.download_button(
-                    label="📥 Download 01_sites.csv",
-                    data=csv_buffers["01_sites.csv"].getvalue(),
-                    file_name="01_sites.csv",
-                    mime="text/csv",
-                    key="dl_01_sites",
+                    label="📦 Download NetBox Import Bundle (.zip)",
+                    data=build_import_zip(selection_bundle).getvalue(),
+                    file_name="netbox-ipam-import-bundle.zip",
+                    mime="application/zip",
+                    key="dl_ipam_bundle_zip",
+                    type="primary",
                 )
-            else:
-                st.caption("No sites to import.")
-
-        with col2:
-            st.markdown("**2. VLAN Groups (`ipam.vlangroup`)**")
-            if "02_vlan_groups.csv" in csv_buffers:
-                buf = csv_buffers["02_vlan_groups.csv"]
-                if buf.tell() > 0:
+                st.caption("Includes all 5 dependency-ordered CSV files from selected rows.")
+            with st.container():
+                audit_buf = io.BytesIO()
+                for fname, buf in sorted(csv_buffers.items()):
                     buf.seek(0)
-                    preview = buf.read().decode("utf-8")
-                    st.code(preview[:400] + ("..." if len(preview) > 400 else ""), language="csv")
+                    audit_buf.write(f"=== {fname} ===\n".encode("utf-8"))
+                    audit_buf.write(buf.read())
+                    audit_buf.write(b"\n")
+                audit_buf.seek(0)
                 st.download_button(
-                    label="📥 Download 02_vlan_groups.csv",
-                    data=csv_buffers["02_vlan_groups.csv"].getvalue(),
-                    file_name="02_vlan_groups.csv",
+                    label="📋 Download Full Reconciliation Audit (.csv)",
+                    data=audit_buf.getvalue(),
+                    file_name="netbox-ipam-reconciliation-audit.csv",
                     mime="text/csv",
-                    key="dl_02_vg",
+                    key="dl_ipam_audit",
                 )
-            else:
-                st.caption("No VLAN groups to import.")
+                st.caption("Full audit export of all analyzed rows with status.")
 
-        with col3:
-            st.markdown("**3. VLANs (`ipam.vlan`)**")
-            if "03_vlans.csv" in csv_buffers:
-                buf = csv_buffers["03_vlans.csv"]
-                if buf.tell() > 0:
-                    buf.seek(0)
-                    preview = buf.read().decode("utf-8")
-                    st.code(preview[:400] + ("..." if len(preview) > 400 else ""), language="csv")
-                st.download_button(
-                    label="📥 Download 03_vlans.csv",
-                    data=csv_buffers["03_vlans.csv"].getvalue(),
-                    file_name="03_vlans.csv",
-                    mime="text/csv",
-                    key="dl_03_vlans",
-                )
-            else:
-                st.caption("No VLANs to import.")
-
-        col4, col5 = st.columns(2)
-        with col4:
-            st.markdown("**4. Prefixes (`ipam.prefix`)**")
-            if "04_prefixes.csv" in csv_buffers:
-                buf = csv_buffers["04_prefixes.csv"]
-                if buf.tell() > 0:
-                    buf.seek(0)
-                    preview = buf.read().decode("utf-8")
-                    st.code(preview[:400] + ("..." if len(preview) > 400 else ""), language="csv")
-                st.download_button(
-                    label="📥 Download 04_prefixes.csv",
-                    data=csv_buffers["04_prefixes.csv"].getvalue(),
-                    file_name="04_prefixes.csv",
-                    mime="text/csv",
-                    key="dl_04_prefixes",
-                )
-            else:
-                st.caption("No prefixes to import.")
-
-        with col5:
-            st.markdown("**5. IP Addresses (`ipam.ipaddress`)**")
-            if "05_ip_addresses.csv" in csv_buffers:
-                buf = csv_buffers["05_ip_addresses.csv"]
-                if buf.tell() > 0:
-                    buf.seek(0)
-                    preview = buf.read().decode("utf-8")
-                    st.code(preview[:400] + ("..." if len(preview) > 400 else ""), language="csv")
-                st.download_button(
-                    label="📥 Download 05_ip_addresses.csv",
-                    data=csv_buffers["05_ip_addresses.csv"].getvalue(),
-                    file_name="05_ip_addresses.csv",
-                    mime="text/csv",
-                    key="dl_05_ips",
-                )
-            else:
-                st.caption("No IP addresses to import.")
-
-        st.divider()
-        col_zip, col_json = st.columns(2)
-        with col_zip:
-            st.download_button(
-                label="📥 Download NetBox Import Bundle (.zip)",
-                data=build_import_zip(bundle).getvalue(),
-                file_name="netbox-ipam-import-bundle.zip",
-                mime="application/zip",
-                key="dl_ipam_bundle_zip",
-                type="primary",
+        with action_col2:
+            st.markdown("**📋 Instant Copy-to-Clipboard CSV (Web UI Ready)**")
+            csv_target_options = {
+                "01_sites.csv": "Sites — NetBox Organization → Sites → Import",
+                "02_vlan_groups.csv": "VLAN Groups — NetBox IPAM → VLAN Groups → Import",
+                "03_vlans.csv": "VLANs — NetBox IPAM → VLANs → Import",
+                "04_prefixes.csv": "Prefixes — NetBox IPAM → Prefixes → Import",
+                "05_ip_addresses.csv": "IP Addresses — NetBox IPAM → IP Addresses → Import",
+            }
+            csv_target = st.selectbox(
+                "Select CSV to copy",
+                options=list(csv_target_options.keys()),
+                key="ipam_clipboard_csv",
             )
-            st.caption("Includes all 5 dependency-ordered CSV files.")
-        with col_json:
-            st.download_button(
-                label="🚀 Generate & Download NetBox Import JSON",
-                data=build_import_json(bundle),
-                file_name="netbox-ipam-import.json",
-                mime="application/json",
-                key="dl_ipam_bundle_json",
-                type="primary",
-            )
-            st.caption("Single JSON payload structured by endpoint for REST API bulk-creation.")
-
-        st.caption("💡 Import order matters: Sites → VLAN Groups → VLANs → Prefixes → IP Addresses.")
+            if csv_target in csv_buffers:
+                buf = csv_buffers[csv_target]
+                buf.seek(0)
+                csv_text = buf.read().decode("utf-8")
+                st.code(csv_text, language="csv")
+                st.caption(csv_target_options[csv_target])
+                st.button("📋 Copy to Clipboard", key="copy_csv_clipboard", on_click=lambda t=csv_text: st.session_state.update({"csv_clipboard_text": t}))
+                if st.session_state.get("csv_clipboard_text") == csv_text:
+                    st.caption("✅ Copied to clipboard!")
+            else:
+                st.caption("No data available for this target.")
     elif result is not None:
         st.caption("Click **Analyze Requirements** above first to build the import bundle.")
     else:
