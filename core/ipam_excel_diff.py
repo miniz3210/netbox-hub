@@ -1,5 +1,5 @@
 """
-Master IPAM Excel Diff Engine — NetBox Hub v4.3
+Master IPAM Excel Diff Engine — NetBox Hub v4.3.5
 
 High-performance in-memory parser and audit engine for multi-sheet Excel/IPAM
 inventories.  Dynamically discovers sheet names and column headers, normalises
@@ -17,6 +17,7 @@ import io
 import json
 import re
 import sqlite3
+import zipfile
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -40,6 +41,7 @@ from core.db_manager import (
     get_existing_prefix_strings,
     get_all_site_names,
     init_db as db_init,
+    lookup_scope_id,
 )
 
 # ---------------------------------------------------------------------------
@@ -187,6 +189,109 @@ def _combine_ip_and_mask(base_ip: str, mask_str: str) -> str:
         return str(network)
     except (ipaddress.AddressValueError, ValueError):
         return ""
+
+
+# ---------------------------------------------------------------------------
+# DB-backed site resolution helpers
+# ---------------------------------------------------------------------------
+
+_SITE_SITE_TOKEN_MATCHERS: List[Tuple[str, List[str]]] = [
+    ("equinix", ["equinix", "eqx", "sn", "sn3"]),
+    ("sy3", ["sy3", "syn3", "sydney-3"]),
+    ("palo alto", ["palo alto", "pa", "palalto"]),
+]
+
+
+def _build_site_index() -> Dict[str, Tuple[str, Optional[int]]]:
+    """Build a mapping from normalised site key → (display_name, scope_id).
+
+    Checks both the SQLite ``sites_records`` table and the NetBox backup
+    registry via ``SharedBackupState``.  Keys are lower-cased slug-like forms.
+    """
+    result: Dict[str, Tuple[str, Optional[int]]] = {}
+    db_init()
+    try:
+        with sqlite3.connect(DATABASE_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute("SELECT id, name, slug FROM sites_records")
+            for row in cur.fetchall():
+                sid = row["id"]
+                sname = str(row["name"] or "").strip()
+                sslug = str(row["slug"] or "").strip()
+                if sname:
+                    result[sname.lower()] = (sname, sid)
+                if sslug:
+                    result[sslug.lower()] = (sname, sid)
+    except Exception:
+        pass
+
+    from core.shared_backup_state import SharedBackupState
+    inspector = SharedBackupState.get_inspector()
+    if inspector is not None:
+        registry = inspector.inspect_all_objects()
+        for key in ("dcim/sites", "dcim.sites", "sites", "site"):
+            if key in registry:
+                for obj in registry[key].get("data", []):
+                    sname = str(obj.get("name", "")).strip()
+                    sslug = str(obj.get("slug", "")).strip()
+                    sid = obj.get("id")
+                    if sname:
+                        result[sname.lower()] = (sname, sid)
+                    if sslug:
+                        result[sslug.lower()] = (sname, sid)
+                break
+
+    return result
+
+
+def _resolve_site_to_db_record(
+    site_token: str,
+    site_index: Dict[str, Tuple[str, Optional[int]]],
+) -> Optional[Tuple[str, Optional[int]]]:
+    """Resolve a raw site token (e.g. "SY3" or "Equinix SY3") to a known DB
+    site via exact match, slug match, or token-substring match."""
+    clean = site_token.strip().lower()
+    if not clean:
+        return None
+
+    # 1. Exact / slug match
+    if clean in site_index:
+        return site_index[clean]
+
+    # 2. Token-based match (handles "SY3" → "Equinix SY3", etc.)
+    for keyword, tokens in _SITE_SITE_TOKEN_MATCHERS:
+        if keyword in clean or any(t in clean for t in tokens):
+            # Find the best match containing this keyword
+            candidates = [
+                (name, sid) for k, (name, sid) in site_index.items()
+                if keyword in k
+            ]
+            if candidates:
+                return candidates[0]
+
+    # 3. Substring match — token appears inside a site name or slug
+    for key, (name, sid) in site_index.items():
+        if clean in key or any(tok in key for tok in clean.split()):
+            return (name, sid)
+
+    return None
+
+
+def _extract_site_tokens(raw_location: str) -> List[str]:
+    """Extract uppercase site tokens from a location string (e.g. 'SY3 Palo Alto'
+    → ['SY3', 'PALO', 'ALTO'])."""
+    return re.findall(r'\b([A-Z]{2,}(?:\d+)?|[A-Z]+(?:\d+)?)\b', raw_location)
+
+
+def _is_public_ip_row(rec: Dict[str, Any]) -> bool:
+    """Heuristic: True when the record looks like a public/UPstream IP entry
+    (no VLAN ID, no VLAN name, has an IP but no subnet with a VLAN association)."""
+    vid = str(rec.get("vlan_id", "") or "").strip()
+    vname = str(rec.get("vlan_name", "") or "").strip()
+    ip = rec.get("ip_address", "").strip()
+    subnet = rec.get("subnet", "").strip()
+    return bool(ip) and not vid and not vname and "/" not in subnet and subnet != ip
 
 
 # ---------------------------------------------------------------------------
@@ -943,3 +1048,371 @@ def run_audit(
         "vlans_csv": vlans_buf,
         "parsed_at": datetime.utcnow().isoformat(timespec="seconds"),
     }
+
+
+# ---------------------------------------------------------------------------
+# Reconciliation Bundle Builder — dependency-ordered NetBox import assets
+# ---------------------------------------------------------------------------
+
+
+def _build_reconciliation_bundle(
+    records: List[Dict[str, Any]],
+    matched_df: pd.DataFrame,
+    pending_df: pd.DataFrame,
+    conflicts_df: pd.DataFrame,
+    metrics: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Build a dependency-ordered bundle of NetBox objects required for import.
+
+    The bundle contains:
+      - missing_sites: list of dicts {name, slug, scope_id, status}
+      - missing_vlan_groups: list of dicts {name, slug, scope_type, scope_id}
+      - missing_vlans: list of dicts {vid, name, site, description, role}
+      - missing_prefixes: list of dicts {prefix, site, vlan_id, description, status}
+      - ip_addresses: list of dicts {address, role, site, description}
+      - aggregates: list of dicts {prefix, site, description}
+      - metrics: same as classification metrics
+    """
+    prefixes_set, ips_set, sites_set, db_record_map = _build_backup_index()
+    if not prefixes_set and not sites_set:
+        prefixes_set, ips_set, sites_set, db_record_map = _build_db_index()
+
+    site_index = _build_site_index()
+
+    # 1. Missing sites — collect from parsed records
+    parsed_sites = sorted({
+        str(r.get("site", "")).strip()
+        for r in records
+    } - {""}) if records else []
+    missing_sites = []
+    for s in parsed_sites:
+        if not s:
+            continue
+        if sites_set and s.lower() in sites_set:
+            continue
+        # Try to resolve to existing DB site
+        resolved = _resolve_site_to_db_record(s, site_index)
+        if resolved:
+            display_name, scope_id = resolved
+            missing_sites.append({
+                "name": display_name,
+                "slug": slugify(display_name),
+                "scope_id": scope_id,
+                "status": "matched_to_existing",
+                "raw_input": s,
+            })
+        else:
+            missing_sites.append({
+                "name": s,
+                "slug": slugify(s),
+                "scope_id": None,
+                "status": "new",
+                "raw_input": s,
+            })
+
+    # 2. Missing VLAN Groups (one per site)
+    site_names_for_groups = sorted({
+        str(r.get("site", "")).strip()
+        for r in records
+        if str(r.get("site", "")).strip()
+    } - {""})
+    missing_vlan_groups = []
+    for site_name in site_names_for_groups:
+        if not site_name:
+            continue
+        if sites_set and site_name.lower() in sites_set:
+            # Site exists, try to get scope_id
+            sid = lookup_scope_id(site_name)
+            missing_vlan_groups.append({
+                "name": f"{site_name} VLAN Group",
+                "slug": slugify(f"{site_name} VLAN Group"),
+                "scope_type": "dcim.site",
+                "scope_id": sid,
+                "site": site_name,
+            })
+        else:
+            # New site — will be created alongside
+            sid = None
+            for ms in missing_sites:
+                if ms["raw_input"].lower() == site_name.lower():
+                    sid = ms["scope_id"]
+                    break
+            missing_vlan_groups.append({
+                "name": f"{site_name} VLAN Group",
+                "slug": slugify(f"{site_name} VLAN Group"),
+                "scope_type": "dcim.site",
+                "scope_id": sid,
+                "site": site_name,
+            })
+
+    # 3. Missing VLANs — from pending records that have a vlan_id
+    missing_vlans = []
+    seen_vlans = set()
+    for _, row in pending_df.iterrows():
+        vid = str(row.get("vlan_id", "") or "").strip()
+        if not vid or not vid.isdigit():
+            continue
+        key = (vid, str(row.get("site", "")).strip())
+        if key in seen_vlans:
+            continue
+        seen_vlans.add(key)
+        missing_vlans.append({
+            "vid": vid,
+            "name": str(row.get("vlan_name", "") or "").strip(),
+            "site": str(row.get("site", "")).strip(),
+            "description": str(row.get("description", "") or "").strip(),
+            "role": str(row.get("vlan_name", "") or row.get("description", "") or "").strip(),
+        })
+
+    # 4. Missing Prefixes — from pending records
+    missing_prefixes = []
+    seen_prefixes = set()
+    for _, row in pending_df.iterrows():
+        subnet = str(row.get("subnet", "")).strip()
+        if not subnet or "/" not in subnet:
+            continue
+        if subnet in seen_prefixes:
+            continue
+        seen_prefixes.add(subnet)
+        site = str(row.get("site", "")).strip()
+        desc = str(row.get("description", "") or "").strip()
+        role = str(row.get("vlan_name", "") or "").strip()
+        missing_prefixes.append({
+            "prefix": subnet,
+            "site": site,
+            "vlan_id": str(row.get("vlan_id", "") or "").strip(),
+            "description": desc,
+            "role": role,
+            "status": "pending_add",
+        })
+
+    # 5. IP Addresses & Gateways — from pending records
+    ip_addresses = []
+    seen_ips = set()
+    for _, row in pending_df.iterrows():
+        ip = str(row.get("ip_address", "")).strip()
+        subnet = str(row.get("subnet", "")).strip()
+        if not ip or ip in seen_ips:
+            continue
+        seen_ips.add(ip)
+        site = str(row.get("site", "")).strip()
+        desc = str(row.get("description", "") or "").strip()
+        # Determine role
+        role = ""
+        if "/" in subnet:
+            network_addr = subnet.split("/")[0]
+            if ip == network_addr:
+                role = "gateway"
+        if not role:
+            role = str(row.get("vlan_name", "") or "").strip() or "vip"
+        if not role:
+            role = str(row.get("vlan_name", "") or "").strip() or "vip"
+        ip_addresses.append({
+            "address": ip,
+            "role": role,
+            "site": site,
+            "description": desc,
+            "subnet": subnet,
+        })
+
+    # 6. Parent aggregates for blank/unallocated IPs (e.g. APNIC /24 containers)
+    aggregates = []
+    seen_aggs = set()
+    for _, row in pending_df.iterrows():
+        subnet = str(row.get("subnet", "")).strip()
+        ip = str(row.get("ip_address", "")).strip()
+        if not subnet or "/" not in subnet:
+            continue
+        if subnet in seen_aggs:
+            continue
+        seen_aggs.add(subnet)
+        # Check if this is a parent aggregate (no VLAN association, public IP range)
+        vid = str(row.get("vlan_id", "") or "").strip()
+        if not vid:
+            site = str(row.get("site", "")).strip()
+            if _is_public_ip_row({**row}):
+                aggregates.append({
+                    "prefix": subnet,
+                    "site": site,
+                    "description": f"Public IP container — {subnet}",
+                    "status": "container",
+                })
+
+    return {
+        "missing_sites": missing_sites,
+        "missing_vlan_groups": missing_vlan_groups,
+        "missing_vlans": missing_vlans,
+        "missing_prefixes": missing_prefixes,
+        "ip_addresses": ip_addresses,
+        "aggregates": aggregates,
+        "metrics": metrics,
+    }
+
+
+def build_import_csvs(bundle: Dict[str, Any]) -> Dict[str, io.BytesIO]:
+    """Generate dependency-ordered NetBox CSV buffers from a reconciliation bundle.
+
+    Returns a dict mapping filenames (01_sites.csv … 05_ip_addresses.csv) to
+    BytesIO objects, already seeked to 0.
+    """
+    buffers: Dict[str, io.BytesIO] = {}
+
+    # 1. Sites
+    sites_buf = io.BytesIO()
+    sites_lines = ["name,slug,status"]
+    for site in bundle.get("missing_sites", []):
+        name = site.get("name", "")
+        slug = site.get("slug", "")
+        sites_lines.append(f'"{name}","{slug}",active')
+    sites_buf.write("\n".join(sites_lines).encode("utf-8"))
+    sites_buf.seek(0)
+    buffers["01_sites.csv"] = sites_buf
+
+    # 2. VLAN Groups
+    vg_buf = io.BytesIO()
+    vg_lines = ["name,slug,scope_type,scope_id"]
+    for vg in bundle.get("missing_vlan_groups", []):
+        name = vg.get("name", "")
+        slug = vg.get("slug", "")
+        scope_id = vg.get("scope_id") or ""
+        vg_lines.append(f'"{name}","{slug}","dcim.site",{scope_id}')
+    vg_buf.write("\n".join(vg_lines).encode("utf-8"))
+    vg_buf.seek(0)
+    buffers["02_vlan_groups.csv"] = vg_buf
+
+    # 3. VLANs
+    vlan_buf = io.BytesIO()
+    vlan_lines = ["vid,name,status,site,group,description,role"]
+    for v in bundle.get("missing_vlans", []):
+        vid = v.get("vid", "")
+        name = v.get("name", "")
+        site = v.get("site", "")
+        desc = v.get("description", "")
+        role = v.get("role", "")
+        vlan_lines.append(f'{vid},"{name}",active,"{site}","{site} VLAN Group","{desc}","{role}"')
+    vlan_buf.write("\n".join(vlan_lines).encode("utf-8"))
+    vlan_buf.seek(0)
+    buffers["03_vlans.csv"] = vlan_buf
+
+    # 4. Prefixes
+    prefix_buf = io.BytesIO()
+    prefix_lines = ["prefix,status,scope_type,scope_id,vlan_group,vlan,role,description"]
+    for p in bundle.get("missing_prefixes", []):
+        prefix = p.get("prefix", "")
+        site = p.get("site", "")
+        vid = p.get("vlan_id", "")
+        desc = p.get("description", "")
+        role = p.get("role", "")
+        prefix_lines.append(f'"{prefix}",active,"dcim.site",,"{site} VLAN Group",{vid},"{role}","{desc}"')
+    prefix_buf.write("\n".join(prefix_lines).encode("utf-8"))
+    prefix_buf.seek(0)
+    buffers["04_prefixes.csv"] = prefix_buf
+
+    # 5. IP Addresses
+    ip_buf = io.BytesIO()
+    ip_lines = ["address,status,role,description"]
+    for ip_rec in bundle.get("ip_addresses", []):
+        addr = ip_rec.get("address", "")
+        role = ip_rec.get("role", "")
+        desc = ip_rec.get("description", "")
+        ip_lines.append(f'"{addr}",active,"{role}","{desc}"')
+    ip_buf.write("\n".join(ip_lines).encode("utf-8"))
+    ip_buf.seek(0)
+    buffers["05_ip_addresses.csv"] = ip_buf
+
+    return buffers
+
+
+def build_import_json(bundle: Dict[str, Any]) -> bytes:
+    """Generate a single JSON payload ready for NetBox REST API bulk creation.
+
+    Returns bytes suitable for download.
+    """
+    payload = {
+        "sites": [
+            {
+                "name": s["name"],
+                "slug": s["slug"],
+                "status": "active",
+            }
+            for s in bundle.get("missing_sites", [])
+        ],
+        "vlan_groups": [
+            {
+                "name": vg["name"],
+                "slug": vg["slug"],
+                "scope_type": "dcim.site",
+                "scope_id": vg.get("scope_id"),
+            }
+            for vg in bundle.get("missing_vlan_groups", [])
+        ],
+        "vlans": [
+            {
+                "vid": int(v["vid"]) if v.get("vid", "").isdigit() else None,
+                "name": v["name"],
+                "status": "active",
+                "site": v["site"],
+                "group": f"{v['site']} VLAN Group",
+                "description": v.get("description", ""),
+                "role": v.get("role", ""),
+            }
+            for v in bundle.get("missing_vlans", [])
+        ],
+        "prefixes": [
+            {
+                "prefix": p["prefix"],
+                "status": "active",
+                "scope_type": "dcim.site",
+                "scope_id": next(
+                    (vg.get("scope_id") for vg in bundle.get("missing_vlan_groups", [])
+                     if vg.get("site") == p["site"]),
+                    None,
+                ),
+                "vlan_group": f"{p['site']} VLAN Group",
+                "vlan": int(p["vlan_id"]) if p.get("vlan_id", "").isdigit() else None,
+                "role": p.get("role", ""),
+                "description": p.get("description", ""),
+            }
+            for p in bundle.get("missing_prefixes", [])
+        ],
+        "ip_addresses": [
+            {
+                "address": ip_rec["address"],
+                "status": "active",
+                "role": ip_rec.get("role", "vip"),
+                "description": ip_rec.get("description", ""),
+            }
+            for ip_rec in bundle.get("ip_addresses", [])
+        ],
+    }
+    return json.dumps(payload, indent=2, ensure_ascii=False).encode("utf-8")
+
+
+def build_import_zip(bundle: Dict[str, Any]) -> io.BytesIO:
+    """Bundle all 5 CSV files into a single ZIP download."""
+    zip_buf = io.BytesIO()
+    csv_buffers = build_import_csvs(bundle)
+    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for filename, buf in sorted(csv_buffers.items()):
+            zf.writestr(filename, buf.getvalue().decode("utf-8"))
+    zip_buf.seek(0)
+    return zip_buf
+
+
+def build_reconciliation_result(
+    result: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Enrich a reconcile result with a full dependency-ordered bundle.
+
+    The returned dict has all original keys plus ``bundle`` containing the
+    structured NetBox import assets.
+    """
+    bundle = _build_reconciliation_bundle(
+        result.get("_records_raw", []),
+        result["matched"],
+        result["pending_add"],
+        result["conflicts"],
+        result["metrics"],
+    )
+    result["bundle"] = bundle
+    return result

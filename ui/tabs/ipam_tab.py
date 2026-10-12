@@ -422,7 +422,13 @@ def _reconcile_uploaded(file_bytes: io.BytesIO, filename: str):
 
 def _render_reconciliation_tab():
     """Progressive open-layout Master IPAM Reconciliation dashboard."""
-    from core.ipam_excel_diff import export_pending_csvs
+    from core.ipam_excel_diff import (
+        export_pending_csvs,
+        build_reconciliation_result,
+        build_import_csvs,
+        build_import_json,
+        build_import_zip,
+    )
     from core.db_manager import get_all_site_names, get_sync_metadata
     from core.shared_backup_state import SharedBackupState
     import ipaddress as _ipaddress
@@ -440,6 +446,16 @@ def _render_reconciliation_tab():
         st.session_state["recon_result"] = None
     if "recon_uploaded_file" not in st.session_state:
         st.session_state["recon_uploaded_file"] = None
+    if "recon_bundle" not in st.session_state:
+        st.session_state["recon_bundle"] = None
+    if "recon_selected_sites" not in st.session_state:
+        st.session_state["recon_selected_sites"] = None
+    if "recon_selected_vlans" not in st.session_state:
+        st.session_state["recon_selected_vlans"] = None
+    if "recon_selected_prefixes" not in st.session_state:
+        st.session_state["recon_selected_prefixes"] = None
+    if "recon_selected_ips" not in st.session_state:
+        st.session_state["recon_selected_ips"] = None
 
     # ------------------------------------------------------------------
     # Section 1: Upload & Ingest
@@ -458,6 +474,11 @@ def _render_reconciliation_tab():
         if st.button("🗑️ Clear Excel Data", key="btn_clear_ipam_recon"):
             st.session_state.pop("recon_result", None)
             st.session_state.pop("recon_uploaded_file", None)
+            st.session_state.pop("recon_bundle", None)
+            st.session_state.pop("recon_selected_sites", None)
+            st.session_state.pop("recon_selected_vlans", None)
+            st.session_state.pop("recon_selected_prefixes", None)
+            st.session_state.pop("recon_selected_ips", None)
             for k in list(st.session_state.keys()):
                 if k.startswith("recon_") or k.startswith("ipam_recon_"):
                     st.session_state.pop(k, None)
@@ -542,7 +563,7 @@ def _render_reconciliation_tab():
             st.info("No records to display.")
 
     # ------------------------------------------------------------------
-    # Section 3: NetBox Objects Required
+    # Section 3: Interactive Checkbox Selection — NetBox Objects Required
     # ------------------------------------------------------------------
     st.markdown("---")
     st.markdown("### 🏢 NetBox Objects Required")
@@ -550,55 +571,204 @@ def _render_reconciliation_tab():
     analyze_btn = st.button("📋 Analyze Requirements", key="btn_analyze_ipam_recon", type="primary")
 
     if analyze_btn and result is not None:
-        from core.ipam_excel_diff import _build_backup_index, _build_db_index
+        # Build the full reconciliation bundle (dependency-ordered)
+        enriched = build_reconciliation_result(result)
+        st.session_state["recon_bundle"] = enriched
+        bundle = enriched["bundle"]
 
-        prefixes_set, ips_set, sites_set, _ = _build_backup_index()
-        if not prefixes_set and not sites_set:
-            prefixes_set, ips_set, sites_set, _ = _build_db_index()
+        # ---- Table A: Missing Sites ----
+        st.markdown("**Table A — Missing Sites to Create**")
+        sites_data = bundle.get("missing_sites", [])
+        if sites_data:
+            sites_df = pd.DataFrame(sites_data)
+            # Ensure 'Selected' column exists
+            if "Selected" not in sites_df.columns:
+                sites_df.insert(0, "Selected", True)
+            # Reorder columns
+            col_order = ["Selected", "name", "slug", "scope_id", "status", "raw_input"]
+            avail = [c for c in col_order if c in sites_df.columns]
+            sites_df = sites_df[avail]
+            # Init session state for selections if missing
+            if st.session_state.get("recon_selected_sites") is None:
+                st.session_state["recon_selected_sites"] = sites_df.copy()
+            edited_sites = st.data_editor(
+                st.session_state["recon_selected_sites"],
+                num_rows="dynamic",
+                key="recon_sites_editor",
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Selected": st.column_config.CheckboxColumn(
+                        "Import?",
+                        help="Check to include in import bundle.",
+                        default=True,
+                    ),
+                    "name": st.column_config.TextColumn("Site Name"),
+                    "slug": st.column_config.TextColumn("Slug"),
+                    "scope_id": st.column_config.NumberColumn("Scope ID", help="NetBox site ID (auto-filled if matched)."),
+                    "status": st.column_config.TextColumn("Status"),
+                    "raw_input": st.column_config.TextColumn("Raw Input", help="Original site value from sheet."),
+                },
+            )
+            st.session_state["recon_selected_sites"] = edited_sites
+            sa, sma = st.columns(2)
+            with sa:
+                if st.button("Select All", key="sites_select_all"):
+                    st.session_state["recon_selected_sites"]["Selected"] = True
+                    st.rerun()
+            with sma:
+                if st.button("Deselect All", key="sites_deselect_all"):
+                    st.session_state["recon_selected_sites"]["Selected"] = False
+                    st.rerun()
+        else:
+            st.caption("All sites already exist in NetBox.")
 
+        # ---- Table B: Missing VLAN Groups & VLANs ----
+        st.markdown("**Table B — Missing VLAN Groups & VLANs to Create**")
+        vlan_groups_data = bundle.get("missing_vlan_groups", [])
+        vlans_data = bundle.get("missing_vlans", [])
+        if vlan_groups_data or vlans_data:
+            # Combine VLAN groups and VLANs into one table for simplicity
+            rows_b = []
+            for vg in vlan_groups_data:
+                rows_b.append({
+                    "Selected": True,
+                    "Type": "VLAN Group",
+                    "ID/VID": "",
+                    "Name": vg["name"],
+                    "Site": vg.get("site", ""),
+                    "Description": f"VLAN group for {vg.get('site', '')}",
+                    "Role": "",
+                })
+            for v in vlans_data:
+                rows_b.append({
+                    "Selected": True,
+                    "Type": "VLAN",
+                    "ID/VID": v.get("vid", ""),
+                    "Name": v.get("name", ""),
+                    "Site": v.get("site", ""),
+                    "Description": v.get("description", ""),
+                    "Role": v.get("role", ""),
+                })
+            df_b = pd.DataFrame(rows_b)
+            if st.session_state.get("recon_selected_vlans") is None:
+                st.session_state["recon_selected_vlans"] = df_b.copy()
+            edited_b = st.data_editor(
+                st.session_state["recon_selected_vlans"],
+                num_rows="dynamic",
+                key="recon_vlans_editor",
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Selected": st.column_config.CheckboxColumn("Import?", default=True),
+                    "Type": st.column_config.TextColumn("Type"),
+                    "ID/VID": st.column_config.TextColumn("ID / VID"),
+                    "Name": st.column_config.TextColumn("Name"),
+                    "Site": st.column_config.TextColumn("Site"),
+                    "Description": st.column_config.TextColumn("Description"),
+                    "Role": st.column_config.TextColumn("Role"),
+                },
+            )
+            st.session_state["recon_selected_vlans"] = edited_b
+            sb, smb = st.columns(2)
+            with sb:
+                if st.button("Select All", key="vlans_select_all"):
+                    st.session_state["recon_selected_vlans"]["Selected"] = True
+                    st.rerun()
+            with smb:
+                if st.button("Deselect All", key="vlans_deselect_all"):
+                    st.session_state["recon_selected_vlans"]["Selected"] = False
+                    st.rerun()
+        else:
+            st.caption("All VLAN groups and VLANs already exist in NetBox.")
+
+        # ---- Table C: Missing Prefixes ----
+        st.markdown("**Table C — Missing Prefixes to Allocate**")
+        prefixes_data = bundle.get("missing_prefixes", [])
+        if prefixes_data:
+            df_c = pd.DataFrame(prefixes_data)
+            if "Selected" not in df_c.columns:
+                df_c.insert(0, "Selected", True)
+            col_order_c = ["Selected", "prefix", "site", "vlan_id", "description", "status"]
+            avail_c = [c for c in col_order_c if c in df_c.columns]
+            df_c = df_c[avail_c]
+            if st.session_state.get("recon_selected_prefixes") is None:
+                st.session_state["recon_selected_prefixes"] = df_c.copy()
+            edited_c = st.data_editor(
+                st.session_state["recon_selected_prefixes"],
+                num_rows="dynamic",
+                key="recon_prefixes_editor",
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Selected": st.column_config.CheckboxColumn("Import?", default=True),
+                    "prefix": st.column_config.TextColumn("Prefix (CIDR)"),
+                    "site": st.column_config.TextColumn("Site"),
+                    "vlan_id": st.column_config.TextColumn("VLAN ID"),
+                    "description": st.column_config.TextColumn("Description"),
+                    "status": st.column_config.TextColumn("Status"),
+                },
+            )
+            st.session_state["recon_selected_prefixes"] = edited_c
+            sc, smc = st.columns(2)
+            with sc:
+                if st.button("Select All", key="prefixes_select_all"):
+                    st.session_state["recon_selected_prefixes"]["Selected"] = True
+                    st.rerun()
+            with smc:
+                if st.button("Deselect All", key="prefixes_deselect_all"):
+                    st.session_state["recon_selected_prefixes"]["Selected"] = False
+                    st.rerun()
+        else:
+            st.caption("All prefixes already exist in NetBox.")
+
+        # ---- Table D: IP Addresses & Gateways ----
+        st.markdown("**Table D — IP Addresses & Gateways**")
+        ips_data = bundle.get("ip_addresses", [])
+        if ips_data:
+            df_d = pd.DataFrame(ips_data)
+            if "Selected" not in df_d.columns:
+                df_d.insert(0, "Selected", True)
+            col_order_d = ["Selected", "address", "role", "site", "description", "subnet"]
+            avail_d = [c for c in col_order_d if c in df_d.columns]
+            df_d = df_d[avail_d]
+            if st.session_state.get("recon_selected_ips") is None:
+                st.session_state["recon_selected_ips"] = df_d.copy()
+            edited_d = st.data_editor(
+                st.session_state["recon_selected_ips"],
+                num_rows="dynamic",
+                key="recon_ips_editor",
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Selected": st.column_config.CheckboxColumn("Import?", default=True),
+                    "address": st.column_config.TextColumn("IP Address"),
+                    "role": st.column_config.TextColumn("Role"),
+                    "site": st.column_config.TextColumn("Site"),
+                    "description": st.column_config.TextColumn("Description"),
+                    "subnet": st.column_config.TextColumn("Subnet"),
+                },
+            )
+            st.session_state["recon_selected_ips"] = edited_d
+            sd, smd = st.columns(2)
+            with sd:
+                if st.button("Select All", key="ips_select_all"):
+                    st.session_state["recon_selected_ips"]["Selected"] = True
+                    st.rerun()
+            with smd:
+                if st.button("Deselect All", key="ips_deselect_all"):
+                    st.session_state["recon_selected_ips"]["Selected"] = False
+                    st.rerun()
+        else:
+            st.caption("No additional IP addresses to import.")
+
+        # Quick-action: site loader
+        all_sites = get_all_site_names()
         parsed_records = result.get("_records_raw", [])
         parsed_sites = sorted({
             str(r.get("site", "")).strip()
             for r in parsed_records
         } - {""}) if parsed_records else []
-        parsed_vlans = sorted({
-            str(r.get("vlan_id", "")).strip()
-            for r in parsed_records
-        } - {""}) if parsed_records else []
-        parsed_prefixes = sorted({
-            str(r.get("subnet", "")).strip()
-            for r in parsed_records
-        } - {""}) if parsed_records else []
-
-        missing_sites = [s for s in parsed_sites if s and (not sites_set or s.lower() not in sites_set)]
-        missing_vlans = [v for v in parsed_vlans if v and not ips_set]
-        missing_prefixes = [p for p in parsed_prefixes if p and (not prefixes_set or p not in prefixes_set)]
-
-        rc1, rc2, rc3 = st.columns(3)
-        with rc1:
-            st.metric("Missing Sites", len(missing_sites))
-            if missing_sites:
-                for s in missing_sites[:10]:
-                    st.caption(s)
-                if len(missing_sites) > 10:
-                    st.caption(f"... and {len(missing_sites) - 10} more")
-        with rc2:
-            st.metric("Missing VLANs", len(missing_vlans))
-            if missing_vlans:
-                for v in missing_vlans[:10]:
-                    st.caption(f"VLAN {v}")
-                if len(missing_vlans) > 10:
-                    st.caption(f"... and {len(missing_vlans) - 10} more")
-        with rc3:
-            st.metric("Missing Prefixes", len(missing_prefixes))
-            if missing_prefixes:
-                for p in missing_prefixes[:10]:
-                    st.caption(p)
-                if len(missing_prefixes) > 10:
-                    st.caption(f"... and {len(missing_prefixes) - 10} more")
-
-        # Quick-action: site loader
-        all_sites = get_all_site_names()
         parsed_site_options = parsed_sites or all_sites
         if parsed_site_options:
             site_sel = st.selectbox(
@@ -615,59 +785,201 @@ def _render_reconciliation_tab():
         st.caption("Upload a file above, then click **Analyze Requirements**.")
 
     # ------------------------------------------------------------------
-    # Section 4: Export & Sync Bundles
+    # Section 4: Export & Sync Bundles — Dependency-Ordered Import Generators
     # ------------------------------------------------------------------
     st.markdown("---")
     st.markdown("### 📦 Export & Sync Bundles")
 
-    if result is not None:
-        prefixes_buf, vlans_buf = export_pending_csvs(result["pending_add"])
+    bundle = st.session_state.get("recon_bundle")
+    if bundle is not None:
+        csv_buffers = build_import_csvs(bundle)
 
-        col_pf, col_vl = st.columns(2)
-        with col_pf:
-            st.download_button(
-                label="📥 Download NetBox Prefixes Import CSV",
-                data=prefixes_buf.getvalue(),
-                file_name="netbox-ipam-prefixes-import.csv",
-                mime="text/csv",
-                key="ipam_recon_dl_prefixes",
-            )
-            if prefixes_buf.tell() > 0:
-                prefixes_buf.seek(0)
-                preview = prefixes_buf.read().decode("utf-8")
-                st.code(preview[:500] + ("..." if len(preview) > 500 else ""), language="csv")
-            else:
-                st.caption("No prefix records to export.")
+        # Filter to only user-selected rows per table
+        def _filter_selected(df, key):
+            if df is None or df.empty:
+                return None
+            selected = df[df.get("Selected", True) is True if "Selected" in df.columns else df.index.astype(bool)]
+            if selected.empty:
+                return None
+            return selected.drop(columns=["Selected"], errors="ignore")
 
-        with col_vl:
-            st.download_button(
-                label="📥 Download NetBox VLANs Import CSV",
-                data=vlans_buf.getvalue(),
-                file_name="netbox-ipam-vlans-import.csv",
-                mime="text/csv",
-                key="ipam_recon_dl_vlans",
-            )
-            if vlans_buf.tell() > 0:
-                vlans_buf.seek(0)
-                preview = vlans_buf.read().decode("utf-8")
-                st.code(preview[:500] + ("..." if len(preview) > 500 else ""), language="csv")
-            else:
-                st.caption("No VLAN records to export.")
-
-        missing_buf = io.BytesIO()
-        if not result["pending_add"].empty:
-            result["pending_add"].to_csv(missing_buf, index=False)
-        missing_buf.seek(0)
-        st.download_button(
-            label="📥 Download NetBox-to-Excel Missing Records CSV (Backfill)",
-            data=missing_buf.getvalue(),
-            file_name="netbox-to-excel-missing-records.csv",
-            mime="text/csv",
-            key="ipam_recon_dl_missing",
+        sel_sites = _filter_selected(
+            st.session_state.get("recon_selected_sites"), "sites"
+        )
+        sel_vlans = _filter_selected(
+            st.session_state.get("recon_selected_vlans"), "vlans"
+        )
+        sel_prefixes = _filter_selected(
+            st.session_state.get("recon_selected_prefixes"), "prefixes"
+        )
+        sel_ips = _filter_selected(
+            st.session_state.get("recon_selected_ips"), "ips"
         )
 
+        # Build selection-aware bundle
+        selection_bundle = {
+            "missing_sites": sel_sites.to_dict("records") if sel_sites is not None and not sel_sites.empty else [],
+            "missing_vlan_groups": [],
+            "missing_vlans": [],
+            "missing_prefixes": sel_prefixes.to_dict("records") if sel_prefixes is not None and not sel_prefixes.empty else [],
+            "ip_addresses": sel_ips.to_dict("records") if sel_ips is not None and not sel_ips.empty else [],
+            "aggregates": bundle.get("aggregates", []),
+            "metrics": bundle.get("metrics", {}),
+        }
+        # Re-derive vlan_groups from sites if needed
+        if sel_sites is not None and not sel_sites.empty:
+            for _, row in sel_sites.iterrows():
+                site_name = row.get("name", row.get("raw_input", ""))
+                if site_name:
+                    selection_bundle["missing_vlan_groups"].append({
+                        "name": f"{site_name} VLAN Group",
+                        "slug": slugify(f"{site_name} VLAN Group"),
+                        "scope_type": "dcim.site",
+                        "scope_id": row.get("scope_id"),
+                        "site": site_name,
+                    })
+        # Pull VLANs from the original bundle filtered by site
+        if sel_vlans is not None and not sel_vlans.empty:
+            for _, row in sel_vlans.iterrows():
+                if row.get("Type") == "VLAN":
+                    selection_bundle["missing_vlans"].append({
+                        "vid": str(row.get("ID/VID", "")).strip(),
+                        "name": str(row.get("Name", "")).strip(),
+                        "site": str(row.get("Site", "")).strip(),
+                        "description": str(row.get("Description", "")).strip(),
+                        "role": str(row.get("Role", "")).strip(),
+                    })
+        elif sel_sites is not None and not sel_sites.empty:
+            # Include all VLANs for selected sites
+            selected_site_names = set()
+            for _, row in sel_sites.iterrows():
+                sn = row.get("name", row.get("raw_input", ""))
+                if sn:
+                    selected_site_names.add(sn.lower())
+            for v in bundle.get("missing_vlans", []):
+                if v.get("site", "").lower() in selected_site_names:
+                    selection_bundle["missing_vlans"].append(v)
+
+        st.markdown("**Dependency-Ordered Import Pipeline** — Import in order: Sites → VLAN Groups → VLANs → Prefixes → IP Addresses.")
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown("**1. Sites (`dcim.site`)**")
+            if "01_sites.csv" in csv_buffers:
+                buf = csv_buffers["01_sites.csv"]
+                if buf.tell() > 0:
+                    buf.seek(0)
+                    preview = buf.read().decode("utf-8")
+                    st.code(preview[:400] + ("..." if len(preview) > 400 else ""), language="csv")
+                st.download_button(
+                    label="📥 Download 01_sites.csv",
+                    data=csv_buffers["01_sites.csv"].getvalue(),
+                    file_name="01_sites.csv",
+                    mime="text/csv",
+                    key="dl_01_sites",
+                )
+            else:
+                st.caption("No sites to import.")
+
+        with col2:
+            st.markdown("**2. VLAN Groups (`ipam.vlangroup`)**")
+            if "02_vlan_groups.csv" in csv_buffers:
+                buf = csv_buffers["02_vlan_groups.csv"]
+                if buf.tell() > 0:
+                    buf.seek(0)
+                    preview = buf.read().decode("utf-8")
+                    st.code(preview[:400] + ("..." if len(preview) > 400 else ""), language="csv")
+                st.download_button(
+                    label="📥 Download 02_vlan_groups.csv",
+                    data=csv_buffers["02_vlan_groups.csv"].getvalue(),
+                    file_name="02_vlan_groups.csv",
+                    mime="text/csv",
+                    key="dl_02_vg",
+                )
+            else:
+                st.caption("No VLAN groups to import.")
+
+        with col3:
+            st.markdown("**3. VLANs (`ipam.vlan`)**")
+            if "03_vlans.csv" in csv_buffers:
+                buf = csv_buffers["03_vlans.csv"]
+                if buf.tell() > 0:
+                    buf.seek(0)
+                    preview = buf.read().decode("utf-8")
+                    st.code(preview[:400] + ("..." if len(preview) > 400 else ""), language="csv")
+                st.download_button(
+                    label="📥 Download 03_vlans.csv",
+                    data=csv_buffers["03_vlans.csv"].getvalue(),
+                    file_name="03_vlans.csv",
+                    mime="text/csv",
+                    key="dl_03_vlans",
+                )
+            else:
+                st.caption("No VLANs to import.")
+
+        col4, col5 = st.columns(2)
+        with col4:
+            st.markdown("**4. Prefixes (`ipam.prefix`)**")
+            if "04_prefixes.csv" in csv_buffers:
+                buf = csv_buffers["04_prefixes.csv"]
+                if buf.tell() > 0:
+                    buf.seek(0)
+                    preview = buf.read().decode("utf-8")
+                    st.code(preview[:400] + ("..." if len(preview) > 400 else ""), language="csv")
+                st.download_button(
+                    label="📥 Download 04_prefixes.csv",
+                    data=csv_buffers["04_prefixes.csv"].getvalue(),
+                    file_name="04_prefixes.csv",
+                    mime="text/csv",
+                    key="dl_04_prefixes",
+                )
+            else:
+                st.caption("No prefixes to import.")
+
+        with col5:
+            st.markdown("**5. IP Addresses (`ipam.ipaddress`)**")
+            if "05_ip_addresses.csv" in csv_buffers:
+                buf = csv_buffers["05_ip_addresses.csv"]
+                if buf.tell() > 0:
+                    buf.seek(0)
+                    preview = buf.read().decode("utf-8")
+                    st.code(preview[:400] + ("..." if len(preview) > 400 else ""), language="csv")
+                st.download_button(
+                    label="📥 Download 05_ip_addresses.csv",
+                    data=csv_buffers["05_ip_addresses.csv"].getvalue(),
+                    file_name="05_ip_addresses.csv",
+                    mime="text/csv",
+                    key="dl_05_ips",
+                )
+            else:
+                st.caption("No IP addresses to import.")
+
         st.divider()
-        st.caption("💡 After downloading, import via NetBox: IPAM → Prefixes / VLANs → Import.")
+        col_zip, col_json = st.columns(2)
+        with col_zip:
+            st.download_button(
+                label="📥 Download NetBox Import Bundle (.zip)",
+                data=build_import_zip(bundle).getvalue(),
+                file_name="netbox-ipam-import-bundle.zip",
+                mime="application/zip",
+                key="dl_ipam_bundle_zip",
+                type="primary",
+            )
+            st.caption("Includes all 5 dependency-ordered CSV files.")
+        with col_json:
+            st.download_button(
+                label="🚀 Generate & Download NetBox Import JSON",
+                data=build_import_json(bundle),
+                file_name="netbox-ipam-import.json",
+                mime="application/json",
+                key="dl_ipam_bundle_json",
+                type="primary",
+            )
+            st.caption("Single JSON payload structured by endpoint for REST API bulk-creation.")
+
+        st.caption("💡 Import order matters: Sites → VLAN Groups → VLANs → Prefixes → IP Addresses.")
+    elif result is not None:
+        st.caption("Click **Analyze Requirements** above first to build the import bundle.")
     else:
         st.caption("Upload and parse a file to enable export bundles.")
 

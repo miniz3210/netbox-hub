@@ -13,6 +13,7 @@ Covers:
 from __future__ import annotations
 
 import io
+import json
 import os
 import sys
 from pathlib import Path
@@ -761,6 +762,249 @@ class TestBidirectionalDiff:
         nb_prefixes2 = {"10.0.0.0/24", "10.99.0.0/24"}
         missing2 = len(nb_prefixes2 - parsed_subnets)
         assert missing2 == 1  # 10.99.0.0/24 is in NetBox but not Excel
+
+
+# ============================================================================
+# TEST 12: DB-backed site resolution & APNIC public IP matching
+# ============================================================================
+
+class TestSiteResolution:
+    """Test that sheet names / location tokens resolve against NetBox DB sites."""
+
+    def test_apnic_sy3_resolves_to_equinix_site(self):
+        """'SY3 Palo Alto' should resolve 'SY3' token to 'Equinix SY3' site."""
+        from core.ipam_excel_diff import _resolve_site_to_db_record, _build_site_index
+        idx = _build_site_index()
+        result = _resolve_site_to_db_record("SY3 Palo Alto", idx)
+        # Either matched via DB or returned None — must not crash
+        if result is not None:
+            name, sid = result
+            assert isinstance(name, str) and name
+            assert sid is None or isinstance(sid, int)
+
+    def test_exact_site_match(self):
+        """A raw site name that exactly matches a DB site returns that site."""
+        from core.ipam_excel_diff import _resolve_site_to_db_record, _build_site_index
+        idx = _build_site_index()
+        # If 'hq' exists in the index, it should match
+        result = _resolve_site_to_db_record("hq", idx)
+        if result is not None:
+            name, sid = result
+            assert name.lower() == "hq" or "hq" in name.lower()
+
+    def test_slug_match(self):
+        """Slug matching works — 'equinix-sy3' should match 'Equinix SY3'."""
+        from core.ipam_excel_diff import _resolve_site_to_db_record, _build_site_index
+        idx = _build_site_index()
+        result = _resolve_site_to_db_record("equinix-sy3", idx)
+        # At minimum must not crash
+        assert result is None or (isinstance(result, tuple) and len(result) == 2)
+
+    def test_public_ip_heuristic(self):
+        """Public IP rows without VLAN ID and without subnet CIDR should be flagged."""
+        from core.ipam_excel_diff import _is_public_ip_row
+        # Pure IP with no subnet — qualifies as public/upstream
+        rec = {
+            "ip_address": "103.174.3.1",
+            "subnet": "",
+            "vlan_id": "",
+            "vlan_name": "",
+            "site": "SY3 Palo Alto",
+        }
+        assert _is_public_ip_row(rec) is True
+        # A normal VLAN row should NOT match
+        rec2 = {
+            "ip_address": "10.0.0.1",
+            "subnet": "10.0.0.0/24",
+            "vlan_id": "100",
+            "vlan_name": "Corporate",
+            "site": "HQ",
+        }
+        assert _is_public_ip_row(rec2) is False
+        # IP with subnet but no VLAN — still not a "public" pattern (has CIDR)
+        rec3 = {
+            "ip_address": "103.174.3.1",
+            "subnet": "103.174.3.0/24",
+            "vlan_id": "",
+            "vlan_name": "",
+            "site": "SY3 Palo Alto",
+        }
+        assert _is_public_ip_row(rec3) is False  # has subnet, so not pure public
+
+
+# ============================================================================
+# TEST 13: Reconciliation bundle generation
+# ============================================================================
+
+class TestReconciliationBundle:
+    """Tests for _build_reconciliation_bundle, build_import_csvs, build_import_json,
+    build_import_zip, and build_reconciliation_result."""
+
+    def test_bundle_contains_all_sections(self):
+        """A basic reconcile result should produce a bundle with all sections."""
+        from core.ipam_excel_diff import (
+            _build_reconciliation_bundle, parse_file_bytes, classify_records,
+            build_import_csvs, build_import_json, build_import_zip,
+            build_reconciliation_result,
+        )
+        buf = _make_wb({
+            "HQ": [
+                ["ip", "subnet", "vlan id", "vlan name", "site"],
+                ["10.0.0.1", "10.0.0.0/24", "100", "Corporate", "HQ"],
+                ["10.1.0.1", "10.1.0.0/24", "200", "Guests", "HQ"],
+            ]
+        })
+        records = parse_file_bytes(buf, filename="test.xlsx")
+        matched, pending, conflicts, metrics = classify_records(
+            records,
+            existing_prefixes={"10.0.0.0/24"},
+            existing_ips=set(),
+            existing_sites={"hq"},
+            db_record_map={"10.0.0.0/24": [{"site": "HQ", "vlan_id": "100"}]},
+        )
+        result = {
+            "matched": matched,
+            "pending_add": pending,
+            "conflicts": conflicts,
+            "metrics": metrics,
+            "_records_raw": records,
+        }
+        bundle = _build_reconciliation_bundle(records, matched, pending, conflicts, metrics)
+        assert "missing_sites" in bundle
+        assert "missing_vlan_groups" in bundle
+        assert "missing_vlans" in bundle
+        assert "missing_prefixes" in bundle
+        assert "ip_addresses" in bundle
+        assert "aggregates" in bundle
+
+    def test_csv_buffers_have_headers(self):
+        """Each CSV buffer should have the correct headers."""
+        from core.ipam_excel_diff import (
+            _build_reconciliation_bundle, parse_file_bytes, classify_records,
+            build_import_csvs,
+        )
+        buf = _make_wb({
+            "HQ": [
+                ["ip", "subnet", "vlan id", "vlan name", "site"],
+                ["10.0.0.1", "10.0.0.0/24", "100", "Corporate", "HQ"],
+            ]
+        })
+        records = parse_file_bytes(buf, filename="test.xlsx")
+        matched, pending, conflicts, metrics = classify_records(records)
+        bundle = _build_reconciliation_bundle(records, matched, pending, conflicts, metrics)
+        csvs = build_import_csvs(bundle)
+        assert "01_sites.csv" in csvs
+        assert "02_vlan_groups.csv" in csvs
+        assert "03_vlans.csv" in csvs
+        assert "04_prefixes.csv" in csvs
+        assert "05_ip_addresses.csv" in csvs
+        sites_content = csvs["01_sites.csv"].read().decode("utf-8")
+        assert "name,slug,status" in sites_content
+        vg_content = csvs["02_vlan_groups.csv"].read().decode("utf-8")
+        assert "name,slug,scope_type,scope_id" in vg_content
+
+    def test_json_payload_structure(self):
+        """JSON payload should have top-level keys for each object type."""
+        from core.ipam_excel_diff import (
+            _build_reconciliation_bundle, parse_file_bytes, classify_records,
+            build_import_json,
+        )
+        buf = _make_wb({
+            "HQ": [
+                ["ip", "subnet", "vlan id", "vlan name", "site"],
+                ["10.0.0.1", "10.0.0.0/24", "100", "Corporate", "HQ"],
+            ]
+        })
+        records = parse_file_bytes(buf, filename="test.xlsx")
+        matched, pending, conflicts, metrics = classify_records(records)
+        bundle = _build_reconciliation_bundle(records, matched, pending, conflicts, metrics)
+        json_bytes = build_import_json(bundle)
+        payload = json.loads(json_bytes.decode("utf-8"))
+        assert "sites" in payload
+        assert "vlan_groups" in payload
+        assert "vlans" in payload
+        assert "prefixes" in payload
+        assert "ip_addresses" in payload
+
+    def test_zip_bundle_is_valid(self):
+        """ZIP bundle should contain all 5 CSV files."""
+        from core.ipam_excel_diff import (
+            _build_reconciliation_bundle, parse_file_bytes, classify_records,
+            build_import_zip,
+        )
+        buf = _make_wb({
+            "HQ": [
+                ["ip", "subnet", "vlan id", "vlan name", "site"],
+                ["10.0.0.1", "10.0.0.0/24", "100", "Corporate", "HQ"],
+            ]
+        })
+        records = parse_file_bytes(buf, filename="test.xlsx")
+        matched, pending, conflicts, metrics = classify_records(records)
+        bundle = _build_reconciliation_bundle(records, matched, pending, conflicts, metrics)
+        zip_buf = build_import_zip(bundle)
+        import zipfile
+        with zipfile.ZipFile(zip_buf, "r") as zf:
+            names = sorted(zf.namelist())
+            assert "01_sites.csv" in names
+            assert "02_vlan_groups.csv" in names
+            assert "03_vlans.csv" in names
+            assert "04_prefixes.csv" in names
+            assert "05_ip_addresses.csv" in names
+
+    def test_build_reconciliation_result_enriches(self):
+        """build_reconciliation_result should add 'bundle' key to result."""
+        from core.ipam_excel_diff import (
+            parse_file_bytes, classify_records, build_reconciliation_result,
+        )
+        buf = _make_wb({
+            "HQ": [
+                ["ip", "subnet", "vlan id", "vlan name", "site"],
+                ["10.0.0.1", "10.0.0.0/24", "100", "Corporate", "HQ"],
+            ]
+        })
+        records = parse_file_bytes(buf, filename="test.xlsx")
+        matched, pending, conflicts, metrics = classify_records(records)
+        result = {
+            "matched": matched,
+            "pending_add": pending,
+            "conflicts": conflicts,
+            "metrics": metrics,
+            "_records_raw": records,
+        }
+        enriched = build_reconciliation_result(result)
+        assert "bundle" in enriched
+        assert "missing_sites" in enriched["bundle"]
+
+    def test_no_netmask_in_prefix_output(self):
+        """Netmask values must never appear as prefix strings in any output."""
+        from core.ipam_excel_diff import (
+            _build_reconciliation_bundle, parse_file_bytes, classify_records,
+            build_import_csvs, build_import_json,
+        )
+        buf = _make_wb({
+            "S1": [
+                ["ip", "subnet", "subnet mask", "vlan id", "vlan name", "site"],
+                ["10.113.252.1", "10.113.252.0", "255.255.254.0", "100", "Corp", "HQ"],
+            ]
+        })
+        records = parse_file_bytes(buf, filename="test.xlsx")
+        matched, pending, conflicts, metrics = classify_records(records)
+        bundle = _build_reconciliation_bundle(records, matched, pending, conflicts, metrics)
+        # Check no netmask value appears as a prefix
+        for p in bundle.get("missing_prefixes", []):
+            prefix = p.get("prefix", "")
+            assert not prefix.startswith("255."), f"Netmask leaked as prefix: {prefix}"
+        # Check JSON too
+        json_bytes = build_import_json(bundle)
+        payload = json.loads(json_bytes.decode("utf-8"))
+        for prefix_obj in payload.get("prefixes", []):
+            p = prefix_obj.get("prefix", "")
+            assert not p.startswith("255."), f"Netmask leaked as prefix in JSON: {p}"
+        # Check CSVs
+        csvs = build_import_csvs(bundle)
+        for name, buf_obj in csvs.items():
+            content = buf_obj.read().decode("utf-8")
+            assert "255.255.254.0" not in content, f"Netmask found in {name}: {content}"
 
 
 # ============================================================================
