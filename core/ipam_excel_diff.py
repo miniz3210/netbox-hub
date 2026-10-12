@@ -66,6 +66,7 @@ _SITE_POSITIVE_TOKENS = frozenset({"site", "location", "branch"})
 _SITE_NEGATIVE_TOKENS = frozenset({
     "device", "host", "hostname", "server", "fqdn", "app", "vpn",
     "description", "desc", "name", "purpose",
+    "palo", "fw", "as400", "ibm", "auth",
 })
 
 # ---------------------------------------------------------------------------
@@ -77,7 +78,7 @@ _HEADER_ALIASES: Dict[str, List[str]] = {
     "subnet": ["subnet", "network", "cidr", "prefix"],
     "vlan_id": ["vlan id", "vid", "vlan_id", "vlan"],
     "vlan_name": ["vlan name", "role", "name", "purpose", "description"],
-    "site": ["site", "location", "branch"],
+    "site": ["site", "location", "branch", "site name", "site_name", "location name"],
 }
 
 _NORMALISE_RE = re.compile(r"[\s\-]+")
@@ -112,10 +113,19 @@ def _is_ip_col(normed: str) -> bool:
 
 
 def _is_site_col(normed: str) -> bool:
-    """True when *normed* is a site/location/branch column per the spec."""
-    has_site = any(tok in normed for tok in _SITE_POSITIVE_TOKENS)
-    has_negative = any(tok in normed for tok in _SITE_NEGATIVE_TOKENS)
-    return has_site and not has_negative
+    """True when *normed* is a strict site/location/branch column per the spec.
+
+    Only matches exact header tokens (no partial substring matches) to avoid
+    capturing device/firewall tokens like 'sy3-palo-alto' or 'wips-as400-ibm' as
+    site names in sheets without an explicit site column.
+    """
+    strict_matches = {"site", "location", "branch", "site_name", "location_name",
+                      "site name", "location name"}
+    if normed not in strict_matches:
+        return False
+    if any(tok in normed for tok in _SITE_NEGATIVE_TOKENS):
+        return False
+    return True
 
 def _is_vlan_name_col(normed: str) -> bool:
     """True when *normed* is a vlan-name / role column per the spec."""
@@ -578,6 +588,81 @@ def _build_db_index() -> Tuple[set, set, set, Dict[str, List[Dict[str, Any]]]]:
     return prefixes, ip_set, sites, record_map
 
 
+def _build_backup_index() -> Tuple[set, set, set, Dict[str, List[Dict[str, Any]]]]:
+    """Build lookup sets from the loaded NetBox JSON backup (authoritative source).
+
+    Falls back to empty sets when no backup is loaded.
+    Returns (existing_prefixes, existing_ips, existing_sites, db_record_map).
+    """
+    from core.shared_backup_state import SharedBackupState
+
+    prefixes: set = set()
+    sites: set = set()
+    ip_set: set = set()
+    record_map: Dict[str, List[Dict[str, Any]]] = {}
+
+    inspector = SharedBackupState.get_inspector()
+    if inspector is None:
+        return prefixes, ip_set, sites, record_map
+
+    registry = inspector.inspect_all_objects()
+
+    def _find_key(candidates: List[str]) -> Optional[str]:
+        for c in candidates:
+            if c in registry:
+                return c
+        return None
+
+    # --- Prefixes ---
+    prefix_key = _find_key(["ipam/prefixes", "ipam/prefix", "prefixes", "prefix"])
+    if prefix_key:
+        for obj in registry[prefix_key].get("data", []):
+            cidr = obj.get("prefix", obj.get("address", ""))
+            if cidr:
+                try:
+                    net = ipaddress.IPv4Network(str(cidr).strip(), strict=False)
+                    prefixes.add(str(net))
+                except (ValueError, ipaddress.AddressValueError):
+                    prefixes.add(str(cidr).strip())
+            site = obj.get("site", "")
+            if site:
+                sites.add(str(site).strip().lower())
+
+    # --- VLANs / IPs ---
+    vlan_key = _find_key(["ipam/vlans", "ipam/vlan", "vlans", "vlan"])
+    if vlan_key:
+        for obj in registry[vlan_key].get("data", []):
+            sid = obj.get("site", "")
+            if sid:
+                sites.add(str(sid).strip().lower())
+
+    # --- Sites ---
+    site_key = _find_key(["dcim/sites", "dcim/site", "sites", "site"])
+    if site_key:
+        for obj in registry[site_key].get("data", []):
+            sn = obj.get("slug", obj.get("name", ""))
+            if sn:
+                sites.add(str(sn).strip().lower())
+
+    return prefixes, ip_set, sites, record_map
+
+
+def _classify_from_backup(
+    records: List[Dict[str, Any]],
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, int]]:
+    """Classify records using the authoritative backup index."""
+    existing_prefixes, existing_ips, existing_sites, db_record_map = _build_backup_index()
+    if not existing_prefixes and not existing_sites:
+        return classify_records(records)
+    return classify_records(
+        records,
+        existing_prefixes=existing_prefixes,
+        existing_ips=existing_ips,
+        existing_sites=existing_sites,
+        db_record_map=db_record_map,
+    )
+
+
 def _index_is_provided(idx):
     """Return True when a non-empty hash index has been explicitly supplied."""
     return idx is not None and len(idx) > 0
@@ -597,7 +682,9 @@ def classify_records(
         (matched_df, pending_add_df, conflicts_df, metrics)
     """
     if existing_prefixes is None or existing_ips is None or existing_sites is None:
-        existing_prefixes, existing_ips, existing_sites, db_record_map = _build_db_index()
+        existing_prefixes, existing_ips, existing_sites, db_record_map = _build_backup_index()
+        if not existing_prefixes and not existing_sites:
+            existing_prefixes, existing_ips, existing_sites, db_record_map = _build_db_index()
 
     matched_rows: List[Dict[str, Any]] = []
     pending_rows: List[Dict[str, Any]] = []
@@ -713,27 +800,27 @@ def _attribute_conflict_reason(
 
 def export_pending_csvs(
     pending_df: pd.DataFrame,
-) -> Tuple[io.BytesIO, io.BytesIO]:
-    """Build NetBox-import-ready CSV byte streams for pending-add records."""
+) -> Tuple[str, str]:
+    """Build NetBox-import-ready CSV strings for pending-add records."""
     prefixes_cols = ["subnet", "vlan_id", "vlan_name", "site", "description",
                      "ip_address"]
     vlans_cols = ["vlan_id", "vlan_name", "site", "description", "subnet"]
 
-    prefix_buf = io.BytesIO()
+    prefix_str = ""
     if not pending_df.empty:
-        pending_df[[c for c in prefixes_cols if c in pending_df.columns]].to_csv(
-            prefix_buf, index=False
-        )
-    prefix_buf.seek(0)
+        buf = io.BytesIO()
+        pending_df[[c for c in prefixes_cols if c in pending_df.columns]].to_csv(buf, index=False)
+        buf.seek(0)
+        prefix_str = buf.read().decode("utf-8")
 
-    vlan_buf = io.BytesIO()
+    vlan_str = ""
     if not pending_df.empty:
-        pending_df[[c for c in vlans_cols if c in pending_df.columns]].to_csv(
-            vlan_buf, index=False
-        )
-    vlan_buf.seek(0)
+        buf = io.BytesIO()
+        pending_df[[c for c in vlans_cols if c in pending_df.columns]].to_csv(buf, index=False)
+        buf.seek(0)
+        vlan_str = buf.read().decode("utf-8")
 
-    return prefix_buf, vlan_buf
+    return prefix_str, vlan_str
 
 
 def run_audit(

@@ -416,13 +416,16 @@ def _reconcile_uploaded(file_bytes: io.BytesIO, filename: str):
         "metrics": metrics,
         "filename": filename,
         "parsed_at": datetime.utcnow().isoformat(timespec="seconds"),
+        "_records_raw": records,
     }
 
 
 def _render_reconciliation_tab():
-    """4-step Azure-style bi-directional IPAM reconciliation dashboard."""
+    """Progressive open-layout Master IPAM Reconciliation dashboard."""
     from core.ipam_excel_diff import export_pending_csvs
     from core.db_manager import get_all_site_names, get_sync_metadata
+    from core.shared_backup_state import SharedBackupState
+    import ipaddress as _ipaddress
 
     st.markdown(
         "**Master IPAM Reconciliation** — Upload an Excel / CSV / JSON inventory and compare it "
@@ -430,184 +433,222 @@ def _render_reconciliation_tab():
         "or conflicted buckets and produces ready-to-import CSV bundles."
     )
 
-    # Step indicator
-    st.markdown("### 📋 Reconciliation Steps")
-    col_step, col_dummy = st.columns([1, 5])
-    with col_step:
-        step = st.radio(
-            "Step",
-            options=["1 · Upload & Parse", "2 · Classify & Audit", "3 · Review Differences", "4 · Export / Import"],
-            label_visibility="collapsed",
-            key="recon_step_radio",
-        )
-
     # ------------------------------------------------------------------
-    # STEP 1: Upload & Parse
+    # Session state init
     # ------------------------------------------------------------------
     if "recon_result" not in st.session_state:
         st.session_state["recon_result"] = None
     if "recon_uploaded_file" not in st.session_state:
         st.session_state["recon_uploaded_file"] = None
 
-    if step in ("1 · Upload & Parse", "2 · Classify & Audit", "3 · Review Differences", "4 · Export / Import"):
-        with st.expander("Step 1 — Upload & Parse", expanded=(step == "1 · Upload & Parse")):
-            file_types = [".xlsx", ".xls", ".csv", ".json"]
-            uploaded_file = st.file_uploader(
-                "Upload IPAM Excel / CSV / JSON",
-                type=file_types,
-                key="recon_file_uploader",
-                help="Multi-sheet Excel, flat CSV, or NetBox backup JSON accepted.",
-            )
+    # ------------------------------------------------------------------
+    # Section 1: Upload & Ingest
+    # ------------------------------------------------------------------
+    st.markdown("### 📤 Upload & Ingest")
+    file_types = [".xlsx", ".xls", ".csv", ".json"]
+    uploaded_file = st.file_uploader(
+        "Upload IPAM Excel / CSV / JSON",
+        type=file_types,
+        key="ipam_recon_uploaded_file",
+        help="Multi-sheet Excel, flat CSV, or NetBox backup JSON accepted.",
+    )
 
-            col_clr, col_run = st.columns(2)
-            with col_clr:
-                if st.button("🗑️ Clear Reconciliation Cache", key="btn_clear_recon"):
-                    st.session_state.pop("recon_result", None)
-                    st.session_state.pop("recon_uploaded_file", None)
-                    for k in list(st.session_state.keys()):
-                        if k.startswith("recon_"):
-                            st.session_state.pop(k, None)
-                    st.toast("🧹 Reconciliation cache cleared.", icon="🧹")
-                    st.rerun()
+    col_clr, col_ref = st.columns(2)
+    with col_clr:
+        if st.button("🗑️ Clear Excel Data", key="btn_clear_ipam_recon"):
+            st.session_state.pop("recon_result", None)
+            st.session_state.pop("recon_uploaded_file", None)
+            for k in list(st.session_state.keys()):
+                if k.startswith("recon_") or k.startswith("ipam_recon_"):
+                    st.session_state.pop(k, None)
+            st.toast("🧹 Cleared.", icon="🧹")
+            st.rerun()
+    with col_ref:
+        if st.button("🔄 Refresh", key="btn_refresh_ipam_recon"):
+            st.rerun()
 
-            if uploaded_file is not None:
-                cache_key = _recon_cache_key(uploaded_file.name, uploaded_file.size)
-                if st.session_state.get(cache_key) is None:
-                    with st.spinner("Parsing and classifying…"):
-                        try:
-                            result = _reconcile_uploaded(
-                                io.BytesIO(uploaded_file.read()), uploaded_file.name
-                            )
-                            st.session_state[cache_key] = result
-                            st.session_state["recon_result"] = result
-                            st.session_state["recon_uploaded_file"] = uploaded_file.name
-                            st.toast(f"✅ Parsed {result['metrics']['total_parsed']} records.", icon="📄")
-                        except Exception as exc:
-                            st.error(f"❌ Parse failed: {exc}")
-                else:
-                    result = st.session_state[cache_key]
+    if uploaded_file is not None:
+        cache_key = _recon_cache_key(uploaded_file.name, uploaded_file.size)
+        if st.session_state.get(cache_key) is None:
+            with st.spinner("Parsing and classifying…"):
+                try:
+                    result = _reconcile_uploaded(
+                        io.BytesIO(uploaded_file.read()), uploaded_file.name
+                    )
+                    st.session_state[cache_key] = result
                     st.session_state["recon_result"] = result
-
-    # ------------------------------------------------------------------
-    # STEP 2: Classify & Audit
-    # ------------------------------------------------------------------
-    if step in ("2 · Classify & Audit", "3 · Review Differences", "4 · Export / Import"):
-        result = st.session_state.get("recon_result")
-        if result is None:
-            st.info("Upload a file in Step 1 first.")
+                    st.session_state["recon_uploaded_file"] = uploaded_file.name
+                    st.toast(f"✅ Parsed {result['metrics']['total_parsed']} records.", icon="📄")
+                except Exception as exc:
+                    st.error(f"❌ Parse failed: {exc}")
         else:
-            with st.expander("Step 2 — Classify & Audit Results", expanded=(step == "2 · Classify & Audit")):
-                metrics = result["metrics"]
-                c1, c2, c3, c4 = st.columns(4)
-                with c1:
-                    st.metric("Total Parsed", metrics["total_parsed"])
-                with c2:
-                    st.metric("✅ In NetBox DB", metrics["matched"])
-                with c3:
-                    st.metric("❌ Need to Add", metrics["pending_add"])
-                with c4:
-                    st.metric("⚠️ Conflicts", metrics["conflicts"])
-
-                db_has_data = (get_total_sites_count() + get_total_vlans_count() + get_total_prefixes_count()) > 0
-                status_emoji = "🟢" if db_has_data else "⚪"
-                db_hint = (
-                    f" ({get_total_sites_count()} sites, {get_total_vlans_count()} VLANs, "
-                    f"{get_total_prefixes_count()} prefixes in DB)" if db_has_data else " (Default Examples)"
-                )
-                st.caption(f"Local DB {status_emoji}{db_hint}")
+            result = st.session_state[cache_key]
+            st.session_state["recon_result"] = result
 
     # ------------------------------------------------------------------
-    # STEP 3: Review Differences
+    # Section 2: Global Preview & Metrics
     # ------------------------------------------------------------------
-    if step in ("3 · Review Differences", "4 · Export / Import"):
-        result = st.session_state.get("recon_result")
-        if result is None:
-            st.info("Upload a file in Step 1 first.")
+    result = st.session_state.get("recon_result")
+    if result is not None:
+        st.markdown("---")
+        st.markdown("### 📊 Global Preview & Metrics")
+
+        metrics = result["metrics"]
+
+        # Authoritative source indicator
+        inspector = SharedBackupState.get_inspector()
+        backup_status = "🟢 NetBox Backup Loaded" if inspector else "⚪ SQLite Fallback"
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric("Total Analyzed", metrics["total_parsed"])
+        with c2:
+            st.metric("❌ Need to Add to NetBox", metrics["pending_add"])
+        with c3:
+            missing_in_excel = metrics["conflicts"]
+            st.metric("📥 Missing in Excel", missing_in_excel)
+        with c4:
+            st.metric("✅ In Sync", metrics["matched"])
+
+        st.caption(backup_status)
+
+        # Full diff dataframe with status badges
+        all_rows = []
+        for _, row in result["matched"].iterrows():
+            all_rows.append({**row, "_bucket": "✅ In Sync"})
+        for _, row in result["pending_add"].iterrows():
+            all_rows.append({**row, "_bucket": "❌ Need to Add"})
+        for _, row in result["conflicts"].iterrows():
+            all_rows.append({**row, "_bucket": "⚠️ Conflict"})
+
+        if all_rows:
+            df_all = pd.DataFrame(all_rows)
+            display_cols = [c for c in df_all.columns if c != "_bucket"] + ["_bucket"]
+            st.dataframe(df_all[display_cols], use_container_width=True, hide_index=True)
         else:
-            with st.expander("Step 3 — Review Differences", expanded=(step == "3 · Review Differences")):
-                df_matched = result["matched"]
-                df_pending = result["pending_add"]
-                df_conflicts = result["conflicts"]
-
-                tab_add, tab_conflicts, tab_matched = st.tabs([
-                    f"❌ Need to Add ({metrics['pending_add']})",
-                    f"⚠️ Conflicts ({metrics['conflicts']})",
-                    f"✅ Existing in DB ({metrics['matched']})",
-                ])
-
-                with tab_add:
-                    if df_pending.empty:
-                        st.info("No records need to be added — all entries exist in the database.")
-                    else:
-                        st.markdown("**Records ready for NetBox bulk import.**")
-                        st.dataframe(df_pending, use_container_width=True, hide_index=True)
-
-                with tab_conflicts:
-                    if df_conflicts.empty:
-                        st.success("No conflicts detected.")
-                    else:
-                        st.markdown("**Records with mismatched Site / VLAN attributes or unmapped sites.**")
-                        st.dataframe(df_conflicts, use_container_width=True, hide_index=True)
-
-                with tab_matched:
-                    if df_matched.empty:
-                        st.info("No records matched existing database entries.")
-                    else:
-                        st.markdown("**Records that already exist in NetBox DB with consistent attributes.**")
-                        st.dataframe(df_matched, use_container_width=True, hide_index=True)
-
-                # Quick-action: site loader
-                all_sites = get_all_site_names()
-                parsed_site_options: List[str] = sorted({
-                    str(r.get("site", "")).strip()
-                    for r in (result.get("_records_raw") or [])
-                } - {""}) or all_sites
-                if parsed_site_options:
-                    site_sel = st.selectbox(
-                        "🔍 Quick Load Site into Subnet Allocation Editor",
-                        options=[""] + parsed_site_options + all_sites,
-                        key="recon_site_selector",
-                        help="Auto-fills ipam_site_in for immediate editing.",
-                    )
-                    if site_sel:
-                        st.session_state["ipam_site_in"] = site_sel
-                        st.toast(f"Loaded site **{site_sel}** into Subnet Allocation Editor.", icon="📌")
+            st.info("No records to display.")
 
     # ------------------------------------------------------------------
-    # STEP 4: Export / Import
+    # Section 3: NetBox Objects Required
     # ------------------------------------------------------------------
-    if step == "4 · Export / Import":
-        result = st.session_state.get("recon_result")
-        if result is None:
-            st.info("Upload a file in Step 1 first.")
-        else:
-            with st.expander("Step 4 — Export / Import CSVs", expanded=True):
-                from core.ipam_excel_diff import export_pending_csvs
-                prefixes_csv, vlans_csv = export_pending_csvs(result["pending_add"])
+    st.markdown("---")
+    st.markdown("### 🏢 NetBox Objects Required")
 
-                col_pf, col_vl = st.columns(2)
-                with col_pf:
-                    buf = io.BytesIO(prefixes_csv.encode("utf-8"))
-                    st.download_button(
-                        "📥 Download netbox-ipam-prefixes-import.csv",
-                        data=buf,
-                        file_name="netbox-ipam-prefixes-import.csv",
-                        mime="text/csv",
-                    )
-                    st.code(prefixes_csv[:500] + ("..." if len(prefixes_csv) > 500 else ""), language="csv")
+    analyze_btn = st.button("📋 Analyze Requirements", key="btn_analyze_ipam_recon", type="primary")
 
-                with col_vl:
-                    buf2 = io.BytesIO(vlans_csv.encode("utf-8"))
-                    st.download_button(
-                        "📥 Download netbox-ipam-vlans-import.csv",
-                        data=buf2,
-                        file_name="netbox-ipam-vlans-import.csv",
-                        mime="text/csv",
-                    )
-                    st.code(vlans_csv[:500] + ("..." if len(vlans_csv) > 500 else ""), language="csv")
+    if analyze_btn and result is not None:
+        from core.ipam_excel_diff import _build_backup_index, _build_db_index
 
-                st.divider()
-                st.caption("💡 After downloading, import via NetBox: IPAM → Prefixes / VLANs → Import.")
+        prefixes_set, ips_set, sites_set, _ = _build_backup_index()
+        if not prefixes_set and not sites_set:
+            prefixes_set, ips_set, sites_set, _ = _build_db_index()
+
+        parsed_records = result.get("_records_raw", [])
+        parsed_sites = sorted({
+            str(r.get("site", "")).strip()
+            for r in parsed_records
+        } - {""}) if parsed_records else []
+        parsed_vlans = sorted({
+            str(r.get("vlan_id", "")).strip()
+            for r in parsed_records
+        } - {""}) if parsed_records else []
+        parsed_prefixes = sorted({
+            str(r.get("subnet", "")).strip()
+            for r in parsed_records
+        } - {""}) if parsed_records else []
+
+        missing_sites = [s for s in parsed_sites if s and (not sites_set or s.lower() not in sites_set)]
+        missing_vlans = [v for v in parsed_vlans if v and not ips_set]
+        missing_prefixes = [p for p in parsed_prefixes if p and (not prefixes_set or p not in prefixes_set)]
+
+        rc1, rc2, rc3 = st.columns(3)
+        with rc1:
+            st.metric("Missing Sites", len(missing_sites))
+            if missing_sites:
+                for s in missing_sites[:10]:
+                    st.caption(s)
+                if len(missing_sites) > 10:
+                    st.caption(f"... and {len(missing_sites) - 10} more")
+        with rc2:
+            st.metric("Missing VLANs", len(missing_vlans))
+            if missing_vlans:
+                for v in missing_vlans[:10]:
+                    st.caption(f"VLAN {v}")
+                if len(missing_vlans) > 10:
+                    st.caption(f"... and {len(missing_vlans) - 10} more")
+        with rc3:
+            st.metric("Missing Prefixes", len(missing_prefixes))
+            if missing_prefixes:
+                for p in missing_prefixes[:10]:
+                    st.caption(p)
+                if len(missing_prefixes) > 10:
+                    st.caption(f"... and {len(missing_prefixes) - 10} more")
+
+        # Quick-action: site loader
+        all_sites = get_all_site_names()
+        parsed_site_options = parsed_sites or all_sites
+        if parsed_site_options:
+            site_sel = st.selectbox(
+                "🔍 Quick Load Site into Subnet Allocation Editor",
+                options=[""] + parsed_site_options + [s for s in all_sites if s not in parsed_site_options],
+                key="recon_site_selector",
+                help="Auto-fills ipam_site_in for immediate editing.",
+            )
+            if site_sel:
+                st.session_state["ipam_site_in"] = site_sel
+                st.toast(f"Loaded site **{site_sel}** into Subnet Allocation Editor.", icon="📌")
+
+    elif result is None:
+        st.caption("Upload a file above, then click **Analyze Requirements**.")
+
+    # ------------------------------------------------------------------
+    # Section 4: Export & Sync Bundles
+    # ------------------------------------------------------------------
+    st.markdown("---")
+    st.markdown("### 📦 Export & Sync Bundles")
+
+    if result is not None:
+        prefixes_csv, vlans_csv = export_pending_csvs(result["pending_add"])
+
+        col_pf, col_vl = st.columns(2)
+        with col_pf:
+            st.download_button(
+                label="📥 Download NetBox Prefixes Import CSV",
+                data=prefixes_csv.encode("utf-8"),
+                file_name="netbox-ipam-prefixes-import.csv",
+                mime="text/csv",
+                key="ipam_recon_dl_prefixes",
+            )
+            if prefixes_csv:
+                st.code(prefixes_csv[:500] + ("..." if len(prefixes_csv) > 500 else ""), language="csv")
+            else:
+                st.caption("No prefix records to export.")
+
+        with col_vl:
+            st.download_button(
+                label="📥 Download NetBox VLANs Import CSV",
+                data=vlans_csv.encode("utf-8"),
+                file_name="netbox-ipam-vlans-import.csv",
+                mime="text/csv",
+                key="ipam_recon_dl_vlans",
+            )
+            if vlans_csv:
+                st.code(vlans_csv[:500] + ("..." if len(vlans_csv) > 500 else ""), language="csv")
+            else:
+                st.caption("No VLAN records to export.")
+
+        st.download_button(
+            label="📥 Download NetBox-to-Excel Missing Records CSV (Backfill)",
+            data=result["pending_add"].to_csv(index=False).encode("utf-8"),
+            file_name="netbox-to-excel-missing-records.csv",
+            mime="text/csv",
+            key="ipam_recon_dl_missing",
+        )
+
+        st.divider()
+        st.caption("💡 After downloading, import via NetBox: IPAM → Prefixes / VLANs → Import.")
+    else:
+        st.caption("Upload and parse a file to enable export bundles.")
 
 
 def render_ipam_tab(active_model: str):
