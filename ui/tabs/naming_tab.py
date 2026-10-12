@@ -2023,20 +2023,25 @@ def _render_chip_card(
         if edited and edited != text:
             st.session_state.setdefault("chips_session_corrections", {})
             st.session_state["chips_session_corrections"][text] = edited
-            st.session_state["chips_unassigned"] = [
-                c if c["id"] != chip_id else {**c, "text": edited}
-                for c in st.session_state.get("chips_unassigned", [])
-            ]
-            if is_assigned and switch_id and slot_type:
-                deck = st.session_state.get("switch_deck", {})
-                if switch_id in deck:
-                    slot_key = "port_groups" if slot_type == "service" else "uplinks"
-                    deck[switch_id][slot_key] = [
-                        c if c["id"] != chip_id else {**c, "text": edited}
-                        for c in deck[switch_id][slot_key]
-                    ]
-                    st.session_state["switch_deck"] = deck
-            st.rerun()
+            # If this is a parent/switch chip present in the deck, propagate globally
+            _deck = st.session_state.get("switch_deck", {})
+            if category == "parent" and text and text in _deck:
+                _rename_switch_container(text, edited)
+            else:
+                st.session_state["chips_unassigned"] = [
+                    c if c["id"] != chip_id else {**c, "text": edited}
+                    for c in st.session_state.get("chips_unassigned", [])
+                ]
+                if is_assigned and switch_id and slot_type:
+                    deck = st.session_state.get("switch_deck", {})
+                    if switch_id in deck:
+                        slot_key = "port_groups" if slot_type == "service" else "uplinks"
+                        deck[switch_id][slot_key] = [
+                            c if c["id"] != chip_id else {**c, "text": edited}
+                            for c in deck[switch_id][slot_key]
+                        ]
+                        st.session_state["switch_deck"] = deck
+                st.rerun()
         chip_disabled = "disabled" if edited == text else ""
         # Use a styled markdown chip
         cat_colors = {
@@ -2116,6 +2121,73 @@ def _apply_corrections_from_state(text: str) -> str:
     return corrections.get(text, text)
 
 
+def _rename_switch_container(old_name: str, new_name: str) -> None:
+    """Globally rename a switch container key, merge duplicates, and sync chips.
+
+    - If ``new_name`` already exists as a deck key, merge all port_groups/uplinks
+      from ``old_name`` into it and remove the old key.
+    - Otherwise just rename the deck key (preserving contents) and update the
+      stored ``name`` field so the header reflects the new label.
+    - Unassigned parent-category chips whose text matched ``old_name`` are
+      re-keyed to ``new_name`` (first occurrence wins via dedup).
+    """
+    import streamlit as st
+    deck = st.session_state.get("switch_deck", {})
+    pool = st.session_state.get("chips_unassigned", [])
+    corrections = st.session_state.setdefault("chips_session_corrections", {})
+
+    if old_name not in deck:
+        return
+
+    old_data = deck[old_name]
+    has_existing_new = new_name in deck and new_name != old_name
+
+    if has_existing_new:
+        # Merge: absorb old into existing new
+        existing_new = deck[new_name]
+        for slot_key in ("port_groups", "uplinks"):
+            existing_list = existing_new.get(slot_key, [])
+            old_list = old_data.get(slot_key, [])
+            existing_ids = {c["id"] for c in existing_list}
+            for c in old_list:
+                if c["id"] not in existing_ids:
+                    existing_list.append(c)
+            existing_new[slot_key] = existing_list
+        deck.pop(old_name)
+    else:
+        # Pure rename — move the key
+        deck[new_name] = old_data
+        if old_name in deck:
+            del deck[old_name]
+
+    st.session_state["switch_deck"] = deck
+
+    # Sync corrections map for chips whose text was old_name
+    if old_name in corrections:
+        corrections[new_name] = corrections.pop(old_name)
+
+    # Re-key pool chips whose id/text matched old_name
+    new_pool = []
+    for c in pool:
+        if c["id"] == old_name and c.get("category") in ("parent", "container"):
+            c = {**c, "id": new_name, "text": new_name}
+        new_pool.append(c)
+    st.session_state["chips_unassigned"] = new_pool
+
+    # Deduplicate pool by text
+    seen = set()
+    deduped = []
+    for c in new_pool:
+        if c["text"] in seen:
+            continue
+        seen.add(c["text"])
+        deduped.append(c)
+    st.session_state["chips_unassigned"] = deduped
+
+    st.toast(f"Renamed switch: {old_name} → {new_name}", icon="✏️")
+    st.rerun()
+
+
 def _assign_chip(chip: dict, switch_id: str, category: str):
     import streamlit as st
     deck = st.session_state.get("switch_deck", {})
@@ -2181,9 +2253,7 @@ def _render_switch_card(
             help="Rename this switch container",
         )
         if new_name.strip() and new_name.strip() != name:
-            st.session_state["switch_deck"][switch_id]["name"] = new_name.strip()
-            st.toast(f"Renamed to {new_name.strip()}", icon="✏️")
-            st.rerun()
+            _rename_switch_container(switch_id, new_name.strip())
     with col_remove:
         if st.button("Remove Switch", key=f"sw_remove_{switch_id}", type="secondary", help="Remove this switch and return chips to pool"):
             _remove_switch(switch_id)
