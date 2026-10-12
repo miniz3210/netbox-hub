@@ -47,7 +47,7 @@ from core.db_manager import (get_all_site_names,
 )
 from core.shared_backup_state import SharedBackupState
 from utils.formatters import to_title_case_preserve_acronyms
-from ui.components import render_ai_chat, render_backup_uploader
+from ui.components import render_ai_chat
 
 _last_site_lookup = {}  # tracks (site_name, scope_id, supernet) to avoid redundant DB queries
 
@@ -397,197 +397,217 @@ You have DIRECT ACCESS to the complete IPAM database. Analyze the user's request
 
 
 # ---------------------------------------------------------------------------
-# Ingest & Audit Master IPAM Drawer
+# Reconciliation helpers
 # ---------------------------------------------------------------------------
 
-def _audit_cache_key(filename: str, size: int) -> str:
-    return f"{filename}_{size}"
+def _recon_cache_key(filename: str, size: int) -> str:
+    return f"recon_{filename}_{size}"
 
 
-def _render_ingest_audit_drawer(total_sites: int, total_vlans: int, total_prefixes: int):
-    """Unified ingest-and-audit drawer replacing the legacy backup-only expander."""
-    from core.ipam_excel_diff import parse_file_bytes, classify_records
-    from core.db_manager import get_all_site_names, get_existing_prefix_strings
+def _reconcile_uploaded(file_bytes: io.BytesIO, filename: str):
+    from core.ipam_excel_diff import parse_file_bytes, classify_records, load_naming_rules
+    rules = load_naming_rules()
+    records = parse_file_bytes(file_bytes, filename=filename, rules=rules)
+    matched, pending, conflicts, metrics = classify_records(records)
+    return {
+        "matched": matched,
+        "pending_add": pending,
+        "conflicts": conflicts,
+        "metrics": metrics,
+        "filename": filename,
+        "parsed_at": datetime.utcnow().isoformat(timespec="seconds"),
+    }
 
-    db_has_data = (total_sites + total_vlans + total_prefixes) > 0
-    status_emoji = "🟢" if db_has_data else "⚪"
-    db_hint = f" ({total_sites} sites, {total_vlans} VLANs, {total_prefixes} prefixes in DB)" if db_has_data else " (Default Examples)"
 
-    with st.expander(f"📥 Ingest & Audit Master IPAM (Backup JSON / Excel / CSV) {status_emoji}{db_hint}", expanded=False):
+def _render_reconciliation_tab():
+    """4-step Azure-style bi-directional IPAM reconciliation dashboard."""
+    from core.ipam_excel_diff import export_pending_csvs
+    from core.db_manager import get_all_site_names, get_sync_metadata
 
-        # --- Schema registry notice (legacy path, still useful) ---------------
-        from core.universal_schema_registry import UniversalSchemaRegistry
-        registry = UniversalSchemaRegistry.load_from_session_state()
-        if registry and registry.model_signatures:
-            st.success(
-                f"✅ **Schema Registry Active:** {len(registry.model_signatures)} NetBox models loaded. CSV files will be automatically classified.",
-                icon="🔍"
-            )
-        else:
-            st.warning(
-                "⚠️ **Schema Registry Not Initialized:** Upload a NetBox backup JSON below to enable automatic classification.",
-                icon="⚠️"
-            )
+    st.markdown(
+        "**Master IPAM Reconciliation** — Upload an Excel / CSV / JSON inventory and compare it "
+        "against the local NetBox database. The engine classifies every row into matched, pending-add, "
+        "or conflicted buckets and produces ready-to-import CSV bundles."
+    )
 
-        if db_has_data:
-            meta_sites = get_sync_metadata("netbox_sites")
-            meta_vlans = get_sync_metadata("netbox_VLANs")
-            meta_prefixes = get_sync_metadata("netbox_prefixes")
-            sources = [m['source'] for m in [meta_sites, meta_vlans, meta_prefixes] if m['source'] != "None"]
-            st.markdown(f"**DB Status:** `Source: {sources[0] if sources else 'Manual CSV Upload'}`")
-
-        # --- File uploader ---------------------------------------------------
-        file_types = [".xlsx", ".xls", ".csv", ".json"]
-        uploaded_file = st.file_uploader(
-            "Upload IPAM Excel / CSV / JSON",
-            type=file_types,
-            key="ipam_audit_uploader",
-            help="Multi-sheet Excel, flat CSV, or NetBox backup JSON accepted. "
-                 "Headers are discovered dynamically; site defaults to sheet name.",
+    # Step indicator
+    st.markdown("### 📋 Reconciliation Steps")
+    col_step, col_dummy = st.columns([1, 5])
+    with col_step:
+        step = st.radio(
+            "Step",
+            options=["1 · Upload & Parse", "2 · Classify & Audit", "3 · Review Differences", "4 · Export / Import"],
+            label_visibility="collapsed",
+            key="recon_step_radio",
         )
 
-        # --- Action buttons --------------------------------------------------
-        col_clear, col_refresh = st.columns(2)
-        with col_clear:
-            if st.button("🗑️ Clear IPAM Data", key="btn_clear_ipam_audit"):
-                clear_ipam_records()
-                SharedBackupState.clear_csv_only()
-                for k in ["ipam_persisted_rows", "ipam_scope_in", "ipam_site_in", "ipam_super_in",
-                          "ipam_audit_result", "ipam_site_options"]:
-                    st.session_state.pop(k, None)
-                st.toast("🗑️ IPAM audit cache cleared.", icon="🧹")
-                st.rerun()
-        with col_refresh:
-            if st.button("🔄 Refresh Audit", key="btn_refresh_ipam_audit"):
-                if "ipam_audit_result" in st.session_state:
+    # ------------------------------------------------------------------
+    # STEP 1: Upload & Parse
+    # ------------------------------------------------------------------
+    if "recon_result" not in st.session_state:
+        st.session_state["recon_result"] = None
+    if "recon_uploaded_file" not in st.session_state:
+        st.session_state["recon_uploaded_file"] = None
+
+    if step in ("1 · Upload & Parse", "2 · Classify & Audit", "3 · Review Differences", "4 · Export / Import"):
+        with st.expander("Step 1 — Upload & Parse", expanded=(step == "1 · Upload & Parse")):
+            file_types = [".xlsx", ".xls", ".csv", ".json"]
+            uploaded_file = st.file_uploader(
+                "Upload IPAM Excel / CSV / JSON",
+                type=file_types,
+                key="recon_file_uploader",
+                help="Multi-sheet Excel, flat CSV, or NetBox backup JSON accepted.",
+            )
+
+            col_clr, col_run = st.columns(2)
+            with col_clr:
+                if st.button("🗑️ Clear Reconciliation Cache", key="btn_clear_recon"):
+                    st.session_state.pop("recon_result", None)
+                    st.session_state.pop("recon_uploaded_file", None)
+                    for k in list(st.session_state.keys()):
+                        if k.startswith("recon_"):
+                            st.session_state.pop(k, None)
+                    st.toast("🧹 Reconciliation cache cleared.", icon="🧹")
                     st.rerun()
 
-        # --- Parse & cache ---------------------------------------------------
-        audit_result = None
-        if uploaded_file is not None:
-            cache_key = _audit_cache_key(uploaded_file.name, uploaded_file.size)
-            cached = st.session_state.get(cache_key)
-            if cached is None:
-                try:
-                    bytes_buf = io.BytesIO(uploaded_file.read())
-                    rules = load_naming_rules()
-                    records = parse_file_bytes(bytes_buf, filename=uploaded_file.name, rules=rules)
-                    matched, pending, conflicts, metrics = classify_records(records)
-                    audit_result = {
-                        "matched": matched,
-                        "pending_add": pending,
-                        "conflicts": conflicts,
-                        "metrics": metrics,
-                        "filename": uploaded_file.name,
-                    }
-                    st.session_state[cache_key] = audit_result
-                    # Also store under canonical key so downstream UI reads it
-                    st.session_state["ipam_audit_result"] = audit_result
-                except Exception as exc:
-                    st.error(f"❌ Parse failed: {exc}")
-            else:
-                audit_result = cached
+            if uploaded_file is not None:
+                cache_key = _recon_cache_key(uploaded_file.name, uploaded_file.size)
+                if st.session_state.get(cache_key) is None:
+                    with st.spinner("Parsing and classifying…"):
+                        try:
+                            result = _reconcile_uploaded(
+                                io.BytesIO(uploaded_file.read()), uploaded_file.name
+                            )
+                            st.session_state[cache_key] = result
+                            st.session_state["recon_result"] = result
+                            st.session_state["recon_uploaded_file"] = uploaded_file.name
+                            st.toast(f"✅ Parsed {result['metrics']['total_parsed']} records.", icon="📄")
+                        except Exception as exc:
+                            st.error(f"❌ Parse failed: {exc}")
+                else:
+                    result = st.session_state[cache_key]
+                    st.session_state["recon_result"] = result
 
-        # --- Render cached / live result -------------------------------------
-        result = audit_result or st.session_state.get("ipam_audit_result")
+    # ------------------------------------------------------------------
+    # STEP 2: Classify & Audit
+    # ------------------------------------------------------------------
+    if step in ("2 · Classify & Audit", "3 · Review Differences", "4 · Export / Import"):
+        result = st.session_state.get("recon_result")
         if result is None:
-            st.caption("Upload an Excel, CSV, or JSON file to run the audit.")
-            render_backup_uploader("ipam")
-            return
+            st.info("Upload a file in Step 1 first.")
+        else:
+            with st.expander("Step 2 — Classify & Audit Results", expanded=(step == "2 · Classify & Audit")):
+                metrics = result["metrics"]
+                c1, c2, c3, c4 = st.columns(4)
+                with c1:
+                    st.metric("Total Parsed", metrics["total_parsed"])
+                with c2:
+                    st.metric("✅ In NetBox DB", metrics["matched"])
+                with c3:
+                    st.metric("❌ Need to Add", metrics["pending_add"])
+                with c4:
+                    st.metric("⚠️ Conflicts", metrics["conflicts"])
 
-        metrics = result["metrics"]
-        df_matched = result["matched"]
-        df_pending = result["pending_add"]
-        df_conflicts = result["conflicts"]
-
-        # --- Metric cards ----------------------------------------------------
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            st.metric("Total Parsed", metrics["total_parsed"])
-        with c2:
-            st.metric("✅ In NetBox DB", metrics["matched"])
-        with c3:
-            st.metric("❌ Need to Add", metrics["pending_add"])
-        with c4:
-            st.metric("⚠️ Conflicts", metrics["conflicts"])
-
-        # --- Quick-action: site loader ---------------------------------------
-        all_sites = get_all_site_names()
-        parsed_site_options: List[str] = sorted({
-            str(r.get("site", "")).strip()
-            for r in (result.get("_records_raw") or [])
-        } - {""}) or all_sites
-        if parsed_site_options:
-            with st.expander("🔍 Quick Action: Load Site into Subnet Allocation Editor", expanded=False):
-                st.markdown(
-                    "Select any site discovered in the uploaded file to auto-fill the "
-                    "**Branch / Site Name** field and jump directly to live editing."
+                db_has_data = (get_total_sites_count() + get_total_vlans_count() + get_total_prefixes_count()) > 0
+                status_emoji = "🟢" if db_has_data else "⚪"
+                db_hint = (
+                    f" ({get_total_sites_count()} sites, {get_total_vlans_count()} VLANs, "
+                    f"{get_total_prefixes_count()} prefixes in DB)" if db_has_data else " (Default Examples)"
                 )
-                site_sel = st.selectbox(
-                    "Load Site",
-                    options=[""] + parsed_site_options + all_sites,
-                    key="ipam_audit_site_selector",
-                    help="Auto-fills ipam_site_in for immediate editing.",
-                )
-                if site_sel:
-                    st.session_state["ipam_site_in"] = site_sel
-                    st.toast(f"Loaded site **{site_sel}** into Subnet Allocation Editor.", icon="📌")
-                    st.rerun()
+                st.caption(f"Local DB {status_emoji}{db_hint}")
 
-        # --- Tabbed audit view -----------------------------------------------
-        tab_add, tab_conflicts, tab_matched = st.tabs([
-            f"❌ Need to Add ({metrics['pending_add']})",
-            f"⚠️ Conflicts ({metrics['conflicts']})",
-            f"✅ Existing in DB ({metrics['matched']})",
-        ])
+    # ------------------------------------------------------------------
+    # STEP 3: Review Differences
+    # ------------------------------------------------------------------
+    if step in ("3 · Review Differences", "4 · Export / Import"):
+        result = st.session_state.get("recon_result")
+        if result is None:
+            st.info("Upload a file in Step 1 first.")
+        else:
+            with st.expander("Step 3 — Review Differences", expanded=(step == "3 · Review Differences")):
+                df_matched = result["matched"]
+                df_pending = result["pending_add"]
+                df_conflicts = result["conflicts"]
 
-        with tab_add:
-            if df_pending.empty:
-                st.info("No records need to be added — all entries exist in the database.")
-            else:
-                st.markdown("**Records ready for NetBox bulk import.**")
-                st.dataframe(df_pending, use_container_width=True, hide_index=True)
+                tab_add, tab_conflicts, tab_matched = st.tabs([
+                    f"❌ Need to Add ({metrics['pending_add']})",
+                    f"⚠️ Conflicts ({metrics['conflicts']})",
+                    f"✅ Existing in DB ({metrics['matched']})",
+                ])
+
+                with tab_add:
+                    if df_pending.empty:
+                        st.info("No records need to be added — all entries exist in the database.")
+                    else:
+                        st.markdown("**Records ready for NetBox bulk import.**")
+                        st.dataframe(df_pending, use_container_width=True, hide_index=True)
+
+                with tab_conflicts:
+                    if df_conflicts.empty:
+                        st.success("No conflicts detected.")
+                    else:
+                        st.markdown("**Records with mismatched Site / VLAN attributes or unmapped sites.**")
+                        st.dataframe(df_conflicts, use_container_width=True, hide_index=True)
+
+                with tab_matched:
+                    if df_matched.empty:
+                        st.info("No records matched existing database entries.")
+                    else:
+                        st.markdown("**Records that already exist in NetBox DB with consistent attributes.**")
+                        st.dataframe(df_matched, use_container_width=True, hide_index=True)
+
+                # Quick-action: site loader
+                all_sites = get_all_site_names()
+                parsed_site_options: List[str] = sorted({
+                    str(r.get("site", "")).strip()
+                    for r in (result.get("_records_raw") or [])
+                } - {""}) or all_sites
+                if parsed_site_options:
+                    site_sel = st.selectbox(
+                        "🔍 Quick Load Site into Subnet Allocation Editor",
+                        options=[""] + parsed_site_options + all_sites,
+                        key="recon_site_selector",
+                        help="Auto-fills ipam_site_in for immediate editing.",
+                    )
+                    if site_sel:
+                        st.session_state["ipam_site_in"] = site_sel
+                        st.toast(f"Loaded site **{site_sel}** into Subnet Allocation Editor.", icon="📌")
+
+    # ------------------------------------------------------------------
+    # STEP 4: Export / Import
+    # ------------------------------------------------------------------
+    if step == "4 · Export / Import":
+        result = st.session_state.get("recon_result")
+        if result is None:
+            st.info("Upload a file in Step 1 first.")
+        else:
+            with st.expander("Step 4 — Export / Import CSVs", expanded=True):
+                from core.ipam_excel_diff import export_pending_csvs
+                prefixes_csv, vlans_csv = export_pending_csvs(result["pending_add"])
+
                 col_pf, col_vl = st.columns(2)
                 with col_pf:
-                    buf = io.BytesIO()
-                    cols_pf = [c for c in ["subnet", "vlan_id", "vlan_name", "site", "description", "ip_address"] if c in df_pending.columns]
-                    df_pending[cols_pf].to_csv(buf, index=False)
-                    buf.seek(0)
+                    buf = io.BytesIO(prefixes_csv.encode("utf-8"))
                     st.download_button(
                         "📥 Download netbox-ipam-prefixes-import.csv",
                         data=buf,
                         file_name="netbox-ipam-prefixes-import.csv",
                         mime="text/csv",
                     )
+                    st.code(prefixes_csv[:500] + ("..." if len(prefixes_csv) > 500 else ""), language="csv")
+
                 with col_vl:
-                    buf2 = io.BytesIO()
-                    cols_vl = [c for c in ["vlan_id", "vlan_name", "site", "description", "subnet"] if c in df_pending.columns]
-                    df_pending[cols_vl].to_csv(buf2, index=False)
-                    buf2.seek(0)
+                    buf2 = io.BytesIO(vlans_csv.encode("utf-8"))
                     st.download_button(
                         "📥 Download netbox-ipam-vlans-import.csv",
                         data=buf2,
                         file_name="netbox-ipam-vlans-import.csv",
                         mime="text/csv",
                     )
+                    st.code(vlans_csv[:500] + ("..." if len(vlans_csv) > 500 else ""), language="csv")
 
-        with tab_conflicts:
-            if df_conflicts.empty:
-                st.success("No conflicts detected.")
-            else:
-                st.markdown("**Records with mismatched Site / VLAN attributes or unmapped sites.**")
-                st.dataframe(df_conflicts, use_container_width=True, hide_index=True)
-
-        with tab_matched:
-            if df_matched.empty:
-                st.info("No records matched existing database entries.")
-            else:
-                st.markdown("**Records that already exist in NetBox DB with consistent attributes.**")
-                st.dataframe(df_matched, use_container_width=True, hide_index=True)
-
-        # --- Fallback: legacy backup uploader remains accessible -------------
-        st.divider()
-        render_backup_uploader("ipam")
+                st.divider()
+                st.caption("💡 After downloading, import via NetBox: IPAM → Prefixes / VLANs → Import.")
 
 
 def render_ipam_tab(active_model: str):
@@ -607,327 +627,337 @@ def render_ipam_tab(active_model: str):
                 import logging
                 logging.getLogger(__name__).warning(f"Failed to restore backup on tab load: {e}")
 
-    # 1. Ingest & Audit Master Drawer
-    total_ipam_recs = get_total_ipam_count()
-    total_sites_recs = get_total_sites_count()
-    total_vlans_recs = get_total_vlans_count()
-    total_prefixes_recs = get_total_prefixes_count()
-    _render_ingest_audit_drawer(total_sites_recs, total_vlans_recs, total_prefixes_recs)
+    # Two top-level sub-tabs
+    tab_subnet, tab_reconcile = st.tabs(["🏢 Site Subnet Allocation", "⚖️ Master IPAM Reconciliation"])
 
-    # 2. Site Inputs and Dynamic Lookups
-    if "ipam_site_in" not in st.session_state:
-        st.session_state["ipam_site_in"] = ""
-    if "ipam_scope_in" not in st.session_state:
-        st.session_state["ipam_scope_in"] = ""
-    if "ipam_super_in" not in st.session_state:
-        st.session_state["ipam_super_in"] = ""
-
-    max_scope_id = get_max_scope_id()
-    scope_eg = f"e.g. {max_scope_id + 1}" if max_scope_id is not None else "e.g. 42"
-    site_name = st.session_state.get("ipam_site_in", "").strip()
-    supernet_in = st.session_state.get("ipam_super_in", "").strip()
-    existing_prefixes = get_existing_prefix_strings()
-
-    # 2.5. AI IPAM & Subnet Assistant
-    render_ai_chat(
-        history_key="ipam_chat_history",
-        caption="Ask for subnet suggestions using natural language (e.g., 'Show me VLANs in Weybridge' or 'Suggest the next available /24 in 10.113.0.0/16')",
-        placeholder="Ask for subnet suggestions...",
-        active_model=active_model,
-        build_system_prompt=lambda p: build_ipam_system_prompt(
-            p, site_name, supernet_in, existing_prefixes, max_scope_id
-        ),
-    )
-
-    # Site input fields
-    top1, top2, top3 = st.columns([2, 1, 2.2])
-    with top1:
-        st.text_input(
-            "Branch / Site Name",
-            key="ipam_site_in",
-            placeholder="e.g. Bristol, AGE, Adelaide, UK, Site-01",
-            on_change=handle_site_change
+    # ==================================================================
+    # TAB 1: Site Subnet Allocation
+    # ==================================================================
+    with tab_subnet:
+        # 1. AI IPAM & Subnet Assistant
+        render_ai_chat(
+            history_key="ipam_chat_history",
+            caption="Ask for subnet suggestions using natural language (e.g., 'Show me VLANs in Weybridge' or 'Suggest the next available /24 in 10.113.0.0/16')",
+            placeholder="Ask for subnet suggestions...",
+            active_model=active_model,
+            build_system_prompt=lambda p: build_ipam_system_prompt(
+                p,
+                st.session_state.get("ipam_site_in", "").strip(),
+                st.session_state.get("ipam_super_in", "").strip(),
+                get_existing_prefix_strings(),
+                get_max_scope_id(),
+            ),
         )
 
-    cached_site = _last_site_lookup.get("site", "")
-    if site_name and site_name != cached_site:
-        handle_site_change()
+        # 2. Site Inputs and Dynamic Lookups
+        if "ipam_site_in" not in st.session_state:
+            st.session_state["ipam_site_in"] = ""
+        if "ipam_scope_in" not in st.session_state:
+            st.session_state["ipam_scope_in"] = ""
+        if "ipam_super_in" not in st.session_state:
+            st.session_state["ipam_super_in"] = ""
 
-    auto_scope_id = _last_site_lookup.get("scope")
-    auto_supernet = _last_site_lookup.get("supernet")
+        max_scope_id = get_max_scope_id()
+        scope_eg = f"e.g. {max_scope_id + 1}" if max_scope_id is not None else "e.g. 42"
+        site_name = st.session_state.get("ipam_site_in", "").strip()
+        supernet_in = st.session_state.get("ipam_super_in", "").strip()
+        existing_prefixes = get_existing_prefix_strings()
 
-    if site_name and auto_supernet and not st.session_state.get("ipam_super_in"):
-        st.session_state["ipam_super_in"] = str(auto_supernet)
-
-    site_found = bool(st.session_state.get("ipam_site_found_in_db", False))
-    if site_name and st.session_state.get("ipam_loaded_site") != site_name:
-        site_found = bool(get_ipam_records_by_site(site_name))
-        st.session_state["ipam_site_found_in_db"] = site_found
-
-    with top2:
-        st.text_input(
-            "Scope ID (NetBox Site ID)", 
-            key="ipam_scope_in",
-            placeholder=scope_eg,
-            help="Auto-discovered from uploaded data/agent sync, or editable manually."
-        )
-        scope_id = st.session_state["ipam_scope_in"].strip()
-        if auto_scope_id:
-            st.caption(f"🟢 Matched Scope ID: **`{auto_scope_id}`**")
-        else:
-            st.caption("⚪ Manual Scope ID mode")
-
-    with top3:
-        st.text_input(
-            "Site Supernet (CIDR)", 
-            key="ipam_super_in",
-            placeholder="e.g. 10.x.x.0/24",
-            help="Top-level container subnet for this branch site."
-        )
-        cap_placeholder = st.empty()
-
-    display_site_name = format_branch_display(site_name)
-
-    # 3. Preset Selection & Allocation Editor
-    st.divider()
-    c_title, c_preset_container = st.columns([2.3, 1.5])
-    with c_title:
-        st.markdown("##### 📊 Subnet Allocation & Live Status (✏️ Click any cell to edit)")
-    with c_preset_container:
-        c_preset_inner, c_refresh, c_status = st.columns([1.0, 0.3, 0.3])
-        rules = load_naming_rules()
-        dynamic_presets = get_vlan_presets(rules)
-        preset_options = ["🗄️ Load From DB (Existing Site)", "Custom / Empty Preset"] + [k for k in dynamic_presets.keys() if k != "Custom / Empty Preset"]
-        default_idx = preset_options.index("Custom / Empty Preset") if "Custom / Empty Preset" in preset_options else 0
-        with c_preset_inner:
-            st.selectbox(
-                "Load Standard Preset",
-                options=preset_options,
-                index=default_idx,
-                key="ipam_preset_selector",
-                on_change=on_preset_change,
-                help="Quickly load pre-defined standard VLAN structures or start blank."
+        # Site input fields
+        top1, top2, top3 = st.columns([2, 1, 2.2])
+        with top1:
+            st.text_input(
+                "Branch / Site Name",
+                key="ipam_site_in",
+                placeholder="e.g. Bristol, AGE, Adelaide, UK, Site-01",
+                on_change=handle_site_change
             )
-        selected_preset = st.session_state.get("ipam_preset_selector", "")
-        db_mode = selected_preset == "🗄️ Load From DB (Existing Site)"
 
-        with c_refresh:
-            st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-            if db_mode:
-                if st.button("🔄", key="btn_refresh_ipam", help=f"Reload '{site_name or 'site'}' data from database"):
-                    if load_ipam_records_from_db(site_name):
-                        st.toast(f"🔄 Reloaded {site_name} from database.", icon="✅")
-                    else:
-                        st.toast(f"⚠️ No records found for '{site_name}'.", icon="⚠️")
-                    st.rerun()
-        with c_status:
-            st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-            if site_found:
-                st.markdown("✅", help="Site found in DB - Select 'Load From DB' to load data")
+        cached_site = _last_site_lookup.get("site", "")
+        if site_name and site_name != cached_site:
+            handle_site_change()
+
+        auto_scope_id = _last_site_lookup.get("scope")
+        auto_supernet = _last_site_lookup.get("supernet")
+
+        if site_name and auto_supernet and not st.session_state.get("ipam_super_in"):
+            st.session_state["ipam_super_in"] = str(auto_supernet)
+
+        site_found = bool(st.session_state.get("ipam_site_found_in_db", False))
+        if site_name and st.session_state.get("ipam_loaded_site") != site_name:
+            site_found = bool(get_ipam_records_by_site(site_name))
+            st.session_state["ipam_site_found_in_db"] = site_found
+
+        with top2:
+            st.text_input(
+                "Scope ID (NetBox Site ID)", 
+                key="ipam_scope_in",
+                placeholder=scope_eg,
+                help="Auto-discovered from uploaded data/agent sync, or editable manually."
+            )
+            scope_id = st.session_state["ipam_scope_in"].strip()
+            if auto_scope_id:
+                st.caption(f"🟢 Matched Scope ID: **`{auto_scope_id}`**")
             else:
-                st.caption("⚪")
+                st.caption("⚪ Manual Scope ID mode")
 
-    if db_mode and site_name and st.session_state.get("ipam_loaded_site") != site_name:
-        load_ipam_records_from_db(site_name)
-        st.rerun()
-
-    if "ipam_persisted_rows" not in st.session_state:
-        st.session_state["ipam_persisted_rows"] = []
-
-    raw_rows = [dict(r) for r in st.session_state["ipam_persisted_rows"]]
-    editor_state = st.session_state.get("ipam_data_editor_live", {})
-
-    active_vlan_presets = get_vlan_presets(rules)
-    vlan_desc_mappings = get_vlan_description_mappings(rules)
-    role_rules = get_ipam_role_mappings(rules)
-    
-    deleted_indices = set(editor_state.get("deleted_rows", []))
-    if deleted_indices:
-        raw_rows = [r for i, r in enumerate(raw_rows) if i not in deleted_indices]
-
-    edited_cells = editor_state.get("edited_rows", {})
-    for row_idx_str, changes in edited_cells.items():
-        row_idx = int(row_idx_str)
-        if row_idx < len(raw_rows):
-            if "VLAN Description" in changes:
-                raw_rows[row_idx]["_vlan_desc_manual"] = True
-
-            manual_desc = raw_rows[row_idx].get("_vlan_desc_manual", False)
-
-            if "Role" in changes:
-                changes["Role"] = normalize_role_name(changes["Role"], role_rules)
-                name_pattern = raw_rows[row_idx].get("_name_pattern", "")
-                if name_pattern and "VLAN Name" not in changes:
-                    site_display = format_branch_display(site_name)
-                    changes["VLAN Name"] = resolve_vlan_name(
-                        site_display,
-                        changes.get("VLAN ID", raw_rows[row_idx].get("VLAN ID")),
-                        changes["Role"],
-                        name_pattern
-                    )
-            pattern_template = raw_rows[row_idx].get("_pattern_template", "")
-            if (
-                not manual_desc
-                and ("Role" in changes or "VLAN ID" in changes)
-                and "VLAN Description" not in changes
-            ):
-                next_role = changes.get("Role", raw_rows[row_idx].get("Role", ""))
-                next_vlan_id = changes.get("VLAN ID", raw_rows[row_idx].get("VLAN ID"))
-                next_vlan_name = changes.get("VLAN Name", raw_rows[row_idx].get("VLAN Name", next_role))
-                changes["VLAN Description"] = build_vlan_description(
-                    site_name, next_role, next_vlan_id, next_vlan_name, active_vlan_presets, vlan_desc_mappings, role_rules
-                )
-            if pattern_template and ("Role" in changes or "VLAN ID" in changes):
-                if "Prefix Description" not in changes:
-                    site_display = format_branch_display(site_name)
-                    role_for_prefix = changes.get("Role", raw_rows[row_idx].get("Role", ""))
-                    vid_for_prefix = changes.get("VLAN ID", raw_rows[row_idx].get("VLAN ID"))
-                    name_for_prefix = changes.get("VLAN Name", raw_rows[row_idx].get("VLAN Name", role_for_prefix))
-                    changes["Prefix Description"] = resolve_pattern_template(
-                        pattern_template, site_display, vid_for_prefix, role_for_prefix, name_for_prefix
-                    )
-            raw_rows[row_idx].update(changes)
-
-    for new_r in editor_state.get("added_rows", []):
-        r_name = new_r.get("Role", "")
-        new_vid = new_r.get("VLAN ID", None)
-        typed_desc = str(new_r.get("VLAN Description", "") or "").strip()
-        typed_vlan_name = str(new_r.get("VLAN Name", "") or "").strip()
-        site_display = format_branch_display(site_name)
-        selected_preset_name = st.session_state.get("ipam_preset_selector", "")
-        if selected_preset_name and selected_preset_name != "🗄️ Load From DB (Existing Site)" and selected_preset_name in dynamic_presets:
-            group_vname_pat = dynamic_presets[selected_preset_name].get("vlan_name_pattern", "")
-            group_prefix_pat = dynamic_presets[selected_preset_name].get("prefix_pattern", "")
-        else:
-            group_vname_pat = ""
-            group_prefix_pat = ""
-        name_pattern = new_r.get("_name_pattern", group_vname_pat) or group_vname_pat
-        prefix_template = new_r.get("_pattern_template", group_prefix_pat) or group_prefix_pat
-        if typed_vlan_name and not name_pattern:
-            vlan_name = typed_vlan_name
-        else:
-            vlan_name = resolve_vlan_name(site_display, new_vid, r_name, name_pattern)
-        raw_rows.append({
-            "VLAN ID": new_vid,
-            "Role": normalize_role_name(r_name, role_rules) or to_title_case_preserve_acronyms(r_name),
-            "VLAN Name": vlan_name,
-            "VLAN Description": typed_desc if typed_desc else resolve_vlan_description(new_vid, r_name, active_vlan_presets, vlan_desc_mappings, role_rules),
-            "_vlan_desc_manual": bool(typed_desc),
-            "_pattern_template": prefix_template,
-            "_name_pattern": name_pattern,
-            "Subnet (CIDR)": new_r.get("Subnet (CIDR)", "")
-        })
-
-    computed_rows = compute_chained_rows(supernet_in, raw_rows)
-    st.session_state["ipam_persisted_rows"] = computed_rows
-
-    loaded_from_db = st.session_state.get("ipam_loaded_from_db", False)
-    allocated_subnets = []
-    for r in computed_rows:
-        sub_str = str(r.get("Subnet (CIDR)", "") or "").strip()
-        if sub_str:
-            allocated_subnets.append(sub_str)
-        
-        eval_res = evaluate_subnet_row(
-            sub_str, 
-            r.get("VLAN ID"), 
-            r.get("Role", ""), 
-            site_name, 
-            supernet_in, 
-            existing_prefixes,
-            vlan_name=r.get("VLAN Name", ""),
-            pattern_template=r.get("_pattern_template", ""),
-        )
-        r["Usable Range"] = eval_res["usable_range"]
-        r["Status"] = eval_res["status"]
-        
-        if loaded_from_db and "_db_prefix_desc" in r:
-            r["Prefix Description"] = r.get("_db_prefix_desc") or ""
-        else:
-            r["Prefix Description"] = eval_res["desc"]
-
-    with cap_placeholder.container():
-        if supernet_in and "/" in supernet_in:
-            try:
-                sup_net = ipaddress.ip_network(supernet_in, strict=False)
-                sup_range = calculate_ip_range_str(sup_net)
-                cap_matrix = calculate_remaining_subnets(supernet_in, allocated_subnets)
-                sup_prefix_len = sup_net.prefixlen
-                step_masks = [f"/{m}" for m in range(sup_prefix_len + 1, min(sup_prefix_len + 5, 31))]
-                cap_items = [f"`{cap_matrix.get(m, 0)}x {m}`" for m in step_masks]
-                cap_str = f"**Available:** {' | '.join(cap_items)}" if cap_items else "No subnets"
-                st.markdown(f"📍 **Site Subnet:** `{sup_range}`")
-                st.caption(cap_str)
-            except ValueError:
-                st.caption("⚠️ Invalid CIDR format")
-
-    TABLE_COLS = [
-        "VLAN ID", "Role", "VLAN Name", "VLAN Description", 
-        "Suggest Subnet", "Subnet (CIDR)", "Usable Range", "Status", "Prefix Description"
-    ]
-    if computed_rows:
-        df_init = pd.DataFrame(computed_rows)[TABLE_COLS]
-    else:
-        df_init = pd.DataFrame(columns=TABLE_COLS)
-
-    edited_df = st.data_editor(
-        df_init,
-        width="stretch",
-        num_rows="dynamic",
-        key="ipam_data_editor_live",
-        column_config={
-            "VLAN ID": st.column_config.NumberColumn("VLAN ID", step=1, required=True),
-            "Role": st.column_config.TextColumn("Role", help="VLAN Role. Auto-sets VLAN Name & Description via DB lookup."),
-            "VLAN Name": st.column_config.TextColumn("VLAN Name", help="VLAN Name in NetBox. Defaults to Role (or dynamic pattern), or editable."),
-            "VLAN Description": st.column_config.TextColumn("VLAN Description", help="VLAN Description. Auto-looked up from DB or editable."),
-            "Suggest Subnet": st.column_config.TextColumn("Suggest Subnet", help="Calculated next available network IP ID.", disabled=True),
-            "Subnet (CIDR)": st.column_config.TextColumn("Subnet (CIDR)", help="Type subnet CIDR (e.g. 10.113.252.0/23) and hit Enter."),
-            "Usable Range": st.column_config.TextColumn("Usable Range", help="Calculated usable host IP range.", disabled=True),
-            "Status": st.column_config.TextColumn("Status", help="Collision & Database usage status.", disabled=True),
-            "Prefix Description": st.column_config.TextColumn("Prefix Description", help="Calculated NetBox prefix description.", disabled=True)
-        }
-    )
-
-    # 4. NetBox Bulk-Import CSV Copy Cards & Scope ID Notification
-    st.divider()
-    st.markdown("### 📋 NetBox Bulk-Import CSV Generators")
-
-    if not scope_id:
-        st.warning("⚠️ **Notice:** Scope ID is empty. Export NetBox Sites CSV to discover Scope ID, or enter it manually.", icon="⚠️")
-
-    display_site = display_site_name or "Site"
-    csv_site = generate_netbox_site_csv(display_site)
-    csv_group = generate_netbox_vlan_group_csv(display_site, scope_id)
-    csv_vlans = generate_netbox_vlans_csv(display_site, computed_rows)
-
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("**1. Import Site (`dcim.site`)**", help="📍 NetBox Path: Organization → Sites → Import")
-        st.code(csv_site, language="csv")
-
-        st.markdown("**3. Import VLANs (`ipam.vlan`)**", help="📍 NetBox Path: IPAM → VLANs → Import\n\nExports VLANs with allocated IP subnets. Unassigned presets are filtered out.")
-        st.code(csv_vlans, language="csv")
-
-    with c2:
-        st.markdown("**2. Import VLAN Group (`ipam.vlangroup`)**", help="📍 NetBox Path: IPAM → VLAN Groups → Import")
-        st.code(csv_group, language="csv")
-
-        prefix_title, prefix_option = st.columns([2.2, 1.8])
-        with prefix_title:
-            st.markdown("**4. Import Prefixes (`ipam.prefix`)**", help="📍 NetBox Path: IPAM → Prefixes → Import")
-        with prefix_option:
-            st.checkbox(
-                "Include site subnet in Prefixes CSV",
-                value=True,
-                help="Add the top-level site supernet.",
-                key="ipam_include_site_subnet",
+        with top3:
+            st.text_input(
+                "Site Supernet (CIDR)", 
+                key="ipam_super_in",
+                placeholder="e.g. 10.x.x.0/24",
+                help="Top-level container subnet for this branch site."
             )
-        include_site_subnet = st.session_state.get("ipam_include_site_subnet", True)
-        csv_prefixes = generate_netbox_prefixes_csv(
-            display_site,
-            scope_id,
-            supernet_in,
-            computed_rows,
-            include_site_subnet=include_site_subnet,
+            cap_placeholder = st.empty()
+
+        display_site_name = format_branch_display(site_name)
+
+        # 3. Preset Selection & Allocation Editor
+        st.divider()
+        c_title, c_preset_container = st.columns([2.3, 1.5])
+        with c_title:
+            st.markdown("##### 📊 Subnet Allocation & Live Status (✏️ Click any cell to edit)")
+        with c_preset_container:
+            c_preset_inner, c_refresh, c_status = st.columns([1.0, 0.3, 0.3])
+            rules = load_naming_rules()
+            dynamic_presets = get_vlan_presets(rules)
+            preset_options = ["🗄️ Load From DB (Existing Site)", "Custom / Empty Preset"] + [k for k in dynamic_presets.keys() if k != "Custom / Empty Preset"]
+            default_idx = preset_options.index("Custom / Empty Preset") if "Custom / Empty Preset" in preset_options else 0
+            with c_preset_inner:
+                st.selectbox(
+                    "Load Standard Preset",
+                    options=preset_options,
+                    index=default_idx,
+                    key="ipam_preset_selector",
+                    on_change=on_preset_change,
+                    help="Quickly load pre-defined standard VLAN structures or start blank."
+                )
+            selected_preset = st.session_state.get("ipam_preset_selector", "")
+            db_mode = selected_preset == "🗄️ Load From DB (Existing Site)"
+
+            with c_refresh:
+                st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+                if db_mode:
+                    if st.button("🔄", key="btn_refresh_ipam", help=f"Reload '{site_name or 'site'}' data from database"):
+                        if load_ipam_records_from_db(site_name):
+                            st.toast(f"🔄 Reloaded {site_name} from database.", icon="✅")
+                        else:
+                            st.toast(f"⚠️ No records found for '{site_name}'.", icon="⚠️")
+                        st.rerun()
+            with c_status:
+                st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+                if site_found:
+                    st.markdown("✅", help="Site found in DB - Select 'Load From DB' to load data")
+                else:
+                    st.caption("⚪")
+
+        if db_mode and site_name and st.session_state.get("ipam_loaded_site") != site_name:
+            load_ipam_records_from_db(site_name)
+            st.rerun()
+
+        if "ipam_persisted_rows" not in st.session_state:
+            st.session_state["ipam_persisted_rows"] = []
+
+        raw_rows = [dict(r) for r in st.session_state["ipam_persisted_rows"]]
+        editor_state = st.session_state.get("ipam_data_editor_live", {})
+
+        active_vlan_presets = get_vlan_presets(rules)
+        vlan_desc_mappings = get_vlan_description_mappings(rules)
+        role_rules = get_ipam_role_mappings(rules)
+        
+        deleted_indices = set(editor_state.get("deleted_rows", []))
+        if deleted_indices:
+            raw_rows = [r for i, r in enumerate(raw_rows) if i not in deleted_indices]
+
+        edited_cells = editor_state.get("edited_rows", {})
+        for row_idx_str, changes in edited_cells.items():
+            row_idx = int(row_idx_str)
+            if row_idx < len(raw_rows):
+                if "VLAN Description" in changes:
+                    raw_rows[row_idx]["_vlan_desc_manual"] = True
+
+                manual_desc = raw_rows[row_idx].get("_vlan_desc_manual", False)
+
+                if "Role" in changes:
+                    changes["Role"] = normalize_role_name(changes["Role"], role_rules)
+                    name_pattern = raw_rows[row_idx].get("_name_pattern", "")
+                    if name_pattern and "VLAN Name" not in changes:
+                        site_display = format_branch_display(site_name)
+                        changes["VLAN Name"] = resolve_vlan_name(
+                            site_display,
+                            changes.get("VLAN ID", raw_rows[row_idx].get("VLAN ID")),
+                            changes["Role"],
+                            name_pattern
+                        )
+                pattern_template = raw_rows[row_idx].get("_pattern_template", "")
+                if (
+                    not manual_desc
+                    and ("Role" in changes or "VLAN ID" in changes)
+                    and "VLAN Description" not in changes
+                ):
+                    next_role = changes.get("Role", raw_rows[row_idx].get("Role", ""))
+                    next_vlan_id = changes.get("VLAN ID", raw_rows[row_idx].get("VLAN ID"))
+                    next_vlan_name = changes.get("VLAN Name", raw_rows[row_idx].get("VLAN Name", next_role))
+                    changes["VLAN Description"] = build_vlan_description(
+                        site_name, next_role, next_vlan_id, next_vlan_name, active_vlan_presets, vlan_desc_mappings, role_rules
+                    )
+                if pattern_template and ("Role" in changes or "VLAN ID" in changes):
+                    if "Prefix Description" not in changes:
+                        site_display = format_branch_display(site_name)
+                        role_for_prefix = changes.get("Role", raw_rows[row_idx].get("Role", ""))
+                        vid_for_prefix = changes.get("VLAN ID", raw_rows[row_idx].get("VLAN ID"))
+                        name_for_prefix = changes.get("VLAN Name", raw_rows[row_idx].get("VLAN Name", role_for_prefix))
+                        changes["Prefix Description"] = resolve_pattern_template(
+                            pattern_template, site_display, vid_for_prefix, role_for_prefix, name_for_prefix
+                        )
+                raw_rows[row_idx].update(changes)
+
+        for new_r in editor_state.get("added_rows", []):
+            r_name = new_r.get("Role", "")
+            new_vid = new_r.get("VLAN ID", None)
+            typed_desc = str(new_r.get("VLAN Description", "") or "").strip()
+            typed_vlan_name = str(new_r.get("VLAN Name", "") or "").strip()
+            site_display = format_branch_display(site_name)
+            selected_preset_name = st.session_state.get("ipam_preset_selector", "")
+            if selected_preset_name and selected_preset_name != "🗄️ Load From DB (Existing Site)" and selected_preset_name in dynamic_presets:
+                group_vname_pat = dynamic_presets[selected_preset_name].get("vlan_name_pattern", "")
+                group_prefix_pat = dynamic_presets[selected_preset_name].get("prefix_pattern", "")
+            else:
+                group_vname_pat = ""
+                group_prefix_pat = ""
+            name_pattern = new_r.get("_name_pattern", group_vname_pat) or group_vname_pat
+            prefix_template = new_r.get("_pattern_template", group_prefix_pat) or group_prefix_pat
+            if typed_vlan_name and not name_pattern:
+                vlan_name = typed_vlan_name
+            else:
+                vlan_name = resolve_vlan_name(site_display, new_vid, r_name, name_pattern)
+            raw_rows.append({
+                "VLAN ID": new_vid,
+                "Role": normalize_role_name(r_name, role_rules) or to_title_case_preserve_acronyms(r_name),
+                "VLAN Name": vlan_name,
+                "VLAN Description": typed_desc if typed_desc else resolve_vlan_description(new_vid, r_name, active_vlan_presets, vlan_desc_mappings, role_rules),
+                "_vlan_desc_manual": bool(typed_desc),
+                "_pattern_template": prefix_template,
+                "_name_pattern": name_pattern,
+                "Subnet (CIDR)": new_r.get("Subnet (CIDR)", "")
+            })
+
+        computed_rows = compute_chained_rows(supernet_in, raw_rows)
+        st.session_state["ipam_persisted_rows"] = computed_rows
+
+        loaded_from_db = st.session_state.get("ipam_loaded_from_db", False)
+        allocated_subnets = []
+        for r in computed_rows:
+            sub_str = str(r.get("Subnet (CIDR)", "") or "").strip()
+            if sub_str:
+                allocated_subnets.append(sub_str)
+            
+            eval_res = evaluate_subnet_row(
+                sub_str, 
+                r.get("VLAN ID"), 
+                r.get("Role", ""), 
+                site_name, 
+                supernet_in, 
+                existing_prefixes,
+                vlan_name=r.get("VLAN Name", ""),
+                pattern_template=r.get("_pattern_template", ""),
+            )
+            r["Usable Range"] = eval_res["usable_range"]
+            r["Status"] = eval_res["status"]
+            
+            if loaded_from_db and "_db_prefix_desc" in r:
+                r["Prefix Description"] = r.get("_db_prefix_desc") or ""
+            else:
+                r["Prefix Description"] = eval_res["desc"]
+
+        with cap_placeholder.container():
+            if supernet_in and "/" in supernet_in:
+                try:
+                    sup_net = ipaddress.ip_network(supernet_in, strict=False)
+                    sup_range = calculate_ip_range_str(sup_net)
+                    cap_matrix = calculate_remaining_subnets(supernet_in, allocated_subnets)
+                    sup_prefix_len = sup_net.prefixlen
+                    step_masks = [f"/{m}" for m in range(sup_prefix_len + 1, min(sup_prefix_len + 5, 31))]
+                    cap_items = [f"`{cap_matrix.get(m, 0)}x {m}`" for m in step_masks]
+                    cap_str = f"**Available:** {' | '.join(cap_items)}" if cap_items else "No subnets"
+                    st.markdown(f"📍 **Site Subnet:** `{sup_range}`")
+                    st.caption(cap_str)
+                except ValueError:
+                    st.caption("⚠️ Invalid CIDR format")
+
+        TABLE_COLS = [
+            "VLAN ID", "Role", "VLAN Name", "VLAN Description", 
+            "Suggest Subnet", "Subnet (CIDR)", "Usable Range", "Status", "Prefix Description"
+        ]
+        if computed_rows:
+            df_init = pd.DataFrame(computed_rows)[TABLE_COLS]
+        else:
+            df_init = pd.DataFrame(columns=TABLE_COLS)
+
+        edited_df = st.data_editor(
+            df_init,
+            width="stretch",
+            num_rows="dynamic",
+            key="ipam_data_editor_live",
+            column_config={
+                "VLAN ID": st.column_config.NumberColumn("VLAN ID", step=1, required=True),
+                "Role": st.column_config.TextColumn("Role", help="VLAN Role. Auto-sets VLAN Name & Description via DB lookup."),
+                "VLAN Name": st.column_config.TextColumn("VLAN Name", help="VLAN Name in NetBox. Defaults to Role (or dynamic pattern), or editable."),
+                "VLAN Description": st.column_config.TextColumn("VLAN Description", help="VLAN Description. Auto-looked up from DB or editable."),
+                "Suggest Subnet": st.column_config.TextColumn("Suggest Subnet", help="Calculated next available network IP ID.", disabled=True),
+                "Subnet (CIDR)": st.column_config.TextColumn("Subnet (CIDR)", help="Type subnet CIDR (e.g. 10.113.252.0/23) and hit Enter."),
+                "Usable Range": st.column_config.TextColumn("Usable Range", help="Calculated usable host IP range.", disabled=True),
+                "Status": st.column_config.TextColumn("Status", help="Collision & Database usage status.", disabled=True),
+                "Prefix Description": st.column_config.TextColumn("Prefix Description", help="Calculated NetBox prefix description.", disabled=True)
+            }
         )
-        st.code(csv_prefixes, language="csv")
+
+        # 4. NetBox Bulk-Import CSV Copy Cards & Scope ID Notification
+        st.divider()
+        st.markdown("### 📋 NetBox Bulk-Import CSV Generators")
+
+        if not scope_id:
+            st.warning("⚠️ **Notice:** Scope ID is empty. Export NetBox Sites CSV to discover Scope ID, or enter it manually.", icon="⚠️")
+
+        display_site = display_site_name or "Site"
+        csv_site = generate_netbox_site_csv(display_site)
+        csv_group = generate_netbox_vlan_group_csv(display_site, scope_id)
+        csv_vlans = generate_netbox_vlans_csv(display_site, computed_rows)
+
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("**1. Import Site (`dcim.site`)**", help="📍 NetBox Path: Organization → Sites → Import")
+            st.code(csv_site, language="csv")
+
+            st.markdown("**3. Import VLANs (`ipam.vlan`)**", help="📍 NetBox Path: IPAM → VLANs → Import\n\nExports VLANs with allocated IP subnets. Unassigned presets are filtered out.")
+            st.code(csv_vlans, language="csv")
+
+        with c2:
+            st.markdown("**2. Import VLAN Group (`ipam.vlangroup`)**", help="📍 NetBox Path: IPAM → VLAN Groups → Import")
+            st.code(csv_group, language="csv")
+
+            prefix_title, prefix_option = st.columns([2.2, 1.8])
+            with prefix_title:
+                st.markdown("**4. Import Prefixes (`ipam.prefix`)**", help="📍 NetBox Path: IPAM → Prefixes → Import")
+            with prefix_option:
+                st.checkbox(
+                    "Include site subnet in Prefixes CSV",
+                    value=True,
+                    help="Add the top-level site supernet.",
+                    key="ipam_include_site_subnet",
+                )
+            include_site_subnet = st.session_state.get("ipam_include_site_subnet", True)
+            csv_prefixes = generate_netbox_prefixes_csv(
+                display_site,
+                scope_id,
+                supernet_in,
+                computed_rows,
+                include_site_subnet=include_site_subnet,
+            )
+            st.code(csv_prefixes, language="csv")
+
+    # ==================================================================
+    # TAB 2: Master IPAM Reconciliation
+    # ==================================================================
+    with tab_reconcile:
+        _render_reconciliation_tab()
