@@ -54,6 +54,58 @@ def _cached_get_reference_records(category_key, site_filter="", name_filter=""):
     return items
 
 
+# ---------------------------------------------------------------------------
+# Session-level cascade replacement helpers
+# ---------------------------------------------------------------------------
+_CASCADE_FIELDS = ("interface", "parent", "note")
+_ANOMALY_PATTERNS = (
+    re.compile(r"\d+[a-zA-Z]+\d+"),  # isolated letter between digits (e.g. 6Q5)
+    re.compile(r"(?i)(?<=\d)o(?=[\d$])"),  # 'o' used as '0' next to a digit
+)
+
+
+def _has_anomalous_tokens(value: str) -> bool:
+    """Return True if the value likely still contains OCR-error tokens."""
+    if not value:
+        return False
+    for pat in _ANOMALY_PATTERNS:
+        if pat.search(str(value)):
+            return True
+    return False
+
+
+def _apply_cascade_to_rows(rows_before: list, edited_cells: dict) -> list:
+    """Apply session-level cascade replacement for edited cells in the
+    interface/parent/note fields across all rows. Returns a new list."""
+    cascaded = [dict(r) for r in rows_before]
+    for row_idx_str, changes in edited_cells.items():
+        try:
+            row_idx = int(row_idx_str)
+        except (ValueError, TypeError):
+            continue
+        if row_idx < 0 or row_idx >= len(cascaded):
+            continue
+        prev_row = rows_before[row_idx]
+        for col, new_val in changes.items():
+            old_val = prev_row.get(col)
+            new_str = "" if new_val is None else str(new_val).strip()
+            old_str = "" if old_val is None else str(old_val).strip()
+            if not old_str or not new_str or old_str == new_str:
+                continue
+            if col not in _CASCADE_FIELDS:
+                continue
+            for r in cascaded:
+                for fc in _CASCADE_FIELDS:
+                    val = r.get(fc)
+                    val_str = "" if val is None else str(val)
+                    if old_str in val_str:
+                        r[fc] = val_str.replace(old_str, new_str)
+                if fc == "interface" and new_str and not _has_anomalous_tokens(new_str):
+                    r["is_uncertain"] = False
+                    r["note"] = None
+    return cascaded
+
+
 @st.cache_data(ttl=60, show_spinner=False)
 def _interface_ref_examples_cached(intf_code: str, _ts: str = ""):
     from core.shared_backup_state import SharedBackupState
@@ -1024,6 +1076,8 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
 
     if "hypervisor_editor_version" not in st.session_state:
         st.session_state["hypervisor_editor_version"] = 0
+    if "hypervisor_cascade_mappings" not in st.session_state:
+        st.session_state["hypervisor_cascade_mappings"] = []
 
     # Always reload fresh rules from disk/SSM on entry so that any Standards-tab
     # edits that triggered a rerun while this tab was inactive are picked up.
@@ -1174,6 +1228,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         st.session_state.pop("hypervisor_parsed_descriptions", None)
                         st.session_state.pop("latest_ocr_raw_text", None)
                         st.session_state.pop("latest_vault_session", None)
+                        st.session_state.pop("hypervisor_cascade_mappings", None)
                     st.rerun()
 
         # Control bar: Platform selector + Analyze + Clear
@@ -1233,6 +1288,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             st.session_state["hypervisor_parsed_items"] = []
             st.session_state["latest_ocr_raw_text"] = ""
             st.session_state.pop("latest_vault_session", None)
+            st.session_state.pop("hypervisor_cascade_mappings", None)
             st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
             st.session_state["hypervisor_editor_version"] = st.session_state.get("hypervisor_editor_version", 0) + 1
             st.rerun()
@@ -1531,6 +1587,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         deduped.append(item)
 
                 st.session_state["hypervisor_parsed_descriptions"] = deduped
+                st.session_state.pop("hypervisor_cascade_mappings", None)
                 # Increment editor version to FORCE Streamlit to mount a brand new data_editor widget
                 st.session_state["hypervisor_editor_version"] = st.session_state.get("hypervisor_editor_version", 0) + 1
                 st.toast(f"Successfully analyzed {total_imgs} screenshots and merged {len(deduped)} unique records!", icon="🚀")
@@ -1654,12 +1711,41 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         st.markdown("###### 📋 Generated NetBox Interface Descriptions (Editable)")
         st.caption("Review and edit parsed topology directly below. Batch text updates reactively in real time.")
 
+        # --- Session-level cascade replacement ---
+        editor_key = f"hypervisor_data_editor_{st.session_state['hypervisor_editor_version']}"
+        rows_before = list(st.session_state.get("hypervisor_parsed_descriptions") or [])
+        editor_state = st.session_state.get(editor_key)
+        edited_cells = editor_state.get("edited_rows", {}) if isinstance(editor_state, dict) else {}
+
+        if rows_before and edited_cells:
+            cascaded_rows = _apply_cascade_to_rows(rows_before, edited_cells)
+            for row_idx_str, changes in edited_cells.items():
+                try:
+                    row_idx = int(row_idx_str)
+                except (ValueError, TypeError):
+                    continue
+                if row_idx < 0 or row_idx >= len(rows_before):
+                    continue
+                prev_row = rows_before[row_idx]
+                for col, new_val in changes.items():
+                    old_val = prev_row.get(col)
+                    new_str = "" if new_val is None else str(new_val).strip()
+                    old_str = "" if old_val is None else str(old_val).strip()
+                    if old_str and new_str and old_str != new_str and col in _CASCADE_FIELDS:
+                        st.session_state["hypervisor_cascade_mappings"].append({
+                            "field": col,
+                            "old": old_str,
+                            "new": new_str,
+                            "row": row_idx,
+                        })
+            rows_before = cascaded_rows
+
         edited_descriptions = st.data_editor(
-            st.session_state["hypervisor_parsed_descriptions"],
+            rows_before,
             width="stretch",
             hide_index=True,
             num_rows="dynamic",
-            key=f"hypervisor_data_editor_{st.session_state['hypervisor_editor_version']}"
+            key=editor_key
         )
         # PROTECT STATE: Only update if the user actually edited non-empty content
         if edited_descriptions is not None:

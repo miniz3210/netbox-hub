@@ -113,3 +113,7 @@ auto_corrections:
     replacement: Management Network
     description: Separate fused ManagementNetwork
     enabled: true
+  - pattern: ^[xX!✓\-\.\s]+([a-zA-Z0-9_\-\.]+)
+    replacement: \1
+    description: hostname correction
+    enabled: true
