@@ -51,8 +51,9 @@ _MAC_RE = re.compile(
 
 _COLLAPSED_PREFIX_RE = re.compile(r"^[\s>›»▶]+")
 
-# Normalized container patterns — lowercase, no colons/spaces.
-_CONTAINER_NORM_PATTERNS = ["standardswitch", "dvswitch", "vmbr"]
+# No hardcoded container patterns — all detection is driven by the
+# container_header anchor patterns supplied via the active platform's
+# topology_parsing_presets in naming_rules.yaml.
 
 # Switch-name extraction regex (preserves legacy behaviour).
 _SWITCH_NAME_RE = re.compile(
@@ -341,12 +342,11 @@ def _extract_switch_headers(
     """Scan tokens and identify active (non-collapsed) switch headers.
 
     Returns list of (header_y_top, switch_name) sorted by header_y ascending.
+    All container detection is driven by the provided header_patterns from
+    naming_rules.yaml — no hardcoded platform names are used.
     """
     active_switches: List[Tuple[float, str]] = []
-
-    # Combine user config patterns with default universal patterns
-    all_patterns = list(header_patterns) + _CONTAINER_NORM_PATTERNS
-    norm_containers = [re.sub(r'[\s:]', '', p).lower() for p in all_patterns if p]
+    norm_containers = [re.sub(r'[\s:]', '', p).lower() for p in header_patterns if p]
 
     for t in tokens:
         text = str(t.get("text", "")).strip()

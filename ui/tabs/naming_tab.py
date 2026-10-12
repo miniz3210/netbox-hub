@@ -1716,9 +1716,109 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             return True
         return False
 
-    # Valid switch/container name pattern for parent category
-    _VALID_SWITCH_RE = re.compile(
-        r"^(?:vswitch|dvswitch|vmbr|standardswitch|distributedswitch)\d+$",
+    # ── YAML-driven container detection (no hardcoded switch-name patterns) ──
+    def _get_container_headers(rules: dict, platform: str) -> List[str]:
+        """Return container_header patterns from the active platform's topology preset."""
+        presets = rules.get("topology_parsing_presets") or {}
+        plat_data = presets.get(platform, {})
+        if not isinstance(plat_data, dict):
+            for k, v in presets.items():
+                if isinstance(k, str) and isinstance(v, dict) and k.strip().lower() == platform.strip().lower():
+                    plat_data = v
+                    break
+        if not isinstance(plat_data, dict):
+            return []
+        sp_cfg = plat_data.get("spatial_anchors_and_redaction", {})
+        if not isinstance(sp_cfg, dict):
+            return []
+        anchors = sp_cfg.get("anchors", [])
+        if not isinstance(anchors, list):
+            return []
+        headers: List[str] = []
+        for a in anchors:
+            if isinstance(a, dict) and a.get("role") == "container_header":
+                pats = a.get("patterns", [])
+                if isinstance(pats, list):
+                    headers.extend(p for p in pats if p)
+        return headers
+
+    def _is_container_name(text: str, headers: List[str]) -> bool:
+        """Return True if text matches any configured container_header pattern."""
+        if not headers or not text:
+            return False
+        low = text.lower()
+        return any(h.lower() in low for h in headers)
+
+    def _extract_container_name_from_line(line: str) -> Tuple[str, bool]:
+        """Extract clean switch name from a line containing a container header.
+
+        Returns (clean_name, is_collapsed).
+        Strips leading collapse symbols (>, ›) and trailing UI actions.
+        """
+        stripped = line.strip()
+        if not stripped:
+            return "", False
+        collapsed = False
+        prefix_match = re.match(r"^([\s>›»▶]+)", stripped)
+        if prefix_match:
+            prefix = prefix_match.group(1)
+            if any(c in prefix for c in (">", "›")):
+                collapsed = True
+            stripped = stripped[len(prefix):]
+        # Strip leading expand symbols (v, ⌄) without collapsing
+        stripped = re.sub(r"^[v⌄]\s*", "", stripped)
+        # Try to find a container_header pattern and extract text after it
+        found = False
+        for hdr in _active_container_headers:
+            low_line = stripped.lower()
+            low_hdr = hdr.lower()
+            idx = low_line.find(low_hdr)
+            if idx >= 0:
+                after = stripped[idx + len(hdr):].lstrip(": \t").strip()
+                # Strip trailing UI action labels
+                after = re.split(
+                    r"\s+(?:ADD\s+NETWORKING|EDIT|MANAGE\s+PHYSICAL\s+ADAPTERS|"
+                    r"MANAGE\s+PHYSICAL\s+ADAPTER|MANAGE\s+ADAPTERS|MANAGE|\.\.\.)\s*$",
+                    after, flags=re.IGNORECASE,
+                )[0].strip()
+                if after:
+                    return after, False
+                found = True
+                break
+        if not found:
+            # Fallback: last-colon split + UI artifact strip
+            parts = stripped.split(":")
+            remaining = parts[-1].strip() if len(parts) > 1 else stripped
+            remaining = re.split(
+                r"\s+(?:ADD|EDIT|MANAGE|\.\.\.)\s*$", remaining, flags=re.IGNORECASE
+            )[0].strip(' :->»▶|')
+            return remaining if remaining else stripped, collapsed
+
+    def _scan_text_for_containers(text: str, headers: List[str]) -> List[Tuple[str, bool]]:
+        """Scan multi-line text for lines matching container headers.
+
+        Returns list of (name, is_collapsed) tuples, deduplicated by name.
+        """
+        if not text or not headers:
+            return []
+        seen: set = set()
+        results: List[Tuple[str, bool]] = []
+        for line in text.splitlines():
+            low = line.lower()
+            if not any(h.lower() in low for h in headers):
+                continue
+            name, collapsed = _extract_container_name_from_line(line)
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            results.append((name, collapsed))
+        return results
+
+    _active_container_headers = _get_container_headers(naming_rules, active_plat_display)
+
+    # ── Fused adapter+speed splitter ─────────────────────────────────────────
+    _FUSED_ADAPTER_SPEED_RE = re.compile(
+        r"^(vmnic\d+)\s+(\d+\s*[GKM]bit/s\s+(?:Full|Half)|\d+\s*(?:Gbit|Mbit|Kbit)/s\s*(?:Full|Half)?|\d+\s*Full|\d+\s*Mbps?)$",
         re.IGNORECASE,
     )
 
@@ -1752,21 +1852,45 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 if category is None:
                     category = "interface"
 
-                # Re-classify parent as interface if it does not match a valid
-                # switch/container name pattern (e.g. "Management Network" is a
-                # service/purpose, not a container).
-                if category == "parent" and not _VALID_SWITCH_RE.match(resolved):
-                    # Check if it is better classified as a service/purpose
-                    if not resolved.lower().startswith(("vswitch", "dvswitch", "vmbr")):
-                        category = "purpose"
+                # Re-classify parent using YAML-driven container headers (no hardcoded patterns).
+                if category == "parent":
+                    if not _is_container_name(resolved, _active_container_headers):
+                        # Check if the resolved text is better classified as a service/purpose
+                        if not _is_container_name(resolved, _active_container_headers):
+                            category = "purpose"
 
                 chip_id = resolved  # unique by text; first occurrence wins
                 if chip_id in seen_chips:
                     continue
                 seen_chips.add(chip_id)
+
+                # Handle fused adapter+speed entries (e.g. "vmnic1 10000 Full")
+                interface_val = resolved
                 speed_val = ""
-                if category == "speed" and "speed" in r:
-                    speed_val = str(r["speed"]).strip()
+                fm = _FUSED_ADAPTER_SPEED_RE.match(resolved)
+                if fm and category == "interface":
+                    interface_val = fm.group(1)
+                    speed_raw = fm.group(2).strip()
+                    speed_val = speed_raw
+                    # Add split interface as its own chip
+                    fused_chip_id = interface_val
+                    if fused_chip_id not in seen_chips:
+                        seen_chips.add(fused_chip_id)
+                        new_pool.append({
+                            "id": fused_chip_id,
+                            "text": interface_val,
+                            "category": "interface",
+                            "speed": None,
+                        })
+                    # Replace current chip with split interface
+                    resolved = interface_val
+                    chip_id = resolved
+                    # Keep speed in the record for association
+                    r["_fused_speed"] = speed_val
+                else:
+                    if category == "speed" and "speed" in r:
+                        speed_val = str(r["speed"]).strip()
+
                 new_pool.append({
                     "id": chip_id,
                     "text": resolved,
@@ -1817,6 +1941,29 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         iface_chips = [c for c in pool if c["category"] == "interface"]
         service_chips = [c for c in pool if c["category"] == "purpose"]
         speed_chips = [c for c in pool if c["category"] == "speed"]
+
+        # ── Spatial-anchor-driven deck initialization ─────────────────────────
+        # Scan OCR/sanitized text for configured container_header patterns so
+        # that containers like "PR Spain Fuenmayor Age VLab" are detected even
+        # when the LLM does not emit a parent field.
+        _ocr_text_for_containers = st.session_state.get("latest_ocr_raw_text", "")
+        if not _ocr_text_for_containers:
+            _try_structured = st.session_state.get("structured_output_text", "")
+            if _try_structured:
+                _ocr_text_for_containers = _try_structured
+        _found_containers = _scan_text_for_containers(
+            _ocr_text_for_containers, _active_container_headers
+        )
+        if _found_containers and not deck:
+            for cname, is_collapsed in _found_containers:
+                if not is_collapsed and cname not in deck:
+                    deck[cname] = {
+                        "name": cname,
+                        "port_groups": [],
+                        "uplinks": [],
+                    }
+            if deck:
+                st.session_state[_DECK_KEY] = deck
 
         if not deck and parent_chips:
             for chip in parent_chips:
