@@ -1675,6 +1675,53 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         c["text"] = _apply_corrections(c.get("text", ""))
         return c
 
+    # ── Metadata / noise blacklist ───────────────────────────────────────────
+    _META_SKIP_STRINGS = {
+        "true", "false",
+        "portgroup", "vmnic", "vmk",
+        "yes", "no",
+    }
+
+    def _is_pure_number(s: str) -> bool:
+        return bool(re.fullmatch(r"\d+", s))
+
+    def _is_note_text(s: str) -> bool:
+        s_l = s.lower()
+        if not s_l:
+            return False
+        note_keywords = ("ocr typo", "ocr", "note", "uncertain", "guess", "may be",
+                         "likely", "probably", "unknown", "unverified", "unconfirmed")
+        return any(kw in s_l for kw in note_keywords)
+
+    def _is_metadata_key_inferred(resolved: str, r: dict) -> bool:
+        for k, v in r.items():
+            if v is None:
+                continue
+            v_s = str(v).strip()
+            if resolved != v_s:
+                continue
+            kl = k.lower()
+            if kl in ("type", "is_uncertain", "note", "status", "error"):
+                return True
+        return False
+
+    def _should_filter_chip(resolved: str, r: dict) -> bool:
+        if _is_pure_number(resolved):
+            return True
+        if resolved.lower() in _META_SKIP_STRINGS:
+            return True
+        if _is_note_text(resolved):
+            return True
+        if _is_metadata_key_inferred(resolved, r):
+            return True
+        return False
+
+    # Valid switch/container name pattern for parent category
+    _VALID_SWITCH_RE = re.compile(
+        r"^(?:vswitch|dvswitch|vmbr|standardswitch|distributedswitch)\d+$",
+        re.IGNORECASE,
+    )
+
     if parsed_records:
         # ── Build unassigned chip pool from parsed records ──────────────────────
         seen_chips: set = set()
@@ -1687,6 +1734,9 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 resolved = _apply_corrections(val_str)
                 if not resolved:
                     continue
+                if _should_filter_chip(resolved, r):
+                    continue
+
                 category = _alias_to_canon.get(resolved.lower())
                 if category is None:
                     category = _alias_to_canon.get(
@@ -1695,7 +1745,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 if category is None and canon_key in _alias_to_canon:
                     category = _alias_to_canon[canon_key]
                 if category is None:
-                    # Infer category from token key name
                     for _ck in _CATEGORY_ORDER:
                         if _ck in canon_key:
                             category = _ck
@@ -1703,7 +1752,15 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 if category is None:
                     category = "interface"
 
-                chip_id = f"{resolved}:{category}"
+                # Re-classify parent as interface if it does not match a valid
+                # switch/container name pattern (e.g. "Management Network" is a
+                # service/purpose, not a container).
+                if category == "parent" and not _VALID_SWITCH_RE.match(resolved):
+                    # Check if it is better classified as a service/purpose
+                    if not resolved.lower().startswith(("vswitch", "dvswitch", "vmbr")):
+                        category = "purpose"
+
+                chip_id = resolved  # unique by text; first occurrence wins
                 if chip_id in seen_chips:
                     continue
                 seen_chips.add(chip_id)
@@ -1716,6 +1773,16 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     "category": category,
                     "speed": speed_val or None,
                 })
+
+        # Strict deduplication preserving display order (first occurrence wins)
+        seen_text: set = set()
+        deduped_pool: list = []
+        for c in new_pool:
+            if c["text"] in seen_text:
+                continue
+            seen_text.add(c["text"])
+            deduped_pool.append(c)
+        new_pool = deduped_pool
 
         existing_pool = st.session_state.get(_POOL_KEY, [])
         existing_ids = {c["id"] for c in existing_pool}
