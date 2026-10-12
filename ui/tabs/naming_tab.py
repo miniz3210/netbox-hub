@@ -1289,6 +1289,9 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             st.session_state["latest_ocr_raw_text"] = ""
             st.session_state.pop("latest_vault_session", None)
             st.session_state.pop("hypervisor_cascade_mappings", None)
+            st.session_state.pop("chips_unassigned", None)
+            st.session_state.pop("switch_deck", None)
+            st.session_state.pop("chips_session_corrections", None)
             st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
             st.session_state["hypervisor_editor_version"] = st.session_state.get("hypervisor_editor_version", 0) + 1
             st.rerun()
@@ -1604,305 +1607,577 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     if start_analyze and "hypervisor_parsed_descriptions" in st.session_state:
         st.rerun()
 
-    st.markdown("##### 2️⃣ Extracted Variables Inspector (Dynamic Token Bag)")
+    st.markdown("##### 2️⃣ Chips Pool & Switch Deck")
     parsed_records = st.session_state.get("hypervisor_parsed_descriptions") or []
     parsed_records = [
         r for r in parsed_records
         if isinstance(r, dict) and str(r.get("interface", "")).strip().lower() not in ("", "none", "null")
     ]
-    if parsed_records:
-        rows = parsed_records
 
-        raw_token_dict = {}
-        for r in rows:
-            if not isinstance(r, dict):
-                continue
-            for k, v in r.items():
-                if v is not None and str(v).strip() and str(v).lower() not in ("nan", "none", ""):
-                    norm_k = re.sub(r"[^a-zA-Z0-9]+", "_", str(k).strip().lower()).strip("_")
-                    if norm_k:
-                        raw_token_dict.setdefault(norm_k, set()).add(str(v).strip())
-
-        existing_vars = get_pattern_variables(naming_rules)
-        existing_token_names = set()
-        if isinstance(existing_vars, dict):
-            for k, v in existing_vars.items():
-                if isinstance(v, dict) and "label" in v:
-                    existing_token_names.add(k.lower())
-                elif isinstance(v, dict):
-                    for sub_k in v.keys():
-                        existing_token_names.add(sub_k.lower())
-        for k in get_pattern_variables(naming_rules).keys():
-            existing_token_names.add(str(k).lower())
-
-        # Build alias lookup from the UNIFIED topology_parsing_presets
-        active_plat_display = st.session_state.get("naming_target_platform", "VMware ESXi")
+    # Build alias lookup from the UNIFIED topology_parsing_presets
+    active_plat_display = st.session_state.get("naming_target_platform", "VMware ESXi")
+    active_aliases: Dict[str, List[str]] = {}
+    if isinstance(parsing_presets, dict):
+        plat_data = parsing_presets.get(active_plat_display)
+        if not plat_data:
+            for _k, _v in parsing_presets.items():
+                if isinstance(_k, str) and _k.strip().lower() == active_plat_display.strip().lower():
+                    plat_data = _v
+                    break
+        if isinstance(plat_data, dict):
+            active_aliases = plat_data.get("aliases", {}) or {}
+    if not isinstance(active_aliases, dict):
         active_aliases = {}
-        if isinstance(parsing_presets, dict):
-            plat_data = parsing_presets.get(active_plat_display)
-            if not plat_data:
-                for _k, _v in parsing_presets.items():
-                    if isinstance(_k, str) and _k.strip().lower() == active_plat_display.strip().lower():
-                        plat_data = _v
-                        break
-            if isinstance(plat_data, dict):
-                active_aliases = plat_data.get("aliases", {}) or {}
-        if not isinstance(active_aliases, dict):
-            active_aliases = {}
-        # Reverse map: alias -> canonical
-        alias_to_canonical = {}
-        for canon, alias_list in active_aliases.items():
-            if isinstance(alias_list, list):
-                for a in alias_list:
-                    alias_to_canonical[a.lower()] = canon
 
-        with st.expander("🔍 OCR Raw Token Dictionary (Platform-Agnostic Variable Bag)", expanded=False):
-            st.caption("All extracted tokens discovered from the uploaded topology. These keys are immediately available in Step 3 patterns and can be synced to Standards.")
-            tok_cols = st.columns(3)
-            for idx, (t_name, t_vals) in enumerate(sorted(raw_token_dict.items())):
-                col_target = tok_cols[idx % 3]
-                sample_vals = ", ".join(list(t_vals)[:3])
-                sync_key = f"btn_sync_tok_{t_name}"
-                clean_t = t_name.strip("<>_").lower()
-                is_existing = clean_t in existing_token_names
-                matched_alias = None
-                if not is_existing:
-                    matched_alias = alias_to_canonical.get(clean_t)
-                    if matched_alias and matched_alias in existing_token_names:
-                        is_existing = True
-                with col_target:
-                    if is_existing:
-                        alias_note = f" / Alias of {matched_alias}" if matched_alias else " (In Standards)"
-                        st.button(f"✅ <{t_name}>{alias_note}", key=sync_key, disabled=True, width='stretch')
-                    else:
-                        if st.button(f"🔗 Sync <{t_name}>", key=sync_key, help=f"Sync <{t_name}> to Hypervisor Standards with default value: {sample_vals}", width='stretch'):
-                            from config.naming_rules import save_naming_rules
-                            norm_token = re.sub(r"[^a-z0-9_]", "", t_name)
-                            if "pattern_variables" not in naming_rules or not isinstance(naming_rules.get("pattern_variables"), dict):
-                                naming_rules.setdefault("pattern_variables", {})
-                            sample_val_list = list(t_vals)
-                            default_val = sample_val_list[0] if sample_val_list else ""
-                            naming_rules["pattern_variables"][norm_token] = {
-                                "label": norm_token.replace("_", " ").title(),
-                                "placeholder": f"e.g. {default_val or norm_token}",
-                                "default": default_val,
-                                "optional": False,
-                                "scope": "hypervisor",
-                            }
-                            save_naming_rules(naming_rules, source="Variable Inspector Sync")
-                            SSM.set_naming_rules(naming_rules.copy())
-                            st.toast(f"✅ <{norm_token}> synced! Manage in Standards Tab ➔ Pattern Variables.", icon="💾")
-                            st.rerun()
-                    border_color = "#22c55e" if is_existing else "rgba(255,255,255,0.08)"
-                    title_color = "#22c55e" if is_existing else "#38bdf8"
-                    with st.container(border=True):
-                        st.markdown(f"""
-                        <div style="font-family: monospace; font-weight: 600; color: {title_color}; font-size: 0.85rem;">&lt;{t_name}&gt;</div>
-                        <div style="color: #94a3b8; font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{sample_vals}">e.g. {sample_vals}</div>
-                        """, unsafe_allow_html=True)
-    else:
-        st.caption("Tokens will be listed here after analyzing topology screenshots.")
+    # Reverse-map: every alias string → canonical key
+    _alias_to_canon: Dict[str, str] = {}
+    for _canon, _alist in active_aliases.items():
+        if isinstance(_alist, list):
+            for _a in _alist:
+                _alias_to_canon[_a.lower()] = _canon
 
-    # 3️⃣ NetBox Descriptions & Review (Ready-to-Copy)
-    st.divider()
-    st.markdown("##### 3️⃣ NetBox Descriptions & Review (Ready-to-Copy)")
+    # Category labels derived from canonical keys (no hardcoded platform strings)
+    _CATEGORY_ORDER = ["parent", "interface", "purpose", "speed"]
+    _CATEGORY_LABELS = {
+        "parent": "Containers / Switches",
+        "interface": "Interfaces / Adapters",
+        "purpose": "Services / Port Groups",
+        "speed": "Speed / Metrics",
+    }
+
+    # ── OCR noise stripping helper ────────────────────────────────────────────
+    _OCR_NOISE_RE = re.compile(r"^[❌!✔Xx]\s*")
+
+    def _clean_chip_text(raw: str) -> str:
+        if not raw:
+            return ""
+        t = _OCR_NOISE_RE.sub("", raw.strip())
+        return t
+
+    # ── Session-state bootstrap ───────────────────────────────────────────────
+    _POOL_KEY = "chips_unassigned"
+    _DECK_KEY = "switch_deck"
+    _CORR_KEY = "chips_session_corrections"
+
+    if _POOL_KEY not in st.session_state:
+        st.session_state[_POOL_KEY] = []
+    if _DECK_KEY not in st.session_state:
+        st.session_state[_DECK_KEY] = {}
+    if _CORR_KEY not in st.session_state:
+        st.session_state[_CORR_KEY] = {}
+
+    def _apply_corrections(text: str) -> str:
+        orig = _clean_chip_text(text)
+        return st.session_state.get(_CORR_KEY, {}).get(orig, orig)
+
+    def _resolve_chip(chip: dict) -> dict:
+        c = dict(chip)
+        c["text"] = _apply_corrections(c.get("text", ""))
+        return c
 
     if parsed_records:
-        st.markdown("###### 📋 Generated NetBox Interface Descriptions (Editable)")
-        st.caption("Review and edit parsed topology directly below. Batch text updates reactively in real time.")
-
-        # --- Session-level cascade replacement ---
-        editor_key = f"hypervisor_data_editor_{st.session_state['hypervisor_editor_version']}"
-        rows_before = list(st.session_state.get("hypervisor_parsed_descriptions") or [])
-        editor_state = st.session_state.get(editor_key)
-        edited_cells = editor_state.get("edited_rows", {}) if isinstance(editor_state, dict) else {}
-
-        if rows_before and edited_cells:
-            cascaded_rows = _apply_cascade_to_rows(rows_before, edited_cells)
-            for row_idx_str, changes in edited_cells.items():
-                try:
-                    row_idx = int(row_idx_str)
-                except (ValueError, TypeError):
+        # ── Build unassigned chip pool from parsed records ──────────────────────
+        seen_chips: set = set()
+        new_pool: list = []
+        for r in parsed_records:
+            for canon_key, val in r.items():
+                val_str = str(val).strip() if val is not None else ""
+                if not val_str or val_str.lower() in ("nan", "none", ""):
                     continue
-                if row_idx < 0 or row_idx >= len(rows_before):
+                resolved = _apply_corrections(val_str)
+                if not resolved:
                     continue
-                prev_row = rows_before[row_idx]
-                for col, new_val in changes.items():
-                    old_val = prev_row.get(col)
-                    new_str = "" if new_val is None else str(new_val).strip()
-                    old_str = "" if old_val is None else str(old_val).strip()
-                    if old_str and new_str and old_str != new_str and col in _CASCADE_FIELDS:
-                        st.session_state["hypervisor_cascade_mappings"].append({
-                            "field": col,
-                            "old": old_str,
-                            "new": new_str,
-                            "row": row_idx,
-                        })
-            rows_before = cascaded_rows
+                category = _alias_to_canon.get(resolved.lower())
+                if category is None:
+                    category = _alias_to_canon.get(
+                        re.sub(r"[^a-z0-9]", "", resolved.lower())
+                    )
+                if category is None and canon_key in _alias_to_canon:
+                    category = _alias_to_canon[canon_key]
+                if category is None:
+                    # Infer category from token key name
+                    for _ck in _CATEGORY_ORDER:
+                        if _ck in canon_key:
+                            category = _ck
+                            break
+                if category is None:
+                    category = "interface"
 
-        edited_descriptions = st.data_editor(
-            rows_before,
-            width="stretch",
-            hide_index=True,
-            num_rows="dynamic",
-            key=editor_key
+                chip_id = f"{resolved}:{category}"
+                if chip_id in seen_chips:
+                    continue
+                seen_chips.add(chip_id)
+                speed_val = ""
+                if category == "speed" and "speed" in r:
+                    speed_val = str(r["speed"]).strip()
+                new_pool.append({
+                    "id": chip_id,
+                    "text": resolved,
+                    "category": category,
+                    "speed": speed_val or None,
+                })
+
+        existing_pool = st.session_state.get(_POOL_KEY, [])
+        existing_ids = {c["id"] for c in existing_pool}
+        merged_pool = [c for c in existing_pool if c["id"] not in seen_chips] + new_pool
+        if merged_pool != existing_pool:
+            st.session_state[_POOL_KEY] = merged_pool
+            st.rerun()
+
+        # ── Zone 1: Unassigned Chips Pool ───────────────────────────────────────
+        st.markdown("**Unassigned Chips Pool**")
+        st.caption("Click chips to assign them. Edit any chip inline to correct OCR errors.")
+        pool = st.session_state.get(_POOL_KEY, [])
+
+        for cat_key in _CATEGORY_ORDER:
+            cat_chips = [c for c in pool if c["category"] == cat_key]
+            if not cat_chips:
+                continue
+            col_hdr = f"**{_CATEGORY_LABELS.get(cat_key, cat_key)}**"
+            st.markdown(col_hdr)
+            chip_cols = st.columns(min(len(cat_chips), 8))
+            for idx, chip in enumerate(cat_chips):
+                with chip_cols[idx % len(chip_cols)]:
+                    _render_chip_card(chip, is_assigned=False)
+
+        # ── Zone 2: Switch Deck ─────────────────────────────────────────────────
+        st.markdown("**Switch Deck / Container Slots**")
+        st.caption("Click chips from the pool above to move them into switch slots. Click assigned chips to return them.")
+
+        deck = st.session_state.get(_DECK_KEY, {})
+        # Detect switches from pool chips that match parent category
+        parent_chips = [c for c in pool if c["category"] == "parent"]
+        iface_chips = [c for c in pool if c["category"] == "interface"]
+        service_chips = [c for c in pool if c["category"] == "purpose"]
+        speed_chips = [c for c in pool if c["category"] == "speed"]
+
+        if not deck and parent_chips:
+            for chip in parent_chips:
+                switch_id = chip["id"]
+                deck[switch_id] = {
+                    "name": chip["text"],
+                    "port_groups": [],
+                    "uplinks": [],
+                }
+            st.session_state[_DECK_KEY] = deck
+            st.rerun()
+
+        if deck:
+            for switch_id, switch_data in deck.items():
+                _render_switch_card(switch_id, switch_data, pool, iface_chips, service_chips, speed_chips)
+
+        # Manual switch add
+        with st.expander("➕ Add Switch Manually", expanded=False):
+            col_add_name, col_add_btn = st.columns([3, 1])
+            with col_add_name:
+                new_switch_name = st.text_input(
+                    "Switch / Container Name",
+                    key="new_switch_name_input",
+                    placeholder="e.g. vSwitch0, vmbr0",
+                    label_visibility="collapsed",
+                )
+            with col_add_btn:
+                if st.button("Add", key="add_switch_btn", width="stretch"):
+                    n = str(new_switch_name).strip()
+                    if n:
+                        sid = f"manual:{n}"
+                        if sid not in deck:
+                            deck[sid] = {"name": n, "port_groups": [], "uplinks": []}
+                            st.session_state[_DECK_KEY] = deck
+                            st.toast(f"Added switch: {n}", icon="➕")
+                            st.rerun()
+
+    # ── Zone 3: Live NetBox Output ────────────────────────────────────────────
+    st.divider()
+    st.markdown("##### 3️⃣ Live NetBox Output & Copy")
+
+    _output_bulk_text = "# No parsed topology records. Upload screenshots and click Analyze to generate descriptions.\n"
+
+    if parsed_records and (st.session_state.get(_DECK_KEY) or st.session_state.get(_POOL_KEY)):
+        _naming_rules_local = SSM.get_naming_rules({})
+        _patterns_local = _naming_rules_local.get("naming_patterns", {})
+        _pattern_vars_local = _naming_rules_local.get("pattern_variables", {}) or {}
+        _presets_map_local = _naming_rules_local.get("hypervisor_presets") or {}
+        _active_platform_local = st.session_state.get("naming_target_platform", "VMware ESXi")
+        _preset_templates_local = _presets_map_local.get(
+            _active_platform_local, _presets_map_local.get("VMware ESXi", [])
         )
-        # PROTECT STATE: Only update if the user actually edited non-empty content
-        if edited_descriptions is not None:
-            if hasattr(edited_descriptions, "to_dict"):
-                ed_list = edited_descriptions.to_dict(orient="records")
-            else:
-                ed_list = list(edited_descriptions)
-            # Only overwrite if ed_list is populated or if session was already empty
-            if ed_list:
-                st.session_state["hypervisor_parsed_descriptions"] = ed_list
+        if not _preset_templates_local:
+            _preset_templates_local = [{"pattern": "<interface> - <parent> <purpose>"}]
 
-        col_qc_title, col_qc_btn = st.columns([3.5, 1.0], vertical_alignment="center")
-        with col_qc_title:
-            st.markdown("###### 📋 Quick Copy for NetBox (Batch Text)")
-        with col_qc_btn:
-            if st.button("🔄 Refresh", key="btn_refresh_quick_copy", width='stretch', help="Re-render Quick Copy using the latest standards and patterns without re-running OCR"):
-                from config.naming_rules import load_naming_rules
-                fresh_rules = load_naming_rules()
-                SSM.set_naming_rules(fresh_rules.copy())
-                SSM.refresh_naming_rules()
-                st.toast("✅ Refreshed with latest standards!")
-                st.rerun()
-        rows = edited_descriptions
-
-        _naming_rules = SSM.get_naming_rules({})
-        _patterns = _naming_rules.get("naming_patterns", {})
-        pattern_vars = _naming_rules.get("variables", {}) or {}
-
-        # Load templates from hypervisor_presets (multi-platform)
-        presets_map = _naming_rules.get("hypervisor_presets") or {}
-        active_platform = st.session_state.get("naming_target_platform", "VMware ESXi")
-        preset_templates = presets_map.get(active_platform, presets_map.get("VMware ESXi", []))
-
-        if not preset_templates:
-            preset_templates = [{"pattern": "<interface> - <parent> <purpose>"}]
-
-        tpl_keys = st.session_state.get("_hyp_last_tpl_keys")
-        if tpl_keys != preset_templates:
-            st.session_state["_hyp_last_tpl_keys"] = preset_templates
-
-        active_rows = st.session_state.get("hypervisor_parsed_descriptions") or []
-
-        # Load platform aliases from the UNIFIED topology_parsing_presets for bidirectional resolution in Step 3
-        active_aliases_step3 = {}
+        _active_aliases_step3: Dict[str, List[str]] = {}
         if isinstance(parsing_presets, dict):
-            plat_data_s3 = parsing_presets.get(active_platform)
-            if not plat_data_s3:
-                for _k, _v in parsing_presets.items():
-                    if isinstance(_k, str) and _k.strip().lower() == active_platform.strip().lower():
-                        plat_data_s3 = _v
+            _plat_s3 = parsing_presets.get(_active_platform_local)
+            if not _plat_s3:
+                for _k3, _v3 in parsing_presets.items():
+                    if isinstance(_k3, str) and _k3.strip().lower() == _active_platform_local.strip().lower():
+                        _plat_s3 = _v3
                         break
-            if isinstance(plat_data_s3, dict):
-                active_aliases_step3 = plat_data_s3.get("aliases", {}) or {}
-        if not isinstance(active_aliases_step3, dict):
-            active_aliases_step3 = {}
+            if isinstance(_plat_s3, dict):
+                _active_aliases_step3 = _plat_s3.get("aliases", {}) or {}
 
-        GENERIC_NAV_HEADINGS = {
+        _GENERIC_NAV = {
             "virtual switches", "virtual switch", "switches", "switch",
             "physical adapters", "physical adapter", "adapters", "adapter",
             "vmkernel adapters", "vmkernel adapter", "networks", "network"
         }
 
-        cleaned_topology = []
-        for item in active_rows:
-            row = dict(item)
-            p = str(row.get("parent") or "").strip()
-            p = re.sub(r"^(?:standard\s*switch|distributed\s*switch|vswitch)\s*[:_-]\s*", "", p, flags=re.IGNORECASE).strip()
-            if p.lower() in GENERIC_NAV_HEADINGS or p.lower() == str(row.get("interface") or row.get("name") or "").strip().lower():
-                p = ""
-            row["parent"] = p
-            cleaned_topology.append(row)
+        _cleaned_topo = []
+        for _item in parsed_records:
+            _row = dict(_item)
+            _p = str(_row.get("parent") or "").strip()
+            _p = re.sub(
+                r"^(?:standard\s*switch|distributed\s*switch|vswitch)\s*[:_-]\s*",
+                "", _p, flags=re.IGNORECASE
+            ).strip()
+            if _p.lower() in _GENERIC_NAV or _p.lower() == str(
+                _row.get("interface") or _row.get("name") or ""
+            ).strip().lower():
+                _p = ""
+            _row["parent"] = _p
+            _cleaned_topo.append(_row)
 
-        valid_interface_parents = {}
-        for item in cleaned_topology:
-            iface = str(item.get("interface") or item.get("name") or "").strip().lower()
-            parent = str(item.get("parent") or "").strip()
-            if iface and parent:
-                valid_interface_parents[iface] = parent
+        _valid_iface_parents = {}
+        for _ci in _cleaned_topo:
+            _ci_iface = str(_ci.get("interface") or _ci.get("name") or "").strip().lower()
+            _ci_parent = str(_ci.get("parent") or "").strip()
+            if _ci_iface and _ci_parent:
+                _valid_iface_parents[_ci_iface] = _ci_parent
 
-        filtered_topology = []
-        seen_entries = set()
-        for item in cleaned_topology:
-            iface = str(item.get("interface") or item.get("name") or "").strip()
-            iface_lower = iface.lower()
-            parent = str(item.get("parent") or "").strip()
-
-            if not parent and iface_lower in valid_interface_parents:
+        _filtered_topo = []
+        _seen_entries_s3 = set()
+        for _fi in _cleaned_topo:
+            _fi_iface = str(_fi.get("interface") or _fi.get("name") or "").strip()
+            _fi_ifl = _fi_iface.lower()
+            _fi_parent = str(_fi.get("parent") or "").strip()
+            if not _fi_parent and _fi_ifl in _valid_iface_parents:
                 continue
-
-            entry_key = (parent.lower(), iface_lower)
-            if entry_key in seen_entries:
+            _ek = (_fi_parent.lower(), _fi_ifl)
+            if _ek in _seen_entries_s3:
                 continue
-            seen_entries.add(entry_key)
-            filtered_topology.append(item)
+            _seen_entries_s3.add(_ek)
+            _filtered_topo.append(_fi)
 
-        groups: dict[str, list[dict]] = {}
-        for item in filtered_topology:
-            p = str(item.get("parent") or "").strip() or "General"
-            groups.setdefault(p, []).append(item)
+        _groups_s3: Dict[str, List[dict]] = {}
+        for _gi in _filtered_topo:
+            _gp = str(_gi.get("parent") or "").strip() or "General"
+            _groups_s3.setdefault(_gp, []).append(_gi)
 
-        output_lines = ["# NOTE:\n# Generated from active Standards templates.\n"]
-        for parent in sorted(groups.keys()):
-            output_lines.append(f"=== {parent} ===")
-            for row in sorted(groups[parent], key=lambda x: str(x.get("interface") or x.get("name") or "")):
-                row_vals = {str(k).strip().lower(): str(v).strip() for k, v in row.items() if v is not None}
-                iface = row_vals.get("interface") or row_vals.get("name") or ""
-                parent_switch = row_vals.get("parent", parent)
+        _out_lines = ["# NOTE:\n# Generated from active Standards templates.\n"]
+        for _gparent in sorted(_groups_s3.keys()):
+            _out_lines.append(f"=== {_gparent} ===")
+            for _grow in sorted(
+                _groups_s3[_gparent],
+                key=lambda x: str(x.get("interface") or x.get("name") or ""),
+            ):
+                _rvals = {
+                    str(k).strip().lower(): str(v).strip()
+                    for k, v in _grow.items()
+                    if v is not None
+                }
+                _riface = _rvals.get("interface") or _rvals.get("name") or ""
+                _rparent = _rvals.get("parent", _gparent)
+                _rvals["interface"] = _riface
+                _rvals["parent"] = _rparent
+                _rvals["v_switch"] = _rparent
 
-                # Dynamic aliases for universal template tokens
-                row_vals["interface"] = iface
-                row_vals["parent"] = parent_switch
-                row_vals["v_switch"] = parent_switch
-
-                for canonical, alias_list in active_aliases_step3.items():
-                    if canonical in row_vals and row_vals[canonical]:
-                        c_val = row_vals[canonical]
-                        for a in alias_list:
-                            if a not in row_vals or not row_vals[a]:
-                                row_vals[a] = c_val
+                for _acanon, _aalist in _active_aliases_step3.items():
+                    if _acanon in _rvals and _rvals[_acanon]:
+                        _av = _rvals[_acanon]
+                        for _aa in _aalist:
+                            if _aa not in _rvals or not _rvals[_aa]:
+                                _rvals[_aa] = _av
                     else:
-                        for a in alias_list:
-                            if a in row_vals and row_vals[a]:
-                                a_val = row_vals[a]
-                                row_vals[canonical] = a_val
-                                for sibling in alias_list:
-                                    if sibling not in row_vals or not row_vals[sibling]:
-                                        row_vals[sibling] = a_val
+                        for _aa in _aalist:
+                            if _aa in _rvals and _rvals[_aa]:
+                                _aav = _rvals[_aa]
+                                _rvals[_acanon] = _aav
+                                for _asib in _aalist:
+                                    if _asib not in _rvals or not _rvals[_asib]:
+                                        _rvals[_asib] = _aav
                                 break
 
-                tpl = _select_best_template(row_vals, preset_templates)
-                rendered = render_dynamic_pattern(tpl, row_vals, pattern_vars)
-                rendered = _clean_rendered_clause(rendered)
-
+                _rtpl = _select_best_template(_rvals, _preset_templates_local)
+                _rrendered = render_dynamic_pattern(_rtpl, _rvals, _pattern_vars_local)
+                _rrendered = _clean_rendered_clause(_rrendered)
                 if st.session_state.get("auto_correct", True):
                     from utils.formatters import apply_auto_corrections
-                    rendered = apply_auto_corrections(rendered, "port_shortening")
-                    rendered = apply_auto_corrections(rendered, "ocr_cleaning")
-                    rendered = apply_auto_corrections(rendered, "vmware")
+                    _rrendered = apply_auto_corrections(_rrendered, "port_shortening")
+                    _rrendered = apply_auto_corrections(_rrendered, "ocr_cleaning")
+                    _rrendered = apply_auto_corrections(_rrendered, "vmware")
+                if not _rrendered:
+                    _rrendered = _riface
+                _rslot = str(_rvals.get("slot", "")).strip()
+                _rheader = f"{_rslot} ({_riface}):" if _rslot else f"{_riface}:"
+                if _riface:
+                    _out_lines.append(f"{_rheader}\n{_rrendered}\n")
 
-                if not rendered:
-                    rendered = iface
+        _output_bulk_text = "\n".join(_out_lines).strip()
 
-                slot = str(row_vals.get("slot", "")).strip()
-                header = f"{slot} ({iface}):" if slot else f"{iface}:"
-                if iface:
-                    output_lines.append(f"{header}\n{rendered}\n")
+    st.markdown("**NetBox Description Output**")
+    st.code(_output_bulk_text, language="text")
 
-        bulk_text = "\n".join(output_lines).strip()
-        st.code(bulk_text, language="text")
-    else:
-        bulk_text = "# No parsed topology records. Upload screenshots and click Analyze to generate descriptions.\n"
-        st.code(bulk_text, language="text")
+    col_copy, col_dl = st.columns([2, 1])
+    with col_copy:
+        if st.button("📋 Copy All Descriptions", key="copy_all_descriptions", width="stretch"):
+            st.session_state["_last_copied"] = _output_bulk_text
+            st.toast("Copied to clipboard!", icon="📋")
+    with col_dl:
+        st.download_button(
+            "📥 Download (.txt)",
+            _output_bulk_text.encode("utf-8"),
+            file_name="netbox-descriptions.txt",
+            mime="text/plain",
+            key="dl_esxi_descriptions_pipe",
+        )
 
-    st.download_button(
-        "📥 Download Generated Descriptions (.txt)",
-        bulk_text.encode("utf-8"),
-        file_name="netbox-descriptions.txt",
-        mime="text/plain",
-        key="dl_esxi_descriptions_pipe"
+
+def _render_chip_card(
+    chip: dict,
+    is_assigned: bool = False,
+    switch_id: str = "",
+    slot_type: str = "",
+):
+    """Render a single clickable chip with inline correction."""
+    import streamlit as st
+    text = chip.get("text", "")
+    chip_id = chip.get("id", "")
+    category = chip.get("category", "")
+
+    col_edit, col_action = st.columns([5, 1])
+    with col_edit:
+        edited = st.text_input(
+            label="Chip",
+            value=text,
+            key=f"chip_edit_{chip_id}",
+            label_visibility="collapsed",
+            help=f"Category: {category}",
+        ).strip()
+        if edited and edited != text:
+            st.session_state.setdefault("chips_session_corrections", {})
+            st.session_state["chips_session_corrections"][text] = edited
+            st.session_state["chips_unassigned"] = [
+                c if c["id"] != chip_id else {**c, "text": edited}
+                for c in st.session_state.get("chips_unassigned", [])
+            ]
+            if is_assigned and switch_id and slot_type:
+                deck = st.session_state.get("switch_deck", {})
+                if switch_id in deck:
+                    slot_key = "port_groups" if slot_type == "service" else "uplinks"
+                    deck[switch_id][slot_key] = [
+                        c if c["id"] != chip_id else {**c, "text": edited}
+                        for c in deck[switch_id][slot_key]
+                    ]
+                    st.session_state["switch_deck"] = deck
+            st.rerun()
+        chip_disabled = "disabled" if edited == text else ""
+        # Use a styled markdown chip
+        cat_colors = {
+            "parent": "#3b82f6",
+            "interface": "#10b981",
+            "purpose": "#f59e0b",
+            "speed": "#8b5cf6",
+        }
+        cat_color = cat_colors.get(category, "#64748b")
+        st.markdown(
+            f'<div style="display:inline-block;padding:4px 10px;border-radius:12px;'
+            f'background:{cat_color}22;border:1px solid {cat_color};'
+            f'color:{cat_color};font-size:0.82rem;font-weight:500;'
+            f'margin:2px;cursor:pointer;" '
+            f'title="Click to assign to a switch slot">{_esc_html(text)}</div>',
+            unsafe_allow_html=True,
+        )
+    with col_action:
+        if is_assigned:
+            if st.button("✖", key=f"chip_rm_{chip_id}_{switch_id}_{slot_type}", help="Return to pool", type="secondary"):
+                _return_chip_to_pool(chip_id, switch_id, slot_type)
+        else:
+            # Show which switches this chip could be assigned to
+            deck = st.session_state.get("switch_deck", {})
+            if deck:
+                switch_keys = list(deck.keys())
+                if len(switch_keys) == 1:
+                    if st.button("→", key=f"chip_assign_{chip_id}_{switch_keys[0]}", help="Assign to switch", type="primary"):
+                        _assign_chip(chip, switch_keys[0], category)
+                else:
+                    with st.popover("Assign to…", use_container_width=True):
+                        for _sk in switch_keys:
+                            if st.button(f"→ {_deck_switch_name(deck, _sk)}", key=f"chip_assign_{chip_id}_{_sk}", use_container_width=True):
+                                _assign_chip(chip, _sk, category)
+
+
+def _esc_html(s: str) -> str:
+    return (
+        s.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
     )
+
+
+def _deck_switch_name(deck: dict, sid: str) -> str:
+    sd = deck.get(sid, {})
+    return str(sd.get("name", sid))
+
+
+def _return_chip_to_pool(chip_id: str, switch_id: str, slot_type: str):
+    import streamlit as st
+    deck = st.session_state.get("switch_deck", {})
+    if switch_id not in deck:
+        return
+    slot_key = "port_groups" if slot_type == "service" else "uplinks"
+    slot_list = deck[switch_id].get(slot_key, [])
+    for i, c in enumerate(slot_list):
+        if c.get("id") == chip_id:
+            chip = dict(c)
+            chip["category"] = slot_type  # service or interface
+            chip["text"] = _apply_corrections_from_state(chip.get("text", ""))
+            pool = st.session_state.get("chips_unassigned", [])
+            existing_ids = {pc["id"] for pc in pool}
+            if chip["id"] not in existing_ids:
+                pool.append(chip)
+            st.session_state["chips_unassigned"] = pool
+            slot_list.pop(i)
+            st.session_state["switch_deck"] = deck
+            st.toast(f"Returned to pool: {chip.get('text', '')}", icon="↩️")
+            st.rerun()
+            return
+
+
+def _apply_corrections_from_state(text: str) -> str:
+    corrections = st.session_state.get("chips_session_corrections", {})
+    return corrections.get(text, text)
+
+
+def _assign_chip(chip: dict, switch_id: str, category: str):
+    import streamlit as st
+    deck = st.session_state.get("switch_deck", {})
+    if switch_id not in deck:
+        return
+    slot_key = "port_groups" if category == "purpose" else "uplinks"
+    chip_resolved = dict(chip)
+    chip_resolved["text"] = _apply_corrections_from_state(chip_resolved.get("text", ""))
+    # Remove from pool
+    pool = st.session_state.get("chips_unassigned", [])
+    st.session_state["chips_unassigned"] = [
+        c for c in pool if c["id"] != chip["id"]
+    ]
+    # Add to deck slot
+    deck[switch_id][slot_key].append(chip_resolved)
+    st.session_state["switch_deck"] = deck
+    st.toast(f"Assigned '{chip_resolved['text']}' to {_deck_switch_name(deck, switch_id)}", icon="✅")
+    st.rerun()
+
+
+def _render_switch_card(
+    switch_id: str,
+    switch_data: dict,
+    pool: list,
+    iface_chips: list,
+    service_chips: list,
+    speed_chips: list,
+):
+    import streamlit as st
+    name = switch_data.get("name", switch_id)
+    port_groups = switch_data.get("port_groups", [])
+    uplinks = switch_data.get("uplinks", [])
+
+    st.markdown(f"### 🔹 {name}")
+    st.caption(f"Switch ID: `{switch_id}`")
+
+    col_pg, col_up = st.columns(2)
+
+    with col_pg:
+        st.markdown("**Services / Port Groups**")
+        if port_groups:
+            for idx, pg in enumerate(port_groups):
+                _render_assigned_chip_in_card(pg, switch_id, "service", idx)
+        else:
+            st.caption("No services assigned. Click a service chip from the pool above.")
+
+    with col_up:
+        st.markdown("**Uplinks / Adapters**")
+        if uplinks:
+            for idx, up in enumerate(uplinks):
+                _render_assigned_chip_in_card(up, switch_id, "interface", idx)
+        else:
+            st.caption("No uplinks assigned. Click an interface chip from the pool above.")
+
+    # Switch-level actions
+    col_rename, col_remove = st.columns(2)
+    with col_rename:
+        new_name = st.text_input(
+            "Rename",
+            value=name,
+            key=f"sw_rename_{switch_id}",
+            label_visibility="collapsed",
+            help="Rename this switch container",
+        )
+        if new_name.strip() and new_name.strip() != name:
+            st.session_state["switch_deck"][switch_id]["name"] = new_name.strip()
+            st.toast(f"Renamed to {new_name.strip()}", icon="✏️")
+            st.rerun()
+    with col_remove:
+        if st.button("Remove Switch", key=f"sw_remove_{switch_id}", type="secondary", help="Remove this switch and return chips to pool"):
+            _remove_switch(switch_id)
+
+
+def _render_assigned_chip_in_card(
+    chip: dict,
+    switch_id: str,
+    slot_type: str,
+    index: int,
+):
+    import streamlit as st
+    text = chip.get("text", "")
+    chip_id = chip.get("id", "")
+    role = chip.get("role", "Active Uplink")
+
+    c1, c2, c3 = st.columns([4, 1, 1])
+    with c1:
+        st.markdown(
+            f'<div style="display:inline-block;padding:3px 8px;border-radius:10px;'
+            f'background:#f1f5f9;border:1px solid #94a3b8;'
+            f'color:#334155;font-size:0.78rem;margin:1px;">'
+            f'{_esc_html(text)}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+    with c2:
+        if slot_type == "interface":
+            role_opt = st.selectbox(
+                "Role",
+                options=["Active Uplink", "Standby Uplink"],
+                index=0 if role == "Active Uplink" else 1,
+                key=f"sw_{switch_id}_{slot_type}_{index}_role",
+                label_visibility="collapsed",
+                height=30,
+            )
+            deck = st.session_state.get("switch_deck", {})
+            if switch_id in deck:
+                slot_key = "uplinks"
+                if deck[switch_id][slot_key][index].get("role") != role_opt:
+                    deck[switch_id][slot_key][index]["role"] = role_opt
+                    st.session_state["switch_deck"] = deck
+    with c3:
+        if st.button("✖", key=f"sw_{switch_id}_{slot_type}_{index}_rm", help="Return to pool", type="secondary"):
+            _return_chip_to_pool(chip_id, switch_id, slot_type)
+
+
+def _remove_switch(switch_id: str):
+    import streamlit as st
+    deck = st.session_state.get("switch_deck", {})
+    if switch_id not in deck:
+        return
+    sw = deck.pop(switch_id)
+    st.session_state["switch_deck"] = deck
+    # Return all chips to pool
+    pool = list(st.session_state.get("chips_unassigned", []))
+    existing_ids = {c["id"] for c in pool}
+    for slot_key in ("port_groups", "uplinks"):
+        for c in sw.get(slot_key, []):
+            if c["id"] not in existing_ids:
+                pool.append(c)
+    st.session_state["chips_unassigned"] = pool
+    st.toast(f"Removed switch '{sw.get('name', switch_id)}'. Chips returned to pool.", icon="🗑️")
+    st.rerun()

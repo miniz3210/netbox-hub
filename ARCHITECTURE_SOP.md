@@ -1,5 +1,5 @@
 # NetBox Hub — Living Architecture SOP & Handover Guide
-# Target Baseline: v4.3.3 | Platform: Oracle Cloud Ampere A1 (ARM64)
+# Target Baseline: v4.3.11 | Platform: Oracle Cloud Ampere A1 (ARM64)
 
 ---
 
@@ -8,7 +8,7 @@
 | Property              | Value                                                        |
 |-----------------------|--------------------------------------------------------------|
 | Application           | NetBox Universal Library Hub                                 |
-| Target Version        | v4.3.3                                                       |
+| Target Version        | v4.3.11                                                      |
 | Runtime               | Python 3.11+ / Streamlit                                     |
 | Cloud Infrastructure  | Oracle Cloud Ampere A1 (ARM64 / aarch64, Linux)              |
 | Container Registry    | `ghcr.io/miniz3210/netbox-hub`                               |
@@ -24,6 +24,8 @@
    - **Endpoint** (VMs, vNICs, MAC addresses, IP assignments)
 3. **Less is More** — Minimal UI chrome; no nested containers; flat component hierarchy; toast-only notifications.
 4. **Zero Data Leakage** — All sensitive tokens (RFC1918 IPs, MACs, internal DNS domains) are redacted in-memory before any external LLM call and restored in-memory after extraction.
+5. **Lean Extraction + Human-in-the-Loop** — The LLM focuses on pure factual extraction and discrepancy detection only, emitting `is_uncertain` flags and `note` fields for anomalies. Final string template assembly is handled deterministically from the Standards Tab naming patterns. The UI review step (`st.data_editor`) is the human checkpoint where corrections are applied before any data reaches the database.
+6. **Session-only In-Memory Cascade Replace** — When a user corrects a cell value (e.g. an OCR typo like `dvSwitcho` → `dvSwitch0`) in the DataGrid, the replacement cascades to every row in the active session's memory that contains the same substring in `interface`, `parent`, or `note` fields. The correction is **not persisted to disk** and does **not pollute future hosts or sessions** — it is ephemeral and scoped to the current browser session only.
 
 ---
 
@@ -46,6 +48,36 @@
 
 - After the LLM returns structured JSON, the restoration map is applied locally to reinject real IPs/MACs/domains.
 - The original data never leaves the process memory boundary.
+
+### Topology & Spatial Invariants (v4.3.11)
+
+#### Left/Right Parent Column Separation
+
+- **Port Groups and VMkernel interfaces** belong strictly to the root Switch (`parent = <SwitchName>`), NEVER to a `-DVUplinks-` container.
+- **Physical adapters (`vmnic*`)** in a DVS belong strictly to the `-DVUplinks-<ID>` container.
+- The column split is determined by content-pattern heuristics in `_step_c_column_split_card_centric()`: tokens containing `vmnic`, `Full`, or "no physical network adapters" go to the uplink bucket; all others go to the port-group bucket.
+
+#### Ghost Interface Filtering
+
+- DVS slot headers matching `Uplink <N> [<N> NIC Adapters]` are **discarded** — they are section markers, not valid data.
+- Valid nested `vmnic*` adapter entries inside those slots **are extracted**.
+- Empty slots `(0 NIC Adapters)` must **never** trigger hallucinated NIC increments; the pipeline treats them as an explicit empty-state signal and skips further uplink inference.
+
+#### Switch Name & Number Fidelity
+
+- Verbatim preservation of valid switch numbers: `vSwitch0`, `vSwitch01`, `vSwitch02`, `vSwitch1` are distinct and must not be silently normalized against each other.
+- OCR letter 'o' → digit '0' correction is applied **only on switch suffixes** (e.g. `dvSwitcho` → `dvSwitch0`). This is a deterministic normalization, not an uncertainty flag.
+- Two-digit and multi-digit switch suffixes are preserved as-is.
+
+#### Icon Stripping
+
+- Leading UI status symbols (`❌`, `!`, `✔`, and the virtual-machine-style `X` prefix like `Xvmnic1`) are stripped silently during text normalization to their canonical form (`vmnic1`).
+- This stripping does **not** trigger `is_uncertain` flags — it is treated as pure UI noise removal.
+
+#### DataGrid Uncertainty Tagging
+
+- Fields that fail anomaly-detection (e.g. isolated letters between digits like `6Q5`, or `'o'` next to a digit) are flagged with `is_uncertain = True` and a descriptive `note`.
+- The `is_uncertain` / `note` fields are purely informational in the DataGrid; human review resolves them before commit.
 
 ---
 
@@ -73,6 +105,7 @@
 ┌──────────────────────┐
 │  LLM Structured       │   Extract JSON via multi-pass AI
 │  Extraction           │   (ai_two_pass_system.py)
+│  + is_uncertain/NOTE  │   LLM flags only; no template assembly
 └──────────┬───────────┘
            ▼
 ┌──────────────────────┐
@@ -81,9 +114,29 @@
 └──────────┬───────────┘
            ▼
 ┌──────────────────────┐
+│  Human-in-the-Loop    │   DataGrid review: edit cells, cascade
+│  DataGrid Review      │   corrections across active session rows
+└──────────┬───────────┘
+           ▼
+┌──────────────────────┐
+│  Deterministic Template│  Apply naming patterns from Standards
+│  Assembly             │  (naming_rules.yaml) — no LLM here
+└──────────┬───────────┘
+           ▼
+┌──────────────────────┐
 │  DB Commit / Sync     │   SQLite write + NetBox upload
 └──────────────────────┘
 ```
+
+### In-Memory Cascade Replace (Session-Scoped)
+
+When a cell in the DataGrid is edited, `_apply_cascade_to_rows()` in `ui/tabs/naming_tab.py` performs a single-pass scan:
+
+1. For each changed cell in `interface`, `parent`, or `note` fields:
+2. Walk all rows in the current session's `hypervisor_parsed_descriptions`.
+3. If the old value appears as a substring in the same field, replace it with the new value.
+4. If `interface` is corrected and no anomaly pattern remains, clear `is_uncertain = False` and `note = None`.
+5. The corrected state lives only in `st.session_state` — it is not written to `data/netbox_hub.db` until the user explicitly commits.
 
 ---
 
@@ -113,7 +166,7 @@
 Capture a baseline snapshot of the Standards Tab configuration into `data/naming_rules.yaml`. Verify all section definitions (2.5 UX rules, 4.0 Blueprint guide) are present and consistent.
 
 ### Step 2 — Version Assert Verification
-Confirm `config/constants.py::APP_VERSION == "4.3.3"`. Ensure no release notes or version bump scripts are pending.
+Confirm `config/constants.py::APP_VERSION == "4.3.11"`. Ensure no release notes or version bump scripts are pending.
 
 ### Step 3 — Safe Local Container Cache Cleanup
 ```bash
@@ -124,8 +177,8 @@ docker builder prune -a -f
 
 ### Step 4 — Docker Build & Tag Release
 ```bash
-docker build -t ghcr.io/miniz3210/netbox-hub:v4.3.3 -t ghcr.io/miniz3210/netbox-hub:latest .
-docker push ghcr.io/miniz3210/netbox-hub:v4.3.3
+docker build -t ghcr.io/miniz3210/netbox-hub:v4.3.11 -t ghcr.io/miniz3210/netbox-hub:latest .
+docker push ghcr.io/miniz3210/netbox-hub:v4.3.11
 docker push ghcr.io/miniz3210/netbox-hub:latest
 ```
 
@@ -133,7 +186,7 @@ docker push ghcr.io/miniz3210/netbox-hub:latest
 
 ## 6. Living Task Checklist
 
-### ✅ Completed Checklist (v4.3.3 Baseline)
+### ✅ Completed Checklist (v4.3.11 Baseline)
 
 - [x] Relative spatial clustering engine & resolution-agnostic geometry partitioning.
 - [x] Boundary card fix (eliminated collapsed header overlap, e.g. iSCSI Veeam).
@@ -145,14 +198,18 @@ docker push ghcr.io/miniz3210/netbox-hub:latest
 - [x] Unified header layout and right-aligned badge count formatting.
 - [x] Notification migration: replaced disruptive alert banners with `st.toast`.
 - [x] Naming tab performance cache fix (`_interface_ref_examples_cached` at module top level).
-- [x] Cleaned up obsolete standalone scripts and consolidated tests (114 passing tests).
+- [x] Cleaned up obsolete standalone scripts and consolidated tests (114+ passing tests).
+- [x] **Topology Spatial Reconciliation Axioms** — Left/right parent column separation, ghost interface filtering, switch name fidelity, icon stripping all verified and implemented in `spatial_redactor.py` v4.3.11.
+- [x] **DataGrid uncertainty tagging** — `is_uncertain` flag + `note` field propagation through the pipeline, verified in `tests/test_spatial_redactor.py` and naming tab integration.
+- [x] **Session-only in-memory cascade replacement** — `_apply_cascade_to_rows()` in `naming_tab.py` cascades cell corrections across all rows in `hypervisor_parsed_descriptions` without persisting to disk.
 
 ### ⬜ Pending Roadmap
 
-- [ ] Prune stale local git tags prior to v4.2.4 (audit `git tag -l` for orphaned pre-v4.2.4 refs).
-- [ ] Add unit test coverage for `spatial_redactor.py` in `tests/test_spatial_redactor.py`.
+- [ ] Implement unit test coverage for `core/spatial_redactor.py` in `tests/test_spatial_redactor.py` (expand existing test suite to cover v4.3.11 invariants: ghost interface filtering, icon stripping, switch name fidelity, cascade replacement edge cases).
+- [ ] Build Excel IPAM offline reconciliation script against `AW IPs & VLANs_Final (2).xlsx`.
+- [ ] Prune stale local git tags prior to v4.3.11 release.
+- [ ] Publish GHCR image release `v4.3.11` (`ghcr.io/miniz3210/netbox-hub:v4.3.11`).
 - [ ] Build platform expansion templates for Proxmox VE and Azure Portal.
-- [ ] Release Docker image tag `v4.3.3` to GHCR (`ghcr.io/miniz3210/netbox-hub:v4.3.3`).
 
 ---
 
