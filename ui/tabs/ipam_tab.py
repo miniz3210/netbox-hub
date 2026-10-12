@@ -797,11 +797,11 @@ def _render_reconciliation_tab():
         # Filter to only user-selected rows per table
         def _filter_selected(df, key):
             if df is None or df.empty:
-                return None
-            selected = df[df.get("Selected", True) is True if "Selected" in df.columns else df.index.astype(bool)]
-            if selected.empty:
-                return None
-            return selected.drop(columns=["Selected"], errors="ignore")
+                return pd.DataFrame() if df is None else df.copy()
+            if "Selected" in df.columns:
+                mask = df["Selected"].fillna(False).astype(bool)
+                return df[mask].copy()
+            return df.copy()
 
         sel_sites = _filter_selected(
             st.session_state.get("recon_selected_sites"), "sites"

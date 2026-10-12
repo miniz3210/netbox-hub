@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Unit Tests for Master IPAM Excel Diff Engine — NetBox Hub v4.3.5
+Unit Tests for Master IPAM Excel Diff Engine — NetBox Hub v4.3.9
 
 Covers:
   1. Dynamic multi-sheet discovery (arbitrary sheet counts/names)
   2. Header alias discovery (ip/subnet/vlan_id/vlan_name/site variations)
   3. Standards-driven normalisation (site_code_rules, ipam_role_mappings)
   4. Deterministic classification (matched / pending_add / conflicts / unmapped)
-  5. Application version assertion: config.constants.APP_VERSION == "4.3.5"
+  5. Application version assertion: config.constants.APP_VERSION == "4.3.9"
 """
 
 from __future__ import annotations
@@ -544,8 +544,8 @@ class TestParseFileBytes:
 # ============================================================================
 
 class TestVersion:
-    def test_app_version_is_435(self):
-        assert APP_VERSION.startswith("4.3.5"), f"Expected '4.3.5.x', got {APP_VERSION!r}"
+    def test_app_version_is_439(self):
+        assert APP_VERSION.startswith("4.3.9"), f"Expected '4.3.9.x', got {APP_VERSION!r}"
 
     def test_version_no_v_prefix(self):
         assert not APP_VERSION.startswith("v"), f"Version should not have 'v' prefix: {APP_VERSION!r}"
