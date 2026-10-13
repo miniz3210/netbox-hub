@@ -58,6 +58,24 @@ def _cached_get_reference_records(category_key, site_filter="", name_filter=""):
 
 
 # ---------------------------------------------------------------------------
+# Switch name normalization
+# ---------------------------------------------------------------------------
+def _normalize_switch_name(name: str) -> str:
+    """Normalize a switch/container name for consistent deck-key usage.
+
+    Strips whitespace, replaces trailing letter 'o'/'O' with '0', and removes
+    any 'manual:' prefix that may have been left from prior manual adds.
+    """
+    n = str(name).strip()
+    if n.startswith("manual:"):
+        n = n[len("manual:"):]
+    # Normalize trailing letter o/O to digit 0 if preceded by switch/vswitch
+    if re.search(r"switch[oO]$", n, re.IGNORECASE):
+        n = n[:-1] + "0"
+    return n
+
+
+# ---------------------------------------------------------------------------
 # Natural sort key — pure Python, no external deps
 # ---------------------------------------------------------------------------
 def _natsort_key(s: str):
@@ -1811,20 +1829,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 if isinstance(pats, list):
                     headers.extend(p for p in pats if p)
         return headers if headers else builtin_defaults
-
-    def _normalize_switch_name(name: str) -> str:
-        """Normalize a switch/container name for consistent deck-key usage.
-
-        Strips whitespace, replaces trailing letter 'o'/'O' with '0', and removes
-        any 'manual:' prefix that may have been left from prior manual adds.
-        """
-        n = name.strip()
-        if n.startswith("manual:"):
-            n = n[len("manual:"):]
-        # Replace trailing letter o/O with digit 0
-        if n and n[-1].lower() == "o":
-            n = n[:-1] + "0"
-        return n
 
     def _is_container_name(text: str, headers: List[str]) -> bool:
         """Return True if text matches any configured container_header pattern."""
