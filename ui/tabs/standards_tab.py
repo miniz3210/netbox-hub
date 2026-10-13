@@ -1515,6 +1515,56 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 st.rerun()
 
     # ──────────────────────────────────────────────────────────────────────
+    # Section 2.6: UI Noise Blacklist (Dynamic Chip Filtering)
+    # ──────────────────────────────────────────────────────────────────────
+    with st.expander("🔇 2.6. UI Noise Blacklist", expanded=False):
+        current_blacklist = plat_parsing.get("ui_noise_blacklist", [])
+        if not isinstance(current_blacklist, list):
+            current_blacklist = []
+        blacklist_text = "\n".join(str(t).strip() for t in current_blacklist if t.strip())
+        edited_blacklist = st.text_area(
+            "Noise Tokens (one per line or comma-separated)",
+            value=blacklist_text,
+            height=220,
+            key=f"plat_noise_bl_{active_plat}",
+            help="Tokens listed here are treated as noise during chip harvesting. One token per line, or comma-separated. These supplement the global UI_NAV_NOISE.",
+        )
+        parsed_bl: list[str] = []
+        for raw in edited_blacklist.split("\n"):
+            for token in raw.split(","):
+                t = token.strip()
+                if t:
+                    parsed_bl.append(t)
+
+        st.caption(f"**{len(parsed_bl)}** tokens configured for this platform.")
+
+        col_save_s26, col_reset_s26 = st.columns(2, vertical_alignment="center")
+        with col_save_s26:
+            if st.button("💾 Save & Apply Changes", key=f"btn_save_s26_{active_plat}", type="primary", width="stretch"):
+                plat_parsing["ui_noise_blacklist"] = parsed_bl
+                parsing_presets[active_plat] = plat_parsing
+                rules["topology_parsing_presets"] = parsing_presets
+                save_naming_rules(rules, source=f"Save Section 2.6 for {active_plat}")
+                fresh = SSM.get_cached_naming_rules() or load_naming_rules()
+                rules.clear()
+                rules.update(fresh)
+                SSM.set_naming_rules(fresh.copy())
+                SSM.refresh_naming_rules()
+                st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
+                st.toast(f"✅ Section 2.6 (Noise Blacklist) for '{active_plat}' saved & applied!", icon="💾")
+                st.rerun()
+        with col_reset_s26:
+            if st.button("🔄 Reset to Defaults", key=f"btn_reset_s26_{active_plat}", width="stretch"):
+                plat_parsing.pop("ui_noise_blacklist", None)
+                parsing_presets[active_plat] = plat_parsing
+                rules["topology_parsing_presets"] = parsing_presets
+                save_naming_rules(rules, source=f"Reset Section 2.6 for {active_plat}")
+                SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
+                _clear_session_state_prefixes(f"plat_noise_bl_{active_plat}")
+                st.toast(f"✅ Section 2.6 reset to defaults for '{active_plat}'!", icon="🔄")
+                st.rerun()
+
+    # ──────────────────────────────────────────────────────────────────────
     # Section 2.5: Relative Spatial Anchors & Local Privacy Redaction
     # ──────────────────────────────────────────────────────────────────────
     with st.expander("📐 2.5. Relative Spatial Anchors & Local Privacy Redaction", expanded=False):

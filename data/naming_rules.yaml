@@ -938,7 +938,31 @@
           "\\.corp$"
         ],
         "redact_mac": true
-      }
+      },
+      "ui_noise_blacklist": [
+        "summary", "monitor", "configure", "permissions",
+        "vms", "datastores", "networks", "updates", "storage",
+        "actions", "storageadapters", "storagedevices",
+        "hostcacheconfiguration", "host cache configuration",
+        "protocol endpoints", "i/o filters", "1/o filters",
+        "storageproviders", "networking", "virtual switches",
+        "vmkernel adapters", "physical adapters",
+        "tcp/ip configuration", "tcp/ipconfiguration",
+        "virtual machines", "vm startup/shutdown",
+        "agent vm settings", "default vm compatibility",
+        "swap file location", "system", "licensing",
+        "host profile", "time configuration",
+        "authentication services", "authenticationservices",
+        "certificate", "power management",
+        "advanced system settings",
+        "advanced systemsettin..", "firewall", "services",
+        "security profile", "system swap", "systemswap",
+        "packages", "hardware", "refresh", "edit",
+        "add networking", "managephysicaladapters",
+        "manage physical adapters",
+        "no associated port groups", "noassociatedportgroups",
+        "no physical network adapters"
+      ]
     },
     "Proxmox VE": {
       "platform": "Proxmox VE",

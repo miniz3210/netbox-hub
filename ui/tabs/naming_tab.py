@@ -111,7 +111,7 @@ UI_NAV_NOISE = {
 }
 
 
-def _is_junk_token(text: str) -> bool:
+def _is_junk_token(text: str, dynamic_filter: set | None = None) -> bool:
     t = text.strip()
     if not t or len(t) <= 1:
         return True
@@ -121,6 +121,8 @@ def _is_junk_token(text: str) -> bool:
     if low in ("false", "true", "null", "none", "is_uncertain"):
         return True
     if low in UI_NAV_NOISE:
+        return True
+    if dynamic_filter and low in dynamic_filter:
         return True
     if re.match(r"^virtual\s*machines\s*\(\d+\)", low, re.IGNORECASE):
         return True
@@ -1985,37 +1987,17 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             deduped_pool.append(c)
         new_pool = deduped_pool
 
-        # ── Merge IP addresses into their corresponding vmk interface chips ───
-        _IPV4_RE = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
-        _vmk_ip_map: Dict[str, str] = {}
-        for _r in parsed_records:
-            _iface = str(_r.get("interface") or "").strip().lower()
-            _ip_val = str(_r.get("ip") or _r.get("ip_address") or "").strip()
-            if _iface and _IPV4_RE.match(_ip_val):
-                if _iface not in _vmk_ip_map:
-                    _vmk_ip_map[_iface] = _ip_val
-
-        _ip_chip_ids: Set[str] = set()
-        _merged_vmks: Set[str] = set()
-        _final_pool: list = []
-        for _c in new_pool:
-            _ct = _c["text"]
-            _cl = _ct.lower()
-            if _cl in _vmk_ip_map:
-                _merged_vmks.add(_cl)
-                _final_pool.append({
-                    **_c,
-                    "text": f"{_ct} ({_vmk_ip_map[_cl]})",
-                })
-            elif _IPV4_RE.match(_ct):
-                _ip_chip_ids.add(_c["id"])
-            else:
-                _final_pool.append(_c)
-        new_pool = _final_pool
+        # ── Dynamic noise blacklist from active platform presets ────────────
+        active_plat = st.session_state.get("naming_target_platform", "VMware ESXi")
+        plat_cfg = (naming_rules.get("topology_parsing_presets") or {}).get(active_plat, {})
+        dynamic_blacklist: set[str] = set(
+            s.strip().lower() for s in (plat_cfg.get("ui_noise_blacklist") or []) if s.strip()
+        )
+        active_junk_filter = UI_NAV_NOISE.union(dynamic_blacklist)
 
         existing_pool = st.session_state.get(_POOL_KEY, [])
         existing_ids = {c["id"] for c in existing_pool}
-        merged_pool = [c for c in existing_pool if c["id"] not in seen_chips and c["id"] not in _ip_chip_ids] + new_pool
+        merged_pool = [c for c in existing_pool if c["id"] not in seen_chips] + new_pool
         if merged_pool != existing_pool:
             st.session_state[_POOL_KEY] = merged_pool
             st.rerun()
@@ -2032,22 +2014,22 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         def _harvest_tokens_from_text(text: str, source_key: str) -> None:
             if not text:
                 return
-            seen_harvested: set = set()
+            existing_texts: set[str] = {c["text"].strip().lower() for c in merged_pool}
             for line in text.splitlines():
                 raw = line.strip()
                 if not raw:
                     continue
-                clean = re.sub(r"^[❌!✔Xx]\s*", "", raw).strip()
-                if not clean:
+                clean = re.sub(r"^[❌!✔Xx\s>›»▶v⌄]+", "", raw).strip()
+                if not clean or len(clean) <= 1:
                     continue
                 low = clean.lower()
-                if low in _NAV_NOISE:
+                if low in _NAV_NOISE or low in active_junk_filter:
                     continue
                 if _is_pure_number(clean):
                     continue
                 if _is_note_text(clean):
                     continue
-                if _is_junk_token(clean):
+                if _is_junk_token(clean, dynamic_filter=active_junk_filter):
                     continue
                 # Skip lines that are only navigation-header fragments
                 if clean.lower() in ("standard switch", "distributed switch", "switch", "bridge"):
@@ -2056,10 +2038,11 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 resolved = _apply_corrections(clean)
                 if not resolved:
                     continue
-                chip_id = f"harvested_{source_key}_{resolved}"
-                if chip_id in seen_harvested or chip_id in existing_ids:
+                resolved_lower = resolved.strip().lower()
+                if resolved_lower in existing_texts:
                     continue
-                seen_harvested.add(chip_id)
+                existing_texts.add(resolved_lower)
+                existing_ids.add(resolved)
                 # Categorize: container headers → parent, vmnic/vmk/eth → interface, speed patterns → speed, everything else → purpose
                 if _is_container_name(resolved, _active_container_headers):
                     cat = "parent"
@@ -2074,7 +2057,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 else:
                     cat = "purpose"
                 merged_pool.append({
-                    "id": chip_id,
+                    "id": resolved,
                     "text": resolved,
                     "category": cat,
                     "speed": None,
