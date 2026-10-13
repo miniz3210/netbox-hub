@@ -88,26 +88,7 @@ def _natsort_key(s: str):
 # Strict noise / junk-token filter for chip pool hygiene
 # ---------------------------------------------------------------------------
 UI_NAV_NOISE = {
-    "summary", "monitor", "configure", "permissions", "vms", "datastores",
-    "networks", "updates", "storage", "actions", "storageadapters",
-    "storagedevices", "host cache configuration", "protocol endpoints",
-    "i/o filters", "1/o filters", "storageproviders", "networking",
-    "virtual switches", "vmkernel adapters", "physical adapters",
-    "tcp/ip configuration", "tcp/ipconfiguration", "virtual machines",
-    "vm startup/shutdown", "vmstartup/shutdown", "agent vm settings",
-    "agentvmsettings", "default vm compatibility", "defaultvmcompatibility",
-    "swap file location", "swapfile location", "system", "licensing",
-    "host profile", "time configuration", "timeconfiguration",
-    "authentication services", "authenticationservices", "certificate",
-    "power management", "powermanagement", "advanced system settings",
-    "advanced systemsettin..", "advanced systemsettin...",
-    "system resource reservation", "systemresourcereserv..",
-    "systemresourcereser...", "firewall", "services", "security profile",
-    "securityprofile", "system swap", "systemswap", "packages", "hardware",
-    "refresh", "edit", "add networking", "add networking...", "addnetworking...",
-    "managephysicaladapters", "manage physical adapters",
-    "no associated port groups", "noassociatedportgroups",
-    "no physical network adapters",
+    "true", "false", "null", "none", "is_uncertain",
 }
 
 
@@ -1998,18 +1979,24 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         existing_pool = st.session_state.get(_POOL_KEY, [])
         existing_ids = {c["id"] for c in existing_pool}
         merged_pool = [c for c in existing_pool if c["id"] not in seen_chips] + new_pool
-        if merged_pool != existing_pool:
-            st.session_state[_POOL_KEY] = merged_pool
-            st.rerun()
+        st.session_state[_POOL_KEY] = merged_pool
 
         # ── Universal Token Harvesting from raw OCR & AI text ────────────────
         # Every non-noise observable text line becomes a Lego chip so nothing
         # is silently discarded due to fused OCR or missing structured records.
-        _NAV_NOISE = {
-            "summary", "monitor", "configure", "permissions",
-            "vms", "datastores", "networks", "updates", "storage",
-            "actions", "vlan id: --", "vlan id:",
-        }
+
+        # Build interface-prefix regex dynamically from platform aliases (zero hardcoded vendor strings)
+        _iface_prefixes: List[str] = [re.escape(a) for a in active_aliases.get("interface", []) if isinstance(a, str)]
+        if _iface_prefixes:
+            _iface_prefix_re = re.compile(
+                r"^(?:" + "|".join(_iface_prefixes) + r")[0-9]", re.IGNORECASE
+            )
+        else:
+            _iface_prefix_re = re.compile(r"^[\w]*[0-9]", re.IGNORECASE)
+
+        # Navigation-header fragments to skip — built from alias set + generic noise
+        _nav_header_fragments = set(active_junk_filter)
+        _nav_header_fragments.update(("standard switch", "distributed switch", "switch", "bridge"))
 
         def _harvest_tokens_from_text(text: str, source_key: str) -> None:
             if not text:
@@ -2023,7 +2010,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 if not clean or len(clean) <= 1:
                     continue
                 low = clean.lower()
-                if low in _NAV_NOISE or low in active_junk_filter:
+                if low in active_junk_filter:
                     continue
                 if _is_pure_number(clean):
                     continue
@@ -2032,7 +2019,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 if _is_junk_token(clean, dynamic_filter=active_junk_filter):
                     continue
                 # Skip lines that are only navigation-header fragments
-                if clean.lower() in ("standard switch", "distributed switch", "switch", "bridge"):
+                if clean.lower() in _nav_header_fragments:
                     continue
                 # Avoid duplicates already in the pool
                 resolved = _apply_corrections(clean)
@@ -2047,7 +2034,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 if _is_container_name(resolved, _active_container_headers):
                     cat = "parent"
                     resolved = _normalize_switch_name(resolved)
-                elif re.search(r"^(vmnic|vmk|eth|vmbr)[0-9]", resolved, re.IGNORECASE):
+                elif _iface_prefix_re.search(resolved):
                     cat = "interface"
                 elif re.search(
                     r"\b(\d+\s*[GKM]bit/s\s+(?:Full|Half)|\d+\s*(?:Gbit|Mbit|Kbit)/s\s*(?:Full|Half)?|\d+\s*Full|\d+\s*Mbps?|10000\s*Full|10\s*gbit)",
@@ -2079,7 +2066,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
 
         if len(merged_pool) > len(existing_pool):
             st.session_state[_POOL_KEY] = merged_pool
-            st.rerun()
 
         # ── Zone 1: Unassigned Chips Pool (naturally sorted) ───────────────────
         st.markdown("**Unassigned Chips Pool**")
@@ -2232,21 +2218,25 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             if isinstance(_plat_s3, dict):
                 _active_aliases_step3 = _plat_s3.get("aliases", {}) or {}
 
-        _GENERIC_NAV = {
-            "virtual switches", "virtual switch", "switches", "switch",
-            "physical adapters", "physical adapter", "adapters", "adapter",
-            "vmkernel adapters", "vmkernel adapter", "networks", "network"
-        }
+        # Build parent-noise filter from active platform aliases + dynamic blacklist (zero hardcoded vendor strings)
+        _gen_nav: Set[str] = set(active_junk_filter)
+        _gen_nav.update(str(a).lower() for a in active_aliases.get("parent", []) if isinstance(a, str))
+        _gen_nav.update("switch", "bridge", "adapters", "adapter", "networks", "network")
+
+        _parent_prefixes = [re.escape(a) for a in active_aliases.get("parent", []) if isinstance(a, str)]
+        _parent_prefix_re = None
+        if _parent_prefixes:
+            _parent_prefix_re = re.compile(
+                r"^(?:" + "|".join(_parent_prefixes) + r")\s*[:_-]\s*", re.IGNORECASE
+            )
 
         _cleaned_topo = []
         for _item in parsed_records:
             _row = dict(_item)
             _p = str(_row.get("parent") or "").strip()
-            _p = re.sub(
-                r"^(?:standard\s*switch|distributed\s*switch|vswitch)\s*[:_-]\s*",
-                "", _p, flags=re.IGNORECASE
-            ).strip()
-            if _p.lower() in _GENERIC_NAV or _p.lower() == str(_row.get("interface") or _row.get("name") or "").strip().lower():
+            if _parent_prefix_re:
+                _p = _parent_prefix_re.sub("", _p).strip()
+            if _p.lower() in _gen_nav or _p.lower() == str(_row.get("interface") or _row.get("name") or "").strip().lower():
                 _p = ""
             _row["parent"] = _p
             _cleaned_topo.append(_row)
@@ -2416,15 +2406,16 @@ def _render_chip_card(
         sw_keys = sorted(deck.keys(), key=_natsort_key) if deck else []
 
         if not is_assigned:
-            if sw_keys and category in ("interface", "purpose", "speed"):
+            if category in ("interface", "purpose", "speed"):
+                assign_options = ["-- Assign to Switch --"] + sw_keys
                 target_sw = st.selectbox(
                     "Assign to Switch",
-                    options=["-- Assign to --"] + sw_keys,
+                    options=assign_options,
                     key=f"sel_assign_{chip_id}",
                     label_visibility="collapsed",
                     help="Assign this chip to a switch container below"
                 )
-                if target_sw != "-- Assign to --":
+                if target_sw != "-- Assign to Switch --":
                     _ch = dict(chip)
                     _ch["text"] = edited if edited else text
                     _assign_chip(_ch, target_sw, category)
