@@ -38,6 +38,26 @@ from config.naming_rules import (
 )
 
 # ---------------------------------------------------------------------------
+# Cache helpers for toolbar stats and reference records
+# ---------------------------------------------------------------------------
+@st.cache_data(ttl=60, show_spinner=False)
+def _cached_fetch_toolbar_stats():
+    tot = get_total_record_count()
+    dev = len(get_records_by_category("device")) + len(get_records_by_category("hypervisor"))
+    vms = len(get_records_by_category("vm"))
+    return tot, dev, vms
+
+
+def _cached_get_reference_records(category_key, site_filter="", name_filter=""):
+    """Cache reference records to avoid full-table SQLite scans on every widget interaction."""
+    items = get_records_by_category(category_key, site_filter=site_filter)
+    if name_filter:
+        nfu = name_filter.upper()
+        items = [r for r in items if r.get('name', '').upper().startswith(nfu)]
+    return items
+
+
+# ---------------------------------------------------------------------------
 # Natural sort key — pure Python, no external deps
 # ---------------------------------------------------------------------------
 def _natsort_key(s: str):
