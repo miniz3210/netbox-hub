@@ -1701,7 +1701,19 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                 discovered_switches.add(norm_sw)
 
                 sorted_switches = sorted(discovered_switches, key=_natsort_key) if discovered_switches else ["vSwitch0"]
-                st.session_state["discovered_switches"] = sorted_switches
+                UI_CHROME_WORDS = {
+                    "summary", "monitor", "configure", "permissions", "vms", "datastores",
+                    "networks", "updates", "storage", "actions", "add networking", "refresh",
+                    "edit", "manage physical adapters", "protocol endpoints", "system", "hardware"
+                }
+
+                clean_switches = []
+                for s in sorted_switches:
+                    s_str = str(s).strip()
+                    if len(s_str) > 2 and s_str.lower() != "es" and s_str.lower() not in UI_CHROME_WORDS:
+                        clean_switches.append(s_str)
+
+                st.session_state["discovered_switches"] = clean_switches if clean_switches else ["vSwitch0"]
 
                 # 3. Build initial topology records list
                 records = []
@@ -1894,7 +1906,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     if start_analyze and "hypervisor_parsed_descriptions" in st.session_state:
         st.rerun()
 
-    st.markdown("#### 🔹 Topology Visual Overview")
+    st.markdown("#### 🔹 Topology Visual Overview & Card Controls")
     records = st.session_state.get("topology_records", [])
     sw_options = st.session_state.get("discovered_switches", ["vSwitch0"])
 
@@ -1902,23 +1914,70 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         st.info("Upload screenshots above and click '🚀 Analyze & Auto-Populate' to populate topology records.")
     else:
         cols = st.columns(min(len(sw_options), 4) if sw_options else 1)
+
         for idx, sw in enumerate(sw_options):
             with cols[idx % len(cols)]:
-                assigned = [r for r in records if r.get("switch") == sw]
-                uplinks = [r.get("interface") for r in assigned if r.get("type") == "Uplink" and r.get("interface")]
-                services = [r.get("interface") or r.get("purpose") for r in assigned if r.get("type") != "Uplink" and (r.get("interface") or r.get("purpose"))]
+                with st.container(border=True):
+                    c_name, c_del = st.columns([4, 1])
+                    with c_name:
+                        new_sw_val = st.text_input(
+                            "Switch Name",
+                            value=sw,
+                            key=f"card_sw_rename_{idx}_{sw}",
+                            label_visibility="collapsed"
+                        )
+                        if new_sw_val.strip() and new_sw_val.strip() != sw:
+                            for r in records:
+                                if r.get("switch") == sw:
+                                    r["switch"] = new_sw_val.strip()
+                            sw_options[idx] = new_sw_val.strip()
+                            st.session_state["topology_records"] = records
+                            st.session_state["discovered_switches"] = sw_options
+                            st.rerun()
+                    with c_del:
+                        if st.button("✖", key=f"btn_del_sw_{idx}", help=f"Delete {sw} and unassign its interfaces"):
+                            records = [r for r in records if r.get("switch") != sw]
+                            sw_options = [s for s in sw_options if s != sw]
+                            st.session_state["topology_records"] = records
+                            st.session_state["discovered_switches"] = sw_options
+                            st.rerun()
 
-                up_html = "".join([f'<span style="background:#10b98122;color:#10b981;border:1px solid #10b981;padding:2px 6px;border-radius:8px;font-size:0.75rem;margin:2px;">{u}</span>' for u in uplinks]) or '<span style="color:#64748b;font-size:0.75rem;">No uplinks</span>'
-                svc_html = "".join([f'<span style="background:#f59e0b22;color:#f59e0b;border:1px solid #f59e0b;padding:2px 6px;border-radius:8px;font-size:0.75rem;margin:2px;">{s}</span>' for s in services]) or '<span style="color:#64748b;font-size:0.75rem;">No services</span>'
+                    assigned = [r for r in records if r.get("switch") == sw]
+                    uplinks = [r for r in assigned if r.get("type") == "Uplink" and r.get("interface")]
+                    services = [r for r in assigned if r.get("type") != "Uplink" and (r.get("interface") or r.get("purpose"))]
 
-                st.markdown(
-                    f'<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:12px;margin-bottom:12px;">'
-                    f'<div style="font-weight:600;font-size:0.95rem;color:#38bdf8;margin-bottom:6px;">🔷 {sw}</div>'
-                    f'<div style="font-size:0.78rem;color:#94a3b8;margin-bottom:2px;">Uplinks:</div><div style="margin-bottom:6px;">{up_html}</div>'
-                    f'<div style="font-size:0.78rem;color:#94a3b8;margin-bottom:2px;">Services:</div><div>{svc_html}</div>'
-                    f'</div>',
-                    unsafe_allow_html=True
-                )
+                    st.caption(f"Uplinks ({len(uplinks)}):")
+                    if uplinks:
+                        up_badges = " ".join([
+                            f'<span style="background:#10b98122;color:#10b981;border:1px solid #10b981;padding:2px 8px;border-radius:10px;font-size:0.78rem;margin:2px;display:inline-block;">{u.get("interface")} ({u.get("role", "Active")})</span>'
+                            for u in uplinks
+                        ])
+                        st.markdown(up_badges, unsafe_allow_html=True)
+                    else:
+                        st.caption("None")
+
+                    st.caption(f"Services ({len(services)}):")
+                    if services:
+                        svc_badges = " ".join([
+                            f'<span style="background:#f59e0b22;color:#f59e0b;border:1px solid #f59e0b;padding:2px 8px;border-radius:10px;font-size:0.78rem;margin:2px;display:inline-block;">{s.get("interface") or s.get("purpose")}</span>'
+                            for s in services
+                        ])
+                        st.markdown(svc_badges, unsafe_allow_html=True)
+                    else:
+                        st.caption("None")
+
+                    if st.button("➕ Add to Switch", key=f"btn_add_to_{idx}_{sw}", use_container_width=True):
+                        records.append({
+                            "switch": sw,
+                            "interface": f"vmnic{len(records)}",
+                            "type": "Uplink",
+                            "ip": "",
+                            "purpose": "",
+                            "role": "Active Uplink",
+                            "speed": "10000 Full"
+                        })
+                        st.session_state["topology_records"] = records
+                        st.rerun()
 
     st.markdown("#### 🎛️ Topology Data Grid")
     st.caption("Edit switch assignments, interface roles, and IPs directly. Changes update NetBox descriptions instantly.")
@@ -1934,13 +1993,13 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     }])
 
     column_config = {
-        "switch": st.column_config.SelectboxColumn("Switch Container", options=sw_options, required=True),
-        "interface": st.column_config.TextColumn("Interface / Port", required=True),
-        "type": st.column_config.SelectboxColumn("Type", options=["Uplink", "VMkernel", "Port Group"], required=True),
-        "ip": st.column_config.TextColumn("IPv4 Address"),
-        "purpose": st.column_config.TextColumn("Service / Purpose"),
-        "role": st.column_config.SelectboxColumn("Role", options=["Active Uplink", "Standby Uplink", "Management", "vMotion", "vSAN", "iSCSI", "VM Traffic", "None"]),
-        "speed": st.column_config.TextColumn("Link Speed"),
+        "switch": st.column_config.SelectboxColumn("Switch Container", options=sw_options, required=False),
+        "interface": st.column_config.TextColumn("Interface / Port", required=False),
+        "type": st.column_config.SelectboxColumn("Type", options=["Uplink", "VMkernel", "Port Group"], required=False),
+        "ip": st.column_config.TextColumn("IPv4 Address", required=False),
+        "purpose": st.column_config.TextColumn("Service / Purpose", required=False),
+        "role": st.column_config.SelectboxColumn("Role", options=["Active Uplink", "Standby Uplink", "Management", "vMotion", "vSAN", "iSCSI", "VM Traffic", "None"], required=False),
+        "speed": st.column_config.TextColumn("Link Speed", required=False),
     }
 
     edited_df = st.data_editor(
