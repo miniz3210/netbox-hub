@@ -67,6 +67,53 @@ def _natsort_key(s: str):
 
 
 # ---------------------------------------------------------------------------
+# Strict noise / junk-token filter for chip pool hygiene
+# ---------------------------------------------------------------------------
+UI_NAV_NOISE = {
+    "summary", "monitor", "configure", "permissions", "vms", "datastores",
+    "networks", "updates", "storage", "actions", "storageadapters",
+    "storagedevices", "host cache configuration", "protocol endpoints",
+    "i/o filters", "1/o filters", "storageproviders", "networking",
+    "virtual switches", "vmkernel adapters", "physical adapters",
+    "tcp/ip configuration", "tcp/ipconfiguration", "virtual machines",
+    "vm startup/shutdown", "vmstartup/shutdown", "agent vm settings",
+    "agentvmsettings", "default vm compatibility", "defaultvmcompatibility",
+    "swap file location", "swapfile location", "system", "licensing",
+    "host profile", "time configuration", "timeconfiguration",
+    "authentication services", "authenticationservices", "certificate",
+    "power management", "powermanagement", "advanced system settings",
+    "advanced systemsettin..", "advanced systemsettin...",
+    "system resource reservation", "systemresourcereserv..",
+    "systemresourcereser...", "firewall", "services", "security profile",
+    "securityprofile", "system swap", "systemswap", "packages", "hardware",
+    "refresh", "edit", "add networking", "add networking...", "addnetworking...",
+    "managephysicaladapters", "manage physical adapters",
+    "no associated port groups", "noassociatedportgroups",
+    "no physical network adapters",
+}
+
+
+def _is_junk_token(text: str) -> bool:
+    t = text.strip()
+    if not t or len(t) <= 1:
+        return True
+    low = t.lower()
+    if low.startswith("--- screenshot") or low.startswith("==="):
+        return True
+    if low in ("false", "true", "null", "none", "is_uncertain"):
+        return True
+    if low in UI_NAV_NOISE:
+        return True
+    if re.match(r"^virtual\s*machines\s*\(\d+\)", low, re.IGNORECASE):
+        return True
+    if re.match(r"^vmkernel\s*ports\s*\(\d+\)", low, re.IGNORECASE):
+        return True
+    if re.match(r"^vlan\s*id\s*:\s*(?:--|\d+)", low, re.IGNORECASE):
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Session-level cascade replacement helpers
 # ---------------------------------------------------------------------------
 _CASCADE_FIELDS = ("interface", "parent", "note")
@@ -1858,6 +1905,8 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     continue
                 if _should_filter_chip(resolved, r):
                     continue
+                if _is_junk_token(resolved):
+                    continue
 
                 category = _alias_to_canon.get(resolved.lower())
                 if category is None:
@@ -1921,13 +1970,14 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     "speed": speed_val or None,
                 })
 
-        # Strict deduplication preserving display order (first occurrence wins)
+        # Strict case-insensitive deduplication preserving display order (first occurrence wins)
         seen_text: set = set()
         deduped_pool: list = []
         for c in new_pool:
-            if c["text"] in seen_text:
+            tk = c["text"].lower()
+            if tk in seen_text:
                 continue
-            seen_text.add(c["text"])
+            seen_text.add(tk)
             deduped_pool.append(c)
         new_pool = deduped_pool
 
@@ -1992,6 +2042,8 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 if _is_pure_number(clean):
                     continue
                 if _is_note_text(clean):
+                    continue
+                if _is_junk_token(clean):
                     continue
                 # Skip lines that are only navigation-header fragments
                 if clean.lower() in ("standard switch", "distributed switch", "switch", "bridge"):
@@ -2378,19 +2430,19 @@ def _render_chip_card(
                 st.rerun()
 
         deck = st.session_state.get("switch_deck", {})
-        if deck and not is_assigned and category in ("interface", "purpose"):
-            switch_keys = sorted(deck.keys(), key=_natsort_key)
+        sw_keys = sorted(deck.keys(), key=_natsort_key) if deck else []
+        if sw_keys and not is_assigned and category in ("interface", "purpose", "speed"):
             sel_key = f"sel_assign_{chip_id}"
-            current_sel = st.session_state.get(sel_key, "-- Assign to Container --")
+            current_sel = st.session_state.get(sel_key, "-- Assign to --")
             new_sel = st.selectbox(
-                "-- Assign to Container --",
-                options=["-- Assign to Container --"] + switch_keys,
-                index=0 if current_sel == "-- Assign to Container --" else (1 + switch_keys.index(current_sel) if current_sel in switch_keys else 0),
+                "-- Assign to Switch --",
+                options=["-- Assign to --"] + sw_keys,
+                index=0 if current_sel == "-- Assign to --" else (1 + sw_keys.index(current_sel) if current_sel in sw_keys else 0),
                 key=sel_key,
                 label_visibility="collapsed",
-                help="Select a container to assign this chip to.",
+                help="Assign this chip to a switch container below",
             )
-            if new_sel != "-- Assign to Container --" and new_sel != current_sel:
+            if new_sel != "-- Assign to --" and new_sel != current_sel:
                 st.session_state.pop(sel_key, None)
                 _ch = dict(chip)
                 _ch["text"] = edited if edited else text
