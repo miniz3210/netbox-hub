@@ -85,6 +85,18 @@ def _natsort_key(s: str):
 
 
 # ---------------------------------------------------------------------------
+# Compiled regexes for switch header extraction (module scope)
+# ---------------------------------------------------------------------------
+SW_HEADER_RE = re.compile(
+    r"(?:Standard\s*Switch|Distributed\s*Switch|(?<!\w)Switch|Bridge)\s*:?\s*([a-zA-Z0-9_\-\.\s]+)",
+    re.IGNORECASE
+)
+ACTION_SPLIT_RE = re.compile(
+    r"(?:ADD\s*NETWORKING|EDIT|MANAGE\s*PHYSICAL\s*ADAPTERS?|MANAGE\s*ADAPTERS?|REFRESH|ACTIONS?|\.\.\.|Ver\s*\.+\||Ref)",
+    re.IGNORECASE
+)
+
+# ---------------------------------------------------------------------------
 # Strict noise / junk-token filter for chip pool hygiene
 # ---------------------------------------------------------------------------
 UI_NAV_NOISE = {
@@ -1695,32 +1707,32 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             if _p and str(_p).strip().lower() not in ("", "none", "null", "general"):
                 _detected_switches.add(_normalize_switch_name(str(_p).strip()))
 
-        # Scan OCR text for container headers
+        # Scan OCR text for container headers (with pipe segment splitting)
         _seen_cn: set = set()
         for _line in _sc_combined.splitlines():
-            _low = _line.lower()
-            if not any(_h.lower() in _low for _h in _sv_headers):
+            if not _line.strip():
                 continue
-            _stripped = _line.strip()
-            if not _stripped:
-                continue
-            _clean = re.sub(r"^[\s>›»▶v⌄]+\s*", "", _stripped)
-            _m = re.search(
-                r"(?:Standard\s*Switch|Distributed\s*Switch|Switch|Bridge)\s*:?\s*([a-zA-Z0-9_\-\.\s]+)",
-                _clean, re.IGNORECASE,
-            )
-            if _m:
-                _raw_name = _m.group(1).strip()
-                _raw_name = re.split(
-                    r"(?:ADD\s*NETWORKING|EDIT|MANAGE\s*PHYSICAL\s*ADAPTERS?|MANAGE\s*ADAPTERS?|MANAGE|\.\.\.|Ver\s*\.+\||Ref)",
-                    _raw_name, flags=re.IGNORECASE,
-                )[0].strip()
-                if re.search(r"switch[oO]$", _raw_name, re.IGNORECASE):
-                    _raw_name = _raw_name[:-1] + "0"
-                _cn = _normalize_switch_name(_raw_name)
-                if _cn and _cn not in _seen_cn:
-                    _seen_cn.add(_cn)
-                    _detected_switches.add(_cn)
+            _segments = _line.split("|") if "|" in _line else [_line]
+            for _seg in _segments:
+                _s_clean = _seg.strip()
+                if not _s_clean:
+                    continue
+                _s_clean = re.sub(r"^[\s>›»▶v⌄]+\s*", "", _s_clean)
+                _low = _s_clean.lower()
+                if not any(_h.lower() in _low for _h in _sv_headers):
+                    continue
+                _m = SW_HEADER_RE.search(
+                    _s_clean,
+                )
+                if _m:
+                    _raw_name = _m.group(1).strip()
+                    _raw_name = ACTION_SPLIT_RE.split(_raw_name)[0].strip()
+                    if re.search(r"switch[oO]$", _raw_name, re.IGNORECASE):
+                        _raw_name = _raw_name[:-1] + "0"
+                    _cn = _normalize_switch_name(_raw_name)
+                    if _cn and _cn not in _seen_cn:
+                        _seen_cn.add(_cn)
+                        _detected_switches.add(_cn)
 
         _new_deck = {}
         for _s in sorted(_detected_switches, key=_natsort_key):
@@ -1959,21 +1971,13 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         stripped = line.strip()
         if not stripped:
             return "", False
-        collapsed = bool(re.match(r"^[\s>›»▶]+", stripped))
+        collapsed = bool(re.match(r"^[\s>›»▶v⌄]+", stripped))
         clean = re.sub(r"^[\s>›»▶v⌄]+\s*", "", stripped)
 
-        m = re.search(
-            r"(?:Standard\s*Switch|Distributed\s*Switch|Switch|Bridge)\s*:?\s*([a-zA-Z0-9_\-\.\s]+)",
-            clean,
-            re.IGNORECASE,
-        )
+        m = SW_HEADER_RE.search(clean)
         if m:
             raw_name = m.group(1).strip()
-            raw_name = re.split(
-                r"(?:ADD\s*NETWORKING|EDIT|MANAGE\s*PHYSICAL\s*ADAPTERS?|MANAGE\s*ADAPTERS?|MANAGE|\.\.\.|Ver\s*\.+\||Ref)",
-                raw_name,
-                flags=re.IGNORECASE,
-            )[0].strip()
+            raw_name = ACTION_SPLIT_RE.split(raw_name)[0].strip()
             if re.search(r"switch[oO]$", raw_name, re.IGNORECASE):
                 raw_name = raw_name[:-1] + "0"
             return raw_name, collapsed
@@ -1983,20 +1987,28 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         """Scan multi-line text for lines matching container headers.
 
         Returns list of (name, is_collapsed) tuples, deduplicated by name.
+        Splits pipe-delimited lines into segments before scanning.
         """
         if not text or not headers:
             return []
         seen: set = set()
         results: List[Tuple[str, bool]] = []
         for line in text.splitlines():
-            low = line.lower()
-            if not any(h.lower() in low for h in headers):
+            if not line.strip():
                 continue
-            name, collapsed = _extract_container_name_from_line(line)
-            if not name or name in seen:
-                continue
-            seen.add(name)
-            results.append((name, collapsed))
+            segments = line.split("|") if "|" in line else [line]
+            for seg in segments:
+                s_clean = seg.strip()
+                if not s_clean:
+                    continue
+                low = s_clean.lower()
+                if not any(h.lower() in low for h in headers):
+                    continue
+                name, collapsed = _extract_container_name_from_line(s_clean)
+                if not name or name in seen:
+                    continue
+                seen.add(name)
+                results.append((name, collapsed))
         return results
 
     _active_container_headers = _get_container_headers(naming_rules, active_plat_display)
@@ -2795,7 +2807,6 @@ def _render_assigned_chip_in_card(
                 index=0 if role == "Active Uplink" else 1,
                 key=f"sw_{switch_id}_{slot_type}_{index}_role",
                 label_visibility="collapsed",
-                height=30,
             )
             deck = st.session_state.get("switch_deck", {})
             if switch_id in deck:
