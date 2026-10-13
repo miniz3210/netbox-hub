@@ -1853,11 +1853,14 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     category = "interface"
 
                 # Re-classify parent using YAML-driven container headers (no hardcoded patterns).
-                if category == "parent":
-                    if not _is_container_name(resolved, _active_container_headers):
-                        # Check if the resolved text is better classified as a service/purpose
-                        if not _is_container_name(resolved, _active_container_headers):
-                            category = "purpose"
+                # Applies to ANY category — a vSwitch name that defaulted to "interface"
+                # because the parsed record lacked a parent field must still be detected.
+                if _is_container_name(resolved, _active_container_headers):
+                    category = "parent"
+                elif category == "parent":
+                    # Fallback: if the key says "parent" but the text doesn't match any
+                    # container header, demote to "purpose" (e.g. a generic label).
+                    category = "purpose"
 
                 chip_id = resolved  # unique by text; first occurrence wins
                 if chip_id in seen_chips:
@@ -1954,16 +1957,31 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         _found_containers = _scan_text_for_containers(
             _ocr_text_for_containers, _active_container_headers
         )
-        if _found_containers and not deck:
+        if _found_containers:
             for cname, is_collapsed in _found_containers:
-                if not is_collapsed and cname not in deck:
+                if is_collapsed:
+                    continue
+                if cname not in deck:
                     deck[cname] = {
                         "name": cname,
                         "port_groups": [],
                         "uplinks": [],
                     }
-            if deck:
+            # Also seed any OCR-detected container names into the unassigned pool
+            # so they appear in Zone 1 alongside pool-generated parent chips.
+            _pool_container_ids = {c["id"] for c in pool if c["category"] == "parent"}
+            for cname, _ in _found_containers:
+                if cname not in deck and cname not in _pool_container_ids:
+                    pool.append({
+                        "id": cname,
+                        "text": cname,
+                        "category": "parent",
+                        "speed": None,
+                    })
+                    _pool_container_ids.add(cname)
+            if _found_containers:
                 st.session_state[_DECK_KEY] = deck
+                st.session_state[_POOL_KEY] = pool
 
         if not deck and parent_chips:
             for chip in parent_chips:
