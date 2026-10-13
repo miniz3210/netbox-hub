@@ -1347,6 +1347,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             st.session_state.pop("chips_unassigned", None)
             st.session_state.pop("switch_deck", None)
             st.session_state.pop("chips_session_corrections", None)
+            st.session_state.pop("_pool_initialized_v4", None)
             st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
             st.session_state["hypervisor_editor_version"] = st.session_state.get("hypervisor_editor_version", 0) + 1
             st.rerun()
@@ -1713,6 +1714,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     _POOL_KEY = "chips_unassigned"
     _DECK_KEY = "switch_deck"
     _CORR_KEY = "chips_session_corrections"
+    _POOL_INIT_FLAG = "_pool_initialized_v4"
 
     if _POOL_KEY not in st.session_state:
         st.session_state[_POOL_KEY] = []
@@ -1720,6 +1722,8 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         st.session_state[_DECK_KEY] = {}
     if _CORR_KEY not in st.session_state:
         st.session_state[_CORR_KEY] = {}
+    if _POOL_INIT_FLAG not in st.session_state:
+        st.session_state[_POOL_INIT_FLAG] = False
 
     def _apply_corrections(text: str) -> str:
         orig = _clean_chip_text(text)
@@ -1879,195 +1883,247 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     )
 
     if parsed_records:
-        # ── Build unassigned chip pool from parsed records ──────────────────────
-        seen_chips: set = set()
-        new_pool: list = []
-        for r in parsed_records:
-            for canon_key, val in r.items():
-                val_str = str(val).strip() if val is not None else ""
-                if not val_str or val_str.lower() in ("nan", "none", ""):
-                    continue
-                resolved = _apply_corrections(val_str)
-                if not resolved:
-                    continue
-                if _should_filter_chip(resolved, r):
-                    continue
-                if _is_junk_token(resolved):
-                    continue
+        # ── ONE-TIME pool build & deck seed (only during initial analyze) ─────
+        if start_analyze and not st.session_state.get(_POOL_INIT_FLAG, False):
+            # Build unassigned chip pool from parsed records
+            seen_chips: set = set()
+            new_pool: list = []
+            for r in parsed_records:
+                for canon_key, val in r.items():
+                    val_str = str(val).strip() if val is not None else ""
+                    if not val_str or val_str.lower() in ("nan", "none", ""):
+                        continue
+                    resolved = _apply_corrections(val_str)
+                    if not resolved:
+                        continue
+                    if _should_filter_chip(resolved, r):
+                        continue
+                    if _is_junk_token(resolved):
+                        continue
 
-                category = _alias_to_canon.get(resolved.lower())
-                if category is None:
-                    category = _alias_to_canon.get(
-                        re.sub(r"[^a-z0-9]", "", resolved.lower())
-                    )
-                if category is None and canon_key in _alias_to_canon:
-                    category = _alias_to_canon[canon_key]
-                if category is None:
-                    for _ck in _CATEGORY_ORDER:
-                        if _ck in canon_key:
-                            category = _ck
-                            break
-                if category is None:
-                    category = "interface"
+                    category = _alias_to_canon.get(resolved.lower())
+                    if category is None:
+                        category = _alias_to_canon.get(
+                            re.sub(r"[^a-z0-9]", "", resolved.lower())
+                        )
+                    if category is None and canon_key in _alias_to_canon:
+                        category = _alias_to_canon[canon_key]
+                    if category is None:
+                        for _ck in _CATEGORY_ORDER:
+                            if _ck in canon_key:
+                                category = _ck
+                                break
+                    if category is None:
+                        category = "interface"
 
-                # Re-classify parent using YAML-driven container headers (with builtin fallbacks).
-                # If the key is "parent" or the resolved text matches a container header,
-                # it is a Switch Container — never demote to "purpose".
-                if category == "parent" or _is_container_name(resolved, _active_container_headers):
-                    category = "parent"
-                    # Normalize the switch name so 'o' suffixes and manual: prefixes are consistent.
-                    resolved = _normalize_switch_name(resolved)
+                    if category == "parent" or _is_container_name(resolved, _active_container_headers):
+                        category = "parent"
+                        resolved = _normalize_switch_name(resolved)
 
-                chip_id = resolved  # unique by text; first occurrence wins
-                if chip_id in seen_chips:
-                    continue
-                seen_chips.add(chip_id)
-
-                # Handle fused adapter+speed entries (e.g. "vmnic1 10000 Full")
-                interface_val = resolved
-                speed_val = ""
-                fm = _FUSED_ADAPTER_SPEED_RE.match(resolved)
-                if fm and category == "interface":
-                    interface_val = fm.group(1)
-                    speed_raw = fm.group(2).strip()
-                    speed_val = speed_raw
-                    # Add split interface as its own chip
-                    fused_chip_id = interface_val
-                    if fused_chip_id not in seen_chips:
-                        seen_chips.add(fused_chip_id)
-                        new_pool.append({
-                            "id": fused_chip_id,
-                            "text": interface_val,
-                            "category": "interface",
-                            "speed": None,
-                        })
-                    # Replace current chip with split interface
-                    resolved = interface_val
                     chip_id = resolved
-                    # Keep speed in the record for association
-                    r["_fused_speed"] = speed_val
-                else:
-                    if category == "speed" and "speed" in r:
-                        speed_val = str(r["speed"]).strip()
+                    if chip_id in seen_chips:
+                        continue
+                    seen_chips.add(chip_id)
 
-                new_pool.append({
-                    "id": chip_id,
-                    "text": resolved,
-                    "category": category,
-                    "speed": speed_val or None,
-                })
+                    interface_val = resolved
+                    speed_val = ""
+                    fm = _FUSED_ADAPTER_SPEED_RE.match(resolved)
+                    if fm and category == "interface":
+                        interface_val = fm.group(1)
+                        speed_raw = fm.group(2).strip()
+                        speed_val = speed_raw
+                        fused_chip_id = interface_val
+                        if fused_chip_id not in seen_chips:
+                            seen_chips.add(fused_chip_id)
+                            new_pool.append({
+                                "id": fused_chip_id,
+                                "text": interface_val,
+                                "category": "interface",
+                                "speed": None,
+                            })
+                        resolved = interface_val
+                        chip_id = resolved
+                        r["_fused_speed"] = speed_val
+                    else:
+                        if category == "speed" and "speed" in r:
+                            speed_val = str(r["speed"]).strip()
 
-        # Strict case-insensitive deduplication preserving display order (first occurrence wins)
-        seen_text: set = set()
-        deduped_pool: list = []
-        for c in new_pool:
-            tk = c["text"].lower()
-            if tk in seen_text:
-                continue
-            seen_text.add(tk)
-            deduped_pool.append(c)
-        new_pool = deduped_pool
+                    new_pool.append({
+                        "id": chip_id,
+                        "text": resolved,
+                        "category": category,
+                        "speed": speed_val or None,
+                    })
 
-        # ── Dynamic noise blacklist from active platform presets ────────────
-        active_plat = st.session_state.get("naming_target_platform", "VMware ESXi")
-        plat_cfg = (naming_rules.get("topology_parsing_presets") or {}).get(active_plat, {})
-        dynamic_blacklist: set[str] = set(
-            s.strip().lower() for s in (plat_cfg.get("ui_noise_blacklist") or []) if s.strip()
-        )
-        active_junk_filter = UI_NAV_NOISE.union(dynamic_blacklist)
+            seen_text: set = set()
+            deduped_pool: list = []
+            for c in new_pool:
+                tk = c["text"].lower()
+                if tk in seen_text:
+                    continue
+                seen_text.add(tk)
+                deduped_pool.append(c)
+            new_pool = deduped_pool
 
-        existing_pool = st.session_state.get(_POOL_KEY, [])
-        existing_ids = {c["id"] for c in existing_pool}
-        merged_pool = [c for c in existing_pool if c["id"] not in seen_chips] + new_pool
-        st.session_state[_POOL_KEY] = merged_pool
-
-        # ── Universal Token Harvesting from raw OCR & AI text ────────────────
-        # Every non-noise observable text line becomes a Lego chip so nothing
-        # is silently discarded due to fused OCR or missing structured records.
-
-        # Build interface-prefix regex dynamically from platform aliases (zero hardcoded vendor strings)
-        _iface_prefixes: List[str] = [re.escape(a) for a in active_aliases.get("interface", []) if isinstance(a, str)]
-        if _iface_prefixes:
-            _iface_prefix_re = re.compile(
-                r"^(?:" + "|".join(_iface_prefixes) + r")[0-9]", re.IGNORECASE
+            # Dynamic noise blacklist from active platform presets
+            active_plat = st.session_state.get("naming_target_platform", "VMware ESXi")
+            plat_cfg = (naming_rules.get("topology_parsing_presets") or {}).get(active_plat, {})
+            dynamic_blacklist: set[str] = set(
+                s.strip().lower() for s in (plat_cfg.get("ui_noise_blacklist") or []) if s.strip()
             )
-        else:
-            _iface_prefix_re = re.compile(r"^[\w]*[0-9]", re.IGNORECASE)
+            active_junk_filter = UI_NAV_NOISE.union(dynamic_blacklist)
 
-        # Navigation-header fragments to skip — built from alias set + generic noise
-        _nav_header_fragments = set(active_junk_filter)
-        _nav_header_fragments.update(("standard switch", "distributed switch", "switch", "bridge"))
+            # Build interface-prefix regex from platform aliases
+            _iface_prefixes: List[str] = [re.escape(a) for a in active_aliases.get("interface", []) if isinstance(a, str)]
+            if _iface_prefixes:
+                _iface_prefix_re = re.compile(
+                    r"^(?:" + "|".join(_iface_prefixes) + r")[0-9]", re.IGNORECASE
+                )
+            else:
+                _iface_prefix_re = re.compile(r"^[\w]*[0-9]", re.IGNORECASE)
 
-        def _harvest_tokens_from_text(text: str, source_key: str) -> None:
-            if not text:
-                return
-            existing_texts: set[str] = {c["text"].strip().lower() for c in merged_pool}
-            for line in text.splitlines():
-                raw = line.strip()
-                if not raw:
-                    continue
-                clean = re.sub(r"^[❌!✔Xx\s>›»▶v⌄]+", "", raw).strip()
-                if not clean or len(clean) <= 1:
-                    continue
-                low = clean.lower()
-                if low in active_junk_filter:
-                    continue
-                if _is_pure_number(clean):
-                    continue
-                if _is_note_text(clean):
-                    continue
-                if _is_junk_token(clean, dynamic_filter=active_junk_filter):
-                    continue
-                # Skip lines that are only navigation-header fragments
-                if clean.lower() in _nav_header_fragments:
-                    continue
-                # Avoid duplicates already in the pool
-                resolved = _apply_corrections(clean)
-                if not resolved:
-                    continue
-                resolved_lower = resolved.strip().lower()
-                if resolved_lower in existing_texts:
-                    continue
-                existing_texts.add(resolved_lower)
-                existing_ids.add(resolved)
-                # Categorize: container headers → parent, vmnic/vmk/eth → interface, speed patterns → speed, everything else → purpose
-                if _is_container_name(resolved, _active_container_headers):
-                    cat = "parent"
-                    resolved = _normalize_switch_name(resolved)
-                elif _iface_prefix_re.search(resolved):
-                    cat = "interface"
-                elif re.search(
-                    r"\b(\d+\s*[GKM]bit/s\s+(?:Full|Half)|\d+\s*(?:Gbit|Mbit|Kbit)/s\s*(?:Full|Half)?|\d+\s*Full|\d+\s*Mbps?|10000\s*Full|10\s*gbit)",
-                    resolved, re.IGNORECASE
-                ):
-                    cat = "speed"
-                else:
-                    cat = "purpose"
-                merged_pool.append({
-                    "id": resolved,
-                    "text": resolved,
-                    "category": cat,
-                    "speed": None,
-                })
+            _nav_header_fragments = set(active_junk_filter)
+            _nav_header_fragments.update(("standard switch", "distributed switch", "switch", "bridge"))
 
-        _ocr_raw = st.session_state.get("latest_ocr_raw_text", "")
-        if _ocr_raw:
-            _harvest_tokens_from_text(_ocr_raw, "ocr")
-        # Also harvest from AI-parsed items (their free-text values)
-        for _ri, _item in enumerate(parsed_records):
-            if not isinstance(_item, dict):
-                continue
-            for _hk, _hv in _item.items():
-                if _hk in ("interface", "parent"):
-                    continue
-                if not _hv:
-                    continue
-                _harvest_tokens_from_text(str(_hv), f"ai_{_ri}")
+            # UI chrome delimiters to discard immediately
+            _UI_CHROME_WORDS = (
+                "summary", "monitor", "configure", "permissions",
+                "vms", "datastores", "networks", "updates",
+                "storage", "actions", "add networking", "refresh",
+                "edit", "manage physical adapters",
+                "protocol endpoints", "system", "hardware",
+            )
 
-        if len(merged_pool) > len(existing_pool):
-            st.session_state[_POOL_KEY] = merged_pool
+            def _harvest_tokens_from_text(text: str, source_key: str) -> None:
+                if not text:
+                    return
+                existing_texts: set[str] = {c["text"].strip().lower() for c in new_pool}
+                for line in text.splitlines():
+                    raw = line.strip()
+                    if not raw:
+                        continue
+                    # DISCARD lines containing pipe delimiter (UI chrome)
+                    if "|" in raw:
+                        continue
+                    # DISCARD lines containing known UI chrome words
+                    clean = re.sub(r"^[❌!✔Xx\s>›»▶v⌄]+", "", raw).strip()
+                    if not clean or len(clean) <= 1:
+                        continue
+                    low = clean.lower()
+                    if any(w in low for w in _UI_CHROME_WORDS):
+                        continue
+                    if low in active_junk_filter:
+                        continue
+                    if _is_pure_number(clean):
+                        continue
+                    if _is_note_text(clean):
+                        continue
+                    if _is_junk_token(clean, dynamic_filter=active_junk_filter):
+                        continue
+                    if clean.lower() in _nav_header_fragments:
+                        continue
+                    resolved = _apply_corrections(clean)
+                    if not resolved:
+                        continue
+                    resolved_lower = resolved.strip().lower()
+                    if resolved_lower in existing_texts:
+                        continue
+                    existing_texts.add(resolved_lower)
 
-        # ── Zone 1: Unassigned Chips Pool (naturally sorted) ───────────────────
+                    # Restrict chip creation to valid entity patterns only:
+                    #   - Adapters/VMkernels: vmnic*, vmk*, eth*, vmbr*
+                    #   - IPv4 addresses
+                    #   - Speed/link metrics
+                    #   - Container headers (switches)
+                    #   - AI-parsed port group / purpose names
+                    if _is_container_name(resolved, _active_container_headers):
+                        cat = "parent"
+                        resolved = _normalize_switch_name(resolved)
+                    elif _iface_prefix_re.search(resolved):
+                        cat = "interface"
+                    elif re.search(
+                        r"\b(\d+\s*[GKM]bit/s\s+(?:Full|Half)|\d+\s*(?:Gbit|Mbit|Kbit)/s\s*(?:Full|Half)?|\d+\s*Full|\d+\s*Mbps?|10000\s*Full|10\s*gbit)",
+                        resolved, re.IGNORECASE
+                    ):
+                        cat = "speed"
+                    elif re.search(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", resolved):
+                        cat = "interface"
+                    else:
+                        # Only accept if it looks like a meaningful entity (not random noise)
+                        if len(resolved) < 2:
+                            continue
+                        cat = "purpose"
+
+                    new_pool.append({
+                        "id": resolved,
+                        "text": resolved,
+                        "category": cat,
+                        "speed": None,
+                    })
+
+            _ocr_raw = st.session_state.get("latest_ocr_raw_text", "")
+            if _ocr_raw:
+                _harvest_tokens_from_text(_ocr_raw, "ocr")
+            for _ri, _item in enumerate(parsed_records):
+                if not isinstance(_item, dict):
+                    continue
+                for _hk, _hv in _item.items():
+                    if _hk in ("interface", "parent"):
+                        continue
+                    if not _hv:
+                        continue
+                    _harvest_tokens_from_text(str(_hv), f"ai_{_ri}")
+
+            # Store built pool to session state
+            st.session_state[_POOL_KEY] = new_pool
+
+            # ── Turn-1 Switch Deck Initialization ────────────────────────────
+            deck = st.session_state.get(_DECK_KEY, {})
+            _known_switches: set = set(deck.keys())
+
+            _ocr_text_for_containers = st.session_state.get("latest_ocr_raw_text", "")
+            if not _ocr_text_for_containers:
+                _try_structured = st.session_state.get("structured_output_text", "")
+                if _try_structured:
+                    _ocr_text_for_containers = _try_structured
+            _found_containers = _scan_text_for_containers(
+                _ocr_text_for_containers, _active_container_headers
+            )
+            for cname, _ in _found_containers:
+                _known_switches.add(_normalize_switch_name(cname))
+
+            for r in parsed_records:
+                pname = r.get("parent")
+                if pname:
+                    pname_clean = _normalize_switch_name(str(pname).strip())
+                    if pname_clean and pname_clean.lower() not in ("nan", "none", ""):
+                        _known_switches.add(pname_clean)
+
+            for switch_name in sorted(_known_switches, key=_natsort_key):
+                _ns = _normalize_switch_name(switch_name)
+                if _ns not in deck:
+                    deck[_ns] = {"name": _ns, "port_groups": [], "uplinks": []}
+            st.session_state[_DECK_KEY] = deck
+
+            # Add container chips to pool
+            _pool_container_ids = {c["id"] for c in new_pool if c["category"] == "parent"}
+            for cname, _ in _found_containers:
+                _nc = _normalize_switch_name(cname)
+                if _nc not in deck and _nc not in _pool_container_ids:
+                    new_pool.append({
+                        "id": _nc,
+                        "text": _nc,
+                        "category": "parent",
+                        "speed": None,
+                    })
+                    _pool_container_ids.add(_nc)
+            if _found_containers:
+                st.session_state[_POOL_KEY] = new_pool
+
+            st.session_state[_POOL_INIT_FLAG] = True
+            logger.info("Chip pool and switch deck initialized on first analyze.")
+
+        # ── Zone 1: Unassigned Chips Pool (render only, read from session) ─
         st.markdown("**Unassigned Chips Pool**")
         st.caption("Click chips to assign them. Edit any chip inline to correct OCR errors.")
         pool = st.session_state.get(_POOL_KEY, [])
@@ -2091,7 +2147,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         st.caption("Click chips from the pool above to move them into switch slots. Click assigned chips to return them.")
 
         deck = st.session_state.get(_DECK_KEY, {})
-        # Detect switches from pool chips that match parent category
         parent_chips = sorted(
             [c for c in pool if c["category"] == "parent"],
             key=lambda c: _natsort_key(c["text"]),
@@ -2108,61 +2163,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             [c for c in pool if c["category"] == "speed"],
             key=lambda c: _natsort_key(c["text"]),
         )
-
-        # ── Comprehensive deck initialization from ALL sources ────────────────
-        _known_switches: set = set(deck.keys())
-
-        # Source 1: OCR text
-        _ocr_text_for_containers = st.session_state.get("latest_ocr_raw_text", "")
-        if not _ocr_text_for_containers:
-            _try_structured = st.session_state.get("structured_output_text", "")
-            if _try_structured:
-                _ocr_text_for_containers = _try_structured
-        _found_containers = _scan_text_for_containers(
-            _ocr_text_for_containers, _active_container_headers
-        )
-        for cname, is_collapsed in _found_containers:
-            _known_switches.add(_normalize_switch_name(cname))
-
-        # Source 2: parent chips already in the pool
-        for chip in parent_chips:
-            _known_switches.add(_normalize_switch_name(chip["id"]))
-
-        # Source 3: direct parent fields from parsed_records
-        for r in parsed_records:
-            pname = r.get("parent")
-            if pname:
-                pname_clean = _normalize_switch_name(str(pname).strip())
-                if pname_clean and pname_clean.lower() not in ("nan", "none", ""):
-                    _known_switches.add(pname_clean)
-
-        # Seed missing switches into the deck (always use normalized keys)
-        _new_switches_added = False
-        for switch_name in sorted(_known_switches, key=_natsort_key):
-            _ns = _normalize_switch_name(switch_name)
-            if _ns not in deck:
-                deck[_ns] = {
-                    "name": _ns,
-                    "port_groups": [],
-                    "uplinks": [],
-                }
-                _new_switches_added = True
-        if _new_switches_added:
-            st.session_state[_DECK_KEY] = deck
-
-        _pool_container_ids = {c["id"] for c in pool if c["category"] == "parent"}
-        for cname, _ in _found_containers:
-            _nc = _normalize_switch_name(cname)
-            if _nc not in deck and _nc not in _pool_container_ids:
-                pool.append({
-                    "id": _nc,
-                    "text": _nc,
-                    "category": "parent",
-                    "speed": None,
-                })
-                _pool_container_ids.add(_nc)
-        if _found_containers:
-            st.session_state[_POOL_KEY] = pool
 
         if deck:
             for switch_id in sorted(deck.keys(), key=_natsort_key):
