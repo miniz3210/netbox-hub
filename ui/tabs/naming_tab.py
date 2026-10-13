@@ -1790,46 +1790,31 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         """Extract clean switch name from a line containing a container header.
 
         Returns (clean_name, is_collapsed).
-        Strips leading collapse symbols (>, ›) and trailing UI actions.
+        Uses flexible regex matching so fused OCR text like
+        "MANAGEPHYSICALADAPTERS" does not break extraction.
         """
         stripped = line.strip()
         if not stripped:
             return "", False
-        collapsed = False
-        prefix_match = re.match(r"^([\s>›»▶]+)", stripped)
-        if prefix_match:
-            prefix = prefix_match.group(1)
-            if any(c in prefix for c in (">", "›")):
-                collapsed = True
-            stripped = stripped[len(prefix):]
-        # Strip leading expand symbols (v, ⌄) without collapsing
-        stripped = re.sub(r"^[v⌄]\s*", "", stripped)
-        # Try to find a container_header pattern and extract text after it
-        found = False
-        for hdr in _active_container_headers:
-            low_line = stripped.lower()
-            low_hdr = hdr.lower()
-            idx = low_line.find(low_hdr)
-            if idx >= 0:
-                after = stripped[idx + len(hdr):].lstrip(": \t").strip()
-                # Strip trailing UI action labels
-                after = re.split(
-                    r"\s+(?:ADD\s+NETWORKING|EDIT|MANAGE\s+PHYSICAL\s+ADAPTERS|"
-                    r"MANAGE\s+PHYSICAL\s+ADAPTER|MANAGE\s+ADAPTERS|MANAGE|\.\.\.)\s*$",
-                    after, flags=re.IGNORECASE,
-                )[0].strip()
-                if after:
-                    return after, False
-                found = True
-                break
-        if not found:
-            # Fallback: last-colon split + UI artifact strip
-            parts = stripped.split(":")
-            remaining = parts[-1].strip() if len(parts) > 1 else stripped
-            remaining = re.split(
-                r"\s+(?:ADD|EDIT|MANAGE|\.\.\.)\s*$", remaining, flags=re.IGNORECASE
-            )[0].strip(' :->»▶|')
-            return remaining if remaining else stripped, collapsed
+        collapsed = bool(re.match(r"^[\s>›»▶]+", stripped))
+        clean = re.sub(r"^[\s>›»▶v⌄]+\s*", "", stripped)
+
+        m = re.search(
+            r"(?:Standard\s*Switch|Distributed\s*Switch|Switch|Bridge)\s*:?\s*([a-zA-Z0-9_\-\.\s]+)",
+            clean,
+            re.IGNORECASE,
+        )
+        if m:
+            raw_name = m.group(1).strip()
+            raw_name = re.split(
+                r"(?:ADD\s*NETWORKING|EDIT|MANAGE\s*PHYSICAL\s*ADAPTERS?|MANAGE\s*ADAPTERS?|MANAGE|\.\.\.|Ver\s*\.+\||Ref)",
+                raw_name,
+                flags=re.IGNORECASE,
+            )[0].strip()
+            if re.search(r"switch[oO]$", raw_name, re.IGNORECASE):
+                raw_name = raw_name[:-1] + "0"
+            return raw_name, collapsed
+        return "", collapsed
 
     def _scan_text_for_containers(text: str, headers: List[str]) -> List[Tuple[str, bool]]:
         """Scan multi-line text for lines matching container headers.
@@ -1978,6 +1963,82 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         existing_ids = {c["id"] for c in existing_pool}
         merged_pool = [c for c in existing_pool if c["id"] not in seen_chips and c["id"] not in _ip_chip_ids] + new_pool
         if merged_pool != existing_pool:
+            st.session_state[_POOL_KEY] = merged_pool
+            st.rerun()
+
+        # ── Universal Token Harvesting from raw OCR & AI text ────────────────
+        # Every non-noise observable text line becomes a Lego chip so nothing
+        # is silently discarded due to fused OCR or missing structured records.
+        _NAV_NOISE = {
+            "summary", "monitor", "configure", "permissions",
+            "vms", "datastores", "networks", "updates", "storage",
+            "actions", "vlan id: --", "vlan id:",
+        }
+
+        def _harvest_tokens_from_text(text: str, source_key: str) -> None:
+            if not text:
+                return
+            seen_harvested: set = set()
+            for line in text.splitlines():
+                raw = line.strip()
+                if not raw:
+                    continue
+                clean = re.sub(r"^[❌!✔Xx]\s*", "", raw).strip()
+                if not clean:
+                    continue
+                low = clean.lower()
+                if low in _NAV_NOISE:
+                    continue
+                if _is_pure_number(clean):
+                    continue
+                if _is_note_text(clean):
+                    continue
+                # Skip lines that are only navigation-header fragments
+                if clean.lower() in ("standard switch", "distributed switch", "switch", "bridge"):
+                    continue
+                # Avoid duplicates already in the pool
+                resolved = _apply_corrections(clean)
+                if not resolved:
+                    continue
+                chip_id = f"harvested_{source_key}_{resolved}"
+                if chip_id in seen_harvested or chip_id in existing_ids:
+                    continue
+                seen_harvested.add(chip_id)
+                # Categorize: container headers → parent, vmnic/vmk/eth → interface, speed patterns → speed, everything else → purpose
+                if _is_container_name(resolved, _active_container_headers):
+                    cat = "parent"
+                    resolved = _normalize_switch_name(resolved)
+                elif re.search(r"^(vmnic|vmk|eth|vmbr)[0-9]", resolved, re.IGNORECASE):
+                    cat = "interface"
+                elif re.search(
+                    r"\b(\d+\s*[GKM]bit/s\s+(?:Full|Half)|\d+\s*(?:Gbit|Mbit|Kbit)/s\s*(?:Full|Half)?|\d+\s*Full|\d+\s*Mbps?|10000\s*Full|10\s*gbit)",
+                    resolved, re.IGNORECASE
+                ):
+                    cat = "speed"
+                else:
+                    cat = "purpose"
+                merged_pool.append({
+                    "id": chip_id,
+                    "text": resolved,
+                    "category": cat,
+                    "speed": None,
+                })
+
+        _ocr_raw = st.session_state.get("latest_ocr_raw_text", "")
+        if _ocr_raw:
+            _harvest_tokens_from_text(_ocr_raw, "ocr")
+        # Also harvest from AI-parsed items (their free-text values)
+        for _ri, _item in enumerate(parsed_records):
+            if not isinstance(_item, dict):
+                continue
+            for _hk, _hv in _item.items():
+                if _hk in ("interface", "parent"):
+                    continue
+                if not _hv:
+                    continue
+                _harvest_tokens_from_text(str(_hv), f"ai_{_ri}")
+
+        if len(merged_pool) > len(existing_pool):
             st.session_state[_POOL_KEY] = merged_pool
             st.rerun()
 
@@ -2317,23 +2378,25 @@ def _render_chip_card(
                 st.rerun()
 
         deck = st.session_state.get("switch_deck", {})
-        if deck:
+        if deck and not is_assigned and category in ("interface", "purpose"):
             switch_keys = sorted(deck.keys(), key=_natsort_key)
             sel_key = f"sel_assign_{chip_id}"
-            current_sel = st.session_state.get(sel_key, "-- Assign to --")
+            current_sel = st.session_state.get(sel_key, "-- Assign to Container --")
             new_sel = st.selectbox(
-                "Assign to",
-                options=["-- Assign to --"] + switch_keys,
-                index=0 if current_sel == "-- Assign to --" else (1 + switch_keys.index(current_sel) if current_sel in switch_keys else 0),
+                "-- Assign to Container --",
+                options=["-- Assign to Container --"] + switch_keys,
+                index=0 if current_sel == "-- Assign to Container --" else (1 + switch_keys.index(current_sel) if current_sel in switch_keys else 0),
                 key=sel_key,
                 label_visibility="collapsed",
                 help="Select a container to assign this chip to.",
             )
-            if new_sel != "-- Assign to --" and new_sel != current_sel:
+            if new_sel != "-- Assign to Container --" and new_sel != current_sel:
                 st.session_state.pop(sel_key, None)
                 _ch = dict(chip)
                 _ch["text"] = edited if edited else text
                 _assign_chip(_ch, new_sel, category)
+                st.rerun()
+        if not is_assigned:
             if st.button("⬆ Promote to Container", key=f"chip_promote_{chip_id}", help="Turn this chip into a new switch container", type="secondary", width="stretch"):
                 _promote_chip_to_container(chip)
 
