@@ -1656,6 +1656,131 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             st.error(f"Pipeline execution failed: {str(e)}")
             st.code(traceback.format_exc(), language="text")
 
+    # ── Synchronous State Commitment (v4.4.21) ──────────────────────────────
+    # Populate switch_deck and chips_unassigned BEFORE the post-analyze
+    # st.rerun() so that Section 2 renders with real data on the next pass.
+    if start_analyze:
+        _sc_rules = SSM.get_naming_rules(force_reload_naming_rules())
+        _sc_plat = st.session_state.get("naming_target_platform", "VMware ESXi")
+        _sc_combined = st.session_state.get("latest_ocr_raw_text", "")
+        _sc_deduped = st.session_state.get("hypervisor_parsed_descriptions") or deduped if 'deduped' in dir() else []
+
+        # Inline container-header discovery (avoid forward-reference to nested defs below)
+        _builtin_container_headers = ["Switch:", "Bridge:", "Distributed Switch:"]
+        _sv_presets = _sc_rules.get("topology_parsing_presets") or {}
+        _sv_plat_data = _sv_presets.get(_sc_plat, {})
+        if not isinstance(_sv_plat_data, dict):
+            for _k, _v in _sv_presets.items():
+                if isinstance(_k, str) and isinstance(_v, dict) and _k.strip().lower() == _sc_plat.strip().lower():
+                    _sv_plat_data = _v
+                    break
+        _sv_headers = _builtin_container_headers
+        if isinstance(_sv_plat_data, dict):
+            _sp_cfg = _sv_plat_data.get("spatial_anchors_and_redaction", {})
+            if isinstance(_sp_cfg, dict):
+                _anchors = _sp_cfg.get("anchors", [])
+                if isinstance(_anchors, list):
+                    _h: List[str] = []
+                    for _a in _anchors:
+                        if isinstance(_a, dict) and _a.get("role") == "container_header":
+                            _pats = _a.get("patterns", [])
+                            if isinstance(_pats, list):
+                                _h.extend(p for p in _pats if p)
+                    if _h:
+                        _sv_headers = _h
+
+        _detected_switches = set()
+        for _r in _sc_deduped:
+            _p = _r.get("parent")
+            if _p and str(_p).strip().lower() not in ("", "none", "null", "general"):
+                _detected_switches.add(_normalize_switch_name(str(_p).strip()))
+
+        # Scan OCR text for container headers
+        _seen_cn: set = set()
+        for _line in _sc_combined.splitlines():
+            _low = _line.lower()
+            if not any(_h.lower() in _low for _h in _sv_headers):
+                continue
+            _stripped = _line.strip()
+            if not _stripped:
+                continue
+            _clean = re.sub(r"^[\s>›»▶v⌄]+\s*", "", _stripped)
+            _m = re.search(
+                r"(?:Standard\s*Switch|Distributed\s*Switch|Switch|Bridge)\s*:?\s*([a-zA-Z0-9_\-\.\s]+)",
+                _clean, re.IGNORECASE,
+            )
+            if _m:
+                _raw_name = _m.group(1).strip()
+                _raw_name = re.split(
+                    r"(?:ADD\s*NETWORKING|EDIT|MANAGE\s*PHYSICAL\s*ADAPTERS?|MANAGE\s*ADAPTERS?|MANAGE|\.\.\.|Ver\s*\.+\||Ref)",
+                    _raw_name, flags=re.IGNORECASE,
+                )[0].strip()
+                if re.search(r"switch[oO]$", _raw_name, re.IGNORECASE):
+                    _raw_name = _raw_name[:-1] + "0"
+                _cn = _normalize_switch_name(_raw_name)
+                if _cn and _cn not in _seen_cn:
+                    _seen_cn.add(_cn)
+                    _detected_switches.add(_cn)
+
+        _new_deck = {}
+        for _s in sorted(_detected_switches, key=_natsort_key):
+            _new_deck[_s] = {"name": _s, "port_groups": [], "uplinks": []}
+        st.session_state["switch_deck"] = _new_deck
+
+        _UI_CHROME = {
+            "summary", "monitor", "configure", "permissions", "vms", "datastores",
+            "networks", "updates", "storage", "actions", "add networking", "refresh",
+            "edit", "manage physical adapters", "protocol endpoints", "system", "hardware",
+            "no associated port groups", "no physical network adapters", "virtual switches",
+        }
+
+        def _is_valid_entity_token(_text: str) -> bool:
+            _t = str(_text).strip()
+            if not _t or len(_t) <= 1:
+                return False
+            _low = _t.lower()
+            if "|" in _t or _low.startswith("--- screenshot"):
+                return False
+            if _low in ("false", "true", "null", "none", "is_uncertain"):
+                return False
+            if any(_chrome in _low for _chrome in _UI_CHROME):
+                return False
+            if re.match(r"^virtual\s*machines\s*\(\d+\)", _low):
+                return False
+            if re.match(r"^vmkernel\s*ports\s*\(\d+\)", _low):
+                return False
+            if re.match(r"^vlan\s*id\s*:\s*(?:--|\d+)", _low):
+                return False
+            return True
+
+        _raw_chips = []
+        _seen_texts = set()
+        for _r2 in _sc_deduped:
+            if not isinstance(_r2, dict):
+                continue
+            _iface = str(_r2.get("interface", "")).strip()
+            if _iface and _is_valid_entity_token(_iface) and _iface.lower() not in _seen_texts:
+                _seen_texts.add(_iface.lower())
+                _raw_chips.append({"id": _iface, "text": _iface, "category": "interface", "speed": None})
+
+            _ip_val = str(_r2.get("ip") or _r2.get("ip_address") or "").strip()
+            if _ip_val and re.match(r"^\d{1,3}(?:\.\d{1,3}){3}$", _ip_val) and _ip_val.lower() not in _seen_texts:
+                _seen_texts.add(_ip_val.lower())
+                _raw_chips.append({"id": _ip_val, "text": _ip_val, "category": "interface", "speed": None})
+
+            _purpose = str(_r2.get("purpose", "")).strip()
+            if _purpose and _is_valid_entity_token(_purpose) and _purpose.lower() not in _seen_texts:
+                _seen_texts.add(_purpose.lower())
+                _raw_chips.append({"id": _purpose, "text": _purpose, "category": "purpose", "speed": None})
+
+            _speed = str(_r2.get("speed", "")).strip()
+            if _speed and re.search(r"\b\d+\s*(?:Gbit/s|Mbit/s|Full)\b", _speed, re.I) and _speed.lower() not in _seen_texts:
+                _seen_texts.add(_speed.lower())
+                _raw_chips.append({"id": _speed, "text": _speed, "category": "speed", "speed": None})
+
+        st.session_state["chips_unassigned"] = _raw_chips
+        st.session_state["_pool_initialized_v4"] = True
+
     # st.rerun() is placed OUTSIDE the try/except so that Streamlit's internal
     # RerunException (raised by st.rerun) cannot be caught by the bare
     # except Exception and silently swallowed, which would leave the page
