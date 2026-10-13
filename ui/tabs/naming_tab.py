@@ -2283,14 +2283,14 @@ def _render_chip_card(
         if st.button("✖ Return to Pool", key=f"chip_rm_{chip_id}_{switch_id}_{slot_type}", help="Return this chip to the unassigned pool", type="secondary", width="stretch"):
             _return_chip_to_pool(chip_id, switch_id, slot_type)
     else:
-        edited = st.text_input(
+        raw_val = st.text_input(
             label="Chip",
             value=text,
             key=f"chip_edit_{chip_id}",
             label_visibility="collapsed",
             help=f"Category: {category}",
-            size="small",
-        ).strip()
+        )
+        edited = (raw_val or "").strip()
         if edited and edited != text:
             st.session_state.setdefault("chips_session_corrections", {})
             st.session_state["chips_session_corrections"][text] = edited
