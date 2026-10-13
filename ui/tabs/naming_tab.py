@@ -921,6 +921,26 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
         _render_screenshot_batch_mode(naming_rules, casing, active_model, vault)
 
 
+def _build_dynamic_teaming_clause(uplinks: list) -> str:
+    """Dynamically synthesize teaming description string without hardcoded assumptions."""
+    if not uplinks:
+        return ""
+
+    parts = []
+    for u in uplinks:
+        iface = str(u.get("interface", "")).strip()
+        if not iface:
+            continue
+        role_raw = str(u.get("role") or u.get("uplink_role") or "").strip()
+        role_label = re.sub(r"\s*Uplink$", "", role_raw, flags=re.IGNORECASE).strip()
+        if not role_label or role_label.lower() in ("none", ""):
+            parts.append(iface)
+        else:
+            parts.append(f"{iface} {role_label}")
+
+    return " / ".join(parts)
+
+
 def _clean_rendered_clause(rendered: str) -> str:
     """Removes dangling slashes, empty parens, and orphan active/standby markers."""
     rendered = re.sub(r"\(\s*/\s*\)", "", rendered)
@@ -1741,7 +1761,13 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
 
                     if iface.lower().startswith("vmnic"):
                         row_type = "Uplink"
-                        role_val = "Active Uplink"
+                        _init_role_cfg = ((_std_rules.get("pattern_variables") or {})
+                                          .get("uplink_role") or
+                                          (_std_rules.get("pattern_variables") or {}).get("role") or {})
+                        _init_role_opts = _init_role_cfg.get("options") if isinstance(_init_role_cfg.get("options"), list) else [
+                            "Active Uplink", "Standby Uplink", "Active", "Standby", "Primary", "Backup", "None"
+                        ]
+                        role_val = _init_role_cfg.get("default", _init_role_opts[0] if _init_role_opts else "Active Uplink")
                     elif iface.lower().startswith("vmk"):
                         row_type = "VMkernel"
                         role_val = "Management" if "mgmt" in purpose_val.lower() or "management" in purpose_val.lower() else "None"
@@ -1906,6 +1932,9 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     if start_analyze and "hypervisor_parsed_descriptions" in st.session_state:
         st.rerun()
 
+    # Load standards rules for dynamic role options (available to both cards and editor)
+    _std_rules = SSM.get_naming_rules() or naming_rules
+
     st.markdown("#### 🔹 Topology Visual Overview & Card Controls")
     records = st.session_state.get("topology_records", [])
     sw_options = st.session_state.get("discovered_switches", ["vSwitch0"])
@@ -1966,21 +1995,53 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     else:
                         st.caption("None")
 
-                    if st.button("➕ Add to Switch", key=f"btn_add_to_{idx}_{sw}", use_container_width=True):
-                        records.append({
-                            "switch": sw,
-                            "interface": f"vmnic{len(records)}",
-                            "type": "Uplink",
-                            "ip": "",
-                            "purpose": "",
-                            "role": "Active Uplink",
-                            "speed": "10000 Full"
-                        })
-                        st.session_state["topology_records"] = records
-                        st.rerun()
+                    # Dynamically load role options from Standards
+                    _role_cfg = ((_std_rules.get("pattern_variables") or {})
+                                 .get("uplink_role") or
+                                 (_std_rules.get("pattern_variables") or {}).get("role") or {})
+                    _role_options = _role_cfg.get("options") if isinstance(_role_cfg.get("options"), list) else [
+                        "Active Uplink", "Standby Uplink", "Active", "Standby", "Primary", "Backup", "None"
+                    ]
+                    _default_role = _role_cfg.get("default", _role_options[0] if _role_options else "Active Uplink")
+
+                    col_add_uplink, col_add_service = st.columns(2)
+                    with col_add_uplink:
+                        if st.button("➕ Uplink", key=f"btn_add_uplink_{idx}_{sw}", use_container_width=True):
+                            records.append({
+                                "switch": sw,
+                                "interface": "",
+                                "type": "Uplink",
+                                "ip": "",
+                                "purpose": "",
+                                "role": _default_role,
+                                "speed": "10000 Full"
+                            })
+                            st.session_state["topology_records"] = records
+                            st.rerun()
+                    with col_add_service:
+                        if st.button("➕ Service", key=f"btn_add_service_{idx}_{sw}", use_container_width=True):
+                            records.append({
+                                "switch": sw,
+                                "interface": "",
+                                "type": "Port Group",
+                                "ip": "",
+                                "purpose": "",
+                                "role": "None",
+                                "speed": ""
+                            })
+                            st.session_state["topology_records"] = records
+                            st.rerun()
 
     st.markdown("#### 🎛️ Topology Data Grid")
     st.caption("Edit switch assignments, interface roles, and IPs directly. Changes update NetBox descriptions instantly.")
+
+    # Dynamically load role options from Standards for the data editor too
+    _editor_role_cfg = ((_std_rules.get("pattern_variables") or {})
+                        .get("uplink_role") or
+                        (_std_rules.get("pattern_variables") or {}).get("role") or {})
+    _editor_role_options = _editor_role_cfg.get("options") if isinstance(_editor_role_cfg.get("options"), list) else [
+        "Active Uplink", "Standby Uplink", "Active", "Standby", "Primary", "Backup", "None"
+    ]
 
     df = pd.DataFrame(records if records else [{
         "switch": sw_options[0] if sw_options else "vSwitch0",
@@ -1988,7 +2049,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         "type": "Uplink",
         "ip": "",
         "purpose": "",
-        "role": "Active Uplink",
+        "role": _editor_role_cfg.get("default", _editor_role_options[0] if _editor_role_options else "Active Uplink"),
         "speed": ""
     }])
 
@@ -1998,7 +2059,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         "type": st.column_config.SelectboxColumn("Type", options=["Uplink", "VMkernel", "Port Group"], required=False),
         "ip": st.column_config.TextColumn("IPv4 Address", required=False),
         "purpose": st.column_config.TextColumn("Service / Purpose", required=False),
-        "role": st.column_config.SelectboxColumn("Role", options=["Active Uplink", "Standby Uplink", "Management", "vMotion", "vSAN", "iSCSI", "VM Traffic", "None"], required=False),
+        "role": st.column_config.SelectboxColumn("Role", options=_editor_role_options, required=False),
         "speed": st.column_config.TextColumn("Link Speed", required=False),
     }
 
@@ -2025,57 +2086,120 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             _gparent = str(_tr.get("switch") or "").strip() or "General"
             _groups.setdefault(_gparent, []).append(_tr)
 
-        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.4.24.\n"]
+        # Load standards for pattern/template rendering
+        _std_rules = SSM.get_naming_rules() or naming_rules
+        _naming_pats = get_naming_patterns(_std_rules)
+        _pattern_vars = get_pattern_variables(_std_rules)
+        _hyp_presets_map = _std_rules.get("hypervisor_presets") or {}
+        _plat_key = st.session_state.get("naming_target_platform", "VMware ESXi")
+        _active_hyp_presets = _hyp_presets_map.get(_plat_key, [])
+
+        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.4.26.\n"]
         for _gparent in sorted(_groups.keys(), key=_natsort_key):
             _out_lines.append(f"=== {_gparent} ===")
-            _uplinks_g = []
-            _vmks_g = []
-            _pgs_g = []
-            for _grow in _groups[_gparent]:
-                _rtype = str(_grow.get("type", "")).strip()
-                _riface = str(_grow.get("interface", "")).strip()
-                _rpurpose = str(_grow.get("purpose", "")).strip()
-                _rrole = str(_grow.get("role", "")).strip()
-                _rip = str(_grow.get("ip", "")).strip()
-                if not _riface:
-                    continue
-                if _rtype == "Uplink":
-                    _uplinks_g.append(_grow)
-                elif _rtype == "VMkernel":
-                    _label = _rpurpose or _riface
-                    _vmks_g.append(_label)
-                else:
-                    _pgs_g.append(_grow)
+            _sw_uplinks = [r for r in _groups[_gparent] if r.get("type") == "Uplink" and r.get("interface")]
+            _sw_services = [r for r in _groups[_gparent] if r.get("type") != "Uplink" and (r.get("interface") or r.get("purpose"))]
+            _sw_vmks = [r for r in _groups[_gparent] if r.get("type") == "VMkernel"]
 
-            if _uplinks_g:
-                for _ug in _uplinks_g:
-                    _ui = str(_ug.get("interface", "")).strip()
-                    _ur = str(_ug.get("role", "")).strip()
-                    _up = str(_ug.get("purpose", "")).strip()
-                    _line = f"{_ui} - {_gparent}"
-                    if _up:
-                        _line += f" {_up}"
-                    if _ur:
-                        _line += f" ({_ur})"
+            # Dynamic teaming clause
+            teaming_str = _build_dynamic_teaming_clause(_sw_uplinks)
+
+            # Legacy active/standby lists for backward-compatible template tokens
+            _active_nics = [u.get("interface") for u in _sw_uplinks if "active" in str(u.get("role", "")).lower()]
+            _standby_nics = [u.get("interface") for u in _sw_uplinks if "standby" in str(u.get("role", "")).lower()]
+
+            # ── Render Port Group descriptions via dynamic templates ──────────
+            _pg_templates = [p for p in _active_hyp_presets if p.get("code") in ("PortGroup", "PortGroup_VLAN", "PG_Header") and not p.get("hidden", False)]
+            if not _pg_templates:
+                # Fallback to generic patterns from naming_patterns
+                _pg_templates = []
+                for _pk in ("esxi_portgroup", "esxinet_portgroup", "esxi_vswitch"):
+                    _pat = _naming_pats.get(_pk)
+                    if _pat:
+                        _pg_templates.append({"pattern": _pat})
+
+            if _pg_templates and _sw_services:
+                for _svc in _sw_services:
+                    _svc_name = str(_svc.get("purpose", "")).strip() or str(_svc.get("interface", "")).strip()
+                    if not _svc_name:
+                        continue
+                    row_vals = {
+                        "v_switch": _gparent,
+                        "active_vmnics": ", ".join(_active_nics) if _active_nics else "",
+                        "standby_vmnics": ", ".join(_standby_nics) if _standby_nics else "",
+                        "teaming": teaming_str,
+                        "uplink_teaming": teaming_str,
+                        "pg_network": _svc_name,
+                        "port_group": _svc_name,
+                    }
+                    best_tpl = _select_best_template(row_vals, _pg_templates)
+                    rendered = render_dynamic_pattern(best_tpl, row_vals, _pattern_vars)
+                    rendered = re.sub(r"\s*/\s*Standby", "", rendered)
+                    rendered = re.sub(r"\s*/\s*Active", "", rendered)
+                    rendered = re.sub(r"Active\s*/\s*\)", "Active)", rendered)
+                    rendered = re.sub(r"\(\s*/\s*\)", "", rendered)
+                    rendered = re.sub(r"\(\s*\)", "", rendered)
+                    rendered = re.sub(r"\s{2,}", " ", rendered).strip()
+                    if rendered:
+                        _out_lines.append(rendered)
+            elif _sw_services:
+                # Plain fallback without templates
+                for _svc in _sw_services:
+                    _svc_name = str(_svc.get("purpose", "")).strip() or str(_svc.get("interface", "")).strip()
+                    if not _svc_name:
+                        continue
+                    _line = _gparent
+                    if teaming_str:
+                        _line += f" ({teaming_str})"
+                    _line += f" - {_svc_name}"
                     _out_lines.append(_line)
 
-            if _vmks_g:
-                for _vk in _vmks_g:
-                    _out_lines.append(f"{_vk} ({_gparent})")
-
-            if _pgs_g:
-                _active_uplinks = [str(r.get("interface", "")).strip() for r in _uplinks_g if str(r.get("role", "")).strip() == "Active Uplink" and r.get("interface")]
-                _standby_uplinks = [str(r.get("interface", "")).strip() for r in _uplinks_g if str(r.get("role", "")).strip() == "Standby Uplink" and r.get("interface")]
-                for _pg in _pgs_g:
-                    _pg_name = str(_pg.get("purpose", "")).strip() or str(_pg.get("interface", "")).strip()
-                    if not _pg_name:
+            # Uplink descriptions
+            if _sw_uplinks:
+                _uplink_tpls = [p for p in _active_hyp_presets if p.get("code") == "Uplink" and not p.get("hidden", False)]
+                if not _uplink_tpls:
+                    for _pk in ("esxi_uplink", "esxinet_uplink"):
+                        _pat = _naming_pats.get(_pk)
+                        if _pat:
+                            _uplink_tpls.append({"pattern": _pat})
+                            break
+                for _ug in _sw_uplinks:
+                    _ui = str(_ug.get("interface", "")).strip()
+                    if not _ui:
                         continue
-                    _parts = [_gparent, f"({_pg_name})"]
-                    if _active_uplinks:
-                        _parts.append(f"Active: {', '.join(_active_uplinks)}")
-                    if _standby_uplinks:
-                        _parts.append(f"Standby: {', '.join(_standby_uplinks)}")
-                    _out_lines.append(" ".join(_parts))
+                    _upurpose = str(_ug.get("purpose", "")).strip()
+                    _urole = str(_ug.get("role", "")).strip()
+                    if _uplink_tpls:
+                        _row = {
+                            "vmnic": _ui,
+                            "v_switch": _gparent,
+                            "purpose": _upurpose,
+                            "uplink_role": _urole,
+                        }
+                        _tpl = _select_best_template(_row, _uplink_tpls)
+                        _line = render_dynamic_pattern(_tpl, _row, _pattern_vars)
+                        _line = re.sub(r"\s+/Uplink\b", "", _line, flags=re.IGNORECASE)
+                        _line = re.sub(r"\s{2,}", " ", _line).strip()
+                        if _line:
+                            _out_lines.append(_line)
+                    else:
+                        _line = f"{_ui} - {_gparent}"
+                        if _upurpose:
+                            _line += f" {_upurpose}"
+                        if _urole:
+                            _clean_role = re.sub(r"\s*Uplink$", "", _urole, flags=re.IGNORECASE).strip()
+                            if _clean_role and _clean_role.lower() not in ("none", ""):
+                                _line += f" {_clean_role}"
+                        _out_lines.append(_line)
+
+            # VMkernel descriptions
+            if _sw_vmks:
+                for _vk in _sw_vmks:
+                    _vk_iface = str(_vk.get("interface", "")).strip()
+                    _vk_purpose = str(_vk.get("purpose", "")).strip()
+                    _label = _vk_purpose or _vk_iface
+                    if _label:
+                        _out_lines.append(f"{_label} ({_gparent})")
 
         _output_bulk_text = "\n".join(_out_lines).strip()
 
@@ -2411,7 +2535,7 @@ def _render_assigned_chip_in_card(
     import streamlit as st
     text = chip.get("text", "")
     chip_id = chip.get("id", "")
-    role = chip.get("role", "Active Uplink")
+    role = chip.get("role", "")
 
     c1, c2, c3 = st.columns([4, 1, 1])
     with c1:
@@ -2425,10 +2549,22 @@ def _render_assigned_chip_in_card(
         )
     with c2:
         if slot_type == "interface":
+            _chip_std = SSM.get_naming_rules() or {}
+            _chip_role_cfg = ((_chip_std.get("pattern_variables") or {})
+                              .get("uplink_role") or
+                              (_chip_std.get("pattern_variables") or {}).get("role") or {})
+            _chip_role_opts = _chip_role_cfg.get("options") if isinstance(_chip_role_cfg.get("options"), list) else [
+                "Active Uplink", "Standby Uplink", "Active", "Standby", "Primary", "Backup", "None"
+            ]
+            _chip_default = _chip_role_cfg.get("default", _chip_role_opts[0] if _chip_role_opts else "Active Uplink")
+            _current_role = role or _chip_default
+            _role_index = 0
+            if _current_role in _chip_role_opts:
+                _role_index = _chip_role_opts.index(_current_role)
             role_opt = st.selectbox(
                 "Role",
-                options=["Active Uplink", "Standby Uplink"],
-                index=0 if role == "Active Uplink" else 1,
+                options=_chip_role_opts,
+                index=_role_index,
                 key=f"sw_{switch_id}_{slot_type}_{index}_role",
                 label_visibility="collapsed",
             )
