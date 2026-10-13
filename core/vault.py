@@ -2,10 +2,11 @@
 Local Persistent Sanitization Vault.
 
 Stores bidirectional mappings between real sensitive values (IPv4/CIDR,
-internal FQDN suffixes, hardware serial numbers, MAC addresses, and hostnames)
-and deterministic synthetic tokens in a local SQLite database. Used as
-transparent gateway middleware: text is sanitised before it leaves the process
-and restored after the LLM response returns.
+internal FQDN suffixes, hardware serial numbers, MAC addresses, hostnames,
+custom switch names, and port group names) and deterministic synthetic tokens
+in a local SQLite database. Used as transparent gateway middleware: text is
+sanitised before it leaves the process and restored after the LLM response
+returns.
 
 Token format:
   - IPv4 bare addresses (all)                        -> <SAFE_IP_N>
@@ -14,6 +15,8 @@ Token format:
   - Hardware serial numbers                          -> <SAFE_SERIAL_N>
   - MAC addresses                                    -> <SAFE_MAC_N>
   - Hostnames (device / VM names supplied by caller) -> <SAFE_HOST_N>
+  - Custom switch container names                    -> <SAFE_SW_N>
+  - Port group / service names                       -> <SAFE_PG_N>
 """
 
 import os
@@ -85,7 +88,30 @@ _MAC_HYPHEN_RE = re.compile(r"\b(?:[0-9A-Fa-f]{2}-){5}[0-9A-Fa-f]{2}\b")
 _MAC_BARE_RE = re.compile(r"\b[0-9A-Fa-f]{12}\b")
 _MAC_RE = re.compile(rf"(?:{_MAC_COLON_RE.pattern}|{_MAC_HYPHEN_RE.pattern}|{_MAC_BARE_RE.pattern})")
 
-_TOKEN_RE = re.compile(r"<SAFE_(IP|NET|DOMAIN|SERIAL|MAC|HOST)_(\d+)>")
+_TOKEN_RE = re.compile(r"<SAFE_(IP|NET|DOMAIN|SERIAL|MAC|HOST|SW|PG)_(\d+)>")
+
+# Custom switch container name pattern — matches VMware/Docker/Nutanix style names
+# that appear as topology headers (e.g. "PR Spain Fuenmayor Age VLab", "iDMZ-vdSwitch02")
+_SWITCH_NAME_RE = re.compile(
+    r"\b(?:"
+    r"[Pp][Rr]\s+"  # "PR " prefix commonly used
+    r"|(?:iDMZ|DMZ|mgmt|MGMT)\s*[-:]?\s*"  # prefixed names
+    r"|[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:VLab|vLab|vlab|Lab|LAB))"
+    r"[^\n\r\v\f]{2,60}"
+    r"(?=\s*(?:Standard\s*Switch|Distributed\s*Switch|Switch|Bridge)\s*:|\s*$|\s*\n)"
+    r"|"
+    r"\b[A-Za-z0-9][A-Za-z0-9_\-\.\s]{2,59}(?=\s*(?:Standard\s*Switch|Distributed\s*Switch|Switch|Bridge)\s*:)"
+)
+
+# Port group / service name pattern — matches lines that look like PG names
+# (e.g. "Management Network", "vMotion", "iSCSI01", "VM Kernel")
+_PG_NAME_RE = re.compile(
+    r"\b(?:"
+    r"(?:Management|vMotion|iSCSI|FT|vSAN|Provisioning|VMkernel|Storage)"
+    r"|[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*"
+    r")\b"
+    r"[A-Za-z0-9_\-]*"
+)
 
 
 def _extract_domain_suffixes() -> List[str]:
@@ -292,7 +318,7 @@ class SanitizerVault:
 
     def _reseed_counters(self, conn: sqlite3.Connection) -> None:
         """Re-seed per-category counters so the next token ID is monotonically increasing."""
-        for cat in ("IP", "NET", "DOMAIN", "SERIAL", "MAC", "HOST"):
+        for cat in ("IP", "NET", "DOMAIN", "SERIAL", "MAC", "HOST", "SW", "PG"):
             max_id_row = conn.execute(
                 "SELECT MAX(CAST(REPLACE(REPLACE(token, '<SAFE_', ''), '>', '') AS INT)) AS mx "
                 "FROM vault_mappings WHERE category = ?",
@@ -486,6 +512,41 @@ class SanitizerVault:
                 processed = pat.sub(hostname_matches[orig], processed)
                 used_tokens.append((orig, hostname_matches[orig]))
 
+        # 10. Custom switch container names — tokenise topology headers to prevent
+        #     real site/building names leaking to external LLMs.
+        sw_matches: Dict[str, str] = {}
+        for m in _SWITCH_NAME_RE.finditer(processed):
+            sw_name = m.group(0).strip()
+            if not sw_name or len(sw_name) < 3:
+                continue
+            start, end = m.span()
+            surrounding = processed[max(0, start - 10): end + 10]
+            if "<SAFE_" in surrounding:
+                continue
+            if sw_name not in sw_matches:
+                tok = self._get_or_create_token(sw_name, "SW", session_id)
+                sw_matches[sw_name] = tok
+        for orig in sorted(sw_matches, key=len, reverse=True):
+            processed = processed.replace(orig, sw_matches[orig], 1)
+            used_tokens.append((orig, sw_matches[orig]))
+
+        # 11. Port group / service names — tokenise network service labels.
+        pg_matches: Dict[str, str] = {}
+        for m in _PG_NAME_RE.finditer(processed):
+            pg_name = m.group(0).strip()
+            if not pg_name or len(pg_name) < 2:
+                continue
+            start, end = m.span()
+            surrounding = processed[max(0, start - 10): end + 10]
+            if "<SAFE_" in surrounding:
+                continue
+            if pg_name not in pg_matches:
+                tok = self._get_or_create_token(pg_name, "PG", session_id)
+                pg_matches[pg_name] = tok
+        for orig in sorted(pg_matches, key=len, reverse=True):
+            processed = processed.replace(orig, pg_matches[orig], 1)
+            used_tokens.append((orig, pg_matches[orig]))
+
         # Deterministic session token from all tokens consumed in this pass.
         # Uses SHA-256 (stable across processes) instead of Python's randomised hash().
         if session_id is None:
@@ -604,6 +665,12 @@ class SanitizerVault:
             host_row = conn.execute(
                 "SELECT COUNT(*) AS cnt FROM vault_mappings WHERE category = 'HOST'"
             ).fetchone()
+            sw_row = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM vault_mappings WHERE category = 'SW'"
+            ).fetchone()
+            pg_row = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM vault_mappings WHERE category = 'PG'"
+            ).fetchone()
         return {
             "total": total_row["cnt"],
             "ips": ip_row["cnt"],
@@ -612,6 +679,8 @@ class SanitizerVault:
             "serials": serial_row["cnt"],
             "macs": mac_row["cnt"],
             "hosts": host_row["cnt"],
+            "switches": sw_row["cnt"],
+            "portgroups": pg_row["cnt"],
         }
 
     def get_recent_mappings(self, limit: int = 20) -> List[Dict[str, str]]:

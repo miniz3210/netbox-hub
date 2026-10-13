@@ -301,34 +301,74 @@ def _step_a_filter(
     if not anchor_patterns or not tokens:
         return list(tokens)
 
+    # Prefer tokens that have full bounding boxes for geometric filtering.
+    boxed_tokens = [t for t in tokens if t.get("box") and len(t["box"]) >= 4]
+    unboxed_tokens = [t for t in tokens if not (t.get("box") and len(t["box"]) >= 4)]
+
     matches = [
-        t for t in tokens
+        t for t in boxed_tokens
         if any(
             pat.lower() in str(t.get("text", "")).lower()
             for pat in anchor_patterns
         )
-        and t.get("box") and len(t["box"]) >= 2
     ]
     if not matches:
-        return list(tokens)
+        # Fallback: try matching against all tokens (including unboxed) for text-only detection
+        text_matches = [
+            t for t in tokens
+            if any(
+                pat.lower() in str(t.get("text", "")).lower()
+                for pat in anchor_patterns
+            )
+        ]
+        if not text_matches:
+            return list(tokens)
+        # No bounding box data available — fall back to string-based sidebar stripping
+        return _step_a_fallback_string_filter(tokens, anchor_patterns)
 
+    # Find the leftmost match for the anchor (first occurrence of "Virtual switches" etc.)
     anchor_match = min(matches, key=lambda t: float(t["box"][0]))
     anchor_x = float(anchor_match["box"][0])
 
     if anchor_x < 180:
         return list(tokens)
 
-    left_cutoff_x = max(0.0, anchor_x - 15.0)
-    kept = [
-        t for t in tokens
-        if t.get("box") and len(t["box"]) >= 1
-        and float(t["box"][0]) >= left_cutoff_x
+    # Discard all tokens strictly to the left of the anchor with a 20px margin
+    left_cutoff_x = max(0.0, anchor_x - 20.0)
+    kept_boxed = [
+        t for t in boxed_tokens
+        if float(t["box"][0]) >= left_cutoff_x
     ]
+    # Unboxed tokens (no bbox data) are kept as-is — they lack spatial context
+    kept = kept_boxed + unboxed_tokens
 
     if len(tokens) > 5 and len(kept) < (len(tokens) * 0.6):
         return list(tokens)
 
     return kept
+
+
+def _step_a_fallback_string_filter(
+    tokens: List[Dict],
+    anchor_patterns: List[str],
+) -> List[Dict]:
+    """Fallback sidebar filter when bounding-box data is unavailable.
+
+    Strips all tokens appearing before the first line that matches any anchor
+    pattern. This handles OCR text streams without spatial coordinates.
+    """
+    anchor_indices: List[int] = []
+    for idx, t in enumerate(tokens):
+        text = str(t.get("text", "")).lower()
+        if any(pat.lower() in text for pat in anchor_patterns):
+            anchor_indices.append(idx)
+            break
+
+    if not anchor_indices:
+        return list(tokens)
+
+    cutoff = anchor_indices[0]
+    return list(tokens[cutoff:])
 
 
 # ---------------------------------------------------------------------------

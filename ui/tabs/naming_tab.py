@@ -2136,8 +2136,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             _ocr_text_for_containers, _active_container_headers
         )
         for cname, is_collapsed in _found_containers:
-            if is_collapsed:
-                continue
             _known_switches.add(_normalize_switch_name(cname))
 
         # Source 2: parent chips already in the pool
@@ -2166,8 +2164,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         if _new_switches_added:
             st.session_state[_DECK_KEY] = deck
 
-        # Seed any OCR-detected container names into the unassigned pool so they
-        # appear in Zone 1 alongside pool-generated parent chips.
         _pool_container_ids = {c["id"] for c in pool if c["category"] == "parent"}
         for cname, _ in _found_containers:
             _nc = _normalize_switch_name(cname)
@@ -2418,26 +2414,25 @@ def _render_chip_card(
 
         deck = st.session_state.get("switch_deck", {})
         sw_keys = sorted(deck.keys(), key=_natsort_key) if deck else []
-        if sw_keys and not is_assigned and category in ("interface", "purpose", "speed"):
-            sel_key = f"sel_assign_{chip_id}"
-            current_sel = st.session_state.get(sel_key, "-- Assign to --")
-            new_sel = st.selectbox(
-                "-- Assign to Switch --",
-                options=["-- Assign to --"] + sw_keys,
-                index=0 if current_sel == "-- Assign to --" else (1 + sw_keys.index(current_sel) if current_sel in sw_keys else 0),
-                key=sel_key,
-                label_visibility="collapsed",
-                help="Assign this chip to a switch container below",
-            )
-            if new_sel != "-- Assign to --" and new_sel != current_sel:
-                st.session_state.pop(sel_key, None)
-                _ch = dict(chip)
-                _ch["text"] = edited if edited else text
-                _assign_chip(_ch, new_sel, category)
-                st.rerun()
+
         if not is_assigned:
-            if st.button("⬆ Promote to Container", key=f"chip_promote_{chip_id}", help="Turn this chip into a new switch container", type="secondary", width="stretch"):
-                _promote_chip_to_container(chip)
+            if sw_keys and category in ("interface", "purpose", "speed"):
+                target_sw = st.selectbox(
+                    "Assign to Switch",
+                    options=["-- Assign to --"] + sw_keys,
+                    key=f"sel_assign_{chip_id}",
+                    label_visibility="collapsed",
+                    help="Assign this chip to a switch container below"
+                )
+                if target_sw != "-- Assign to --":
+                    _ch = dict(chip)
+                    _ch["text"] = edited if edited else text
+                    _assign_chip(_ch, target_sw, category)
+                    st.rerun()
+
+            if category != "parent":
+                if st.button("Promote to Container", key=f"chip_prom_{chip_id}", help="Convert token into a new Switch Container", use_container_width=True):
+                    _promote_chip_to_container(chip)
 
 
 def _esc_html(s: str) -> str:
