@@ -2,6 +2,7 @@ import logging
 import re
 from typing import Dict, List, Optional, Tuple, Any, Set
 import streamlit as st
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 from utils.formatters import normalize_port_shortname
@@ -1383,6 +1384,15 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     _unified_presets = naming_rules.get("topology_parsing_presets") or {}
     parsing_presets = _unified_presets if _unified_presets else preset_sm.get_parsing_presets()
 
+    # Resolve active junk filter at function scope so Section 3 can access it
+    # on every render pass (not just when start_analyze is True).
+    active_plat_display = st.session_state.get("naming_target_platform", "VMware ESXi")
+    plat_cfg = (parsing_presets.get(active_plat_display) or {}) if isinstance(parsing_presets, dict) else {}
+    dynamic_blacklist: Set[str] = set(
+        s.strip().lower() for s in (plat_cfg.get("ui_noise_blacklist") or []) if s and str(s).strip()
+    )
+    active_junk_filter: Set[str] = UI_NAV_NOISE.union(dynamic_blacklist)
+
     if start_analyze:
         try:
             progress_bar = st.progress(0, text="Initializing topology analysis...")
@@ -1659,6 +1669,90 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
 
                 st.session_state["hypervisor_parsed_descriptions"] = deduped
                 st.session_state.pop("hypervisor_cascade_mappings", None)
+
+                # ── Hybrid Architecture: Topology Records Ingestion ───────────
+                discovered_switches = set()
+
+                # 1. Capture from AI deduped entities
+                for r in deduped:
+                    p = r.get("parent")
+                    if p and str(p).strip().lower() not in ("", "none", "null", "general"):
+                        discovered_switches.add(_normalize_switch_name(str(p).strip()))
+
+                # 2. Capture from OCR raw text with pipe splitting and leading arrow stripping
+                combined_raw_text_for_sw = st.session_state.get("latest_ocr_raw_text", "")
+                for line in combined_raw_text_for_sw.splitlines():
+                    if not line.strip():
+                        continue
+                    segments = line.split("|") if "|" in line else [line]
+                    for seg in segments:
+                        s_clean = seg.strip()
+                        if not s_clean:
+                            continue
+                        s_clean = re.sub(r"^[\s>›»▶v⌄]+\s*", "", s_clean)
+                        m = SW_HEADER_RE.search(s_clean)
+                        if m:
+                            raw_sw = m.group(1).strip()
+                            clean_sw = ACTION_SPLIT_RE.split(raw_sw)[0].strip()
+                            if re.search(r"switch[oO]$", clean_sw, re.IGNORECASE):
+                                clean_sw = clean_sw[:-1] + "0"
+                            norm_sw = _normalize_switch_name(clean_sw)
+                            if norm_sw and len(norm_sw) > 1:
+                                discovered_switches.add(norm_sw)
+
+                sorted_switches = sorted(discovered_switches, key=_natsort_key) if discovered_switches else ["vSwitch0"]
+                st.session_state["discovered_switches"] = sorted_switches
+
+                # 3. Build initial topology records list
+                records = []
+                seen_entity = set()
+
+                UI_CHROME_WORDS = {
+                    "summary", "monitor", "configure", "permissions", "vms", "datastores",
+                    "networks", "updates", "storage", "actions", "add networking", "refresh",
+                    "edit", "manage physical adapters", "protocol endpoints", "system", "hardware"
+                }
+
+                for r in deduped:
+                    iface = str(r.get("interface", "")).strip()
+                    if not iface or len(iface) <= 1:
+                        continue
+                    if any(cw in iface.lower() for cw in UI_CHROME_WORDS):
+                        continue
+                    parent_sw = _normalize_switch_name(str(r.get("parent", "")).strip())
+                    if parent_sw not in sorted_switches:
+                        parent_sw = sorted_switches[0]
+
+                    ip_val = str(r.get("ip") or r.get("ip_address") or "").strip()
+                    purpose_val = str(r.get("purpose", "")).strip()
+                    speed_val = str(r.get("speed", "")).strip()
+
+                    if iface.lower().startswith("vmnic"):
+                        row_type = "Uplink"
+                        role_val = "Active Uplink"
+                    elif iface.lower().startswith("vmk"):
+                        row_type = "VMkernel"
+                        role_val = "Management" if "mgmt" in purpose_val.lower() or "management" in purpose_val.lower() else "None"
+                    else:
+                        row_type = "Port Group"
+                        role_val = "VM Traffic"
+
+                    entity_key = (parent_sw, iface.lower())
+                    if entity_key in seen_entity:
+                        continue
+                    seen_entity.add(entity_key)
+
+                    records.append({
+                        "switch": parent_sw,
+                        "interface": iface,
+                        "type": row_type,
+                        "ip": ip_val,
+                        "purpose": purpose_val,
+                        "role": role_val,
+                        "speed": speed_val
+                    })
+
+                st.session_state["topology_records"] = records
                 # Increment editor version to FORCE Streamlit to mount a brand new data_editor widget
                 st.session_state["hypervisor_editor_version"] = st.session_state.get("hypervisor_editor_version", 0) + 1
                 st.toast(f"Successfully analyzed {total_imgs} screenshots and merged {len(deduped)} unique records!", icon="🚀")
@@ -1800,531 +1894,64 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     if start_analyze and "hypervisor_parsed_descriptions" in st.session_state:
         st.rerun()
 
-    st.markdown("##### 2️⃣ Chips Pool & Switch Deck")
-    parsed_records = st.session_state.get("hypervisor_parsed_descriptions") or []
-    parsed_records = [
-        r for r in parsed_records
-        if isinstance(r, dict) and str(r.get("interface", "")).strip().lower() not in ("", "none", "null")
-    ]
+    st.markdown("#### 🔹 Topology Visual Overview")
+    records = st.session_state.get("topology_records", [])
+    sw_options = st.session_state.get("discovered_switches", ["vSwitch0"])
 
-    # Build alias lookup from the UNIFIED topology_parsing_presets
-    active_plat_display = st.session_state.get("naming_target_platform", "VMware ESXi")
-    active_aliases: Dict[str, List[str]] = {}
-    if isinstance(parsing_presets, dict):
-        plat_data = parsing_presets.get(active_plat_display)
-        if not plat_data:
-            for _k, _v in parsing_presets.items():
-                if isinstance(_k, str) and _k.strip().lower() == active_plat_display.strip().lower():
-                    plat_data = _v
-                    break
-        if isinstance(plat_data, dict):
-            active_aliases = plat_data.get("aliases", {}) or {}
-    if not isinstance(active_aliases, dict):
-        active_aliases = {}
+    if not records and not sw_options:
+        st.info("Upload screenshots above and click '🚀 Analyze & Auto-Populate' to populate topology records.")
+    else:
+        cols = st.columns(min(len(sw_options), 4) if sw_options else 1)
+        for idx, sw in enumerate(sw_options):
+            with cols[idx % len(cols)]:
+                assigned = [r for r in records if r.get("switch") == sw]
+                uplinks = [r.get("interface") for r in assigned if r.get("type") == "Uplink" and r.get("interface")]
+                services = [r.get("interface") or r.get("purpose") for r in assigned if r.get("type") != "Uplink" and (r.get("interface") or r.get("purpose"))]
 
-    # Reverse-map: every alias string → canonical key
-    _alias_to_canon: Dict[str, str] = {}
-    for _canon, _alist in active_aliases.items():
-        if isinstance(_alist, list):
-            for _a in _alist:
-                _alias_to_canon[_a.lower()] = _canon
+                up_html = "".join([f'<span style="background:#10b98122;color:#10b981;border:1px solid #10b981;padding:2px 6px;border-radius:8px;font-size:0.75rem;margin:2px;">{u}</span>' for u in uplinks]) or '<span style="color:#64748b;font-size:0.75rem;">No uplinks</span>'
+                svc_html = "".join([f'<span style="background:#f59e0b22;color:#f59e0b;border:1px solid #f59e0b;padding:2px 6px;border-radius:8px;font-size:0.75rem;margin:2px;">{s}</span>' for s in services]) or '<span style="color:#64748b;font-size:0.75rem;">No services</span>'
 
-    # Category labels derived from canonical keys (no hardcoded platform strings)
-    _CATEGORY_ORDER = ["parent", "interface", "purpose", "speed"]
-    _CATEGORY_LABELS = {
-        "parent": "Containers / Switches",
-        "interface": "Interfaces / Adapters",
-        "purpose": "Services / Port Groups",
-        "speed": "Speed / Metrics",
+                st.markdown(
+                    f'<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:12px;margin-bottom:12px;">'
+                    f'<div style="font-weight:600;font-size:0.95rem;color:#38bdf8;margin-bottom:6px;">🔷 {sw}</div>'
+                    f'<div style="font-size:0.78rem;color:#94a3b8;margin-bottom:2px;">Uplinks:</div><div style="margin-bottom:6px;">{up_html}</div>'
+                    f'<div style="font-size:0.78rem;color:#94a3b8;margin-bottom:2px;">Services:</div><div>{svc_html}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+
+    st.markdown("#### 🎛️ Topology Data Grid")
+    st.caption("Edit switch assignments, interface roles, and IPs directly. Changes update NetBox descriptions instantly.")
+
+    df = pd.DataFrame(records if records else [{
+        "switch": sw_options[0] if sw_options else "vSwitch0",
+        "interface": "",
+        "type": "Uplink",
+        "ip": "",
+        "purpose": "",
+        "role": "Active Uplink",
+        "speed": ""
+    }])
+
+    column_config = {
+        "switch": st.column_config.SelectboxColumn("Switch Container", options=sw_options, required=True),
+        "interface": st.column_config.TextColumn("Interface / Port", required=True),
+        "type": st.column_config.SelectboxColumn("Type", options=["Uplink", "VMkernel", "Port Group"], required=True),
+        "ip": st.column_config.TextColumn("IPv4 Address"),
+        "purpose": st.column_config.TextColumn("Service / Purpose"),
+        "role": st.column_config.SelectboxColumn("Role", options=["Active Uplink", "Standby Uplink", "Management", "vMotion", "vSAN", "iSCSI", "VM Traffic", "None"]),
+        "speed": st.column_config.TextColumn("Link Speed"),
     }
 
-    # ── OCR noise stripping helper ────────────────────────────────────────────
-    _OCR_NOISE_RE = re.compile(r"^[❌!✔Xx]\s*")
-
-    def _clean_chip_text(raw: str) -> str:
-        if not raw:
-            return ""
-        t = _OCR_NOISE_RE.sub("", raw.strip())
-        return t
-
-    # ── Session-state bootstrap ───────────────────────────────────────────────
-    _POOL_KEY = "chips_unassigned"
-    _DECK_KEY = "switch_deck"
-    _CORR_KEY = "chips_session_corrections"
-    _POOL_INIT_FLAG = "_pool_initialized_v4"
-
-    if _POOL_KEY not in st.session_state:
-        st.session_state[_POOL_KEY] = []
-    if _DECK_KEY not in st.session_state:
-        st.session_state[_DECK_KEY] = {}
-    if _CORR_KEY not in st.session_state:
-        st.session_state[_CORR_KEY] = {}
-    if _POOL_INIT_FLAG not in st.session_state:
-        st.session_state[_POOL_INIT_FLAG] = False
-
-    def _apply_corrections(text: str) -> str:
-        orig = _clean_chip_text(text)
-        return st.session_state.get(_CORR_KEY, {}).get(orig, orig)
-
-    def _resolve_chip(chip: dict) -> dict:
-        c = dict(chip)
-        c["text"] = _apply_corrections(c.get("text", ""))
-        return c
-
-    # ── Metadata / noise blacklist ───────────────────────────────────────────
-    # Derived from YAML aliases + generic UI noise — no vendor-specific strings hardcoded.
-    _META_SKIP_STRINGS = {
-        "true", "false",
-        "yes", "no",
-        "portgroup", "is_uncertain", "note",
-        "add networking", "edit", "refresh",
-    }
-    # Merge alias strings from the active platform so category-hint words
-    # (e.g. "vmnic", "vmk", "eth", "vmbr") are excluded as standalone chips.
-    for _alist in active_aliases.values():
-        if isinstance(_alist, list):
-            _META_SKIP_STRINGS.update(a.lower() for a in _alist)
-
-    def _is_pure_number(s: str) -> bool:
-        return bool(re.fullmatch(r"\d+", s))
-
-    def _is_note_text(s: str) -> bool:
-        s_l = s.lower()
-        if not s_l:
-            return False
-        note_keywords = ("ocr typo", "ocr", "note", "uncertain", "guess", "may be",
-                         "likely", "probably", "unknown", "unverified", "unconfirmed")
-        return any(kw in s_l for kw in note_keywords)
-
-    def _is_metadata_key_inferred(resolved: str, r: dict) -> bool:
-        for k, v in r.items():
-            if v is None:
-                continue
-            v_s = str(v).strip()
-            if resolved != v_s:
-                continue
-            kl = k.lower()
-            if kl in ("type", "is_uncertain", "note", "status", "error"):
-                return True
-        return False
-
-    def _should_filter_chip(resolved: str, r: dict) -> bool:
-        if _is_pure_number(resolved):
-            return True
-        if resolved.lower() in _META_SKIP_STRINGS:
-            return True
-        if _is_note_text(resolved):
-            return True
-        if _is_metadata_key_inferred(resolved, r):
-            return True
-        return False
-
-    # ── YAML-driven container detection (with builtin fallbacks) ──
-    def _get_container_headers(rules: dict, platform: str) -> List[str]:
-        """Return container_header patterns from the active platform's topology preset.
-
-        Falls back to a builtin list of common switch-header patterns when
-        no YAML anchors are configured (or the platform key is missing).
-        """
-        builtin_defaults = [
-            "Switch:",
-            "Bridge:",
-            "Distributed Switch:",
-        ]
-        presets = rules.get("topology_parsing_presets") or {}
-        plat_data = presets.get(platform, {})
-        if not isinstance(plat_data, dict):
-            for k, v in presets.items():
-                if isinstance(k, str) and isinstance(v, dict) and k.strip().lower() == platform.strip().lower():
-                    plat_data = v
-                    break
-        if not isinstance(plat_data, dict):
-            return builtin_defaults
-        sp_cfg = plat_data.get("spatial_anchors_and_redaction", {})
-        if not isinstance(sp_cfg, dict):
-            return builtin_defaults
-        anchors = sp_cfg.get("anchors", [])
-        if not isinstance(anchors, list):
-            return builtin_defaults
-        headers: List[str] = []
-        for a in anchors:
-            if isinstance(a, dict) and a.get("role") == "container_header":
-                pats = a.get("patterns", [])
-                if isinstance(pats, list):
-                    headers.extend(p for p in pats if p)
-        return headers if headers else builtin_defaults
-
-    def _is_container_name(text: str, headers: List[str]) -> bool:
-        """Return True if text matches any configured container_header pattern."""
-        if not headers or not text:
-            return False
-        low = text.lower()
-        return any(h.lower() in low for h in headers)
-
-    def _extract_container_name_from_line(line: str) -> Tuple[str, bool]:
-        """Extract clean switch name from a line containing a container header.
-
-        Returns (clean_name, is_collapsed).
-        Uses flexible regex matching so fused OCR text like
-        "MANAGEPHYSICALADAPTERS" does not break extraction.
-        """
-        stripped = line.strip()
-        if not stripped:
-            return "", False
-        collapsed = bool(re.match(r"^[\s>›»▶v⌄]+", stripped))
-        clean = re.sub(r"^[\s>›»▶v⌄]+\s*", "", stripped)
-
-        m = SW_HEADER_RE.search(clean)
-        if m:
-            raw_name = m.group(1).strip()
-            raw_name = ACTION_SPLIT_RE.split(raw_name)[0].strip()
-            if re.search(r"switch[oO]$", raw_name, re.IGNORECASE):
-                raw_name = raw_name[:-1] + "0"
-            return raw_name, collapsed
-        return "", collapsed
-
-    def _scan_text_for_containers(text: str, headers: List[str]) -> List[Tuple[str, bool]]:
-        """Scan multi-line text for lines matching container headers.
-
-        Returns list of (name, is_collapsed) tuples, deduplicated by name.
-        Splits pipe-delimited lines into segments before scanning.
-        """
-        if not text or not headers:
-            return []
-        seen: set = set()
-        results: List[Tuple[str, bool]] = []
-        for line in text.splitlines():
-            if not line.strip():
-                continue
-            segments = line.split("|") if "|" in line else [line]
-            for seg in segments:
-                s_clean = seg.strip()
-                if not s_clean:
-                    continue
-                low = s_clean.lower()
-                if not any(h.lower() in low for h in headers):
-                    continue
-                name, collapsed = _extract_container_name_from_line(s_clean)
-                if not name or name in seen:
-                    continue
-                seen.add(name)
-                results.append((name, collapsed))
-        return results
-
-    _active_container_headers = _get_container_headers(naming_rules, active_plat_display)
-
-    # ── Fused adapter+speed splitter (vendor-agnostic pattern) ───────────────
-    _FUSED_ADAPTER_SPEED_RE = re.compile(
-        r"^([a-zA-Z_]*\d+)\s+(\d+\s*[GKM]bit/s\s+(?:Full|Half)|\d+\s*(?:Gbit|Mbit|Kbit)/s\s*(?:Full|Half)?|\d+\s*Full|\d+\s*Mbps?)$",
-        re.IGNORECASE,
+    edited_df = st.data_editor(
+        df,
+        column_config=column_config,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="topology_data_editor"
     )
 
-    if parsed_records:
-        # ── ONE-TIME pool build & deck seed (only during initial analyze) ─────
-        if start_analyze and not st.session_state.get(_POOL_INIT_FLAG, False):
-            # Build unassigned chip pool from parsed records
-            seen_chips: set = set()
-            new_pool: list = []
-            for r in parsed_records:
-                for canon_key, val in r.items():
-                    val_str = str(val).strip() if val is not None else ""
-                    if not val_str or val_str.lower() in ("nan", "none", ""):
-                        continue
-                    resolved = _apply_corrections(val_str)
-                    if not resolved:
-                        continue
-                    if _should_filter_chip(resolved, r):
-                        continue
-                    if _is_junk_token(resolved):
-                        continue
-
-                    category = _alias_to_canon.get(resolved.lower())
-                    if category is None:
-                        category = _alias_to_canon.get(
-                            re.sub(r"[^a-z0-9]", "", resolved.lower())
-                        )
-                    if category is None and canon_key in _alias_to_canon:
-                        category = _alias_to_canon[canon_key]
-                    if category is None:
-                        for _ck in _CATEGORY_ORDER:
-                            if _ck in canon_key:
-                                category = _ck
-                                break
-                    if category is None:
-                        category = "interface"
-
-                    if category == "parent" or _is_container_name(resolved, _active_container_headers):
-                        category = "parent"
-                        resolved = _normalize_switch_name(resolved)
-
-                    chip_id = resolved
-                    if chip_id in seen_chips:
-                        continue
-                    seen_chips.add(chip_id)
-
-                    interface_val = resolved
-                    speed_val = ""
-                    fm = _FUSED_ADAPTER_SPEED_RE.match(resolved)
-                    if fm and category == "interface":
-                        interface_val = fm.group(1)
-                        speed_raw = fm.group(2).strip()
-                        speed_val = speed_raw
-                        fused_chip_id = interface_val
-                        if fused_chip_id not in seen_chips:
-                            seen_chips.add(fused_chip_id)
-                            new_pool.append({
-                                "id": fused_chip_id,
-                                "text": interface_val,
-                                "category": "interface",
-                                "speed": None,
-                            })
-                        resolved = interface_val
-                        chip_id = resolved
-                        r["_fused_speed"] = speed_val
-                    else:
-                        if category == "speed" and "speed" in r:
-                            speed_val = str(r["speed"]).strip()
-
-                    new_pool.append({
-                        "id": chip_id,
-                        "text": resolved,
-                        "category": category,
-                        "speed": speed_val or None,
-                    })
-
-            seen_text: set = set()
-            deduped_pool: list = []
-            for c in new_pool:
-                tk = c["text"].lower()
-                if tk in seen_text:
-                    continue
-                seen_text.add(tk)
-                deduped_pool.append(c)
-            new_pool = deduped_pool
-
-            # Dynamic noise blacklist from active platform presets
-            active_plat = st.session_state.get("naming_target_platform", "VMware ESXi")
-            plat_cfg = (naming_rules.get("topology_parsing_presets") or {}).get(active_plat, {})
-            dynamic_blacklist: set[str] = set(
-                s.strip().lower() for s in (plat_cfg.get("ui_noise_blacklist") or []) if s.strip()
-            )
-            active_junk_filter = UI_NAV_NOISE.union(dynamic_blacklist)
-
-            # Build interface-prefix regex from platform aliases
-            _iface_prefixes: List[str] = [re.escape(a) for a in active_aliases.get("interface", []) if isinstance(a, str)]
-            if _iface_prefixes:
-                _iface_prefix_re = re.compile(
-                    r"^(?:" + "|".join(_iface_prefixes) + r")[0-9]", re.IGNORECASE
-                )
-            else:
-                _iface_prefix_re = re.compile(r"^[\w]*[0-9]", re.IGNORECASE)
-
-            _nav_header_fragments = set(active_junk_filter)
-            _nav_header_fragments.update(("standard switch", "distributed switch", "switch", "bridge"))
-
-            # UI chrome delimiters to discard immediately
-            _UI_CHROME_WORDS = (
-                "summary", "monitor", "configure", "permissions",
-                "vms", "datastores", "networks", "updates",
-                "storage", "actions", "add networking", "refresh",
-                "edit", "manage physical adapters",
-                "protocol endpoints", "system", "hardware",
-            )
-
-            def _harvest_tokens_from_text(text: str, source_key: str) -> None:
-                if not text:
-                    return
-                existing_texts: set[str] = {c["text"].strip().lower() for c in new_pool}
-                for line in text.splitlines():
-                    raw = line.strip()
-                    if not raw:
-                        continue
-                    # DISCARD lines containing pipe delimiter (UI chrome)
-                    if "|" in raw:
-                        continue
-                    # DISCARD lines containing known UI chrome words
-                    clean = re.sub(r"^[❌!✔Xx\s>›»▶v⌄]+", "", raw).strip()
-                    if not clean or len(clean) <= 1:
-                        continue
-                    low = clean.lower()
-                    if any(w in low for w in _UI_CHROME_WORDS):
-                        continue
-                    if low in active_junk_filter:
-                        continue
-                    if _is_pure_number(clean):
-                        continue
-                    if _is_note_text(clean):
-                        continue
-                    if _is_junk_token(clean, dynamic_filter=active_junk_filter):
-                        continue
-                    if clean.lower() in _nav_header_fragments:
-                        continue
-                    resolved = _apply_corrections(clean)
-                    if not resolved:
-                        continue
-                    resolved_lower = resolved.strip().lower()
-                    if resolved_lower in existing_texts:
-                        continue
-                    existing_texts.add(resolved_lower)
-
-                    # Restrict chip creation to valid entity patterns only:
-                    #   - Adapters/VMkernels: vmnic*, vmk*, eth*, vmbr*
-                    #   - IPv4 addresses
-                    #   - Speed/link metrics
-                    #   - Container headers (switches)
-                    #   - AI-parsed port group / purpose names
-                    if _is_container_name(resolved, _active_container_headers):
-                        cat = "parent"
-                        resolved = _normalize_switch_name(resolved)
-                    elif _iface_prefix_re.search(resolved):
-                        cat = "interface"
-                    elif re.search(
-                        r"\b(\d+\s*[GKM]bit/s\s+(?:Full|Half)|\d+\s*(?:Gbit|Mbit|Kbit)/s\s*(?:Full|Half)?|\d+\s*Full|\d+\s*Mbps?|10000\s*Full|10\s*gbit)",
-                        resolved, re.IGNORECASE
-                    ):
-                        cat = "speed"
-                    elif re.search(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", resolved):
-                        cat = "interface"
-                    else:
-                        # Only accept if it looks like a meaningful entity (not random noise)
-                        if len(resolved) < 2:
-                            continue
-                        cat = "purpose"
-
-                    new_pool.append({
-                        "id": resolved,
-                        "text": resolved,
-                        "category": cat,
-                        "speed": None,
-                    })
-
-            _ocr_raw = st.session_state.get("latest_ocr_raw_text", "")
-            if _ocr_raw:
-                _harvest_tokens_from_text(_ocr_raw, "ocr")
-            for _ri, _item in enumerate(parsed_records):
-                if not isinstance(_item, dict):
-                    continue
-                for _hk, _hv in _item.items():
-                    if _hk in ("interface", "parent"):
-                        continue
-                    if not _hv:
-                        continue
-                    _harvest_tokens_from_text(str(_hv), f"ai_{_ri}")
-
-            # Store built pool to session state
-            st.session_state[_POOL_KEY] = new_pool
-
-            # ── Turn-1 Switch Deck Initialization ────────────────────────────
-            deck = st.session_state.get(_DECK_KEY, {})
-            _known_switches: set = set(deck.keys())
-
-            _ocr_text_for_containers = st.session_state.get("latest_ocr_raw_text", "")
-            if not _ocr_text_for_containers:
-                _try_structured = st.session_state.get("structured_output_text", "")
-                if _try_structured:
-                    _ocr_text_for_containers = _try_structured
-            _found_containers = _scan_text_for_containers(
-                _ocr_text_for_containers, _active_container_headers
-            )
-            for cname, _ in _found_containers:
-                _known_switches.add(_normalize_switch_name(cname))
-
-            for r in parsed_records:
-                pname = r.get("parent")
-                if pname:
-                    pname_clean = _normalize_switch_name(str(pname).strip())
-                    if pname_clean and pname_clean.lower() not in ("nan", "none", ""):
-                        _known_switches.add(pname_clean)
-
-            for switch_name in sorted(_known_switches, key=_natsort_key):
-                _ns = _normalize_switch_name(switch_name)
-                if _ns not in deck:
-                    deck[_ns] = {"name": _ns, "port_groups": [], "uplinks": []}
-            st.session_state[_DECK_KEY] = deck
-
-            # Add container chips to pool
-            _pool_container_ids = {c["id"] for c in new_pool if c["category"] == "parent"}
-            for cname, _ in _found_containers:
-                _nc = _normalize_switch_name(cname)
-                if _nc not in deck and _nc not in _pool_container_ids:
-                    new_pool.append({
-                        "id": _nc,
-                        "text": _nc,
-                        "category": "parent",
-                        "speed": None,
-                    })
-                    _pool_container_ids.add(_nc)
-            if _found_containers:
-                st.session_state[_POOL_KEY] = new_pool
-
-            st.session_state[_POOL_INIT_FLAG] = True
-            logger.info("Chip pool and switch deck initialized on first analyze.")
-
-        # ── Zone 1: Unassigned Chips Pool (render only, read from session) ─
-        st.markdown("**Unassigned Chips Pool**")
-        st.caption("Click chips to assign them. Edit any chip inline to correct OCR errors.")
-        pool = st.session_state.get(_POOL_KEY, [])
-
-        for cat_key in _CATEGORY_ORDER:
-            cat_chips = sorted(
-                [c for c in pool if c["category"] == cat_key],
-                key=lambda c: _natsort_key(c["text"]),
-            )
-            if not cat_chips:
-                continue
-            col_hdr = f"**{_CATEGORY_LABELS.get(cat_key, cat_key)}**"
-            st.markdown(col_hdr)
-            chip_cols = st.columns(min(len(cat_chips), 8))
-            for idx, chip in enumerate(cat_chips):
-                with chip_cols[idx % len(chip_cols)]:
-                    _render_chip_card(chip, is_assigned=False)
-
-        # ── Zone 2: Switch Deck ─────────────────────────────────────────────────
-        st.markdown("**Switch Deck / Container Slots**")
-        st.caption("Click chips from the pool above to move them into switch slots. Click assigned chips to return them.")
-
-        deck = st.session_state.get(_DECK_KEY, {})
-        parent_chips = sorted(
-            [c for c in pool if c["category"] == "parent"],
-            key=lambda c: _natsort_key(c["text"]),
-        )
-        iface_chips = sorted(
-            [c for c in pool if c["category"] == "interface"],
-            key=lambda c: _natsort_key(c["text"]),
-        )
-        service_chips = sorted(
-            [c for c in pool if c["category"] == "purpose"],
-            key=lambda c: _natsort_key(c["text"]),
-        )
-        speed_chips = sorted(
-            [c for c in pool if c["category"] == "speed"],
-            key=lambda c: _natsort_key(c["text"]),
-        )
-
-        if deck:
-            for switch_id in sorted(deck.keys(), key=_natsort_key):
-                _render_switch_card(switch_id, deck[switch_id], pool, iface_chips, service_chips, speed_chips)
-
-        # Manual switch add
-        with st.expander("➕ Add Container Manually", expanded=False):
-            col_add_name, col_add_btn = st.columns([3, 1])
-            with col_add_name:
-                new_switch_name = st.text_input(
-                    "Container Name",
-                    key="new_switch_name_input",
-                    placeholder="e.g. vSwitch0, vmbr0",
-                    label_visibility="collapsed",
-                )
-            with col_add_btn:
-                if st.button("Add", key="add_switch_btn", width="stretch"):
-                    n = _normalize_switch_name(str(new_switch_name).strip())
-                    if n:
-                        sid = n
-                        if sid not in deck:
-                            deck[sid] = {"name": n, "port_groups": [], "uplinks": []}
-                            st.session_state[_DECK_KEY] = deck
-                            st.toast(f"Added container: {n}", icon="➕")
-                            st.rerun()
+    st.session_state["topology_records"] = edited_df.to_dict(orient="records")
 
     # ── Zone 3: Live NetBox Output ────────────────────────────────────────────
     st.divider()
@@ -2332,126 +1959,64 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
 
     _output_bulk_text = "# No parsed topology records. Upload screenshots and click Analyze to generate descriptions.\n"
 
-    if parsed_records and (st.session_state.get(_DECK_KEY) or st.session_state.get(_POOL_KEY)):
-        _naming_rules_local = SSM.get_naming_rules({})
-        _patterns_local = _naming_rules_local.get("naming_patterns", {})
-        _pattern_vars_local = _naming_rules_local.get("pattern_variables", {}) or {}
-        _presets_map_local = _naming_rules_local.get("hypervisor_presets") or {}
-        _active_platform_local = st.session_state.get("naming_target_platform", "VMware ESXi")
-        _preset_templates_local = _presets_map_local.get(
-            _active_platform_local, _presets_map_local.get("VMware ESXi", [])
-        )
-        if not _preset_templates_local:
-            _preset_templates_local = [{"pattern": "<interface> - <parent> <purpose>"}]
+    topology_records = st.session_state.get("topology_records", [])
+    if topology_records:
+        _groups: Dict[str, List[dict]] = {}
+        for _tr in topology_records:
+            _gparent = str(_tr.get("switch") or "").strip() or "General"
+            _groups.setdefault(_gparent, []).append(_tr)
 
-        _active_aliases_step3: Dict[str, List[str]] = {}
-        if isinstance(parsing_presets, dict):
-            _plat_s3 = parsing_presets.get(_active_platform_local)
-            if not _plat_s3:
-                for _k3, _v3 in parsing_presets.items():
-                    if isinstance(_k3, str) and _k3.strip().lower() == _active_platform_local.strip().lower():
-                        _plat_s3 = _v3
-                        break
-            if isinstance(_plat_s3, dict):
-                _active_aliases_step3 = _plat_s3.get("aliases", {}) or {}
-
-        # Build parent-noise filter from active platform aliases + dynamic blacklist (zero hardcoded vendor strings)
-        _gen_nav: Set[str] = set(active_junk_filter)
-        _gen_nav.update(str(a).lower() for a in active_aliases.get("parent", []) if isinstance(a, str))
-        _gen_nav.update("switch", "bridge", "adapters", "adapter", "networks", "network")
-
-        _parent_prefixes = [re.escape(a) for a in active_aliases.get("parent", []) if isinstance(a, str)]
-        _parent_prefix_re = None
-        if _parent_prefixes:
-            _parent_prefix_re = re.compile(
-                r"^(?:" + "|".join(_parent_prefixes) + r")\s*[:_-]\s*", re.IGNORECASE
-            )
-
-        _cleaned_topo = []
-        for _item in parsed_records:
-            _row = dict(_item)
-            _p = str(_row.get("parent") or "").strip()
-            if _parent_prefix_re:
-                _p = _parent_prefix_re.sub("", _p).strip()
-            if _p.lower() in _gen_nav or _p.lower() == str(_row.get("interface") or _row.get("name") or "").strip().lower():
-                _p = ""
-            _row["parent"] = _p
-            _cleaned_topo.append(_row)
-
-        _valid_iface_parents = {}
-        for _ci in _cleaned_topo:
-            _ci_iface = str(_ci.get("interface") or _ci.get("name") or "").strip().lower()
-            _ci_parent = str(_ci.get("parent") or "").strip()
-            if _ci_iface and _ci_parent:
-                _valid_iface_parents[_ci_iface] = _ci_parent
-
-        _filtered_topo = []
-        _seen_entries_s3 = set()
-        for _fi in _cleaned_topo:
-            _fi_iface = str(_fi.get("interface") or _fi.get("name") or "").strip()
-            _fi_ifl = _fi_iface.lower()
-            _fi_parent = str(_fi.get("parent") or "").strip()
-            if not _fi_parent and _fi_ifl in _valid_iface_parents:
-                continue
-            _ek = (_fi_parent.lower(), _fi_ifl)
-            if _ek in _seen_entries_s3:
-                continue
-            _seen_entries_s3.add(_ek)
-            _filtered_topo.append(_fi)
-
-        _groups_s3: Dict[str, List[dict]] = {}
-        for _gi in _filtered_topo:
-            _gp = str(_gi.get("parent") or "").strip() or "General"
-            _groups_s3.setdefault(_gp, []).append(_gi)
-
-        _out_lines = ["# NOTE:\n# Generated from active Standards templates.\n"]
-        for _gparent in sorted(_groups_s3.keys(), key=_natsort_key):
+        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.4.24.\n"]
+        for _gparent in sorted(_groups.keys(), key=_natsort_key):
             _out_lines.append(f"=== {_gparent} ===")
-            for _grow in sorted(
-                _groups_s3[_gparent],
-                key=lambda x: str(x.get("interface") or x.get("name") or ""),
-            ):
-                _rvals = {
-                    str(k).strip().lower(): str(v).strip()
-                    for k, v in _grow.items()
-                    if v is not None
-                }
-                _riface = _rvals.get("interface") or _rvals.get("name") or ""
-                _rparent = _rvals.get("parent", _gparent)
-                _rvals["interface"] = _riface
-                _rvals["parent"] = _rparent
-                _rvals["v_switch"] = _rparent
+            _uplinks_g = []
+            _vmks_g = []
+            _pgs_g = []
+            for _grow in _groups[_gparent]:
+                _rtype = str(_grow.get("type", "")).strip()
+                _riface = str(_grow.get("interface", "")).strip()
+                _rpurpose = str(_grow.get("purpose", "")).strip()
+                _rrole = str(_grow.get("role", "")).strip()
+                _rip = str(_grow.get("ip", "")).strip()
+                if not _riface:
+                    continue
+                if _rtype == "Uplink":
+                    _uplinks_g.append(_grow)
+                elif _rtype == "VMkernel":
+                    _label = _rpurpose or _riface
+                    _vmks_g.append(_label)
+                else:
+                    _pgs_g.append(_grow)
 
-                for _acanon, _aalist in _active_aliases_step3.items():
-                    if _acanon in _rvals and _rvals[_acanon]:
-                        _av = _rvals[_acanon]
-                        for _aa in _aalist:
-                            if _aa not in _rvals or not _rvals[_aa]:
-                                _rvals[_aa] = _av
-                    else:
-                        for _aa in _aalist:
-                            if _aa in _rvals and _rvals[_aa]:
-                                _aav = _rvals[_aa]
-                                _rvals[_acanon] = _aav
-                                for _asib in _aalist:
-                                    if _asib not in _rvals or not _rvals[_asib]:
-                                        _rvals[_asib] = _aav
-                                break
+            if _uplinks_g:
+                for _ug in _uplinks_g:
+                    _ui = str(_ug.get("interface", "")).strip()
+                    _ur = str(_ug.get("role", "")).strip()
+                    _up = str(_ug.get("purpose", "")).strip()
+                    _line = f"{_ui} - {_gparent}"
+                    if _up:
+                        _line += f" {_up}"
+                    if _ur:
+                        _line += f" ({_ur})"
+                    _out_lines.append(_line)
 
-                _rtpl = _select_best_template(_rvals, _preset_templates_local)
-                _rrendered = render_dynamic_pattern(_rtpl, _rvals, _pattern_vars_local)
-                _rrendered = _clean_rendered_clause(_rrendered)
-                if st.session_state.get("auto_correct", True):
-                    from utils.formatters import apply_auto_corrections
-                    _rrendered = apply_auto_corrections(_rrendered, "port_shortening")
-                    _rrendered = apply_auto_corrections(_rrendered, "ocr_cleaning")
-                    _rrendered = apply_auto_corrections(_rrendered, "vmware")
-                if not _rrendered:
-                    _rrendered = _riface
-                _rslot = str(_rvals.get("slot", "")).strip()
-                _rheader = f"{_rslot} ({_riface}):" if _rslot else f"{_riface}:"
-                if _riface:
-                    _out_lines.append(f"{_rheader}\n{_rrendered}\n")
+            if _vmks_g:
+                for _vk in _vmks_g:
+                    _out_lines.append(f"{_vk} ({_gparent})")
+
+            if _pgs_g:
+                _active_uplinks = [str(r.get("interface", "")).strip() for r in _uplinks_g if str(r.get("role", "")).strip() == "Active Uplink" and r.get("interface")]
+                _standby_uplinks = [str(r.get("interface", "")).strip() for r in _uplinks_g if str(r.get("role", "")).strip() == "Standby Uplink" and r.get("interface")]
+                for _pg in _pgs_g:
+                    _pg_name = str(_pg.get("purpose", "")).strip() or str(_pg.get("interface", "")).strip()
+                    if not _pg_name:
+                        continue
+                    _parts = [_gparent, f"({_pg_name})"]
+                    if _active_uplinks:
+                        _parts.append(f"Active: {', '.join(_active_uplinks)}")
+                    if _standby_uplinks:
+                        _parts.append(f"Standby: {', '.join(_standby_uplinks)}")
+                    _out_lines.append(" ".join(_parts))
 
         _output_bulk_text = "\n".join(_out_lines).strip()
 
