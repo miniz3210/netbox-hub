@@ -37,21 +37,13 @@ from config.naming_rules import (
     get_esxi_network_presets, compute_suggested_site_code,
 )
 
-@st.cache_data(ttl=60, show_spinner=False)
-def _cached_fetch_toolbar_stats():
-    tot = get_total_record_count()
-    dev = len(get_records_by_category("device")) + len(get_records_by_category("hypervisor"))
-    vms = len(get_records_by_category("vm"))
-    return tot, dev, vms
-
-
-def _cached_get_reference_records(category_key, site_filter="", name_filter=""):
-    """Cache reference records to avoid full-table SQLite scans on every widget interaction."""
-    items = get_records_by_category(category_key, site_filter=site_filter)
-    if name_filter:
-        nfu = name_filter.upper()
-        items = [r for r in items if r.get('name', '').upper().startswith(nfu)]
-    return items
+# ---------------------------------------------------------------------------
+# Natural sort key — pure Python, no external deps
+# ---------------------------------------------------------------------------
+def _natsort_key(s: str):
+    """Return a sort key that orders numeric substrings as integers,
+    so vmnic1 < vmnic2 < vmnic10 instead of alphabetical ordering."""
+    return [int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", s)]
 
 
 # ---------------------------------------------------------------------------
@@ -371,6 +363,7 @@ def render_compact_toolbar(active_model):
         build_system_prompt=build_naming_system_prompt,
     )
 
+
     auto_correct = st.checkbox(
         "⚡ Apply Syntax Auto-Correction (Port Shortening & VMware Conventions)",
         value=True, key="esxi_auto_corr",
@@ -448,7 +441,6 @@ def _dev_pattern_key(dev_code, presets):
 
 def _interface_ref(intf_code):
     return INTERFACE_REF_INFO.get(intf_code, ("Interface", ""))
-
 def _ref_info(dev_code):
     return DEVICE_REF_INFO.get(dev_code, ("Device", "", "SWUSNYC01-0       (Switch Stack)\nWAPUSNYC01        (Access Point 01)\nFWUSNYCPA01       (Firewall 01)"))
 
@@ -766,7 +758,7 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables, global_s
             horizontal=True,
             key="host_type_sel",
             label_visibility="collapsed",
-            help="Select the host type to generate a hostname. Choices are configured in the Standards Tab (Hosts Type Presets).",
+            help="Select the host type to generate a hostname. Choices are configured in the Standards Tab (Hosts & Virtual Machines Presets).",
             format_func=lambda c: c,
         )
         if host_type:
@@ -1081,14 +1073,9 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
 
     # Always reload fresh rules from disk/SSM on entry so that any Standards-tab
     # edits that triggered a rerun while this tab was inactive are picked up.
-    # The caller's `naming_rules` param is a snapshot from the top of
-    # render_naming_tab and may be stale after cross-tab saves.
-    #
-    # We use force_reload_naming_rules() (which clears _cached_naming_rules in
-    # memory) instead of reading the file directly, to avoid triggering
-    # Streamlit's "File change detected. Rerun?" dialog.
     from config.naming_rules import force_reload_naming_rules
     naming_rules = SSM.get_naming_rules(force_reload_naming_rules())
+
     st.session_state["_hyp_last_naming_rules_ts"] = id(naming_rules)
 
     st.markdown("##### 1️⃣ Upload & Analyze Screenshots")
@@ -1100,15 +1087,15 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
 
 1. **Access**: vCenter or ESXi Host Client.
 2. **Navigate**: `Host` ➔ `Configure` ➔ `Networking` ➔ `Virtual switches`.
-3. **Expand**: Open target switches (e.g., `vSwitch0`, `vSwitch01`, `vSwitch1`).
+3. **Expand**: Open target switches.
 4. **Capture**: Ensure all three sections are visible:
    - **Left**: Port Groups & VMkernel ports
    - **Middle**: Virtual Switch diagram
    - **Right**: Physical Adapters (with link speeds)
 
-> 💡 **Pro-Tip (Complete Data Discovery)**: In addition to **Virtual switches** topology, also upload/paste screenshots of **Networking ➜ Physical adapters** (click `>>` to expand adapters like `vmnic1`~`vmnic6`). This provides exact **MAC addresses**, **PCI slot mappings (PCIeX/PortX)**, and **CDP/LLDP Switch Ports (Cable Connections)** with zero manual guesswork!
+> 💡 **Pro-Tip (Complete Data Discovery)**: In addition to **Virtual switches** topology, also upload/paste screenshots of **Networking ➜ Physical adapters** (click `>>` to expand adapters). This provides exact **MAC addresses**, **PCI slot mappings (PCIeX/PortX)**, and **CDP/LLDP Switch Ports (Cable Connections)** with zero manual guesswork!
 
-> ⚠️ **Manual Verification Required:** ESXi topology views do not explicitly display Active vs. Standby status. Please verify in ESXi: click **EDIT** beside the vSwitch ➜ go to **Teaming and failover** ➜ check **Failover order** (Active vs Standby adapters) before committing to NetBox.
+> ⚠️ **Manual Verification Required:** ESXi topology views do not explicitly display Active vs. Standby status. Please verify in ESXi: click **EDIT** beside the switch ➜ go to **Teaming and failover** ➜ check **Failover order** (Active vs Standby adapters) before committing to NetBox.
             """)
 
         col_up1, col_up2 = st.columns([1, 1])
@@ -1452,13 +1439,13 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 "Analyze the provided sanitized OCR text extracted from infrastructure topologies or management dashboards.\n\n"
                 "Extract all observed network entities into a flat JSON array of objects using strictly lowercase keys.\n\n"
                 "STRICT TOPOLOGICAL ENTITY RULES:\n"
-                "    1. ONLY extract endpoint interfaces, physical adapters (e.g., vmnic, eth), logical ports, or virtual interfaces (e.g., vmk, bond, port groups).\n"
+                "    1. ONLY extract endpoint interfaces, physical adapters, logical ports, or virtual interfaces.\n"
                 "    2. NEVER create an interface record for the hosting switch, bridge, or container fabric itself (e.g., vSwitch, vmbr, bridge are purely container attributes, not standalone interface items).\n\n"
                 "MANDATORY TOPOLOGICAL KEYS (EVERY OBJECT MUST HAVE THESE):\n"
-                "    - interface: The exact identifier of the adapter, port, port group, or endpoint (e.g., vmnic0, vmk0). NEVER name this key 'name'; it MUST be 'interface'.\n"
-                "    - parent: The clean identifier of the specific switch, bridge, or fabric (e.g., vSwitch0, vmbr0). STRICT RULES FOR PARENT:\n"
-                "        * Extract ONLY the specific instance name (e.g., 'vSwitch0', NOT 'StandardSwitch:vSwitch0' or 'Standard Switch: vSwitch0'). Strip off all generic category labels, prefixes, and colons.\n"
-                "        * NEVER treat page headings, navigation tabs, or section labels (such as 'Virtual switches', 'Physical adapters', 'VMkernel adapters') as a parent.\n"
+                "    - interface: The exact identifier of the adapter, port, port group, or endpoint. NEVER name this key 'name'; it MUST be 'interface'.\n"
+                "    - parent: The clean identifier of the specific switch, bridge, or fabric. STRICT RULES FOR PARENT:\n"
+                "        * Extract ONLY the specific instance name. Strip off all generic category labels, prefixes, and colons.\n"
+                "        * NEVER treat page headings, navigation tabs, or section labels as a parent.\n"
                 "        * If an interface is displayed in a global inventory or unassigned list, leave parent as ''.\n\n"
                 "DYNAMIC ATTRIBUTES & CROSS-SCREENSHOT CORRELATION:\n"
                 "    Extract all observable attributes into clean lowercase keys:\n"
@@ -1676,11 +1663,18 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         return c
 
     # ── Metadata / noise blacklist ───────────────────────────────────────────
+    # Derived from YAML aliases + generic UI noise — no vendor-specific strings hardcoded.
     _META_SKIP_STRINGS = {
         "true", "false",
-        "portgroup", "vmnic", "vmk",
         "yes", "no",
+        "portgroup", "is_uncertain", "note",
+        "add networking", "edit", "refresh",
     }
+    # Merge alias strings from the active platform so category-hint words
+    # (e.g. "vmnic", "vmk", "eth", "vmbr") are excluded as standalone chips.
+    for _alist in active_aliases.values():
+        if isinstance(_alist, list):
+            _META_SKIP_STRINGS.update(a.lower() for a in _alist)
 
     def _is_pure_number(s: str) -> bool:
         return bool(re.fullmatch(r"\d+", s))
@@ -1720,16 +1714,13 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     def _get_container_headers(rules: dict, platform: str) -> List[str]:
         """Return container_header patterns from the active platform's topology preset.
 
-        Falls back to a builtin list of common VMware switch-header patterns when
+        Falls back to a builtin list of common switch-header patterns when
         no YAML anchors are configured (or the platform key is missing).
         """
         builtin_defaults = [
-            "Standard Switch:",
-            "Standard Switch",
-            "vSphere Distributed Switch:",
-            "vSphere Distributed Switch",
-            "DVSwitch:",
-            "DVSwitch",
+            "Switch:",
+            "Bridge:",
+            "Distributed Switch:",
         ]
         presets = rules.get("topology_parsing_presets") or {}
         plat_data = presets.get(platform, {})
@@ -1842,9 +1833,9 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
 
     _active_container_headers = _get_container_headers(naming_rules, active_plat_display)
 
-    # ── Fused adapter+speed splitter ─────────────────────────────────────────
+    # ── Fused adapter+speed splitter (vendor-agnostic pattern) ───────────────
     _FUSED_ADAPTER_SPEED_RE = re.compile(
-        r"^(vmnic\d+)\s+(\d+\s*[GKM]bit/s\s+(?:Full|Half)|\d+\s*(?:Gbit|Mbit|Kbit)/s\s*(?:Full|Half)?|\d+\s*Full|\d+\s*Mbps?)$",
+        r"^([a-zA-Z_]*\d+)\s+(\d+\s*[GKM]bit/s\s+(?:Full|Half)|\d+\s*(?:Gbit|Mbit|Kbit)/s\s*(?:Full|Half)?|\d+\s*Full|\d+\s*Mbps?)$",
         re.IGNORECASE,
     )
 
@@ -1942,13 +1933,16 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             st.session_state[_POOL_KEY] = merged_pool
             st.rerun()
 
-        # ── Zone 1: Unassigned Chips Pool ───────────────────────────────────────
+        # ── Zone 1: Unassigned Chips Pool (naturally sorted) ───────────────────
         st.markdown("**Unassigned Chips Pool**")
         st.caption("Click chips to assign them. Edit any chip inline to correct OCR errors.")
         pool = st.session_state.get(_POOL_KEY, [])
 
         for cat_key in _CATEGORY_ORDER:
-            cat_chips = [c for c in pool if c["category"] == cat_key]
+            cat_chips = sorted(
+                [c for c in pool if c["category"] == cat_key],
+                key=lambda c: _natsort_key(c["text"]),
+            )
             if not cat_chips:
                 continue
             col_hdr = f"**{_CATEGORY_LABELS.get(cat_key, cat_key)}**"
@@ -1964,16 +1958,24 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
 
         deck = st.session_state.get(_DECK_KEY, {})
         # Detect switches from pool chips that match parent category
-        parent_chips = [c for c in pool if c["category"] == "parent"]
-        iface_chips = [c for c in pool if c["category"] == "interface"]
-        service_chips = [c for c in pool if c["category"] == "purpose"]
-        speed_chips = [c for c in pool if c["category"] == "speed"]
+        parent_chips = sorted(
+            [c for c in pool if c["category"] == "parent"],
+            key=lambda c: _natsort_key(c["text"]),
+        )
+        iface_chips = sorted(
+            [c for c in pool if c["category"] == "interface"],
+            key=lambda c: _natsort_key(c["text"]),
+        )
+        service_chips = sorted(
+            [c for c in pool if c["category"] == "purpose"],
+            key=lambda c: _natsort_key(c["text"]),
+        )
+        speed_chips = sorted(
+            [c for c in pool if c["category"] == "speed"],
+            key=lambda c: _natsort_key(c["text"]),
+        )
 
         # ── Comprehensive deck initialization from ALL sources ────────────────
-        # Collect every unique switch name from three sources so nothing is missed:
-        #   1. OCR/sanitized text (catches custom names like "PR Spain Fuenmayor Age VLab")
-        #   2. Pool parent chips (already classified by the re-classification logic above)
-        #   3. Direct parent fields from parsed_records (LLM may emit them without OCR)
         _known_switches: set = set(deck.keys())
 
         # Source 1: OCR text
@@ -2004,7 +2006,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
 
         # Seed missing switches into the deck (always use normalized keys)
         _new_switches_added = False
-        for switch_name in _known_switches:
+        for switch_name in sorted(_known_switches, key=_natsort_key):
             _ns = _normalize_switch_name(switch_name)
             if _ns not in deck:
                 deck[_ns] = {
@@ -2033,15 +2035,15 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             st.session_state[_POOL_KEY] = pool
 
         if deck:
-            for switch_id, switch_data in deck.items():
-                _render_switch_card(switch_id, switch_data, pool, iface_chips, service_chips, speed_chips)
+            for switch_id in sorted(deck.keys(), key=_natsort_key):
+                _render_switch_card(switch_id, deck[switch_id], pool, iface_chips, service_chips, speed_chips)
 
         # Manual switch add
-        with st.expander("➕ Add Switch Manually", expanded=False):
+        with st.expander("➕ Add Container Manually", expanded=False):
             col_add_name, col_add_btn = st.columns([3, 1])
             with col_add_name:
                 new_switch_name = st.text_input(
-                    "Switch / Container Name",
+                    "Container Name",
                     key="new_switch_name_input",
                     placeholder="e.g. vSwitch0, vmbr0",
                     label_visibility="collapsed",
@@ -2054,7 +2056,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         if sid not in deck:
                             deck[sid] = {"name": n, "port_groups": [], "uplinks": []}
                             st.session_state[_DECK_KEY] = deck
-                            st.toast(f"Added switch: {n}", icon="➕")
+                            st.toast(f"Added container: {n}", icon="➕")
                             st.rerun()
 
     # ── Zone 3: Live NetBox Output ────────────────────────────────────────────
@@ -2100,9 +2102,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 r"^(?:standard\s*switch|distributed\s*switch|vswitch)\s*[:_-]\s*",
                 "", _p, flags=re.IGNORECASE
             ).strip()
-            if _p.lower() in _GENERIC_NAV or _p.lower() == str(
-                _row.get("interface") or _row.get("name") or ""
-            ).strip().lower():
+            if _p.lower() in _GENERIC_NAV or _p.lower() == str(_row.get("interface") or _row.get("name") or "").strip().lower():
                 _p = ""
             _row["parent"] = _p
             _cleaned_topo.append(_row)
@@ -2134,7 +2134,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             _groups_s3.setdefault(_gp, []).append(_gi)
 
         _out_lines = ["# NOTE:\n# Generated from active Standards templates.\n"]
-        for _gparent in sorted(_groups_s3.keys()):
+        for _gparent in sorted(_groups_s3.keys(), key=_natsort_key):
             _out_lines.append(f"=== {_gparent} ===")
             for _grow in sorted(
                 _groups_s3[_gparent],
@@ -2208,7 +2208,7 @@ def _render_chip_card(
     switch_id: str = "",
     slot_type: str = "",
 ):
-    """Render a single clickable chip with inline correction."""
+    """Render a single clickable chip with inline correction and Promote-to-Container action."""
     import streamlit as st
     text = chip.get("text", "")
     chip_id = chip.get("id", "")
@@ -2274,15 +2274,26 @@ def _render_chip_card(
             # Show which switches this chip could be assigned to
             deck = st.session_state.get("switch_deck", {})
             if deck:
-                switch_keys = list(deck.keys())
+                switch_keys = sorted(deck.keys(), key=_natsort_key)
                 if len(switch_keys) == 1:
-                    if st.button("→", key=f"chip_assign_{chip_id}_{switch_keys[0]}", help="Assign to switch", type="primary"):
+                    if st.button("→", key=f"chip_assign_{chip_id}_{switch_keys[0]}", help="Assign to container", type="primary"):
                         _assign_chip(chip, switch_keys[0], category)
                 else:
-                    with st.popover("Assign to…", use_container_width=True):
+                    with st.popover("Snap to Container ⌵", use_container_width=True):
                         for _sk in switch_keys:
                             if st.button(f"→ {_deck_switch_name(deck, _sk)}", key=f"chip_assign_{chip_id}_{_sk}", use_container_width=True):
                                 _assign_chip(chip, _sk, category)
+                    # Promote-to-Container button
+                    if st.button("⬆ Promote", key=f"chip_promote_{chip_id}", help="Turn this brick into a Container", type="secondary"):
+                        _promote_chip_to_container(chip)
+
+    # Inline promote button row when multiple containers exist
+    if not is_assigned and deck:
+        switch_keys = sorted(deck.keys(), key=_natsort_key)
+        if len(switch_keys) > 1:
+            # Promote button is shown inside the popover area via col_action above;
+            # no extra row needed — the popover already contains snap targets.
+            pass
 
 
 def _esc_html(s: str) -> str:
@@ -2328,6 +2339,24 @@ def _apply_corrections_from_state(text: str) -> str:
     return corrections.get(text, text)
 
 
+def _promote_chip_to_container(chip: dict):
+    """Turn an unassigned brick into a new Baseplate (Container) in the deck."""
+    import streamlit as st
+    text = chip.get("text", "")
+    if not text:
+        return
+    deck = st.session_state.get("switch_deck", {})
+    sid = _normalize_switch_name(text)
+    if sid not in deck:
+        deck[sid] = {"name": sid, "port_groups": [], "uplinks": []}
+        st.session_state["switch_deck"] = deck
+    # Remove from pool
+    pool = st.session_state.get("chips_unassigned", [])
+    st.session_state["chips_unassigned"] = [c for c in pool if c["id"] != chip["id"]]
+    st.toast(f"Promoted '{text}' to container.", icon="⬆️")
+    st.rerun()
+
+
 def _rename_switch_container(old_name: str, new_name: str) -> None:
     """Globally rename a switch container key, merge duplicates, and sync chips.
 
@@ -2348,7 +2377,6 @@ def _rename_switch_container(old_name: str, new_name: str) -> None:
     new_norm = _normalize_switch_name(new_name)
 
     # If the old normalized name isn't directly in the deck, try to find it by value match.
-    # This handles cases where the key was created with an un-normalized name.
     if old_norm not in deck:
         for k in list(deck.keys()):
             if _normalize_switch_name(k) == old_norm:
@@ -2408,7 +2436,7 @@ def _rename_switch_container(old_name: str, new_name: str) -> None:
         deduped.append(c)
     st.session_state["chips_unassigned"] = deduped
 
-    st.toast(f"Renamed switch: {old_norm} → {new_norm}", icon="✏️")
+    st.toast(f"Renamed container: {old_norm} → {new_norm}", icon="✏️")
     st.rerun()
 
 
@@ -2446,7 +2474,7 @@ def _render_switch_card(
     uplinks = switch_data.get("uplinks", [])
 
     st.markdown(f"### 🔹 {name}")
-    st.caption(f"Switch ID: `{switch_id}`")
+    st.caption(f"Container ID: `{switch_id}`")
 
     col_pg, col_up = st.columns(2)
 
@@ -2474,12 +2502,12 @@ def _render_switch_card(
             value=name,
             key=f"sw_rename_{switch_id}",
             label_visibility="collapsed",
-            help="Rename this switch container",
+            help="Rename this container",
         )
         if new_name.strip() and new_name.strip() != name:
             _rename_switch_container(switch_id, new_name.strip())
     with col_remove:
-        if st.button("Remove Switch", key=f"sw_remove_{switch_id}", type="secondary", help="Remove this switch and return chips to pool"):
+        if st.button("Remove Container", key=f"sw_remove_{switch_id}", type="secondary", help="Remove this container and return chips to pool"):
             _remove_switch(switch_id)
 
 
@@ -2540,5 +2568,5 @@ def _remove_switch(switch_id: str):
             if c["id"] not in existing_ids:
                 pool.append(c)
     st.session_state["chips_unassigned"] = pool
-    st.toast(f"Removed switch '{sw.get('name', switch_id)}'. Chips returned to pool.", icon="🗑️")
+    st.toast(f"Removed container '{sw.get('name', switch_id)}'. Chips returned to pool.", icon="🗑️")
     st.rerun()
