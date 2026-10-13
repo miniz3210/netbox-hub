@@ -1754,6 +1754,20 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     headers.extend(p for p in pats if p)
         return headers if headers else builtin_defaults
 
+    def _normalize_switch_name(name: str) -> str:
+        """Normalize a switch/container name for consistent deck-key usage.
+
+        Strips whitespace, replaces trailing letter 'o'/'O' with '0', and removes
+        any 'manual:' prefix that may have been left from prior manual adds.
+        """
+        n = name.strip()
+        if n.startswith("manual:"):
+            n = n[len("manual:"):]
+        # Replace trailing letter o/O with digit 0
+        if n and n[-1].lower() == "o":
+            n = n[:-1] + "0"
+        return n
+
     def _is_container_name(text: str, headers: List[str]) -> bool:
         """Return True if text matches any configured container_header pattern."""
         if not headers or not text:
@@ -1869,6 +1883,8 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 # it is a Switch Container — never demote to "purpose".
                 if category == "parent" or _is_container_name(resolved, _active_container_headers):
                     category = "parent"
+                    # Normalize the switch name so 'o' suffixes and manual: prefixes are consistent.
+                    resolved = _normalize_switch_name(resolved)
 
                 chip_id = resolved  # unique by text; first occurrence wins
                 if chip_id in seen_chips:
@@ -1972,26 +1988,27 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         for cname, is_collapsed in _found_containers:
             if is_collapsed:
                 continue
-            _known_switches.add(cname)
+            _known_switches.add(_normalize_switch_name(cname))
 
         # Source 2: parent chips already in the pool
         for chip in parent_chips:
-            _known_switches.add(chip["id"])
+            _known_switches.add(_normalize_switch_name(chip["id"]))
 
         # Source 3: direct parent fields from parsed_records
         for r in parsed_records:
             pname = r.get("parent")
             if pname:
-                pname_clean = str(pname).strip()
+                pname_clean = _normalize_switch_name(str(pname).strip())
                 if pname_clean and pname_clean.lower() not in ("nan", "none", ""):
                     _known_switches.add(pname_clean)
 
-        # Seed missing switches into the deck
+        # Seed missing switches into the deck (always use normalized keys)
         _new_switches_added = False
         for switch_name in _known_switches:
-            if switch_name not in deck:
-                deck[switch_name] = {
-                    "name": switch_name,
+            _ns = _normalize_switch_name(switch_name)
+            if _ns not in deck:
+                deck[_ns] = {
+                    "name": _ns,
                     "port_groups": [],
                     "uplinks": [],
                 }
@@ -2003,14 +2020,15 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         # appear in Zone 1 alongside pool-generated parent chips.
         _pool_container_ids = {c["id"] for c in pool if c["category"] == "parent"}
         for cname, _ in _found_containers:
-            if cname not in deck and cname not in _pool_container_ids:
+            _nc = _normalize_switch_name(cname)
+            if _nc not in deck and _nc not in _pool_container_ids:
                 pool.append({
-                    "id": cname,
-                    "text": cname,
+                    "id": _nc,
+                    "text": _nc,
                     "category": "parent",
                     "speed": None,
                 })
-                _pool_container_ids.add(cname)
+                _pool_container_ids.add(_nc)
         if _found_containers:
             st.session_state[_POOL_KEY] = pool
 
@@ -2030,9 +2048,9 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 )
             with col_add_btn:
                 if st.button("Add", key="add_switch_btn", width="stretch"):
-                    n = str(new_switch_name).strip()
+                    n = _normalize_switch_name(str(new_switch_name).strip())
                     if n:
-                        sid = f"manual:{n}"
+                        sid = n
                         if sid not in deck:
                             deck[sid] = {"name": n, "port_groups": [], "uplinks": []}
                             st.session_state[_DECK_KEY] = deck
@@ -2210,7 +2228,11 @@ def _render_chip_card(
             st.session_state["chips_session_corrections"][text] = edited
             # If this is a parent/switch chip present in the deck, propagate globally
             _deck = st.session_state.get("switch_deck", {})
-            if category == "parent" and text and text in _deck:
+            _norm_text = _normalize_switch_name(text)
+            _norm_edited = _normalize_switch_name(edited)
+            # Check both the raw text and its normalized form against deck keys
+            _found_in_deck = text in _deck or _norm_text in _deck
+            if category == "parent" and _norm_edited and _found_in_deck:
                 _rename_switch_container(text, edited)
             else:
                 st.session_state["chips_unassigned"] = [
@@ -2309,6 +2331,7 @@ def _apply_corrections_from_state(text: str) -> str:
 def _rename_switch_container(old_name: str, new_name: str) -> None:
     """Globally rename a switch container key, merge duplicates, and sync chips.
 
+    Normalizes both names (strip whitespace, 'o'→'0', drop 'manual:' prefix).
     - If ``new_name`` already exists as a deck key, merge all port_groups/uplinks
       from ``old_name`` into it and remove the old key.
     - Otherwise just rename the deck key (preserving contents) and update the
@@ -2321,15 +2344,26 @@ def _rename_switch_container(old_name: str, new_name: str) -> None:
     pool = st.session_state.get("chips_unassigned", [])
     corrections = st.session_state.setdefault("chips_session_corrections", {})
 
-    if old_name not in deck:
+    old_norm = _normalize_switch_name(old_name)
+    new_norm = _normalize_switch_name(new_name)
+
+    # If the old normalized name isn't directly in the deck, try to find it by value match.
+    # This handles cases where the key was created with an un-normalized name.
+    if old_norm not in deck:
+        for k in list(deck.keys()):
+            if _normalize_switch_name(k) == old_norm:
+                old_norm = k
+                break
+
+    if old_norm not in deck:
         return
 
-    old_data = deck[old_name]
-    has_existing_new = new_name in deck and new_name != old_name
+    old_data = deck[old_norm]
+    has_existing_new = new_norm in deck and new_norm != old_norm
 
     if has_existing_new:
         # Merge: absorb old into existing new
-        existing_new = deck[new_name]
+        existing_new = deck[new_norm]
         for slot_key in ("port_groups", "uplinks"):
             existing_list = existing_new.get(slot_key, [])
             old_list = old_data.get(slot_key, [])
@@ -2338,24 +2372,29 @@ def _rename_switch_container(old_name: str, new_name: str) -> None:
                 if c["id"] not in existing_ids:
                     existing_list.append(c)
             existing_new[slot_key] = existing_list
-        deck.pop(old_name)
+        deck.pop(old_norm)
     else:
         # Pure rename — move the key
-        deck[new_name] = old_data
-        if old_name in deck:
-            del deck[old_name]
+        deck[new_norm] = old_data
+        if old_norm in deck:
+            del deck[old_norm]
+        # Update the stored name so the header reflects the new label
+        deck[new_norm]["name"] = new_norm
 
     st.session_state["switch_deck"] = deck
 
     # Sync corrections map for chips whose text was old_name
     if old_name in corrections:
         corrections[new_name] = corrections.pop(old_name)
+    if old_norm in corrections:
+        corrections[new_norm] = corrections.pop(old_norm)
 
     # Re-key pool chips whose id/text matched old_name
     new_pool = []
     for c in pool:
-        if c["id"] == old_name and c.get("category") in ("parent", "container"):
-            c = {**c, "id": new_name, "text": new_name}
+        c_id = c.get("id", "")
+        if c.get("category") in ("parent", "container") and (c_id == old_norm or _normalize_switch_name(c_id) == old_norm):
+            c = {**c, "id": new_norm, "text": new_norm}
         new_pool.append(c)
     st.session_state["chips_unassigned"] = new_pool
 
@@ -2369,7 +2408,7 @@ def _rename_switch_container(old_name: str, new_name: str) -> None:
         deduped.append(c)
     st.session_state["chips_unassigned"] = deduped
 
-    st.toast(f"Renamed switch: {old_name} → {new_name}", icon="✏️")
+    st.toast(f"Renamed switch: {old_norm} → {new_norm}", icon="✏️")
     st.rerun()
 
 
