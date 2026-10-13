@@ -1381,6 +1381,9 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             st.session_state.pop("switch_deck", None)
             st.session_state.pop("chips_session_corrections", None)
             st.session_state.pop("_pool_initialized_v4", None)
+            st.session_state["topology_records"] = []
+            st.session_state["discovered_switches"] = []
+            st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
             st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
             st.session_state["hypervisor_editor_version"] = st.session_state.get("hypervisor_editor_version", 0) + 1
             st.rerun()
@@ -1935,113 +1938,114 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     # Load standards rules for dynamic role options (available to both cards and editor)
     _std_rules = SSM.get_naming_rules() or naming_rules
 
-    st.markdown("#### 🔹 Topology Visual Overview & Card Controls")
+    if "editor_ver" not in st.session_state:
+        st.session_state["editor_ver"] = 0
+
     records = st.session_state.get("topology_records", [])
-    sw_options = st.session_state.get("discovered_switches", ["vSwitch0"])
+    sw_options = st.session_state.get("discovered_switches", [])
 
-    if not records and not sw_options:
-        st.info("Upload screenshots above and click '🚀 Analyze & Auto-Populate' to populate topology records.")
+    # Dynamic role options from Standards
+    role_cfg = (_std_rules.get("pattern_variables") or {}).get("uplink_role") or (_std_rules.get("pattern_variables") or {}).get("role") or {}
+    role_options = role_cfg.get("options") if isinstance(role_cfg.get("options"), list) else [
+        "Active Uplink", "Standby Uplink", "Active", "Standby", "Primary", "Backup", "None"
+    ]
+    default_role = role_cfg.get("default", role_options[0] if role_options else "Active Uplink")
+
+    # Clean Empty State
+    if not sw_options and not records:
+        st.info("ℹ️ No virtual switches discovered yet. Upload and analyze screenshots above, or add a switch manually below.")
+        col_add_swn, col_add_swb = st.columns([4, 1])
+        with col_add_swn:
+            manual_sw_name = st.text_input("New Switch Name", placeholder="e.g. vSwitch0, vmbr0", key="manual_add_sw_input", label_visibility="collapsed")
+        with col_add_swb:
+            if st.button("➕ Add Switch", key="manual_add_sw_btn", use_container_width=True):
+                if manual_sw_name.strip():
+                    st.session_state["discovered_switches"] = [manual_sw_name.strip()]
+                    st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
+                    st.rerun()
     else:
+        # ── Interactive Cards Overview ──
+        st.markdown("#### 🔹 Topology Visual Overview & Card Controls")
         cols = st.columns(min(len(sw_options), 4) if sw_options else 1)
-
         for idx, sw in enumerate(sw_options):
             with cols[idx % len(cols)]:
                 with st.container(border=True):
                     c_name, c_del = st.columns([4, 1])
                     with c_name:
-                        new_sw_val = st.text_input(
-                            "Switch Name",
-                            value=sw,
-                            key=f"card_sw_rename_{idx}_{sw}",
-                            label_visibility="collapsed"
-                        )
-                        if new_sw_val.strip() and new_sw_val.strip() != sw:
-                            for r in records:
-                                if r.get("switch") == sw:
-                                    r["switch"] = new_sw_val.strip()
-                            sw_options[idx] = new_sw_val.strip()
-                            st.session_state["topology_records"] = records
-                            st.session_state["discovered_switches"] = sw_options
-                            st.rerun()
+                        st.markdown(f"**🔷 {sw}**")
                     with c_del:
-                        if st.button("✖", key=f"btn_del_sw_{idx}", help=f"Delete {sw} and unassign its interfaces"):
+                        if st.button("✖", key=f"btn_del_sw_{idx}_{sw}", help=f"Delete {sw} and unassign its ports"):
                             records = [r for r in records if r.get("switch") != sw]
                             sw_options = [s for s in sw_options if s != sw]
                             st.session_state["topology_records"] = records
                             st.session_state["discovered_switches"] = sw_options
+                            st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
                             st.rerun()
 
-                    assigned = [r for r in records if r.get("switch") == sw]
-                    uplinks = [r for r in assigned if r.get("type") == "Uplink" and r.get("interface")]
-                    services = [r for r in assigned if r.get("type") != "Uplink" and (r.get("interface") or r.get("purpose"))]
+                    assigned_uplinks = [r for r in records if r.get("switch") == sw and r.get("type") == "Uplink"]
+                    assigned_services = [r for r in records if r.get("switch") == sw and r.get("type") != "Uplink"]
 
-                    st.caption(f"Uplinks ({len(uplinks)}):")
-                    if uplinks:
-                        up_badges = " ".join([
-                            f'<span style="background:#10b98122;color:#10b981;border:1px solid #10b981;padding:2px 8px;border-radius:10px;font-size:0.78rem;margin:2px;display:inline-block;">{u.get("interface")} ({u.get("role", "Active")})</span>'
-                            for u in uplinks
-                        ])
-                        st.markdown(up_badges, unsafe_allow_html=True)
+                    # Render Uplinks
+                    st.caption(f"Uplinks ({len(assigned_uplinks)}):")
+                    if assigned_uplinks:
+                        for u in assigned_uplinks:
+                            u_disp = u.get("interface") or "(New Uplink)"
+                            u_role = u.get("role") or default_role
+                            st.markdown(
+                                f'<span style="background:#10b98122;color:#10b981;border:1px solid #10b981;padding:2px 8px;border-radius:10px;font-size:0.78rem;margin:2px;display:inline-block;">{u_disp} ({u_role})</span>',
+                                unsafe_allow_html=True
+                            )
                     else:
                         st.caption("None")
 
-                    st.caption(f"Services ({len(services)}):")
-                    if services:
-                        svc_badges = " ".join([
-                            f'<span style="background:#f59e0b22;color:#f59e0b;border:1px solid #f59e0b;padding:2px 8px;border-radius:10px;font-size:0.78rem;margin:2px;display:inline-block;">{s.get("interface") or s.get("purpose")}</span>'
-                            for s in services
-                        ])
-                        st.markdown(svc_badges, unsafe_allow_html=True)
+                    # Render Services
+                    st.caption(f"Services ({len(assigned_services)}):")
+                    if assigned_services:
+                        for s in assigned_services:
+                            s_disp = s.get("interface") or s.get("purpose") or "(New Service)"
+                            st.markdown(
+                                f'<span style="background:#f59e0b22;color:#f59e0b;border:1px solid #f59e0b;padding:2px 8px;border-radius:10px;font-size:0.78rem;margin:2px;display:inline-block;">{s_disp}</span>',
+                                unsafe_allow_html=True
+                            )
                     else:
                         st.caption("None")
 
-                    # Dynamically load role options from Standards
-                    _role_cfg = ((_std_rules.get("pattern_variables") or {})
-                                 .get("uplink_role") or
-                                 (_std_rules.get("pattern_variables") or {}).get("role") or {})
-                    _role_options = _role_cfg.get("options") if isinstance(_role_cfg.get("options"), list) else [
-                        "Active Uplink", "Standby Uplink", "Active", "Standby", "Primary", "Backup", "None"
-                    ]
-                    _default_role = _role_cfg.get("default", _role_options[0] if _role_options else "Active Uplink")
+                    st.divider()
 
-                    col_add_uplink, col_add_service = st.columns(2)
-                    with col_add_uplink:
-                        if st.button("➕ Uplink", key=f"btn_add_uplink_{idx}_{sw}", use_container_width=True):
+                    # Dual Add Buttons
+                    bc1, bc2 = st.columns(2)
+                    with bc1:
+                        if st.button("➕ Uplink", key=f"btn_add_up_{idx}_{sw}", use_container_width=True):
+                            existing_up_count = len([r for r in records if r.get("type") == "Uplink"])
                             records.append({
                                 "switch": sw,
-                                "interface": "",
+                                "interface": f"vmnic{existing_up_count}",
                                 "type": "Uplink",
                                 "ip": "",
                                 "purpose": "",
-                                "role": _default_role,
+                                "role": default_role,
                                 "speed": "10000 Full"
                             })
                             st.session_state["topology_records"] = records
+                            st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
                             st.rerun()
-                    with col_add_service:
-                        if st.button("➕ Service", key=f"btn_add_service_{idx}_{sw}", use_container_width=True):
+                    with bc2:
+                        if st.button("➕ Service", key=f"btn_add_svc_{idx}_{sw}", use_container_width=True):
                             records.append({
                                 "switch": sw,
                                 "interface": "",
                                 "type": "Port Group",
                                 "ip": "",
-                                "purpose": "",
+                                "purpose": "VM Network",
                                 "role": "None",
                                 "speed": ""
                             })
                             st.session_state["topology_records"] = records
+                            st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
                             st.rerun()
 
     st.markdown("#### 🎛️ Topology Data Grid")
     st.caption("Edit switch assignments, interface roles, and IPs directly. Changes update NetBox descriptions instantly.")
-
-    # Dynamically load role options from Standards for the data editor too
-    _editor_role_cfg = ((_std_rules.get("pattern_variables") or {})
-                        .get("uplink_role") or
-                        (_std_rules.get("pattern_variables") or {}).get("role") or {})
-    _editor_role_options = _editor_role_cfg.get("options") if isinstance(_editor_role_cfg.get("options"), list) else [
-        "Active Uplink", "Standby Uplink", "Active", "Standby", "Primary", "Backup", "None"
-    ]
 
     df = pd.DataFrame(records if records else [{
         "switch": sw_options[0] if sw_options else "vSwitch0",
@@ -2049,28 +2053,28 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         "type": "Uplink",
         "ip": "",
         "purpose": "",
-        "role": _editor_role_cfg.get("default", _editor_role_options[0] if _editor_role_options else "Active Uplink"),
+        "role": default_role,
         "speed": ""
     }])
 
     column_config = {
-        "switch": st.column_config.SelectboxColumn("Switch Container", options=sw_options, required=False),
+        "switch": st.column_config.SelectboxColumn("Switch Container", options=sw_options if sw_options else ["vSwitch0"], required=False),
         "interface": st.column_config.TextColumn("Interface / Port", required=False),
         "type": st.column_config.SelectboxColumn("Type", options=["Uplink", "VMkernel", "Port Group"], required=False),
         "ip": st.column_config.TextColumn("IPv4 Address", required=False),
         "purpose": st.column_config.TextColumn("Service / Purpose", required=False),
-        "role": st.column_config.SelectboxColumn("Role", options=_editor_role_options, required=False),
+        "role": st.column_config.SelectboxColumn("Role", options=role_options, required=False),
         "speed": st.column_config.TextColumn("Link Speed", required=False),
     }
 
+    editor_key = f"topology_data_editor_{st.session_state.get('editor_ver', 0)}"
     edited_df = st.data_editor(
         df,
         column_config=column_config,
         num_rows="dynamic",
         use_container_width=True,
-        key="topology_data_editor"
+        key=editor_key
     )
-
     st.session_state["topology_records"] = edited_df.to_dict(orient="records")
 
     # ── Zone 3: Live NetBox Output ────────────────────────────────────────────
@@ -2094,7 +2098,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         _plat_key = st.session_state.get("naming_target_platform", "VMware ESXi")
         _active_hyp_presets = _hyp_presets_map.get(_plat_key, [])
 
-        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.4.26.\n"]
+        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.4.27.\n"]
         for _gparent in sorted(_groups.keys(), key=_natsort_key):
             _out_lines.append(f"=== {_gparent} ===")
             _sw_uplinks = [r for r in _groups[_gparent] if r.get("type") == "Uplink" and r.get("interface")]
