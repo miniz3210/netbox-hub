@@ -1946,9 +1946,37 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             deduped_pool.append(c)
         new_pool = deduped_pool
 
+        # ── Merge IP addresses into their corresponding vmk interface chips ───
+        _IPV4_RE = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
+        _vmk_ip_map: Dict[str, str] = {}
+        for _r in parsed_records:
+            _iface = str(_r.get("interface") or "").strip().lower()
+            _ip_val = str(_r.get("ip") or _r.get("ip_address") or "").strip()
+            if _iface and _IPV4_RE.match(_ip_val):
+                if _iface not in _vmk_ip_map:
+                    _vmk_ip_map[_iface] = _ip_val
+
+        _ip_chip_ids: Set[str] = set()
+        _merged_vmks: Set[str] = set()
+        _final_pool: list = []
+        for _c in new_pool:
+            _ct = _c["text"]
+            _cl = _ct.lower()
+            if _cl in _vmk_ip_map:
+                _merged_vmks.add(_cl)
+                _final_pool.append({
+                    **_c,
+                    "text": f"{_ct} ({_vmk_ip_map[_cl]})",
+                })
+            elif _IPV4_RE.match(_ct):
+                _ip_chip_ids.add(_c["id"])
+            else:
+                _final_pool.append(_c)
+        new_pool = _final_pool
+
         existing_pool = st.session_state.get(_POOL_KEY, [])
         existing_ids = {c["id"] for c in existing_pool}
-        merged_pool = [c for c in existing_pool if c["id"] not in seen_chips] + new_pool
+        merged_pool = [c for c in existing_pool if c["id"] not in seen_chips and c["id"] not in _ip_chip_ids] + new_pool
         if merged_pool != existing_pool:
             st.session_state[_POOL_KEY] = merged_pool
             st.rerun()
@@ -2228,29 +2256,47 @@ def _render_chip_card(
     switch_id: str = "",
     slot_type: str = "",
 ):
-    """Render a single clickable chip with inline correction and Promote-to-Container action."""
+    """Render a single clickable chip with inline correction and assignment dropdown."""
     import streamlit as st
     text = chip.get("text", "")
     chip_id = chip.get("id", "")
     category = chip.get("category", "")
 
-    col_edit, col_action = st.columns([5, 1])
-    with col_edit:
+    cat_colors = {
+        "parent": "#3b82f6",
+        "interface": "#10b981",
+        "purpose": "#f59e0b",
+        "speed": "#8b5cf6",
+    }
+    cat_color = cat_colors.get(category, "#64748b")
+
+    st.markdown(
+        f'<div style="display:inline-block;padding:4px 10px;border-radius:12px;'
+        f'background:{cat_color}22;border:1px solid {cat_color};'
+        f'color:{cat_color};font-size:0.82rem;font-weight:500;'
+        f'margin:2px 2px 6px 2px;cursor:text;" '
+        f'title="Edit to correct OCR errors">{_esc_html(text)}</div>',
+        unsafe_allow_html=True,
+    )
+
+    if is_assigned:
+        if st.button("✖ Return to Pool", key=f"chip_rm_{chip_id}_{switch_id}_{slot_type}", help="Return this chip to the unassigned pool", type="secondary", width="stretch"):
+            _return_chip_to_pool(chip_id, switch_id, slot_type)
+    else:
         edited = st.text_input(
             label="Chip",
             value=text,
             key=f"chip_edit_{chip_id}",
             label_visibility="collapsed",
             help=f"Category: {category}",
+            size="small",
         ).strip()
         if edited and edited != text:
             st.session_state.setdefault("chips_session_corrections", {})
             st.session_state["chips_session_corrections"][text] = edited
-            # If this is a parent/switch chip present in the deck, propagate globally
             _deck = st.session_state.get("switch_deck", {})
             _norm_text = _normalize_switch_name(text)
             _norm_edited = _normalize_switch_name(edited)
-            # Check both the raw text and its normalized form against deck keys
             _found_in_deck = text in _deck or _norm_text in _deck
             if category == "parent" and _norm_edited and _found_in_deck:
                 _rename_switch_container(text, edited)
@@ -2259,7 +2305,7 @@ def _render_chip_card(
                     c if c["id"] != chip_id else {**c, "text": edited}
                     for c in st.session_state.get("chips_unassigned", [])
                 ]
-                if is_assigned and switch_id and slot_type:
+                if switch_id and slot_type:
                     deck = st.session_state.get("switch_deck", {})
                     if switch_id in deck:
                         slot_key = "port_groups" if slot_type == "service" else "uplinks"
@@ -2269,51 +2315,27 @@ def _render_chip_card(
                         ]
                         st.session_state["switch_deck"] = deck
                 st.rerun()
-        chip_disabled = "disabled" if edited == text else ""
-        # Use a styled markdown chip
-        cat_colors = {
-            "parent": "#3b82f6",
-            "interface": "#10b981",
-            "purpose": "#f59e0b",
-            "speed": "#8b5cf6",
-        }
-        cat_color = cat_colors.get(category, "#64748b")
-        st.markdown(
-            f'<div style="display:inline-block;padding:4px 10px;border-radius:12px;'
-            f'background:{cat_color}22;border:1px solid {cat_color};'
-            f'color:{cat_color};font-size:0.82rem;font-weight:500;'
-            f'margin:2px;cursor:pointer;" '
-            f'title="Click to assign to a switch slot">{_esc_html(text)}</div>',
-            unsafe_allow_html=True,
-        )
-    with col_action:
-        if is_assigned:
-            if st.button("✖", key=f"chip_rm_{chip_id}_{switch_id}_{slot_type}", help="Return to pool", type="secondary"):
-                _return_chip_to_pool(chip_id, switch_id, slot_type)
-        else:
-            # Show which switches this chip could be assigned to
-            deck = st.session_state.get("switch_deck", {})
-            if deck:
-                switch_keys = sorted(deck.keys(), key=_natsort_key)
-                if len(switch_keys) == 1:
-                    if st.button("→", key=f"chip_assign_{chip_id}_{switch_keys[0]}", help="Assign to container", type="primary"):
-                        _assign_chip(chip, switch_keys[0], category)
-                else:
-                    with st.popover("Snap to Container ⌵", use_container_width=True):
-                        for _sk in switch_keys:
-                            if st.button(f"→ {_deck_switch_name(deck, _sk)}", key=f"chip_assign_{chip_id}_{_sk}", use_container_width=True):
-                                _assign_chip(chip, _sk, category)
-                    # Promote-to-Container button
-                    if st.button("⬆ Promote", key=f"chip_promote_{chip_id}", help="Turn this brick into a Container", type="secondary"):
-                        _promote_chip_to_container(chip)
 
-    # Inline promote button row when multiple containers exist
-    if not is_assigned and deck:
-        switch_keys = sorted(deck.keys(), key=_natsort_key)
-        if len(switch_keys) > 1:
-            # Promote button is shown inside the popover area via col_action above;
-            # no extra row needed — the popover already contains snap targets.
-            pass
+        deck = st.session_state.get("switch_deck", {})
+        if deck:
+            switch_keys = sorted(deck.keys(), key=_natsort_key)
+            sel_key = f"sel_assign_{chip_id}"
+            current_sel = st.session_state.get(sel_key, "-- Assign to --")
+            new_sel = st.selectbox(
+                "Assign to",
+                options=["-- Assign to --"] + switch_keys,
+                index=0 if current_sel == "-- Assign to --" else (1 + switch_keys.index(current_sel) if current_sel in switch_keys else 0),
+                key=sel_key,
+                label_visibility="collapsed",
+                help="Select a container to assign this chip to.",
+            )
+            if new_sel != "-- Assign to --" and new_sel != current_sel:
+                st.session_state.pop(sel_key, None)
+                _ch = dict(chip)
+                _ch["text"] = edited if edited else text
+                _assign_chip(_ch, new_sel, category)
+            if st.button("⬆ Promote to Container", key=f"chip_promote_{chip_id}", help="Turn this chip into a new switch container", type="secondary", width="stretch"):
+                _promote_chip_to_container(chip)
 
 
 def _esc_html(s: str) -> str:
