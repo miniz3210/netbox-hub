@@ -1716,9 +1716,21 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             return True
         return False
 
-    # ── YAML-driven container detection (no hardcoded switch-name patterns) ──
+    # ── YAML-driven container detection (with builtin fallbacks) ──
     def _get_container_headers(rules: dict, platform: str) -> List[str]:
-        """Return container_header patterns from the active platform's topology preset."""
+        """Return container_header patterns from the active platform's topology preset.
+
+        Falls back to a builtin list of common VMware switch-header patterns when
+        no YAML anchors are configured (or the platform key is missing).
+        """
+        builtin_defaults = [
+            "Standard Switch:",
+            "Standard Switch",
+            "vSphere Distributed Switch:",
+            "vSphere Distributed Switch",
+            "DVSwitch:",
+            "DVSwitch",
+        ]
         presets = rules.get("topology_parsing_presets") or {}
         plat_data = presets.get(platform, {})
         if not isinstance(plat_data, dict):
@@ -1727,20 +1739,20 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     plat_data = v
                     break
         if not isinstance(plat_data, dict):
-            return []
+            return builtin_defaults
         sp_cfg = plat_data.get("spatial_anchors_and_redaction", {})
         if not isinstance(sp_cfg, dict):
-            return []
+            return builtin_defaults
         anchors = sp_cfg.get("anchors", [])
         if not isinstance(anchors, list):
-            return []
+            return builtin_defaults
         headers: List[str] = []
         for a in anchors:
             if isinstance(a, dict) and a.get("role") == "container_header":
                 pats = a.get("patterns", [])
                 if isinstance(pats, list):
                     headers.extend(p for p in pats if p)
-        return headers
+        return headers if headers else builtin_defaults
 
     def _is_container_name(text: str, headers: List[str]) -> bool:
         """Return True if text matches any configured container_header pattern."""
@@ -1852,15 +1864,11 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 if category is None:
                     category = "interface"
 
-                # Re-classify parent using YAML-driven container headers (no hardcoded patterns).
-                # Applies to ANY category — a vSwitch name that defaulted to "interface"
-                # because the parsed record lacked a parent field must still be detected.
-                if _is_container_name(resolved, _active_container_headers):
+                # Re-classify parent using YAML-driven container headers (with builtin fallbacks).
+                # If the key is "parent" or the resolved text matches a container header,
+                # it is a Switch Container — never demote to "purpose".
+                if category == "parent" or _is_container_name(resolved, _active_container_headers):
                     category = "parent"
-                elif category == "parent":
-                    # Fallback: if the key says "parent" but the text doesn't match any
-                    # container header, demote to "purpose" (e.g. a generic label).
-                    category = "purpose"
 
                 chip_id = resolved  # unique by text; first occurrence wins
                 if chip_id in seen_chips:
@@ -1945,10 +1953,14 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         service_chips = [c for c in pool if c["category"] == "purpose"]
         speed_chips = [c for c in pool if c["category"] == "speed"]
 
-        # ── Spatial-anchor-driven deck initialization ─────────────────────────
-        # Scan OCR/sanitized text for configured container_header patterns so
-        # that containers like "PR Spain Fuenmayor Age VLab" are detected even
-        # when the LLM does not emit a parent field.
+        # ── Comprehensive deck initialization from ALL sources ────────────────
+        # Collect every unique switch name from three sources so nothing is missed:
+        #   1. OCR/sanitized text (catches custom names like "PR Spain Fuenmayor Age VLab")
+        #   2. Pool parent chips (already classified by the re-classification logic above)
+        #   3. Direct parent fields from parsed_records (LLM may emit them without OCR)
+        _known_switches: set = set(deck.keys())
+
+        # Source 1: OCR text
         _ocr_text_for_containers = st.session_state.get("latest_ocr_raw_text", "")
         if not _ocr_text_for_containers:
             _try_structured = st.session_state.get("structured_output_text", "")
@@ -1957,42 +1969,50 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         _found_containers = _scan_text_for_containers(
             _ocr_text_for_containers, _active_container_headers
         )
-        if _found_containers:
-            for cname, is_collapsed in _found_containers:
-                if is_collapsed:
-                    continue
-                if cname not in deck:
-                    deck[cname] = {
-                        "name": cname,
-                        "port_groups": [],
-                        "uplinks": [],
-                    }
-            # Also seed any OCR-detected container names into the unassigned pool
-            # so they appear in Zone 1 alongside pool-generated parent chips.
-            _pool_container_ids = {c["id"] for c in pool if c["category"] == "parent"}
-            for cname, _ in _found_containers:
-                if cname not in deck and cname not in _pool_container_ids:
-                    pool.append({
-                        "id": cname,
-                        "text": cname,
-                        "category": "parent",
-                        "speed": None,
-                    })
-                    _pool_container_ids.add(cname)
-            if _found_containers:
-                st.session_state[_DECK_KEY] = deck
-                st.session_state[_POOL_KEY] = pool
+        for cname, is_collapsed in _found_containers:
+            if is_collapsed:
+                continue
+            _known_switches.add(cname)
 
-        if not deck and parent_chips:
-            for chip in parent_chips:
-                switch_id = chip["id"]
-                deck[switch_id] = {
-                    "name": chip["text"],
+        # Source 2: parent chips already in the pool
+        for chip in parent_chips:
+            _known_switches.add(chip["id"])
+
+        # Source 3: direct parent fields from parsed_records
+        for r in parsed_records:
+            pname = r.get("parent")
+            if pname:
+                pname_clean = str(pname).strip()
+                if pname_clean and pname_clean.lower() not in ("nan", "none", ""):
+                    _known_switches.add(pname_clean)
+
+        # Seed missing switches into the deck
+        _new_switches_added = False
+        for switch_name in _known_switches:
+            if switch_name not in deck:
+                deck[switch_name] = {
+                    "name": switch_name,
                     "port_groups": [],
                     "uplinks": [],
                 }
+                _new_switches_added = True
+        if _new_switches_added:
             st.session_state[_DECK_KEY] = deck
-            st.rerun()
+
+        # Seed any OCR-detected container names into the unassigned pool so they
+        # appear in Zone 1 alongside pool-generated parent chips.
+        _pool_container_ids = {c["id"] for c in pool if c["category"] == "parent"}
+        for cname, _ in _found_containers:
+            if cname not in deck and cname not in _pool_container_ids:
+                pool.append({
+                    "id": cname,
+                    "text": cname,
+                    "category": "parent",
+                    "speed": None,
+                })
+                _pool_container_ids.add(cname)
+        if _found_containers:
+            st.session_state[_POOL_KEY] = pool
 
         if deck:
             for switch_id, switch_data in deck.items():
