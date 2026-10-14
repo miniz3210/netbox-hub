@@ -652,7 +652,9 @@
       "placeholder": "Active Uplink / Standby Uplink",
       "default": "Active Uplink / Standby Uplink",
       "optional": true,
-      "scope": "hypervisor"
+      "scope": "hypervisor",
+      "empty_role_token": "None",
+      "no_uplink_fallback": "No Uplink"
     },
     "description": {
       "label": "Description",

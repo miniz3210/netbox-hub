@@ -64,15 +64,13 @@ def _cached_get_reference_records(category_key, site_filter="", name_filter=""):
 def _normalize_switch_name(name: str) -> str:
     """Normalize a switch/container name for consistent deck-key usage.
 
-    Strips whitespace, replaces trailing letter 'o'/'O' with '0', and removes
-    any 'manual:' prefix that may have been left from prior manual adds.
+    Strips whitespace and removes any 'manual:' prefix that may have been left
+    from prior manual adds.  Does NOT alter embedded digits — 'vSwitch01' and
+    'vSwitch02' are preserved verbatim per SOP 4.3.
     """
     n = str(name).strip()
     if n.startswith("manual:"):
         n = n[len("manual:"):]
-    # Normalize trailing letter o/O to digit 0 if preceded by switch/vswitch
-    if re.search(r"switch[oO]$", n, re.IGNORECASE):
-        n = n[:-1] + "0"
     return n
 
 
@@ -922,9 +920,17 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
 
 def _build_dynamic_teaming_clause(uplinks: list) -> str:
-    """Dynamically synthesize teaming description string without hardcoded assumptions."""
+    """Dynamically synthesize teaming description string without hardcoded assumptions.
+
+    Reads empty_role_token and no_uplink_fallback from Standards (pattern_variables.uplink_role).
+    If uplinks is empty (or all are "No physical network adapters" state), returns the
+    standards-driven no_uplink_fallback value instead of an empty string.
+    """
     if not uplinks:
-        return ""
+        # Fetch standards-driven fallback
+        _rules = SSM.get_naming_rules() or {}
+        _ur_cfg = (_rules.get("pattern_variables") or {}).get("uplink_role") or {}
+        return str(_ur_cfg.get("no_uplink_fallback") or "No Uplink").strip()
 
     parts = []
     for u in uplinks:
@@ -932,8 +938,12 @@ def _build_dynamic_teaming_clause(uplinks: list) -> str:
         if not iface:
             continue
         role_raw = str(u.get("role") or u.get("uplink_role") or "").strip()
+        # Fetch standards-driven empty role token
+        _rules = SSM.get_naming_rules() or {}
+        _ur_cfg = (_rules.get("pattern_variables") or {}).get("uplink_role") or {}
+        _empty_role_token = str(_ur_cfg.get("empty_role_token") or "None").strip().lower()
         role_label = re.sub(r"\s*Uplink$", "", role_raw, flags=re.IGNORECASE).strip()
-        if not role_label or role_label.lower() in ("none", ""):
+        if not role_label or role_label.lower() == _empty_role_token:
             parts.append(iface)
         else:
             parts.append(f"{iface} {role_label}")
@@ -1758,8 +1768,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         if m:
                             raw_sw = m.group(1).strip()
                             clean_sw = ACTION_SPLIT_RE.split(raw_sw)[0].strip()
-                            if re.search(r"switch[oO]$", clean_sw, re.IGNORECASE):
-                                clean_sw = clean_sw[:-1] + "0"
                             norm_sw = _normalize_switch_name(clean_sw)
                             if norm_sw and len(norm_sw) > 1:
                                 discovered_switches.add(norm_sw)
@@ -1903,8 +1911,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 if _m:
                     _raw_name = _m.group(1).strip()
                     _raw_name = ACTION_SPLIT_RE.split(_raw_name)[0].strip()
-                    if re.search(r"switch[oO]$", _raw_name, re.IGNORECASE):
-                        _raw_name = _raw_name[:-1] + "0"
                     _cn = _normalize_switch_name(_raw_name)
                     if _cn and _cn not in _seen_cn:
                         _seen_cn.add(_cn)
@@ -2045,7 +2051,9 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     if assigned_uplink_indices:
                         for u_idx in assigned_uplink_indices:
                             u_row = records[u_idx]
-                            u_iface = u_row.get("interface") or "(Unnamed)"
+                            u_iface = u_row.get("interface", "").strip()
+                            if not u_iface:
+                                continue
                             u_role = u_row.get("role") or default_role
 
                             uc_label, uc_role, uc_del = st.columns([3, 3, 1])
@@ -2078,7 +2086,15 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     if assigned_service_indices:
                         for s_idx in assigned_service_indices:
                             s_row = records[s_idx]
-                            s_name = s_row.get("interface") or s_row.get("purpose") or "(Unnamed Service)"
+                            s_iface = str(s_row.get("interface", "")).strip()
+                            s_purpose = str(s_row.get("purpose", "")).strip()
+                            if not s_purpose and not s_iface:
+                                continue
+                            # VMkernel: display "purpose (vmk)" pairing
+                            if s_row.get("type") == "VMkernel" and s_purpose and s_iface:
+                                s_name = f"{s_purpose} ({s_iface})"
+                            else:
+                                s_name = s_purpose or s_iface
 
                             sc_label, sc_del = st.columns([5, 1])
                             with sc_label:
@@ -2321,12 +2337,16 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         if _line:
                             _out_lines.append(_line)
                     else:
+                        _empty_role_tok = str(
+                            ((_std_rules.get("pattern_variables") or {}).get("uplink_role") or {}).get("empty_role_token")
+                            or "None"
+                        ).strip().lower()
                         _line = f"{_ui} - {_gparent}"
                         if _upurpose:
                             _line += f" {_upurpose}"
                         if _urole:
                             _clean_role = re.sub(r"\s*Uplink$", "", _urole, flags=re.IGNORECASE).strip()
-                            if _clean_role and _clean_role.lower() not in ("none", ""):
+                            if _clean_role and _clean_role.lower() not in (_empty_role_tok, ""):
                                 _line += f" {_clean_role}"
                         _out_lines.append(_line)
 
