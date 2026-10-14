@@ -2367,7 +2367,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         _plat_key = st.session_state.get("naming_target_platform", "VMware ESXi")
         _active_hyp_presets = _hyp_presets_map.get(_plat_key, [])
 
-        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.4.34.\n"]
+        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.4.35.\n"]
         for _gparent in sorted(_groups.keys(), key=_natsort_key):
             _out_lines.append(f"=== {_gparent} ===")
             _sw_uplinks = [r for r in _groups[_gparent] if r.get("type") == "Uplink" and r.get("interface")]
@@ -2469,9 +2469,14 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         if _upurpose:
                             _line += f" {_upurpose}"
                         if _urole:
-                            _clean_role = re.sub(r"\s*Uplink$", "", _urole, flags=re.IGNORECASE).strip()
-                            if _clean_role and _clean_role.lower() not in (_empty_role_tok_z3, ""):
-                                _line += f" {_clean_role}"
+                            _tpp_z3 = (_std_rules_zone3.get("topology_parsing_presets") or {}).get(st.session_state.get("naming_target_platform", "VMware ESXi"), {})
+                            _teaming_z3 = (_tpp_z3 or {}).get("teaming_rules") or {}
+                            if not isinstance(_teaming_z3, dict):
+                                _teaming_z3 = {}
+                            _mapping_z3 = _teaming_z3.get("uplink_to_teaming_mapping") or {}
+                            _display_role = _mapping_z3.get(_urole, _urole)
+                            if _display_role and _display_role.lower() not in (_empty_role_tok_z3, ""):
+                                _line += f" {_display_role}"
                         _out_lines.append(_line)
 
             # VMkernel descriptions

@@ -1,15 +1,15 @@
 # NetBox Universal Library Hub
 
-[![Version](https://img.shields.io/badge/version-4.4.34-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.4.35-blue.svg)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)]()
 
 A Streamlit-based hub for managing NetBox IPAM, device naming conventions, and infrastructure data — with offline-first architecture and zero cloud leakage.
 
-## v4.4.34 — Pure Lego Modular Refactor: Standards-Driven Tokens, Popover Crash Fix & Version Bump
+## v4.4.35 — Pure Lego Modular Refactor: Standards-Driven Tokens, Popover Crash Fix & Version Bump
 
 ### Changes
-* Bumped version to **4.4.34** across `config/constants.py`, `data/naming_rules.yaml`, `README.md`, and `ARCHITECTURE_SOP.md`.
+* Bumped version to **4.4.35** across `config/constants.py`, `data/naming_rules.yaml`, `README.md`, and `ARCHITECTURE_SOP.md`.
 
 ### Bug Fixes
 * **Popover crash fix**: Added defensive dictionary resolution for `discovered_service_map` — prevents `AttributeError: 'NoneType' object has no attribute 'get'` when the session state map is missing or not a dict.
