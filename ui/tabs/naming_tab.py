@@ -922,26 +922,53 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 def _build_dynamic_teaming_clause(uplinks: list) -> str:
     """Dynamically synthesize teaming description string without hardcoded assumptions.
 
-    Reads empty_role_token and no_uplink_fallback from Standards (pattern_variables.uplink_role).
-    If uplinks is empty (or all are "No physical network adapters" state), returns the
-    standards-driven no_uplink_fallback value instead of an empty string.
+    Reads empty_role_token and no_uplink_display from Standards (topology_parsing_presets +
+    pattern_variables.uplink_role).  If uplinks is empty (or all are "No physical network
+    adapters" state), returns the standards-driven no_uplink_text instead of an empty string.
+    Speed-only or junk tokens are silently dropped so they never enter the clause.
     """
     if not uplinks:
-        # Fetch standards-driven fallback
         _rules = SSM.get_naming_rules() or {}
+        _tpp = _rules.get("topology_parsing_presets") or {}
+        _active = st.session_state.get("naming_target_platform", "VMware ESXi")
+        _plat_cfg = _tpp.get(_active, {}) if isinstance(_tpp.get(_active), dict) else {}
+        _teaming = _plat_cfg.get("teaming_rules") or {}
+        if isinstance(_teaming, dict):
+            _v = _teaming.get("no_uplink_display")
+            if _v and str(_v).strip():
+                return str(_v).strip()
         _ur_cfg = (_rules.get("pattern_variables") or {}).get("uplink_role") or {}
         return str(_ur_cfg.get("no_uplink_fallback") or "No Uplink").strip()
+
+    def _is_junk_or_speed(text: str) -> bool:
+        t = text.strip()
+        if not t:
+            return True
+        if _is_junk_token(t, None):
+            return True
+        return bool(re.search(r"\b\d+\s*(?:Gbit/s|Mbit/s|Kbit/s|Full|Half)\b", t, re.I))
 
     parts = []
     for u in uplinks:
         iface = str(u.get("interface", "")).strip()
-        if not iface:
+        if not iface or _is_junk_or_speed(iface):
             continue
         role_raw = str(u.get("role") or u.get("uplink_role") or "").strip()
-        # Fetch standards-driven empty role token
         _rules = SSM.get_naming_rules() or {}
-        _ur_cfg = (_rules.get("pattern_variables") or {}).get("uplink_role") or {}
-        _empty_role_token = str(_ur_cfg.get("empty_role_token") or "None").strip().lower()
+        _tpp = _rules.get("topology_parsing_presets") or {}
+        _active = st.session_state.get("naming_target_platform", "VMware ESXi")
+        _plat_cfg = _tpp.get(_active, {}) if isinstance(_tpp.get(_active), dict) else {}
+        _teaming = _plat_cfg.get("teaming_rules") or {}
+        if isinstance(_teaming, dict):
+            _ert = _teaming.get("empty_role_token")
+            if _ert and str(_ert).strip():
+                _empty_role_token = str(_ert).strip().lower()
+            else:
+                _empty_role_token = str((_rules.get("pattern_variables") or {}).get("uplink_role") or {}).get("empty_role_token") or "None"
+                _empty_role_token = str(_empty_role_token).strip().lower()
+        else:
+            _empty_role_token = str((_rules.get("pattern_variables") or {}).get("uplink_role") or {}).get("empty_role_token") or "None"
+            _empty_role_token = str(_empty_role_token).strip().lower()
         role_label = re.sub(r"\s*Uplink$", "", role_raw, flags=re.IGNORECASE).strip()
         if not role_label or role_label.lower() == _empty_role_token:
             parts.append(iface)
@@ -1755,22 +1782,22 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
 
                 # 2. Capture from OCR raw text with pipe splitting and leading arrow stripping
                 combined_raw_text_for_sw = st.session_state.get("latest_ocr_raw_text", "")
-                for line in combined_raw_text_for_sw.splitlines():
-                    if not line.strip():
+                for _line in combined_raw_text_for_sw.splitlines():
+                    if not _line.strip():
                         continue
-                    segments = line.split("|") if "|" in line else [line]
-                    for seg in segments:
-                        s_clean = seg.strip()
-                        if not s_clean:
+                    _segments = _line.split("|") if "|" in _line else [_line]
+                    for _seg in _segments:
+                        _s_clean = _seg.strip()
+                        if not _s_clean:
                             continue
-                        s_clean = re.sub(r"^[\s>›»▶v⌄]+\s*", "", s_clean)
-                        m = SW_HEADER_RE.search(s_clean)
-                        if m:
-                            raw_sw = m.group(1).strip()
-                            clean_sw = ACTION_SPLIT_RE.split(raw_sw)[0].strip()
-                            norm_sw = _normalize_switch_name(clean_sw)
-                            if norm_sw and len(norm_sw) > 1:
-                                discovered_switches.add(norm_sw)
+                        _s_clean = re.sub(r"^[\s>›»▶v⌄]+\s*", "", _s_clean)
+                        _m = SW_HEADER_RE.search(_s_clean)
+                        if _m:
+                            _raw_sw = _m.group(1).strip()
+                            _clean_sw = ACTION_SPLIT_RE.split(_raw_sw)[0].strip()
+                            _norm_sw = _normalize_switch_name(_clean_sw)
+                            if _norm_sw and len(_norm_sw) > 1:
+                                discovered_switches.add(_norm_sw)
 
                 sorted_switches = sorted(discovered_switches, key=_natsort_key) if discovered_switches else [_dynamic_switch_pfx + "0"]
                 UI_CHROME_WORDS = {
@@ -1780,10 +1807,10 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 }
 
                 clean_switches = []
-                for s in sorted_switches:
-                    s_str = str(s).strip()
-                    if len(s_str) > 2 and s_str.lower() != "es" and s_str.lower() not in UI_CHROME_WORDS:
-                        clean_switches.append(s_str)
+                for _s in sorted_switches:
+                    _s_str = str(_s).strip()
+                    if len(_s_str) > 2 and _s_str.lower() != "es" and _s_str.lower() not in UI_CHROME_WORDS:
+                        clean_switches.append(_s_str)
 
                 st.session_state["discovered_switches"] = clean_switches if clean_switches else [_dynamic_switch_pfx + "0"]
 
@@ -1791,17 +1818,11 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 records = []
                 seen_entity = set()
 
-                UI_CHROME_WORDS = {
-                    "summary", "monitor", "configure", "permissions", "vms", "datastores",
-                    "networks", "updates", "storage", "actions", "add networking", "refresh",
-                    "edit", "manage physical adapters", "protocol endpoints", "system", "hardware"
-                }
-
                 for r in deduped:
                     iface = str(r.get("interface", "")).strip()
                     if not iface or len(iface) <= 1:
                         continue
-                    if any(cw in iface.lower() for cw in UI_CHROME_WORDS):
+                    if any(_cw in iface.lower() for _cw in UI_CHROME_WORDS):
                         continue
                     parent_sw = _normalize_switch_name(str(r.get("parent", "")).strip())
                     if parent_sw not in sorted_switches:
@@ -1842,8 +1863,116 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         "speed": speed_val
                     })
 
+                # ── Service/VMkernel harvesting from Standards delimiters ───────
+                _plat_cfg_svc = (naming_rules.get("topology_parsing_presets") or {}).get(active_plat_display, {})
+                if not isinstance(_plat_cfg_svc, dict):
+                    _plat_cfg_svc = {}
+                _service_delimiters = _plat_cfg_svc.get("service_delimiters")
+                if not isinstance(_service_delimiters, list):
+                    _service_delimiters = ["VLAN ID:", "VMkernel Ports", "Virtual Machines"]
+                _teaming_rules = _plat_cfg_svc.get("teaming_rules") or {}
+                if not isinstance(_teaming_rules, dict):
+                    _teaming_rules = {}
+
+                _service_map: Dict[str, dict] = {}
+                _delim_pat = '|'.join(re.escape(d) for d in _service_delimiters)
+                _svc_pattern = rf"(?m)^([^\n\r|><]+?)\s*$\n\s*(?:{_delim_pat})"
+                _vmk_ip_re = rf"\b({re.escape(vmk_pfx)}\d+)\s*:\s*((?:\d{{1,3}}\.){{3}}\d{{1,3}})\b"
+                _noise_clean_re = re.compile(r"^[\s>›»▶v⌄•·▪▫○●✔✖!–—-]+\s*")
+
+                _current_service: Optional[str] = None
+                _current_switch: Optional[str] = None
+                _ocr_lines = combined_raw_text.splitlines()
+                for _li, _line in enumerate(_ocr_lines):
+                    _low = _line.lower()
+                    if any(_kw in _low for _kw in ("--- screenshot", "vmnic")) and re.search(rf"\b{re.escape(uplink_pfx)}\d+\b", _line):
+                        pass
+                    if re.search(rf"\b{re.escape(vmk_pfx)}\d+\b", _line) and re.search(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}", _line):
+                        _vmk_m = re.search(_vmk_ip_re, _line, re.IGNORECASE)
+                        if _vmk_m:
+                            _vmk_iface = _vmk_m.group(1).strip()
+                            _vmk_ip = _vmk_m.group(2).strip()
+                            if _current_service:
+                                _entry = _service_map.get(_current_service, {})
+                                if not _entry:
+                                    _entry = {"name": _current_service, "interface": _vmk_iface, "ip": _vmk_ip, "type": "VMkernel"}
+                                elif not _entry.get("interface"):
+                                    _entry["interface"] = _vmk_iface
+                                if not _entry.get("ip"):
+                                    _entry["ip"] = _vmk_ip
+                                _entry["type"] = "VMkernel"
+                                _service_map[_current_service] = _entry
+                                discovered_services.add(_current_service)
+                                discovered_services.add(_vmk_iface)
+                                discovered_services.add(_vmk_ip)
+                            elif _vmk_iface:
+                                _entry = {"name": _vmk_iface, "interface": _vmk_iface, "ip": _vmk_ip, "type": "VMkernel"}
+                                _service_map[_vmk_iface] = _entry
+                                discovered_services.add(_vmk_iface)
+                                discovered_services.add(_vmk_ip)
+                        continue
+                    if re.match(_svc_pattern, _line):
+                        _svc_name = _noise_clean_re.sub("", _line).strip()
+                        if _svc_name and len(_svc_name) > 1 and _svc_name.lower() not in UI_CHROME_WORDS:
+                            _current_service = _svc_name
+                            _service_map.setdefault(_svc_name, {"name": _svc_name, "interface": "", "ip": "", "type": "Port Group"})
+                            discovered_services.add(_svc_name)
+                            continue
+                    for _seg in _line.split("|") if "|" in _line else [_line]:
+                        _s = _seg.strip()
+                        if not _s:
+                            continue
+                        _s = re.sub(r"^[\s>›»▶v⌄]+\s*", "", _s)
+                        _sw_m = SW_HEADER_RE.search(_s)
+                        if _sw_m:
+                            _cn = _normalize_switch_name(ACTION_SPLIT_RE.split(_sw_m.group(1).strip())[0].strip())
+                            if _cn and len(_cn) > 1:
+                                _current_switch = _cn
+                            break
+
+                st.session_state["discovered_service_map"] = _service_map
+                st.session_state["discovered_service_candidates"] = sorted(discovered_services, key=_natsort_key)
+
+                # Auto-populate discovered VMkernel services into topology_records under their detected switch
+                for _svc_label, _svc_entry in _service_map.items():
+                    if _svc_label in discovered_services and _svc_entry.get("type") == "VMkernel":
+                        _matched_vmk = str(_svc_entry.get("interface") or "").strip()
+                        _matched_ip = str(_svc_entry.get("ip") or "").strip()
+                        if not _matched_vmk:
+                            continue
+                        _best_sw: Optional[str] = None
+                        for _i2, _l2 in enumerate(_ocr_lines):
+                            if re.search(rf"\b{re.escape(vmk_pfx)}\d+\s*:", _l2, re.IGNORECASE):
+                                for _j in range(_i2 - 1, -1, -1):
+                                    _prev = _ocr_lines[_j]
+                                    for _sp in _prev.split("|") if "|" in _prev else [_prev]:
+                                        _ps = re.sub(r"^[\s>›»▶v⌄]+\s*", "", _sp.strip())
+                                        _pm = SW_HEADER_RE.search(_ps)
+                                        if _pm:
+                                            _pn = _normalize_switch_name(ACTION_SPLIT_RE.split(_pm.group(1).strip())[0].strip())
+                                            if _pn and len(_pn) > 1:
+                                                _best_sw = _pn
+                                                break
+                                    if _best_sw:
+                                        break
+                                break
+                        _assign_sw = _best_sw or (sorted_switches[0] if sorted_switches else None)
+                        if not _assign_sw:
+                            continue
+                        _key = (_assign_sw, _matched_vmk.lower())
+                        if _key not in seen_entity:
+                            seen_entity.add(_key)
+                            records.append({
+                                "switch": _assign_sw,
+                                "interface": _matched_vmk,
+                                "type": "VMkernel",
+                                "ip": _matched_ip,
+                                "purpose": _svc_label,
+                                "role": "Management" if "mgmt" in _svc_label.lower() else "None",
+                                "speed": ""
+                            })
+
                 st.session_state["topology_records"] = records
-                # Increment editor version to FORCE Streamlit to mount a brand new data_editor widget
                 st.session_state["hypervisor_editor_version"] = st.session_state.get("hypervisor_editor_version", 0) + 1
                 st.toast(f"Successfully analyzed {total_imgs} screenshots and merged {len(deduped)} unique records!", icon="🚀")
         except Exception as e:
@@ -2052,7 +2181,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         for u_idx in assigned_uplink_indices:
                             u_row = records[u_idx]
                             u_iface = u_row.get("interface", "").strip()
-                            if not u_iface:
+                            if not u_iface or _is_junk_token(u_iface, active_junk_filter) or re.search(r"\b\d+\s*(?:Gbit/s|Mbit/s|Kbit/s|Full|Half)\b", u_iface, re.I):
                                 continue
                             u_role = u_row.get("role") or default_role
 
@@ -2155,12 +2284,15 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     with btn_col2:
                         with st.popover("➕ Service", use_container_width=True):
                             st.markdown("**Add Port Group / VMkernel**")
+                            _disc_svc_map = st.session_state.get("discovered_service_map", {})
+                            _mapped_svc_labels = {str(e.get("name") or "").strip() for e in _disc_svc_map.values() if isinstance(e, dict)}
                             svc_choice_options = ["➕ Custom / Manual Entry"] + [c for c in service_candidates if not any((r.get("purpose") == c or r.get("interface") == c) and r.get("switch") == sw for r in records)]
                             selected_svc_choice = st.selectbox(
                                 "Select Detected Service or Enter New",
                                 options=svc_choice_options,
                                 key=f"pop_svc_sel_{idx}_{sw}"
                             )
+                            _autofill = _disc_svc_map.get(selected_svc_choice) if selected_svc_choice != "➕ Custom / Manual Entry" else {}
                             if selected_svc_choice == "➕ Custom / Manual Entry":
                                 final_svc_name = st.text_input(
                                     "Service / Port Group Name",
@@ -2168,17 +2300,24 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                     key=f"pop_svc_custom_{idx}_{sw}"
                                 ).strip()
                             else:
-                                final_svc_name = selected_svc_choice.strip()
+                                _auto_name = str(_autofill.get("name") or selected_svc_choice).strip()
+                                final_svc_name = st.text_input(
+                                    "Service / Port Group Name",
+                                    value=_auto_name,
+                                    placeholder=f"e.g. Management Network, {_dynamic_vmk_pfx}0",
+                                    key=f"pop_svc_custom_{idx}_{sw}"
+                                ).strip()
                                 st.caption(f"Selected: `{final_svc_name}`")
 
-                            is_vmk_guess = final_svc_name.lower().startswith(_dynamic_vmk_pfx.lower())
+                            _is_vm = str(_autofill.get("type") or "").lower() == "vmkernel" or final_svc_name.lower().startswith(_dynamic_vmk_pfx.lower())
                             new_svc_type = st.selectbox(
                                 "Type",
                                 options=["Port Group", "VMkernel"],
-                                index=1 if is_vmk_guess else 0,
+                                index=1 if _is_vm else 0,
                                 key=f"pop_svc_type_{idx}_{sw}"
                             )
-                            new_svc_ip = st.text_input("IP Address (optional)", placeholder="e.g. 10.0.0.1/24", key=f"pop_svc_ip_{idx}_{sw}").strip()
+                            _auto_ip = str(_autofill.get("ip") or "")
+                            new_svc_ip = st.text_input("IP Address (optional)", placeholder="e.g. 10.0.0.1/24", value=_auto_ip, key=f"pop_svc_ip_{idx}_{sw}").strip()
 
                             if st.button("Add to Switch", key=f"pop_svc_confirm_{idx}_{sw}", use_container_width=True):
                                 records.append({
@@ -2248,7 +2387,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         _plat_key = st.session_state.get("naming_target_platform", "VMware ESXi")
         _active_hyp_presets = _hyp_presets_map.get(_plat_key, [])
 
-        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.4.31.\n"]
+        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.4.33.\n"]
         for _gparent in sorted(_groups.keys(), key=_natsort_key):
             _out_lines.append(f"=== {_gparent} ===")
             _sw_uplinks = [r for r in _groups[_gparent] if r.get("type") == "Uplink" and r.get("interface")]
@@ -2323,6 +2462,14 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         continue
                     _upurpose = str(_ug.get("purpose", "")).strip()
                     _urole = str(_ug.get("role", "")).strip()
+                    _std_rules_zone3 = SSM.get_naming_rules() or naming_rules
+                    _tpp_z3 = (_std_rules_zone3.get("topology_parsing_presets") or {}).get(st.session_state.get("naming_target_platform", "VMware ESXi"), {})
+                    _teaming_z3 = (_tpp_z3 or {}).get("teaming_rules") or {}
+                    if not isinstance(_teaming_z3, dict):
+                        _teaming_z3 = {}
+                    _empty_role_tok_z3 = str(_teaming_z3.get("empty_role_token")
+                        or ((_std_rules_zone3.get("pattern_variables") or {}).get("uplink_role") or {}).get("empty_role_token")
+                        or "None").strip().lower()
                     if _uplink_tpls:
                         _row = {
                             "vmnic": _ui,
@@ -2333,20 +2480,17 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         _tpl = _select_best_template(_row, _uplink_tpls)
                         _line = render_dynamic_pattern(_tpl, _row, _pattern_vars)
                         _line = re.sub(r"\s+/Uplink\b", "", _line, flags=re.IGNORECASE)
+                        _line = re.sub(rf"(?i)\s+{re.escape(_empty_role_tok_z3)}\b", "", _line)
                         _line = re.sub(r"\s{2,}", " ", _line).strip()
                         if _line:
                             _out_lines.append(_line)
                     else:
-                        _empty_role_tok = str(
-                            ((_std_rules.get("pattern_variables") or {}).get("uplink_role") or {}).get("empty_role_token")
-                            or "None"
-                        ).strip().lower()
                         _line = f"{_ui} - {_gparent}"
                         if _upurpose:
                             _line += f" {_upurpose}"
                         if _urole:
                             _clean_role = re.sub(r"\s*Uplink$", "", _urole, flags=re.IGNORECASE).strip()
-                            if _clean_role and _clean_role.lower() not in (_empty_role_tok, ""):
+                            if _clean_role and _clean_role.lower() not in (_empty_role_tok_z3, ""):
                                 _line += f" {_clean_role}"
                         _out_lines.append(_line)
 

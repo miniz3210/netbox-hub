@@ -1,16 +1,15 @@
 # NetBox Universal Library Hub
 
-[![Version](https://img.shields.io/badge/version-4.4.31-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.4.33-blue.svg)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)]()
 
 A Streamlit-based hub for managing NetBox IPAM, device naming conventions, and infrastructure data — with offline-first architecture and zero cloud leakage.
 
-## v4.4.31 — IPAM Toolbar Restore & Version Bump
+## v4.4.33 — Standards-Driven Service Discovery, Teaming Synthesis & Version Bump
 
 ### Changes
-* Restored missing "📥 Ingest NetBox Data (Backup / CSV)" toolbar expander in the IPAM tab's "Site Subnet Allocation" sub-tab, mirroring the Naming tab behavior and pointing to the shared SQLite database (`data/netbox_hub.db`).
-* Bumped version to **4.4.31** across `config/constants.py` and documentation.
+* Bumped version to **4.4.33** across `config/constants.py` and documentation.
 
 ### New Features
 * **Multi-Sheet Excel Parser (`core.ipam_excel_diff.ExcelIPAMParser`)**: High-performance `openpyxl` streaming parser with dynamic header discovery across all sheets. Supports arbitrary sheet counts and column-name variations (`ip`/`address`/`ipv4`, `subnet`/`cidr`/`prefix`, `vlan id`/`vid`/`vlan`, etc.). Fallback site = sheet name when column is absent.

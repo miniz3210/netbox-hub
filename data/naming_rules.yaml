@@ -941,6 +941,15 @@
         ],
         "redact_mac": true
       },
+      "service_delimiters": [
+        "VLAN ID:",
+        "VMkernel Ports",
+        "Virtual Machines"
+      ],
+      "teaming_rules": {
+        "no_uplink_display": "No Uplink",
+        "empty_role_token": "None"
+      },
        "ui_noise_blacklist": [
          "summary", "monitor", "configure", "permissions",
          "vms", "datastores", "networks", "updates", "storage",
