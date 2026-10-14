@@ -1,15 +1,15 @@
 # NetBox Universal Library Hub
 
-[![Version](https://img.shields.io/badge/version-4.4.36-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.4.37-blue.svg)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)]()
 
 A Streamlit-based hub for managing NetBox IPAM, device naming conventions, and infrastructure data — with offline-first architecture and zero cloud leakage.
 
-## v4.4.36 — Critical State Overwrite Fix, Delimiter Regex & Auto-Fill in Naming Tab
+## v4.4.37 — Critical State Overwrite Fix, Delimiter Regex & Auto-Fill in Naming Tab
 
 ### Changes
-* Bumped version to **4.4.36** across `config/constants.py`, `README.md`, and `ARCHITECTURE_SOP.md`.
+* Bumped version to **4.4.37** across `config/constants.py`, `README.md`, and `ARCHITECTURE_SOP.md`.
 
 ### Bug Fixes
 * **Fatal data wipe fix**: Incremented `editor_ver` during analysis so `st.data_editor` key changes and no longer overwrites topology records with empty data on every analyze pass.
