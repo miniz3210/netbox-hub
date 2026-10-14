@@ -1,5 +1,5 @@
 # NetBox Hub — Living Architecture SOP & Handover Guide
-# Target Baseline: v4.4.42 | Platform: Oracle Cloud Ampere A1 (ARM64)
+# Target Baseline: v4.4.44 | Platform: Oracle Cloud Ampere A1 (ARM64)
 
 ---
 
@@ -8,7 +8,7 @@
 | Property              | Value                                                        |
 |-----------------------|--------------------------------------------------------------|
 | Application           | NetBox Universal Library Hub                                 |
-| Target Version        | v4.4.42                                                      |
+| Target Version        | v4.4.44                                                      |
 | Runtime               | Python 3.11+ / Streamlit                                     |
 | Cloud Infrastructure  | Oracle Cloud Ampere A1 (ARM64 / aarch64, Linux)              |
 | Container Registry    | `ghcr.io/miniz3210/netbox-hub`                               |
@@ -166,7 +166,7 @@ When a cell in the DataGrid is edited, `_apply_cascade_to_rows()` in `ui/tabs/na
 Capture a baseline snapshot of the Standards Tab configuration into `data/naming_rules.yaml`. Verify all section definitions (2.5 UX rules, 4.0 Blueprint guide) are present and consistent.
 
 ### Step 2 — Version Assert Verification
-Confirm `config/constants.py::APP_VERSION == "4.4.42"`. Ensure no release notes or version bump scripts are pending.
+Confirm `config/constants.py::APP_VERSION == "4.4.44"`. Ensure no release notes or version bump scripts are pending.
 
 ### Step 3 — Safe Local Container Cache Cleanup
 ```bash
@@ -177,8 +177,8 @@ docker builder prune -a -f
 
 ### Step 4 — Docker Build & Tag Release
 ```bash
-docker build -t ghcr.io/miniz3210/netbox-hub:v4.4.42 -t ghcr.io/miniz3210/netbox-hub:latest .
-docker push ghcr.io/miniz3210/netbox-hub:v4.4.42
+docker build -t ghcr.io/miniz3210/netbox-hub:v4.4.44 -t ghcr.io/miniz3210/netbox-hub:latest .
+docker push ghcr.io/miniz3210/netbox-hub:v4.4.44
 docker push ghcr.io/miniz3210/netbox-hub:latest
 ```
 
@@ -186,7 +186,7 @@ docker push ghcr.io/miniz3210/netbox-hub:latest
 
 ## 6. Living Task Checklist
 
-### ✅ Completed Checklist (v4.4.42 Baseline)
+### ✅ Completed Checklist (v4.4.44 Baseline)
 
 - [x] Relative spatial clustering engine & resolution-agnostic geometry partitioning.
 - [x] Boundary card fix (eliminated collapsed header overlap, e.g. iSCSI Veeam).
@@ -199,7 +199,7 @@ docker push ghcr.io/miniz3210/netbox-hub:latest
 - [x] Notification migration: replaced disruptive alert banners with `st.toast`.
 - [x] Naming tab performance cache fix (`_interface_ref_examples_cached` at module top level).
 - [x] Cleaned up obsolete standalone scripts and consolidated tests (114+ passing tests).
-- [x] **Topology Spatial Reconciliation Axioms** — Left/right parent column separation, ghost interface filtering, switch name fidelity, icon stripping all verified and implemented in `spatial_redactor.py` v4.4.42.
+- [x] **Topology Spatial Reconciliation Axioms** — Left/right parent column separation, ghost interface filtering, switch name fidelity, icon stripping all verified and implemented in `spatial_redactor.py` v4.4.44.
 - [x] **DataGrid uncertainty tagging** — `is_uncertain` flag + `note` field propagation through the pipeline, verified in `tests/test_spatial_redactor.py` and naming tab integration.
 - [x] **Session-only in-memory cascade replacement** — `_apply_cascade_to_rows()` in `naming_tab.py` cascades cell corrections across all rows in `hypervisor_parsed_descriptions` without persisting to disk.
 
@@ -261,7 +261,7 @@ docker image prune -a -f && docker builder prune -a -f
 
 ## 9. Project Status Checklist: Completed (Done) vs Pending (Roadmap)
 
-### 9.1 Completed & Verified (Baseline v4.4.42)
+### 9.1 Completed & Verified (Baseline v4.4.44)
 - [x] Hybrid Topology Editor Architecture:
   * Completely replaced the unstable 60+ individual widget Chips Pool with a unified Hybrid Architecture (Visual Cards Overview + Authoritative native `st.data_editor` + Live NetBox Output).
   * Eradicated Streamlit widget state race conditions, infinite rerun cascades, and 100% CPU lockups.
@@ -300,4 +300,4 @@ docker image prune -a -f && docker builder prune -a -f
 - [ ] Multi-Platform Preset Expansion (Proxmox VE & Azure):
   * Add and validate spatial anchors, prefix tokens, and naming patterns for Proxmox VE (Linux Bridges `vmbr`, bonding `slaves`) and Azure Portal (VNet / Subnet blade).
 - [ ] Git Tag Pruning & Official Container Release:
-    * Prune legacy transition tags, tag official release `v4.4.42`, and push multi-arch images to GitHub Container Registry (GHCR).
+    * Prune legacy transition tags, tag official release `v4.4.44`, and push multi-arch images to GitHub Container Registry (GHCR).

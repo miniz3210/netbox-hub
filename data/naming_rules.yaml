@@ -965,7 +965,6 @@
       ],
       "service_delimiters": [
         "VLAN ID:",
-        "VLANID:",
         "VMkernel Ports",
         "Virtual Machines"
       ],
@@ -980,33 +979,28 @@
           "None": ""
         }
       },
-        "ui_noise_blacklist": [
-          "summary", "monitor", "configure", "permissions",
-          "vms", "datastores", "networks", "updates", "storage",
-          "actions", "storageadapters", "storagedevices",
-          "host cache configuration",
-          "protocol endpoints", "i/o filters", "1/o filters",
-          "storageproviders", "networking", "virtual switches",
-          "vmkernel adapters", "physical adapters",
-          "tcp/ip configuration",
-          "virtual machines", "vm startup/shutdown",
-          "agent vm settings", "default vm compatibility",
-          "swap file location", "system", "licensing",
-          "host profile", "time configuration",
-          "authentication services", "authenticationservices",
-          "certificate", "power management",
-          "advanced system settings",
-          "advanced systemsettin..",
-          "system resource reservation",
-          "firewall", "services", "security profile",
-          "system swap", "packages", "hardware", "refresh", "refres", "edit",
-          "add networking", "addnetworking", "add networking...",
-           "manage physical adapters", "managephysicaladapters",
-           "manage physkal adapters", "managephyskaladapters",
-           "no associated port groups",
-          "no physical network adapters",
-          "e热"
-        ]
+      "ui_noise_blacklist": [
+        "summary",
+        "monitor",
+        "configure",
+        "permissions",
+        "datastores",
+        "networks",
+        "storage",
+        "actions",
+        "add networking",
+        "refresh",
+        "edit",
+        "manage physical adapters",
+        "protocol endpoints",
+        "system",
+        "hardware",
+        "no associated port groups",
+        "no physical network adapters",
+        "virtual switches",
+        "tcp/ip configuration",
+        "vm startup/shutdown"
+      ]
     },
     "Proxmox VE": {
       "platform": "Proxmox VE",
@@ -1060,12 +1054,6 @@
         "hidden": false
       },
       {
-        "code": "Uplink",
-        "label": "Physical Uplink: PCIeX/PortY",
-        "pattern": "<vmnic> - <v_switch> <purpose> <uplink_role>",
-        "hidden": false
-      },
-      {
         "code": "PortGroup",
         "label": "Port Group Interface",
         "pattern": "<purpose> (<v_switch>)",
@@ -1078,16 +1066,10 @@
         "hidden": false
       },
       {
-        "code": "Uplink_None",
-        "label": "Physical Uplink None",
-        "pattern": "<vmnic> - <v_switch> <uplink_role>",
-        "hidden": true
-      },
-      {
-        "code": "PortGroup_VLAN",
-        "label": "Port Group with VLAN",
-        "pattern": "<v_switch> [<vlan_id>] (<active_vmnics> Active / <standby_vmnics> Standby)",
-        "hidden": true
+        "code": "Uplink",
+        "label": "Physical Uplink",
+        "pattern": "<vmnic> - <v_switch> <purpose> <uplink_role>",
+        "hidden": false
       }
     ],
     "Proxmox VE": [

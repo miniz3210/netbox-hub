@@ -1250,145 +1250,6 @@ def _render_interactive_hypervisor_mode(naming_rules: dict, casing: str, active_
         st.code(cleaned_output, language="text")
 
 
-def _harvest_ocr_topology_candidates(raw_text: str, naming_rules: dict, active_plat_display: str) -> Tuple[List[str], Dict[str, dict], List[str]]:
-    """Parse OCR raw text (handling pipe-merged lines and interleaved sidebar items)
-    to extract all Port Groups, VMkernel interfaces, and IPv4 addresses."""
-    if not raw_text or not raw_text.strip():
-        return [], {}, []
-
-    plat_tokens_cfg = ((naming_rules.get("platform_tokens") or {}).get(active_plat_display, {})) if isinstance(naming_rules.get("platform_tokens"), dict) else {}
-    uplink_pfx = str(plat_tokens_cfg.get("uplink_prefix", "vmnic")).strip()
-    vmk_pfx = str(plat_tokens_cfg.get("vmk_prefix", "vmk")).strip()
-    switch_pfx = str(plat_tokens_cfg.get("switch_prefix", "vSwitch")).strip()
-
-    plat_cfg_svc = (naming_rules.get("topology_parsing_presets") or {}).get(active_plat_display, {})
-    if not isinstance(plat_cfg_svc, dict):
-        plat_cfg_svc = {}
-    service_delimiters = plat_cfg_svc.get("service_delimiters")
-    if not isinstance(service_delimiters, list) or not service_delimiters:
-        service_delimiters = ["VLAN ID:", "VMkernel Ports", "Virtual Machines"]
-
-    dyn_bl = {str(s).strip().lower() for s in (plat_cfg_svc.get("ui_noise_blacklist") or []) if s and str(s).strip()}
-    _, _plat_noise_nospace = _get_platform_noise_set(naming_rules, active_plat_display)
-    sidebar_noise = UI_NAV_NOISE | dyn_bl | _plat_noise_nospace
-
-    # Build a clean stream of topology tokens with sidebar noise removed
-    cleaned_tokens = []
-    for raw_line in raw_text.splitlines():
-        if not raw_line.strip() or raw_line.strip().startswith("--- Screenshot"):
-            continue
-        for seg in raw_line.split("|"):
-            s = seg.strip()
-            if not s:
-                continue
-            # Check if collapsed switch header (starts with > or ›)
-            is_collapsed = s.startswith(">") or s.startswith("›")
-            s_stripped = re.sub(r"^[\s>›»▶⌄•·▪▫○●✔✖!–—-]+", "", s).strip()
-            s_stripped = re.sub(r"\.{2,}$", "", s_stripped).strip()
-            if not s_stripped or len(s_stripped) <= 1:
-                continue
-            low = s_stripped.lower()
-            low_nospace = low.replace(" ", "")
-
-            # Skip domain/host header line (e.g. esagex10.eswine.adds)
-            if re.search(r"\.(adds|local|internal|corp)\b", low):
-                continue
-            # Skip sidebar/navigation noise
-            if low in sidebar_noise or low_nospace in sidebar_noise:
-                continue
-            if any(low.startswith(pfx) for pfx in ("advanced systemset", "systemresourcereser", "1/o filter", "i/o filter")):
-                continue
-            # Skip right-column physical adapter lines
-            if re.search(rf"\b{re.escape(uplink_pfx)}\d+\b", s_stripped, re.I):
-                continue
-            if "physicaladapter" in low_nospace:
-                continue
-
-            cleaned_tokens.append((s_stripped, is_collapsed))
-
-    service_map: Dict[str, dict] = {}
-    discovered_services: Set[str] = set()
-    discovered_ips: Set[str] = set()
-    current_switch = switch_pfx + "0"
-    current_svc_label: Optional[str] = None
-
-    for idx, (tok, is_collapsed) in enumerate(cleaned_tokens):
-        low_tok = tok.lower()
-
-        # 1. Track Expanded Switch Header
-        sw_m = SW_HEADER_RE.search(tok)
-        if sw_m:
-            if not is_collapsed:
-                raw_sw = ACTION_SPLIT_RE.split(sw_m.group(1).strip())[0].strip()
-                norm_sw = _normalize_switch_name(raw_sw)
-                if norm_sw and len(norm_sw) > 1:
-                    current_switch = norm_sw
-            continue
-
-        # 2. Match VMkernel & IP line: e.g. "vmk0 : 10.27.177.246"
-        vmk_m = re.search(rf"\b({re.escape(vmk_pfx)}\d+)\s*:\s*((?:\d{{1,3}}\.){{3}}\d{{1,3}})\b", tok, re.I)
-        if vmk_m:
-            vmk_iface = vmk_m.group(1).strip()
-            vmk_ip = vmk_m.group(2).strip()
-            discovered_ips.add(vmk_ip)
-            discovered_services.add(vmk_iface)
-            if current_svc_label and current_svc_label in service_map:
-                service_map[current_svc_label]["interface"] = vmk_iface
-                service_map[current_svc_label]["ip"] = vmk_ip
-                service_map[current_svc_label]["type"] = "VMkernel"
-                service_map[current_svc_label]["switch"] = current_switch
-            service_map[vmk_iface] = {
-                "name": current_svc_label or vmk_iface,
-                "interface": vmk_iface,
-                "ip": vmk_ip,
-                "type": "VMkernel",
-                "switch": current_switch,
-            }
-            continue
-
-        # Also harvest any standalone IPv4 in the token
-        for ip_hit in re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", tok):
-            if not ip_hit.startswith("255.") and ip_hit != "0.0.0.0":
-                discovered_ips.add(ip_hit)
-
-        # 3. Skip delimiter lines themselves (standardize whitespace for matching)
-        _norm_tok = re.sub(r"\s+", " ", low_tok).strip()
-        if any(_norm_tok.startswith(re.sub(r"\s+", " ", d).strip().lower()) for d in service_delimiters):
-            continue
-
-        # 4. Look-ahead in cleaned_tokens: if any of the next 1..2 tokens starts with a service delimiter, `tok` is a Service / Port Group Name!
-        is_service_title = False
-        for look_idx in range(idx + 1, min(idx + 3, len(cleaned_tokens))):
-            nxt_tok, _ = cleaned_tokens[look_idx]
-            _norm_nxt = re.sub(r"\s+", " ", nxt_tok.strip().lower()).strip()
-            if any(_norm_nxt.startswith(re.sub(r"\s+", " ", d).strip().lower()) for d in service_delimiters):
-                is_service_title = True
-                break
-            if SW_HEADER_RE.search(nxt_tok):
-                break
-
-        if is_service_title:
-            clean_name = tok
-            if st.session_state.get("auto_correct", True):
-                from utils.formatters import apply_auto_corrections
-                clean_name = apply_auto_corrections(clean_name, "vmware")
-            current_svc_label = clean_name
-            service_map.setdefault(clean_name, {
-                "name": clean_name,
-                "interface": "",
-                "ip": "",
-                "type": "Port Group",
-                "switch": current_switch,
-            })
-            discovered_services.add(clean_name)
-
-    return (
-        sorted(discovered_services, key=_natsort_key),
-        service_map,
-        sorted(discovered_ips, key=_natsort_key),
-    )
-
-
 def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model: str, vault):
     """Render the full screenshot OCR pipeline openly (no expanders hiding the workflow)."""
     from core.ocr_engine import run_local_ocr_pipeline
@@ -1795,71 +1656,30 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             sanitized_combined, session_id = vault.sanitize(cleaned_ocr_text)
             st.session_state["latest_vault_session"] = session_id
 
-            system_prompt = (
-                "You are an expert infrastructure network architect and data modeling specialist.\n"
-                "Analyze the provided sanitized OCR text extracted from infrastructure topologies or management dashboards.\n\n"
-                "Extract all observed network entities into a flat JSON array of objects using strictly lowercase keys.\n\n"
-                "STRICT TOPOLOGICAL ENTITY RULES:\n"
-                "    1. ONLY extract endpoint interfaces, physical adapters, logical ports, or virtual interfaces.\n"
-                "    2. NEVER create an interface record for the hosting switch, bridge, or container fabric itself (e.g., vSwitch, vmbr, bridge are purely container attributes, not standalone interface items).\n\n"
-                "MANDATORY TOPOLOGICAL KEYS (EVERY OBJECT MUST HAVE THESE):\n"
-                "    - interface: The exact identifier of the adapter, port, port group, or endpoint. NEVER name this key 'name'; it MUST be 'interface'.\n"
-                "    - parent: The clean identifier of the specific switch, bridge, or fabric. STRICT RULES FOR PARENT:\n"
-                "        * Extract ONLY the specific instance name. Strip off all generic category labels, prefixes, and colons.\n"
-                "        * NEVER treat page headings, navigation tabs, or section labels as a parent.\n"
-                "        * If an interface is displayed in a global inventory or unassigned list, leave parent as ''.\n\n"
-                "DYNAMIC ATTRIBUTES & CROSS-SCREENSHOT CORRELATION:\n"
-                "    Extract all observable attributes into clean lowercase keys:\n"
-                "    - slot: Physical PCIe hardware slot location if visible.\n"
-                "    - ip: Network address or CIDR prefix if present.\n"
-                "    - speed: Connection throughput or duplex mode.\n"
-                "    - vlan: Associated VLAN tag or identifier.\n"
-                "    - purpose: Stated functional role, service, or network designation.\n"
-                "    - remote_device: Discovered peer neighbor device identifier.\n"
-                "    - remote_port: Discovered peer neighbor interface or port.\n"
-                "    - Actively propagate attributes (slot, remote_device, remote_port) across records that share the same interface name.\n\n"
-                "TYPO NORMALIZATION:\n"
-                "    Correct visible OCR substitutions (e.g., letter 'o' vs digit '0') and normalize PCI addresses.\n"
-                "STRICT 1:1 IP ASSIGNMENT:\n"
-                "    Assign each unique IP address to exactly ONE interface record; never duplicate an IP across multiple records.\n\n"
-                "CRITICAL: Output ONLY a valid JSON array of endpoint objects. Do not wrap in markdown fences or include explanations."
-            )
+            system_prompt = """You are an expert VMware and infrastructure network data modeling specialist.
+Analyze the provided sanitized OCR text from hypervisor topologies (Standard Switches vSS and Distributed Switches vDS).
 
-            selected_preset_name = st.session_state.get("naming_target_platform", "VMware ESXi")
-            # Read instructions directly from the unified topology_parsing_presets
-            # (the single source of truth).  Fall back to DEFAULT_PARSING_PRESETS
-            # only when the key is absent.
-            preset_instructions = ""
-            unified_presets = parsing_presets  # already loaded above
-            if isinstance(unified_presets, dict):
-                target_obj = unified_presets.get(selected_preset_name)
-                if not target_obj:
-                    for _k, _v in unified_presets.items():
-                        if isinstance(_k, str) and _k.strip().lower() == selected_preset_name.strip().lower():
-                            target_obj = _v
-                            break
-                if isinstance(target_obj, dict):
-                    preset_instructions = target_obj.get("instructions", "")
-                elif isinstance(target_obj, str):
-                    preset_instructions = target_obj
-            if not preset_instructions:
-                from data.standards_manager import DEFAULT_PARSING_PRESETS
-                if isinstance(DEFAULT_PARSING_PRESETS, dict):
-                    _default_cfg = DEFAULT_PARSING_PRESETS.get(selected_preset_name, {})
-                    if isinstance(_default_cfg, dict):
-                        preset_instructions = _default_cfg.get("instructions", "")
-                    elif isinstance(_default_cfg, str):
-                        preset_instructions = _default_cfg
-            if preset_instructions:
-                system_prompt = f"{system_prompt}\n\n{preset_instructions}".strip()
+Extract all observed network entities into a flat JSON array of objects using strictly lowercase keys:
+[
+  {
+    "switch": "<Root Virtual Switch Name (e.g. vSwitch0, dvSwitch0, iDMZ-vdSwitch02). Strip any child uplink group suffix like -DvUplinks-xx>",
+    "interface": "<Interface name if applicable: physical adapter (e.g. vmnic0) or VMkernel (e.g. vmk0). Empty string for pure VM Port Groups>",
+    "type": "<One of: 'Uplink', 'VMkernel', 'Port Group'>",
+    "ip": "<IP token placeholder if present (e.g. {{IP_1}}), otherwise empty string>",
+    "purpose": "<Exact name of the Port Group or Service (e.g. Management Network, VM Network, iSCSI, OT Routable, vMotion Network). Empty string for pure physical uplinks>",
+    "role": "<For Uplinks: 'Active Uplink', 'Standby Uplink', or 'None'. For VMkernel: 'Management' if management/vmk0 else 'None'. For Port Group: 'VM Traffic' or 'None'>",
+    "speed": "<Link speed if visible, e.g. 10000 Full, otherwise empty string>"
+  }
+]
 
-            # Dynamically inject token expectations from hypervisor presets
-            hypervisor_presets_map = naming_rules.get("hypervisor_presets") or {}
-            active_hyp_platform = st.session_state.get("naming_target_platform", "VMware ESXi")
-            active_presets_for_tokens = hypervisor_presets_map.get(active_hyp_platform, [])
-            active_platform_tokens = set(re.findall(r"<([a-zA-Z0-9_]+)>", " ".join([p.get("pattern", "") for p in active_presets_for_tokens])))
-            if active_platform_tokens:
-                system_prompt += f"\n\nTARGET OUTPUT SCHEMA KEYS: Extract fields into matching lowercase keys: {', '.join(sorted(active_platform_tokens))}"
+CRITICAL EXTRACTION RULES:
+1. CONTAINER NORMALIZATION: In Distributed Switches (vDS), containers named like dvSwitch0-DvUplinks-47 or iDMZ-vdSwitch02-DVUplinks-95 are child uplink groups. Normalize their switch to the root Distributed Switch name (e.g. dvSwitch0, iDMZ-vdSwitch02). Never output an uplink group as a separate switch.
+2. NO PHYSICAL ADAPTERS: If a virtual switch explicitly states 'No physical network adapters' or has 0 physical uplinks, create an entry with interface: 'No Uplink', type: 'Uplink', role: 'None'.
+3. OCR TYPO RESILIENCE:
+   - Recognize that 'ymk0' or 'mk2' are VMkernel interfaces ('vmk0', 'vmk2').
+   - Recognize that 'ymnic0' or 'ymnk3' are physical adapters ('vmnic0', 'vmnic3').
+   - Ignore UI action noise such as 'MANAGE PHYSICAL ADAPTERS', 'ADD NETWORKING', 'EDIT', 'REFRESH'.
+4. STRICT JSON OUTPUT: Return ONLY a valid JSON array of objects. No markdown explanations or fences."""
 
             user_prompt = f"Parse this consolidated sanitized topology text:\n\n{sanitized_combined}"
             response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt, max_tokens=8192)
@@ -1871,521 +1691,77 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 if isinstance(item, dict) and not any(k in item for k in ("finish_reason", "index", "message", "role")):
                     clean_records.append({str(k).strip().lower(): str(v).strip() if v is not None else "" for k, v in item.items()})
 
-            all_parsed_items = clean_records
             if session_id:
-                token_map = vault.get_session_token_map(session_id)
-                if token_map:
-                    try:
-                        all_parsed_items = [
-                            {k: vault.restore(str(v), session_id=session_id) for k, v in item.items()}
-                            for item in all_parsed_items
-                        ]
-                    except Exception as e:
-                        logger.warning("Vault de-tokenization failed: %s — keeping raw records.", e)
-            # Post-LLM reverse de-tokenization for spatial redaction map
+                try:
+                    clean_records = [
+                        {k: vault.restore(str(v), session_id=session_id) for k, v in item.items()}
+                        for item in clean_records
+                    ]
+                except Exception as e:
+                    logger.warning("Vault de-tokenization failed: %s — keeping raw records.", e)
+
             if spatial_redaction_map:
                 try:
-                    all_parsed_items = [
+                    clean_records = [
                         {
                             k: spatial_redaction_map.get(str(v), str(v))
                             for k, v in item.items()
                         }
-                        for item in all_parsed_items
+                        for item in clean_records
                     ]
                 except Exception as e:
-                    logger.warning("Spatial redaction map apply failed: %s — keeping parsed items as-is.", e)
-            if not isinstance(all_parsed_items, list):
-                all_parsed_items = []
+                    logger.warning("Spatial redaction map apply failed: %s — keeping records as-is.", e)
+
+            for r in clean_records:
+                if r.get("switch"):
+                    r["switch"] = _normalize_switch_name(r["switch"])
+
+            discovered_switches = sorted(
+                set(r["switch"] for r in clean_records if r.get("switch")),
+                key=_natsort_key
+            )
+            if not discovered_switches:
+                discovered_switches = [_dynamic_switch_pfx + "0"]
+
+            discovered_services = set()
+            discovered_ips = set()
+            discovered_uplinks = set()
+            for r in clean_records:
+                iface = str(r.get("interface") or "").strip()
+                purpose = str(r.get("purpose") or "").strip()
+                ip_val = str(r.get("ip") or "").strip()
+                rtype = str(r.get("type") or "").strip()
+                if iface and not _is_junk_token(iface, active_junk_filter):
+                    discovered_services.add(iface)
+                if purpose and not _is_junk_token(purpose, active_junk_filter):
+                    discovered_services.add(purpose)
+                if ip_val and re.match(r"^\d{1,3}(?:\.\d{1,3}){3}$", ip_val):
+                    discovered_ips.add(ip_val)
+                if rtype == "Uplink" and iface:
+                    discovered_uplinks.add(iface)
+
+            st.session_state["topology_records"] = clean_records
+            st.session_state["discovered_switches"] = discovered_switches
+            st.session_state["discovered_service_candidates"] = sorted(discovered_services, key=_natsort_key)
+            st.session_state["discovered_ip_candidates"] = sorted(discovered_ips, key=_natsort_key)
+            st.session_state["discovered_uplink_candidates"] = sorted(discovered_uplinks, key=_natsort_key)
 
             if not combined_raw_text:
                 st.warning("⚠️ No text detected by local OCR. Ensure screenshot contains legible topology labels.")
-            elif not all_parsed_items:
+            elif not clean_records:
                 st.warning("⚠️ OCR detected text but no structured records were parsed. Check screenshot quality.")
             else:
-                attr_bag = {}
-                for item in all_parsed_items:
-                    if not isinstance(item, dict):
-                        continue
-                    iface = str(item.get("interface") or "").strip().lower()
-                    if not iface:
-                        continue
-                    if iface not in attr_bag:
-                        attr_bag[iface] = {}
-                    for k, v in item.items():
-                        if k not in ("interface", "parent") and v:
-                            attr_bag[iface][k] = v
+                st.toast(f"Successfully analyzed {total_imgs} screenshots and extracted {len(clean_records)} unique records!", icon="🚀")
 
-                for item in all_parsed_items:
-                    if not isinstance(item, dict):
-                        continue
-                    iface = str(item.get("interface") or "").strip().lower()
-                    if iface in attr_bag:
-                        for k, v in attr_bag[iface].items():
-                            if not item.get(k):
-                                item[k] = v
+            st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
 
-                seen = set()
-                deduped = []
-                for item in all_parsed_items:
-                    if not isinstance(item, dict):
-                        continue
-                    key = (
-                        str(item.get("interface") or "").strip().lower(),
-                        str(item.get("parent") or "").strip().lower(),
-                    )
-                    if key not in seen:
-                        seen.add(key)
-                        deduped.append(item)
-
-                st.session_state["hypervisor_parsed_descriptions"] = deduped
-                st.session_state.pop("hypervisor_cascade_mappings", None)
-
-                # ── Harvest discovered uplink / service candidates from OCR ─────
-                plat_tokens_cfg = ((naming_rules.get("platform_tokens") or {})
-                                   .get(active_plat_display, {})) if isinstance(naming_rules.get("platform_tokens"), dict) else {}
-                uplink_pfx = str(plat_tokens_cfg.get("uplink_prefix", _dynamic_uplink_pfx)).strip()
-                vmk_pfx = str(plat_tokens_cfg.get("vmk_prefix", _dynamic_vmk_pfx)).strip()
-
-                discovered_uplinks = set()
-                discovered_services = set()
-                for item in deduped:
-                    iface = str(item.get("interface", "")).strip()
-                    purpose = str(item.get("purpose", "")).strip()
-                    if iface:
-                        if iface.lower().startswith(uplink_pfx.lower()):
-                            discovered_uplinks.add(iface)
-                        elif iface.lower().startswith(vmk_pfx.lower()):
-                            discovered_services.add(iface)
-                        elif len(iface) > 2 and not _is_noise_token(iface, naming_rules, active_plat_display):
-                            discovered_services.add(iface)
-                    if purpose and len(purpose) > 2 and not _is_noise_token(purpose, naming_rules, active_plat_display):
-                        discovered_services.add(purpose)
-
-                ocr_uplink_matches = re.findall(rf"\b{re.escape(uplink_pfx)}\d+\b", combined_raw_text, re.IGNORECASE)
-                for u in ocr_uplink_matches:
-                    discovered_uplinks.add(u.strip())
-
-                ocr_vmk_matches = re.findall(rf"\b{re.escape(vmk_pfx)}\d+\b", combined_raw_text, re.IGNORECASE)
-                for v in ocr_vmk_matches:
-                    discovered_services.add(v.strip())
-
-                st.session_state["discovered_uplink_candidates"] = sorted(discovered_uplinks, key=_natsort_key)
-                st.session_state["discovered_service_candidates"] = sorted(discovered_services, key=_natsort_key)
-
-                # ── Harvest Port Groups & IPs from cleaned OCR token stream (fixes sidebar interleaving)
-                try:
-                    _harvested_svcs, _harvested_map, _harvested_ips = _harvest_ocr_topology_candidates(
-                        combined_raw_text, naming_rules, active_plat_display
-                    )
-                    st.session_state["discovered_service_candidates"] = _harvested_svcs
-                    st.session_state["discovered_service_map"] = _harvested_map
-                    st.session_state["discovered_ip_candidates"] = _harvested_ips
-                    # Auto-populate discovered services into topology_records
-                    for s_label, s_entry in _harvested_map.items():
-                        if not isinstance(s_entry, dict):
-                            continue
-                        if s_label.lower().startswith(_dynamic_vmk_pfx.lower()) and s_entry.get("name") != s_label:
-                            continue
-                        sw_target = s_entry.get("switch") or _dynamic_switch_pfx + "0"
-                        s_iface = s_entry.get("interface", "")
-                        s_type = s_entry.get("type", "Port Group")
-                        s_ip = s_entry.get("ip", "")
-                        already_exists = False
-                        for existing_r in records:
-                            if existing_r.get("switch") == sw_target and existing_r.get("type") != "Uplink":
-                                if (s_label and existing_r.get("purpose", "").lower() == s_label.lower()) or (s_iface and existing_r.get("interface", "").lower() == s_iface.lower()):
-                                    if not existing_r.get("purpose") and s_label:
-                                        existing_r["purpose"] = s_label
-                                    if not existing_r.get("interface") and s_iface:
-                                        existing_r["interface"] = s_iface
-                                    if not existing_r.get("ip") and s_ip:
-                                        existing_r["ip"] = s_ip
-                                    if s_type == "VMkernel":
-                                        existing_r["type"] = "VMkernel"
-                                    already_exists = True
-                                    break
-                        if not already_exists and s_label:
-                            records.append({
-                                "switch": sw_target,
-                                "interface": s_iface,
-                                "type": s_type,
-                                "ip": s_ip,
-                                "purpose": s_label,
-                                "role": "Management" if "mgmt" in s_label.lower() or "management" in s_label.lower() else "None",
-                                "speed": ""
-                            })
-                    st.session_state["topology_records"] = records
-                except Exception:
-                    pass
-
-                # ── Hybrid Architecture: Topology Records Ingestion ───────────
-                discovered_switches = set()
-
-                # 1. Capture from AI deduped entities
-                for r in deduped:
-                    p = r.get("parent")
-                    if p and str(p).strip().lower() not in ("", "none", "null", "general"):
-                        discovered_switches.add(_normalize_switch_name(str(p).strip()))
-
-                # 2. Capture from OCR raw text with pipe splitting and leading arrow stripping
-                combined_raw_text_for_sw = st.session_state.get("latest_ocr_raw_text", "")
-                for _line in combined_raw_text_for_sw.splitlines():
-                    if not _line.strip():
-                        continue
-                    _segments = _line.split("|") if "|" in _line else [_line]
-                    for _seg in _segments:
-                        _s_clean = _seg.strip()
-                        if not _s_clean:
-                            continue
-                        _s_clean = re.sub(r"^[\s>›»▶v⌄]+\s*", "", _s_clean)
-                        _m = SW_HEADER_RE.search(_s_clean)
-                        if _m:
-                            _raw_sw = _m.group(1).strip()
-                            _clean_sw = ACTION_SPLIT_RE.split(_raw_sw)[0].strip()
-                            _norm_sw = _normalize_switch_name(_clean_sw)
-                            if _norm_sw and len(_norm_sw) > 1:
-                                discovered_switches.add(_norm_sw)
-
-                sorted_switches = sorted(discovered_switches, key=_natsort_key) if discovered_switches else [_dynamic_switch_pfx + "0"]
-
-                clean_switches = []
-                for _s in sorted_switches:
-                    _s_str = str(_s).strip()
-                    if len(_s_str) > 2 and _s_str.lower() != "es" and not _is_noise_token(_s_str, naming_rules, active_plat_display):
-                        clean_switches.append(_s_str)
-
-                st.session_state["discovered_switches"] = clean_switches if clean_switches else [_dynamic_switch_pfx + "0"]
-
-                # 3. Build initial topology records list
-                records = []
-                seen_entity = set()
-
-                for r in deduped:
-                    iface = str(r.get("interface", "")).strip()
-                    if not iface or len(iface) <= 1:
-                        continue
-                    if any(_cw in iface.lower() for _cw in _get_platform_noise_set(naming_rules, active_plat_display)[0]):
-                        continue
-                    parent_sw = _normalize_switch_name(str(r.get("parent", "")).strip())
-                    if parent_sw not in sorted_switches:
-                        parent_sw = sorted_switches[0]
-
-                    ip_val = str(r.get("ip") or r.get("ip_address") or "").strip()
-                    purpose_val = str(r.get("purpose", "")).strip()
-                    speed_val = str(r.get("speed", "")).strip()
-
-                    if iface.lower().startswith(uplink_pfx):
-                        row_type = "Uplink"
-                        _init_role_cfg = ((_std_rules.get("pattern_variables") or {})
-                                          .get("uplink_role") or
-                                          (_std_rules.get("pattern_variables") or {}).get("role") or {})
-                        _init_role_opts = _init_role_cfg.get("options") if isinstance(_init_role_cfg.get("options"), list) else [
-                            "Active Uplink", "Standby Uplink", "Active", "Standby", "Primary", "Backup", "None"
-                        ]
-                        role_val = _init_role_cfg.get("default", _init_role_opts[0] if _init_role_opts else "Active Uplink")
-                    elif iface.lower().startswith(vmk_pfx):
-                        row_type = "VMkernel"
-                        role_val = "Management" if "mgmt" in purpose_val.lower() or "management" in purpose_val.lower() else "None"
-                    else:
-                        row_type = "Port Group"
-                        role_val = "VM Traffic"
-
-                    entity_key = (parent_sw, iface.lower())
-                    if entity_key in seen_entity:
-                        continue
-                    seen_entity.add(entity_key)
-
-                    records.append({
-                        "switch": parent_sw,
-                        "interface": iface,
-                        "type": row_type,
-                        "ip": ip_val,
-                        "purpose": purpose_val,
-                        "role": role_val,
-                        "speed": speed_val
-                    })
-
-                # ── Pipe-Aware Service / Port Group & VMkernel IP Harvesting ──
-                _plat_cfg_svc = (naming_rules.get("topology_parsing_presets") or {}).get(active_plat_display, {})
-                if not isinstance(_plat_cfg_svc, dict):
-                    _plat_cfg_svc = {}
-                _service_delimiters = _plat_cfg_svc.get("service_delimiters")
-                if not isinstance(_service_delimiters, list):
-                    _service_delimiters = ["VLAN ID:", "VMkernel Ports", "Virtual Machines"]
-                _teaming_rules = _plat_cfg_svc.get("teaming_rules") or {}
-                if not isinstance(_teaming_rules, dict):
-                    _teaming_rules = {}
-                _no_uplink_label = str(_teaming_rules.get("no_uplink_display") or "No Uplink").strip()
-
-                _service_map = {}
-                _noise_clean_re = re.compile(r"^[\s>›»▶v⌄•·▪▫○●✔✖!–—\-\d/O]+?\s*Filters\b|^[\s>›»▶v⌄•·▪▫○●✔✖!–—-]+")
-                _current_switch = clean_switches[0] if clean_switches else (_dynamic_switch_pfx + "0")
-                _current_svc_label = None
-
-                # Noise set driven entirely by ui_noise_blacklist from Standards (Section 2.6)
-                _plat_noise_exact, _plat_noise_nospace = _get_platform_noise_set(naming_rules, active_plat_display)
-                _SIDEBAR_NOISE = UI_NAV_NOISE | active_junk_filter | _plat_noise_exact | _plat_noise_nospace
-
-                _ocr_lines = combined_raw_text.splitlines()
-                for i, raw_line in enumerate(_ocr_lines):
-                    if not raw_line.strip():
-                        continue
-                    segments = [s.strip() for s in raw_line.split("|") if s.strip()]
-
-                    # 1. Check if any segment on this line is a Switch Header (only expanded switches, ignore collapsed '>')
-                    for seg in segments:
-                        if seg.startswith(">") or seg.startswith("›"):
-                            continue
-                        s_clean = re.sub(r"^[\s⌄v▼]+\s*", "", seg)
-                        sw_m = SW_HEADER_RE.search(s_clean)
-                        if sw_m:
-                            raw_sw = ACTION_SPLIT_RE.split(sw_m.group(1).strip())[0].strip()
-                            norm_sw = _normalize_switch_name(raw_sw)
-                            if norm_sw and len(norm_sw) > 1 and norm_sw.lower() not in _SIDEBAR_NOISE:
-                                _current_switch = norm_sw
-                                if norm_sw not in clean_switches:
-                                    clean_switches.append(norm_sw)
-                            break
-
-                    # 2. Check if the NEXT line contains any service delimiter (even after a pipe '|')
-                    next_line_has_delim = False
-                    if i + 1 < len(_ocr_lines):
-                        next_segs = [ns.strip() for ns in _ocr_lines[i + 1].split("|") if ns.strip()]
-                        for ns in next_segs:
-                            ns_clean = re.sub(r"^[\s>›»▶v⌄]+\s*", "", ns)
-                            if any(ns_clean.lower().startswith(d.lower()) for d in _service_delimiters):
-                                next_line_has_delim = True
-                                break
-
-                    if next_line_has_delim:
-                        # Find the valid service title segment on the current line (ignoring sidebar noise & PhysicalAdapters)
-                        for seg in segments:
-                            seg_clean = re.sub(r"^[\s>›»▶v⌄•·▪▫○●✔✖!–—-]+", "", seg).strip()
-                            seg_clean = re.sub(r"\.{2,}$", "", seg_clean).strip()
-                            low_seg = seg_clean.lower()
-                            if (
-                                not seg_clean
-                                or len(seg_clean) <= 1
-                                or low_seg in _SIDEBAR_NOISE
-                                or any(low_seg.startswith(d.lower()) for d in _service_delimiters)
-                                or SW_HEADER_RE.search(seg_clean)
-                                or re.search(rf"\b{re.escape(uplink_pfx)}\d+\b", seg_clean, re.I)
-                                or "physicaladapter" in low_seg.replace(" ", "")
-                                or "no physical" in low_seg
-                                or "no associated" in low_seg
-                            ):
-                                continue
-                            if st.session_state.get("auto_correct", True):
-                                from utils.formatters import apply_auto_corrections
-                                seg_clean = apply_auto_corrections(seg_clean, "vmware")
-                            _current_svc_label = seg_clean
-                            _service_map.setdefault(seg_clean, {
-                                "name": seg_clean,
-                                "interface": "",
-                                "ip": "",
-                                "type": "Port Group",
-                                "switch": _current_switch
-                            })
-                            discovered_services.add(seg_clean)
-
-                    # 3. Check for VMkernel interface & IP on the current line: "vmk0 : 10.27.177.246"
-                    vmk_m = re.search(rf"\b({re.escape(vmk_pfx)}\d+)\s*:\s*((?:\d{{1,3}}\.){{3}}\d{{1,3}})\b", raw_line, re.IGNORECASE)
-                    if vmk_m:
-                        vmk_iface = vmk_m.group(1).strip()
-                        vmk_ip = vmk_m.group(2).strip()
-                        if _current_svc_label and _current_svc_label in _service_map:
-                            _service_map[_current_svc_label]["interface"] = vmk_iface
-                            _service_map[_current_svc_label]["ip"] = vmk_ip
-                            _service_map[_current_svc_label]["type"] = "VMkernel"
-                            _service_map[_current_svc_label]["switch"] = _current_switch
-                        _service_map[vmk_iface] = {
-                            "name": _current_svc_label or vmk_iface,
-                            "interface": vmk_iface,
-                            "ip": vmk_ip,
-                            "type": "VMkernel",
-                            "switch": _current_switch
-                        }
-                        discovered_services.add(vmk_iface)
-
-                st.session_state["discovered_switches"] = clean_switches
-                st.session_state["discovered_service_map"] = _service_map
-                st.session_state["discovered_service_candidates"] = sorted(discovered_services, key=_natsort_key)
-
-                # Filter out empty/invalid service records before auto-populating
-                records = [
-                    r for r in records
-                    if (r.get("type") == "Uplink" and r.get("interface"))
-                    or (r.get("type") != "Uplink" and (r.get("purpose") or r.get("interface")))
-                ]
-
-                # Auto-populate discovered services into topology_records (avoiding duplicates)
-                for s_label, s_entry in _service_map.items():
-                    if s_label.lower().startswith(vmk_pfx.lower()) and s_entry.get("name") != s_label:
-                        # Skip duplicate vmk key when already represented by its parent service label
-                        continue
-                    sw_target = s_entry.get("switch") or _current_switch
-                    s_iface = s_entry.get("interface", "")
-                    s_type = s_entry.get("type", "Port Group")
-                    s_ip = s_entry.get("ip", "")
-                    already_exists = False
-                    for existing_r in records:
-                        if existing_r.get("switch") == sw_target and existing_r.get("type") != "Uplink":
-                            if (s_label and existing_r.get("purpose", "").lower() == s_label.lower()) or (s_iface and existing_r.get("interface", "").lower() == s_iface.lower()):
-                                # Enrich existing record if missing purpose, interface, or IP
-                                if not existing_r.get("purpose") and s_label:
-                                    existing_r["purpose"] = s_label
-                                if not existing_r.get("interface") and s_iface:
-                                    existing_r["interface"] = s_iface
-                                if not existing_r.get("ip") and s_ip:
-                                    existing_r["ip"] = s_ip
-                                if s_type == "VMkernel":
-                                    existing_r["type"] = "VMkernel"
-                                already_exists = True
-                                break
-                    if not already_exists:
-                        records.append({
-                            "switch": sw_target,
-                            "interface": s_iface,
-                            "type": s_type,
-                            "ip": s_ip,
-                            "purpose": s_label,
-                            "role": "Management" if "mgmt" in s_label.lower() or "management" in s_label.lower() else "None",
-                            "speed": ""
-                        })
-
-                st.session_state["topology_records"] = records
-                st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
-                st.session_state["hypervisor_editor_version"] = st.session_state.get("hypervisor_editor_version", 0) + 1
-                st.toast(f"Successfully analyzed {total_imgs} screenshots and merged {len(deduped)} unique records!", icon="🚀")
         except Exception as e:
             import traceback
             logger.error("Pipeline execution failed: %s", str(e))
             st.error(f"Pipeline execution failed: {str(e)}")
             st.code(traceback.format_exc(), language="text")
 
-    # ── Synchronous State Commitment (v4.4.21) ──────────────────────────────
-    # Populate switch_deck and chips_unassigned BEFORE the post-analyze
-    # st.rerun() so that Section 2 renders with real data on the next pass.
-    if start_analyze:
-        _sc_rules = SSM.get_naming_rules(force_reload_naming_rules())
-        _sc_plat = st.session_state.get("naming_target_platform", "VMware ESXi")
-        _sc_combined = st.session_state.get("latest_ocr_raw_text", "")
-        _sc_deduped = st.session_state.get("hypervisor_parsed_descriptions") or deduped if 'deduped' in dir() else []
-
-        # Inline container-header discovery (avoid forward-reference to nested defs below)
-        _builtin_container_headers = ["Switch:", "Bridge:", "Distributed Switch:"]
-        _sv_presets = _sc_rules.get("topology_parsing_presets") or {}
-        _sv_plat_data = _sv_presets.get(_sc_plat, {})
-        if not isinstance(_sv_plat_data, dict):
-            for _k, _v in _sv_presets.items():
-                if isinstance(_k, str) and isinstance(_v, dict) and _k.strip().lower() == _sc_plat.strip().lower():
-                    _sv_plat_data = _v
-                    break
-        _sv_headers = _builtin_container_headers
-        if isinstance(_sv_plat_data, dict):
-            _sp_cfg = _sv_plat_data.get("spatial_anchors_and_redaction", {})
-            if isinstance(_sp_cfg, dict):
-                _anchors = _sp_cfg.get("anchors", [])
-                if isinstance(_anchors, list):
-                    _h: List[str] = []
-                    for _a in _anchors:
-                        if isinstance(_a, dict) and _a.get("role") == "container_header":
-                            _pats = _a.get("patterns", [])
-                            if isinstance(_pats, list):
-                                _h.extend(p for p in _pats if p)
-                    if _h:
-                        _sv_headers = _h
-
-        _detected_switches = set()
-        for _r in _sc_deduped:
-            _p = _r.get("parent")
-            if _p and str(_p).strip().lower() not in ("", "none", "null", "general"):
-                _detected_switches.add(_normalize_switch_name(str(_p).strip()))
-
-        # Scan OCR text for container headers (with pipe segment splitting)
-        _seen_cn: set = set()
-        for _line in _sc_combined.splitlines():
-            if not _line.strip():
-                continue
-            _segments = _line.split("|") if "|" in _line else [_line]
-            for _seg in _segments:
-                _s_clean = _seg.strip()
-                if not _s_clean:
-                    continue
-                _s_clean = re.sub(r"^[\s>›»▶v⌄]+\s*", "", _s_clean)
-                _low = _s_clean.lower()
-                if not any(_h.lower() in _low for _h in _sv_headers):
-                    continue
-                _m = SW_HEADER_RE.search(
-                    _s_clean,
-                )
-                if _m:
-                    _raw_name = _m.group(1).strip()
-                    _raw_name = ACTION_SPLIT_RE.split(_raw_name)[0].strip()
-                    _cn = _normalize_switch_name(_raw_name)
-                    if _cn and _cn not in _seen_cn:
-                        _seen_cn.add(_cn)
-                        _detected_switches.add(_cn)
-
-        _new_deck = {}
-        for _s in sorted(_detected_switches, key=_natsort_key):
-            _new_deck[_s] = {"name": _s, "port_groups": [], "uplinks": []}
-        st.session_state["switch_deck"] = _new_deck
-
-        _plat_noise_exact, _plat_noise_nospace = _get_platform_noise_set(naming_rules, active_plat_display)
-
-        def _is_valid_entity_token(_text: str) -> bool:
-            _t = str(_text).strip()
-            if not _t or len(_t) <= 1:
-                return False
-            _low = _t.lower()
-            if "|" in _t or _low.startswith("--- screenshot"):
-                return False
-            if _low in ("false", "true", "null", "none", "is_uncertain"):
-                return False
-            if _low in _plat_noise_exact or re.sub(r"[\s\.]+", "", _low) in _plat_noise_nospace:
-                return False
-            if re.match(r"^virtual\s*machines\s*\(\d+\)", _low):
-                return False
-            if re.match(r"^vmkernel\s*ports\s*\(\d+\)", _low):
-                return False
-            if re.match(r"^vlan\s*id\s*:\s*(?:--|\d+)", _low):
-                return False
-            return True
-
-        _raw_chips = []
-        _seen_texts = set()
-        for _r2 in _sc_deduped:
-            if not isinstance(_r2, dict):
-                continue
-            _iface = str(_r2.get("interface", "")).strip()
-            if _iface and _is_valid_entity_token(_iface) and _iface.lower() not in _seen_texts:
-                _seen_texts.add(_iface.lower())
-                _raw_chips.append({"id": _iface, "text": _iface, "category": "interface", "speed": None})
-
-            _ip_val = str(_r2.get("ip") or _r2.get("ip_address") or "").strip()
-            if _ip_val and re.match(r"^\d{1,3}(?:\.\d{1,3}){3}$", _ip_val) and _ip_val.lower() not in _seen_texts:
-                _seen_texts.add(_ip_val.lower())
-                _raw_chips.append({"id": _ip_val, "text": _ip_val, "category": "interface", "speed": None})
-
-            _purpose = str(_r2.get("purpose", "")).strip()
-            if _purpose and _is_valid_entity_token(_purpose) and _purpose.lower() not in _seen_texts:
-                _seen_texts.add(_purpose.lower())
-                _raw_chips.append({"id": _purpose, "text": _purpose, "category": "purpose", "speed": None})
-
-            _speed = str(_r2.get("speed", "")).strip()
-            if _speed and re.search(r"\b\d+\s*(?:Gbit/s|Mbit/s|Full)\b", _speed, re.I) and _speed.lower() not in _seen_texts:
-                _seen_texts.add(_speed.lower())
-                _raw_chips.append({"id": _speed, "text": _speed, "category": "speed", "speed": None})
-
-        st.session_state["chips_unassigned"] = _raw_chips
-        st.session_state["_pool_initialized_v4"] = True
-
-    # st.rerun() is placed OUTSIDE the try/except so that Streamlit's internal
-    # RerunException (raised by st.rerun) cannot be caught by the bare
-    # except Exception and silently swallowed, which would leave the page
-    # rendering Section 3 before the session state has been persisted.
-    if start_analyze and "hypervisor_parsed_descriptions" in st.session_state:
+    if start_analyze and st.session_state.get("topology_records"):
         st.rerun()
 
     # Load standards rules for dynamic role options (available to both cards and editor)
@@ -2393,25 +1769,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
 
     if "editor_ver" not in st.session_state:
         st.session_state["editor_ver"] = 0
-
-    # Live fallback: re-harvest from existing OCR text even without re-running Analyze
-    _existing_raw = st.session_state.get("latest_ocr_raw_text", "")
-    if _existing_raw and _existing_raw.strip():
-        try:
-            _live_svcs, _live_map, _live_ips = _harvest_ocr_topology_candidates(
-                _existing_raw, naming_rules, active_plat_display
-            )
-            _existing_svcs = set(st.session_state.get("discovered_service_candidates") or [])
-            _existing_map = dict(st.session_state.get("discovered_service_map") or {})
-            _existing_ips = set(st.session_state.get("discovered_ip_candidates") or [])
-            _merged_svcs = sorted(set(_existing_svcs) | set(_live_svcs), key=_natsort_key)
-            _merged_map = {**_existing_map, **_live_map}
-            _merged_ips = sorted(set(_existing_ips) | set(_live_ips), key=_natsort_key)
-            st.session_state["discovered_service_candidates"] = _merged_svcs
-            st.session_state["discovered_service_map"] = _merged_map
-            st.session_state["discovered_ip_candidates"] = _merged_ips
-        except Exception:
-            pass
 
     records = st.session_state.get("topology_records", [])
     sw_options = st.session_state.get("discovered_switches", [])
@@ -2628,13 +1985,10 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     with btn_col2:
                         with st.popover("➕ Service", use_container_width=True):
                             st.markdown("**Add Port Group / VMkernel**")
-                            _disc_svc_map = st.session_state.get("discovered_service_map") or {}
+                            _disc_svc_map = {r["purpose"] or r["interface"]: r for r in st.session_state.get("topology_records", []) if r.get("purpose") or r.get("interface")}
                             if not isinstance(_disc_svc_map, dict):
                                 _disc_svc_map = {}
-                            _ip_candidates = list(st.session_state.get("discovered_ip_candidates") or [])
-                            for _e in _disc_svc_map.values():
-                                if isinstance(_e, dict) and _e.get("ip") and _e.get("ip") not in _ip_candidates:
-                                    _ip_candidates.append(_e.get("ip"))
+                            _ip_candidates = [r["ip"] for r in st.session_state.get("topology_records", []) if r.get("ip")]
 
                             # Format dropdown labels so user sees e.g. "Management Network (vmk0 - 10.27.177.246)" or "VM Network"
                             svc_choice_options = ["➕ Custom / Manual Entry"] + [
@@ -2719,13 +2073,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                      })
                                      # Sync corrected name back to session state so it replaces the old spelling
                                      if selected_svc_choice != "➕ Custom / Manual Entry" and final_svc_name != selected_svc_choice:
-                                         _existing_map = st.session_state.get("discovered_service_map") or {}
-                                         if not isinstance(_existing_map, dict):
-                                             _existing_map = {}
-                                         _existing_map[final_svc_name] = {**_autofill, "name": final_svc_name}
-                                         if selected_svc_choice in _existing_map:
-                                             _existing_map.pop(selected_svc_choice, None)
-                                         st.session_state["discovered_service_map"] = _existing_map
                                          _existing_svcs = list(st.session_state.get("discovered_service_candidates") or [])
                                          if selected_svc_choice in _existing_svcs:
                                              _existing_svcs.remove(selected_svc_choice)
