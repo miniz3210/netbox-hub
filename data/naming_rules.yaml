@@ -648,13 +648,32 @@
       "optional": false
     },
     "uplink_role": {
-      "label": "Uplink Role / Status",
-      "placeholder": "Active Uplink / Standby Uplink",
-      "default": "Active Uplink / Standby Uplink",
-      "optional": true,
+      "label": "Interface Uplink Role",
+      "type": "select",
+      "default": "Active Uplink",
+      "options": [
+        "Active Uplink",
+        "Standby Uplink",
+        "Primary",
+        "Backup",
+        "None"
+      ],
       "scope": "hypervisor",
       "empty_role_token": "None",
       "no_uplink_fallback": "No Uplink"
+    },
+    "teaming_role": {
+      "label": "Teaming State / Role",
+      "type": "select",
+      "default": "Active",
+      "options": [
+        "Active",
+        "Standby",
+        "Primary",
+        "Backup",
+        "None"
+      ],
+      "scope": "hypervisor"
     },
     "description": {
       "label": "Description",
@@ -948,7 +967,14 @@
       ],
       "teaming_rules": {
         "no_uplink_display": "No Uplink",
-        "empty_role_token": "None"
+        "empty_role_token": "None",
+        "uplink_to_teaming_mapping": {
+          "Active Uplink": "Active",
+          "Standby Uplink": "Standby",
+          "Primary": "Primary",
+          "Backup": "Backup",
+          "None": ""
+        }
       },
        "ui_noise_blacklist": [
          "summary", "monitor", "configure", "permissions",

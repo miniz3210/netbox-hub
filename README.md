@@ -1,28 +1,31 @@
 # NetBox Universal Library Hub
 
-[![Version](https://img.shields.io/badge/version-4.4.33-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.4.34-blue.svg)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)]()
 
 A Streamlit-based hub for managing NetBox IPAM, device naming conventions, and infrastructure data — with offline-first architecture and zero cloud leakage.
 
-## v4.4.33 — Standards-Driven Service Discovery, Teaming Synthesis & Version Bump
+## v4.4.34 — Pure Lego Modular Refactor: Standards-Driven Tokens, Popover Crash Fix & Version Bump
 
 ### Changes
-* Bumped version to **4.4.33** across `config/constants.py` and documentation.
+* Bumped version to **4.4.34** across `config/constants.py`, `data/naming_rules.yaml`, `README.md`, and `ARCHITECTURE_SOP.md`.
 
-### New Features
-* **Multi-Sheet Excel Parser (`core.ipam_excel_diff.ExcelIPAMParser`)**: High-performance `openpyxl` streaming parser with dynamic header discovery across all sheets. Supports arbitrary sheet counts and column-name variations (`ip`/`address`/`ipv4`, `subnet`/`cidr`/`prefix`, `vlan id`/`vid`/`vlan`, etc.). Fallback site = sheet name when column is absent.
-* **Standards-Driven Normalization**: Site names normalized via `get_site_code_rules(rules)["exact_mappings"]` with `slugify()` fallback. Roles normalized via `core.ipam_engine.normalize_role_name()` using `get_ipam_role_mappings(rules)`. VLAN descriptions resolved via `core.ipam_engine.resolve_vlan_description()`.
-* **In-Memory Audit Engine**: Queries existing DB state once, builds hash sets for $O(1)$ lookups. Classifies records into `matched`, `pending_add`, `conflicts`, and `unmapped_sites`. Returns clean Pandas DataFrames and metric summaries.
-* **UI Ingest & Audit Drawer**: Unified toolbar in the IPAM tab with file upload (`.xlsx`, `.xls`, `.csv`, `.json`), metric cards, tabbed audit view (Pending Add / Conflicts / Matched), export download buttons, and site selector for live editing.
+### Bug Fixes
+* **Popover crash fix**: Added defensive dictionary resolution for `discovered_service_map` — prevents `AttributeError: 'NoneType' object has no attribute 'get'` when the session state map is missing or not a dict.
+* **Ghost uplinks eliminated**: Removed dummy empty-row initialization in the topology DataGrid; empty records now render a clean empty DataFrame instead of a phantom "Uplink" row. Visual card uplink rendering already skips empty/junk interfaces.
+* **Switch name normalization**: Fixed letter 'o' → digit '0' OCR substitution (e.g. `vSwitcho` → `vSwitch0`, `vSwitcho1` → `vSwitch01`) while preserving leading zeros.
+* **Pure Lego teaming synthesis**: Replaced Python `re.sub(r"\s*Uplink$", "", role_raw)` regex stripping with pure Standards-driven dictionary mapping via `teaming_rules.uplink_to_teaming_mapping`.
+* **Multi-line service & IP discovery**: Fixed single-line regex matching failure by switching to line-by-line iteration with look-ahead to the next line for service delimiters. Services and VMkernel IPs are now accurately harvested and linked to their parent switch container.
 
-### Improvements
-* Version bumped to **4.3** across `config/constants.py`, `data/naming_rules.yaml` (schema metadata), and CHANGELOG.
-* Removed legacy standalone script `scripts/diff_ipam_sqlite.py` — replaced by in-memory core engine.
-* Removed legacy test `tests/test_ipam_diff.py` — replaced by `tests/test_ipam_excel_diff.py`.
+### New Configuration
+* **`<uplink_role>` variable**: Added under `pattern_variables` with select options (Active Uplink, Standby Uplink, Primary, Backup, None), `empty_role_token`, and `no_uplink_fallback`.
+* **`<teaming_role>` variable**: Added under `pattern_variables` with select options (Active, Standby, Primary, Backup, None).
+* **VMware ESXi platform config**: Extended `teaming_rules` with `uplink_to_teaming_mapping` dictionary.
 
 ---
+
+## v4.4.33 — Standards-Driven Service Discovery, Teaming Synthesis & Version Bump
 
 ## Getting Started
 

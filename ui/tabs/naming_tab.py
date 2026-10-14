@@ -65,12 +65,15 @@ def _normalize_switch_name(name: str) -> str:
     """Normalize a switch/container name for consistent deck-key usage.
 
     Strips whitespace and removes any 'manual:' prefix that may have been left
-    from prior manual adds.  Does NOT alter embedded digits — 'vSwitch01' and
-    'vSwitch02' are preserved verbatim per SOP 4.3.
+    from prior manual adds.  Normalizes OCR substitution of letter 'o'/'O' for
+    digit '0' (e.g. vSwitcho -> vSwitch0, vSwitcho1 -> vSwitch01) while
+    preserving leading zeros — 'vSwitch01' and 'vSwitch02' remain distinct.
     """
     n = str(name).strip()
     if n.startswith("manual:"):
         n = n[len("manual:"):]
+    # Normalize OCR substitution of letter 'o'/'O' for digit '0' (e.g. vSwitcho -> vSwitch0, vSwitcho1 -> vSwitch01)
+    n = re.sub(r"(?i)(switch)o(\d*)", r"\g<1>0\2", n)
     return n
 
 
@@ -926,6 +929,7 @@ def _build_dynamic_teaming_clause(uplinks: list) -> str:
     pattern_variables.uplink_role).  If uplinks is empty (or all are "No physical network
     adapters" state), returns the standards-driven no_uplink_text instead of an empty string.
     Speed-only or junk tokens are silently dropped so they never enter the clause.
+    Uses pure Standards-driven dictionary mapping — zero Python regex stripping.
     """
     if not uplinks:
         _rules = SSM.get_naming_rules() or {}
@@ -948,32 +952,31 @@ def _build_dynamic_teaming_clause(uplinks: list) -> str:
             return True
         return bool(re.search(r"\b\d+\s*(?:Gbit/s|Mbit/s|Kbit/s|Full|Half)\b", t, re.I))
 
+    # Load teaming rules once at function scope
+    _rules = SSM.get_naming_rules() or {}
+    _tpp = _rules.get("topology_parsing_presets") or {}
+    _active = st.session_state.get("naming_target_platform", "VMware ESXi")
+    _plat_cfg = _tpp.get(_active, {}) if isinstance(_tpp.get(_active), dict) else {}
+    _teaming = _plat_cfg.get("teaming_rules") or {}
+    if not isinstance(_teaming, dict):
+        _teaming = {}
+    _mapping = _teaming.get("uplink_to_teaming_mapping") or {}
+    _empty_role_token = str(_teaming.get("empty_role_token")
+        or ((_rules.get("pattern_variables") or {}).get("uplink_role") or {}).get("empty_role_token")
+        or "None").strip().lower()
+
     parts = []
     for u in uplinks:
         iface = str(u.get("interface", "")).strip()
         if not iface or _is_junk_or_speed(iface):
             continue
         role_raw = str(u.get("role") or u.get("uplink_role") or "").strip()
-        _rules = SSM.get_naming_rules() or {}
-        _tpp = _rules.get("topology_parsing_presets") or {}
-        _active = st.session_state.get("naming_target_platform", "VMware ESXi")
-        _plat_cfg = _tpp.get(_active, {}) if isinstance(_tpp.get(_active), dict) else {}
-        _teaming = _plat_cfg.get("teaming_rules") or {}
-        if isinstance(_teaming, dict):
-            _ert = _teaming.get("empty_role_token")
-            if _ert and str(_ert).strip():
-                _empty_role_token = str(_ert).strip().lower()
-            else:
-                _empty_role_token = str((_rules.get("pattern_variables") or {}).get("uplink_role") or {}).get("empty_role_token") or "None"
-                _empty_role_token = str(_empty_role_token).strip().lower()
-        else:
-            _empty_role_token = str((_rules.get("pattern_variables") or {}).get("uplink_role") or {}).get("empty_role_token") or "None"
-            _empty_role_token = str(_empty_role_token).strip().lower()
-        role_label = re.sub(r"\s*Uplink$", "", role_raw, flags=re.IGNORECASE).strip()
-        if not role_label or role_label.lower() == _empty_role_token:
+        # Pure Standards-driven dictionary mapping — no regex stripping
+        teaming_status = _mapping.get(role_raw, role_raw)
+        if role_raw.lower() == _empty_role_token or not teaming_status:
             parts.append(iface)
         else:
-            parts.append(f"{iface} {role_label}")
+            parts.append(f"{iface} {teaming_status}")
 
     return " / ".join(parts)
 
@@ -1875,102 +1878,77 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     _teaming_rules = {}
 
                 _service_map: Dict[str, dict] = {}
-                _delim_pat = '|'.join(re.escape(d) for d in _service_delimiters)
-                _svc_pattern = rf"(?m)^([^\n\r|><]+?)\s*$\n\s*(?:{_delim_pat})"
                 _vmk_ip_re = rf"\b({re.escape(vmk_pfx)}\d+)\s*:\s*((?:\d{{1,3}}\.){{3}}\d{{1,3}})\b"
                 _noise_clean_re = re.compile(r"^[\s>›»▶v⌄•·▪▫○●✔✖!–—-]+\s*")
 
-                _current_service: Optional[str] = None
-                _current_switch: Optional[str] = None
+                _current_switch = sorted_switches[0] if sorted_switches else (_dynamic_switch_pfx + "0")
+                _current_svc_label = None
                 _ocr_lines = combined_raw_text.splitlines()
-                for _li, _line in enumerate(_ocr_lines):
-                    _low = _line.lower()
-                    if any(_kw in _low for _kw in ("--- screenshot", "vmnic")) and re.search(rf"\b{re.escape(uplink_pfx)}\d+\b", _line):
-                        pass
-                    if re.search(rf"\b{re.escape(vmk_pfx)}\d+\b", _line) and re.search(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}", _line):
-                        _vmk_m = re.search(_vmk_ip_re, _line, re.IGNORECASE)
-                        if _vmk_m:
-                            _vmk_iface = _vmk_m.group(1).strip()
-                            _vmk_ip = _vmk_m.group(2).strip()
-                            if _current_service:
-                                _entry = _service_map.get(_current_service, {})
-                                if not _entry:
-                                    _entry = {"name": _current_service, "interface": _vmk_iface, "ip": _vmk_ip, "type": "VMkernel"}
-                                elif not _entry.get("interface"):
-                                    _entry["interface"] = _vmk_iface
-                                if not _entry.get("ip"):
-                                    _entry["ip"] = _vmk_ip
-                                _entry["type"] = "VMkernel"
-                                _service_map[_current_service] = _entry
-                                discovered_services.add(_current_service)
-                                discovered_services.add(_vmk_iface)
-                                discovered_services.add(_vmk_ip)
-                            elif _vmk_iface:
-                                _entry = {"name": _vmk_iface, "interface": _vmk_iface, "ip": _vmk_ip, "type": "VMkernel"}
-                                _service_map[_vmk_iface] = _entry
-                                discovered_services.add(_vmk_iface)
-                                discovered_services.add(_vmk_ip)
-                        continue
-                    if re.match(_svc_pattern, _line):
-                        _svc_name = _noise_clean_re.sub("", _line).strip()
-                        if _svc_name and len(_svc_name) > 1 and _svc_name.lower() not in UI_CHROME_WORDS:
-                            _current_service = _svc_name
-                            _service_map.setdefault(_svc_name, {"name": _svc_name, "interface": "", "ip": "", "type": "Port Group"})
-                            discovered_services.add(_svc_name)
-                            continue
-                    for _seg in _line.split("|") if "|" in _line else [_line]:
-                        _s = _seg.strip()
-                        if not _s:
-                            continue
-                        _s = re.sub(r"^[\s>›»▶v⌄]+\s*", "", _s)
-                        _sw_m = SW_HEADER_RE.search(_s)
-                        if _sw_m:
-                            _cn = _normalize_switch_name(ACTION_SPLIT_RE.split(_sw_m.group(1).strip())[0].strip())
-                            if _cn and len(_cn) > 1:
-                                _current_switch = _cn
+                for i, line in enumerate(_ocr_lines):
+                    # Track parent switch header
+                    for seg in (line.split("|") if "|" in line else [line]):
+                        s_clean = re.sub(r"^[\s>›»▶v⌄]+\s*", "", seg.strip())
+                        sw_m = SW_HEADER_RE.search(s_clean)
+                        if sw_m:
+                            raw_sw = ACTION_SPLIT_RE.split(sw_m.group(1).strip())[0].strip()
+                            norm_sw = _normalize_switch_name(raw_sw)
+                            if norm_sw and len(norm_sw) > 1 and norm_sw.lower() not in UI_CHROME_WORDS:
+                                _current_switch = norm_sw
                             break
+
+                    # Look-ahead: if next line starts with a service delimiter, this line is a Service Title
+                    if i + 1 < len(_ocr_lines):
+                        next_line = _ocr_lines[i + 1].strip()
+                        if any(next_line.startswith(d) for d in _service_delimiters):
+                            svc_name = _noise_clean_re.sub("", line).strip()
+                            if svc_name and len(svc_name) > 1 and svc_name.lower() not in UI_CHROME_WORDS:
+                                _current_svc_label = svc_name
+                                _service_map.setdefault(svc_name, {
+                                    "name": svc_name,
+                                    "interface": "",
+                                    "ip": "",
+                                    "type": "Port Group",
+                                    "switch": _current_switch
+                                })
+                                discovered_services.add(svc_name)
+                                continue
+
+                    # Detect VMkernel interface and IP: "vmkX : 10.x.x.x"
+                    vmk_m = re.search(rf"\b({re.escape(vmk_pfx)}\d+)\s*:\s*((?:\d{{1,3}}\.){{3}}\d{{1,3}})\b", line, re.IGNORECASE)
+                    if vmk_m:
+                        vmk_iface = vmk_m.group(1).strip()
+                        vmk_ip = vmk_m.group(2).strip()
+                        if _current_svc_label and _current_svc_label in _service_map:
+                            _service_map[_current_svc_label]["interface"] = vmk_iface
+                            _service_map[_current_svc_label]["ip"] = vmk_ip
+                            _service_map[_current_svc_label]["type"] = "VMkernel"
+                            _service_map[_current_svc_label]["switch"] = _current_switch
+                        else:
+                            _service_map[vmk_iface] = {
+                                "name": vmk_iface,
+                                "interface": vmk_iface,
+                                "ip": vmk_ip,
+                                "type": "VMkernel",
+                                "switch": _current_switch
+                            }
+                        discovered_services.add(vmk_iface)
 
                 st.session_state["discovered_service_map"] = _service_map
                 st.session_state["discovered_service_candidates"] = sorted(discovered_services, key=_natsort_key)
 
-                # Auto-populate discovered VMkernel services into topology_records under their detected switch
-                for _svc_label, _svc_entry in _service_map.items():
-                    if _svc_label in discovered_services and _svc_entry.get("type") == "VMkernel":
-                        _matched_vmk = str(_svc_entry.get("interface") or "").strip()
-                        _matched_ip = str(_svc_entry.get("ip") or "").strip()
-                        if not _matched_vmk:
-                            continue
-                        _best_sw: Optional[str] = None
-                        for _i2, _l2 in enumerate(_ocr_lines):
-                            if re.search(rf"\b{re.escape(vmk_pfx)}\d+\s*:", _l2, re.IGNORECASE):
-                                for _j in range(_i2 - 1, -1, -1):
-                                    _prev = _ocr_lines[_j]
-                                    for _sp in _prev.split("|") if "|" in _prev else [_prev]:
-                                        _ps = re.sub(r"^[\s>›»▶v⌄]+\s*", "", _sp.strip())
-                                        _pm = SW_HEADER_RE.search(_ps)
-                                        if _pm:
-                                            _pn = _normalize_switch_name(ACTION_SPLIT_RE.split(_pm.group(1).strip())[0].strip())
-                                            if _pn and len(_pn) > 1:
-                                                _best_sw = _pn
-                                                break
-                                    if _best_sw:
-                                        break
-                                break
-                        _assign_sw = _best_sw or (sorted_switches[0] if sorted_switches else None)
-                        if not _assign_sw:
-                            continue
-                        _key = (_assign_sw, _matched_vmk.lower())
-                        if _key not in seen_entity:
-                            seen_entity.add(_key)
-                            records.append({
-                                "switch": _assign_sw,
-                                "interface": _matched_vmk,
-                                "type": "VMkernel",
-                                "ip": _matched_ip,
-                                "purpose": _svc_label,
-                                "role": "Management" if "mgmt" in _svc_label.lower() else "None",
-                                "speed": ""
-                            })
+                # Auto-populate discovered services into topology_records
+                for s_label, s_entry in _service_map.items():
+                    sw_target = s_entry.get("switch") or _current_switch
+                    if not any(r.get("switch") == sw_target and (r.get("purpose") == s_label or r.get("interface") == s_entry.get("interface")) for r in records):
+                        records.append({
+                            "switch": sw_target,
+                            "interface": s_entry.get("interface", ""),
+                            "type": s_entry.get("type", "Port Group"),
+                            "ip": s_entry.get("ip", ""),
+                            "purpose": s_label,
+                            "role": "Management" if "mgmt" in s_label.lower() else "None",
+                            "speed": ""
+                        })
 
                 st.session_state["topology_records"] = records
                 st.session_state["hypervisor_editor_version"] = st.session_state.get("hypervisor_editor_version", 0) + 1
@@ -2284,7 +2262,9 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     with btn_col2:
                         with st.popover("➕ Service", use_container_width=True):
                             st.markdown("**Add Port Group / VMkernel**")
-                            _disc_svc_map = st.session_state.get("discovered_service_map", {})
+                            _disc_svc_map = st.session_state.get("discovered_service_map") or {}
+                            if not isinstance(_disc_svc_map, dict):
+                                _disc_svc_map = {}
                             _mapped_svc_labels = {str(e.get("name") or "").strip() for e in _disc_svc_map.values() if isinstance(e, dict)}
                             svc_choice_options = ["➕ Custom / Manual Entry"] + [c for c in service_candidates if not any((r.get("purpose") == c or r.get("interface") == c) and r.get("switch") == sw for r in records)]
                             selected_svc_choice = st.selectbox(
@@ -2292,7 +2272,18 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                 options=svc_choice_options,
                                 key=f"pop_svc_sel_{idx}_{sw}"
                             )
-                            _autofill = _disc_svc_map.get(selected_svc_choice) if selected_svc_choice != "➕ Custom / Manual Entry" else {}
+                            if selected_svc_choice == "➕ Custom / Manual Entry":
+                                _autofill = {}
+                                _auto_name = ""
+                                _auto_ip = ""
+                                _is_vm = False
+                            else:
+                                _autofill = _disc_svc_map.get(selected_svc_choice) or {}
+                                if not isinstance(_autofill, dict):
+                                    _autofill = {}
+                                _auto_name = str(_autofill.get("name") or selected_svc_choice).strip()
+                                _auto_ip = str(_autofill.get("ip") or "").strip()
+                                _is_vm = str(_autofill.get("type") or "").lower() == "vmkernel" or _auto_name.lower().startswith(_dynamic_vmk_pfx.lower())
                             if selected_svc_choice == "➕ Custom / Manual Entry":
                                 final_svc_name = st.text_input(
                                     "Service / Port Group Name",
@@ -2300,7 +2291,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                     key=f"pop_svc_custom_{idx}_{sw}"
                                 ).strip()
                             else:
-                                _auto_name = str(_autofill.get("name") or selected_svc_choice).strip()
                                 final_svc_name = st.text_input(
                                     "Service / Port Group Name",
                                     value=_auto_name,
@@ -2309,14 +2299,12 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                 ).strip()
                                 st.caption(f"Selected: `{final_svc_name}`")
 
-                            _is_vm = str(_autofill.get("type") or "").lower() == "vmkernel" or final_svc_name.lower().startswith(_dynamic_vmk_pfx.lower())
                             new_svc_type = st.selectbox(
                                 "Type",
                                 options=["Port Group", "VMkernel"],
                                 index=1 if _is_vm else 0,
                                 key=f"pop_svc_type_{idx}_{sw}"
                             )
-                            _auto_ip = str(_autofill.get("ip") or "")
                             new_svc_ip = st.text_input("IP Address (optional)", placeholder="e.g. 10.0.0.1/24", value=_auto_ip, key=f"pop_svc_ip_{idx}_{sw}").strip()
 
                             if st.button("Add to Switch", key=f"pop_svc_confirm_{idx}_{sw}", use_container_width=True):
@@ -2336,15 +2324,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     st.markdown("#### 🎛️ Topology Data Grid")
     st.caption("Edit switch assignments, interface roles, and IPs directly. Changes update NetBox descriptions instantly.")
 
-    df = pd.DataFrame(records if records else [{
-        "switch": sw_options[0] if sw_options else (_dynamic_switch_pfx + "0"),
-        "interface": "",
-        "type": "Uplink",
-        "ip": "",
-        "purpose": "",
-        "role": default_role,
-        "speed": ""
-    }])
+    df = pd.DataFrame(records if records else [], columns=["switch", "interface", "type", "ip", "purpose", "role", "speed"])
 
     column_config = {
         "switch": st.column_config.SelectboxColumn("Switch Container", options=sw_options if sw_options else [_dynamic_switch_pfx + "0"], required=False),
@@ -2387,7 +2367,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         _plat_key = st.session_state.get("naming_target_platform", "VMware ESXi")
         _active_hyp_presets = _hyp_presets_map.get(_plat_key, [])
 
-        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.4.33.\n"]
+        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.4.34.\n"]
         for _gparent in sorted(_groups.keys(), key=_natsort_key):
             _out_lines.append(f"=== {_gparent} ===")
             _sw_uplinks = [r for r in _groups[_gparent] if r.get("type") == "Uplink" and r.get("interface")]

@@ -2,7 +2,7 @@
 Application Constants and Versioning
 """
 
-APP_VERSION = "4.4.33"
+APP_VERSION = "4.4.34"
 APP_NAME = "NetBox Universal Library Hub"
 
 # GitHub Official Device-Type Library Source
