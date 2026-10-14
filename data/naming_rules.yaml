@@ -1049,6 +1049,12 @@
   "hypervisor_presets": {
     "VMware ESXi": [
       {
+        "code": "Switch_Teaming",
+        "label": "Switch Teaming Summary",
+        "pattern": "<v_switch> (<teaming>)",
+        "hidden": false
+      },
+      {
         "code": "Uplink",
         "label": "Physical Uplink: PCIeX/PortY",
         "pattern": "<vmnic> - <v_switch> <purpose> <uplink_role>",
@@ -1056,13 +1062,13 @@
       },
       {
         "code": "PortGroup",
-        "label": "Port Group: PG-",
-        "pattern": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
+        "label": "Port Group Interface",
+        "pattern": "<purpose> (<v_switch>)",
         "hidden": false
       },
       {
         "code": "VMkernel",
-        "label": "VMkernel: vmk",
+        "label": "VMkernel Interface",
         "pattern": "<purpose> (<v_switch>)",
         "hidden": false
       },

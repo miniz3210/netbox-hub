@@ -2760,7 +2760,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         _plat_key = st.session_state.get("naming_target_platform", "VMware ESXi")
         _active_hyp_presets = _hyp_presets_map.get(_plat_key, [])
 
-        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.4.39.\n"]
+        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.4.40.\n"]
         for _gparent in sorted(_groups.keys(), key=_natsort_key):
             _out_lines.append(f"=== {_gparent} ===")
             _sw_uplinks = [r for r in _groups[_gparent] if r.get("type") == "Uplink" and r.get("interface")]
@@ -2770,121 +2770,116 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             # Dynamic teaming clause
             teaming_str = _build_dynamic_teaming_clause(_sw_uplinks)
 
-            # Legacy active/standby lists for backward-compatible template tokens
-            _active_nics = [u.get("interface") for u in _sw_uplinks if "active" in str(u.get("role", "")).lower()]
-            _standby_nics = [u.get("interface") for u in _sw_uplinks if "standby" in str(u.get("role", "")).lower()]
+            # ── Switch Teaming Header (rendered ONCE per switch) ──────────────
+            _switch_teaming_tpl = None
+            for _ptpl in _active_hyp_presets:
+                if _ptpl.get("code") == "Switch_Teaming" and not _ptpl.get("hidden", False):
+                    _switch_teaming_tpl = _ptpl.get("pattern", "")
+                    break
+            if not _switch_teaming_tpl:
+                # Fallback: find template with <teaming> but no <purpose>
+                for _ptpl in _active_hyp_presets:
+                    _p = _ptpl.get("pattern", "")
+                    if "<teaming>" in _p and "<purpose>" not in _p and not _ptpl.get("hidden", False):
+                        _switch_teaming_tpl = _p
+                        break
+            if not _switch_teaming_tpl:
+                _switch_teaming_tpl = "<v_switch> (<teaming>)"
 
-            # ── Render Port Group descriptions via dynamic templates ──────────
-            _pg_templates = [p for p in _active_hyp_presets if p.get("code") in ("PortGroup", "PortGroup_VLAN", "PG_Header") and not p.get("hidden", False)]
-            if not _pg_templates:
-                # Fallback to generic patterns from naming_patterns
-                _pg_templates = []
-                for _pk in ("esxi_portgroup", "esxinet_portgroup", "esxi_vswitch"):
+            _sw_vals = {"v_switch": _gparent, "teaming": teaming_str}
+            _rendered_header = render_dynamic_pattern(_switch_teaming_tpl, _sw_vals, _pattern_vars)
+            _rendered_header = re.sub(r"\s{2,}", " ", _rendered_header).strip()
+            if _rendered_header:
+                _out_lines.append(_rendered_header)
+
+            # ── Physical Uplinks (rendered per physical adapter) ───────────────
+            _uplink_tpl = None
+            for _upt in _active_hyp_presets:
+                if _upt.get("code") == "Uplink" and not _upt.get("hidden", False):
+                    _uplink_tpl = _upt.get("pattern", "")
+                    break
+            if not _uplink_tpl:
+                for _pk in ("esxi_uplink", "esxinet_uplink"):
                     _pat = _naming_pats.get(_pk)
                     if _pat:
-                        _pg_templates.append({"pattern": _pat})
+                        _uplink_tpl = _pat
+                        break
+            if not _uplink_tpl:
+                _uplink_tpl = "<vmnic> - <v_switch> <purpose> <uplink_role>"
 
-            if _pg_templates and _sw_services:
-                for _svc in _sw_services:
-                    _svc_name = str(_svc.get("purpose", "")).strip() or str(_svc.get("interface", "")).strip()
-                    if not _svc_name:
-                        continue
-                    row_vals = {
-                        "v_switch": _gparent,
-                        "active_vmnics": ", ".join(_active_nics) if _active_nics else "",
-                        "standby_vmnics": ", ".join(_standby_nics) if _standby_nics else "",
-                        "teaming": teaming_str,
-                        "uplink_teaming": teaming_str,
-                        "pg_network": _svc_name,
-                        "port_group": _svc_name,
-                    }
-                    best_tpl = _select_best_template(row_vals, _pg_templates)
-                    rendered = render_dynamic_pattern(best_tpl, row_vals, _pattern_vars)
-                    rendered = re.sub(r"\s*/\s*Standby", "", rendered)
-                    rendered = re.sub(r"\s*/\s*Active", "", rendered)
-                    rendered = re.sub(r"Active\s*/\s*\)", "Active)", rendered)
-                    rendered = re.sub(r"\(\s*/\s*\)", "", rendered)
-                    rendered = re.sub(r"\(\s*\)", "", rendered)
-                    rendered = re.sub(r"\s{2,}", " ", rendered).strip()
-                    if rendered:
-                        _out_lines.append(rendered)
-            elif _sw_services:
-                # Plain fallback without templates
-                for _svc in _sw_services:
-                    _svc_name = str(_svc.get("purpose", "")).strip() or str(_svc.get("interface", "")).strip()
-                    if not _svc_name:
-                        continue
-                    _line = _gparent
-                    if teaming_str:
-                        _line += f" ({teaming_str})"
-                    _line += f" - {_svc_name}"
-                    _out_lines.append(_line)
+            _valid_uplinks = [u for u in _sw_uplinks if str(u.get("interface", "")).strip() not in ("", "No Uplink")]
+            for _ug in _valid_uplinks:
+                _ui = str(_ug.get("interface", "")).strip()
+                if not _ui:
+                    continue
+                _upurpose = str(_ug.get("purpose", "")).strip()
+                _urole = str(_ug.get("role", "")).strip()
+                _uplink_row = {
+                    "vmnic": _ui,
+                    "v_switch": _gparent,
+                    "purpose": _upurpose,
+                    "uplink_role": _urole,
+                }
+                _upline = render_dynamic_pattern(_uplink_tpl, _uplink_row, _pattern_vars)
+                _upline = re.sub(r"\s{2,}", " ", _upline).strip()
+                if _upline:
+                    _out_lines.append(_upline)
 
-            # Uplink descriptions
-            if _sw_uplinks:
-                _uplink_tpls = [p for p in _active_hyp_presets if p.get("code") == "Uplink" and not p.get("hidden", False)]
-                if not _uplink_tpls:
-                    for _pk in ("esxi_uplink", "esxinet_uplink"):
-                        _pat = _naming_pats.get(_pk)
-                        if _pat:
-                            _uplink_tpls.append({"pattern": _pat})
+            # ── Port Groups & VMkernel (rendered per service, no teaming dup) ─
+            _seen_svc_names: Set[str] = set()
+            for _svc in _sw_services:
+                _svc_name = str(_svc.get("purpose", "")).strip() or str(_svc.get("interface", "")).strip()
+                if not _svc_name:
+                    continue
+                if _svc_name in _seen_svc_names:
+                    continue
+                _seen_svc_names.add(_svc_name)
+
+                _svc_type = str(_svc.get("type", "Port Group")).strip()
+                _svc_iface = str(_svc.get("interface", "")).strip()
+
+                if _svc_type == "VMkernel":
+                    _svc_tpl = None
+                    for _stpl in _active_hyp_presets:
+                        if _stpl.get("code") == "VMkernel" and not _stpl.get("hidden", False):
+                            _svc_tpl = _stpl.get("pattern", "")
                             break
-                for _ug in _sw_uplinks:
-                    _ui = str(_ug.get("interface", "")).strip()
-                    if not _ui:
-                        continue
-                    _upurpose = str(_ug.get("purpose", "")).strip()
-                    _urole = str(_ug.get("role", "")).strip()
-                    _std_rules_zone3 = SSM.get_naming_rules() or naming_rules
-                    _tpp_z3 = (_std_rules_zone3.get("topology_parsing_presets") or {}).get(st.session_state.get("naming_target_platform", "VMware ESXi"), {})
-                    _teaming_z3 = (_tpp_z3 or {}).get("teaming_rules") or {}
-                    if not isinstance(_teaming_z3, dict):
-                        _teaming_z3 = {}
-                    _empty_role_tok_z3 = str(_teaming_z3.get("empty_role_token")
-                        or ((_std_rules_zone3.get("pattern_variables") or {}).get("uplink_role") or {}).get("empty_role_token")
-                        or "None").strip().lower()
-                    if _uplink_tpls:
-                        _row = {
-                            "vmnic": _ui,
-                            "v_switch": _gparent,
-                            "purpose": _upurpose,
-                            "uplink_role": _urole,
-                        }
-                        _tpl = _select_best_template(_row, _uplink_tpls)
-                        _line = render_dynamic_pattern(_tpl, _row, _pattern_vars)
-                        _line = re.sub(r"\s+/Uplink\b", "", _line, flags=re.IGNORECASE)
-                        _line = re.sub(rf"(?i)\s+{re.escape(_empty_role_tok_z3)}\b", "", _line)
-                        _line = re.sub(r"\s{2,}", " ", _line).strip()
-                        if _line:
-                            _out_lines.append(_line)
-                    else:
-                        _line = f"{_ui} - {_gparent}"
-                        if _upurpose:
-                            _line += f" {_upurpose}"
-                        if _urole:
-                            _tpp_z3 = (_std_rules_zone3.get("topology_parsing_presets") or {}).get(st.session_state.get("naming_target_platform", "VMware ESXi"), {})
-                            _teaming_z3 = (_tpp_z3 or {}).get("teaming_rules") or {}
-                            if not isinstance(_teaming_z3, dict):
-                                _teaming_z3 = {}
-                            _mapping_z3 = _teaming_z3.get("uplink_to_teaming_mapping") or {}
-                            _display_role = _mapping_z3.get(_urole, _urole)
-                            if _display_role and _display_role.lower() not in (_empty_role_tok_z3, ""):
-                                _line += f" {_display_role}"
-                        _out_lines.append(_line)
+                    if not _svc_tpl:
+                        for _pk in ("esxi_vmkernel", "esxinet_vmkernel"):
+                            _pat = _naming_pats.get(_pk)
+                            if _pat:
+                                _svc_tpl = _pat
+                                break
+                    if not _svc_tpl:
+                        _svc_tpl = "<purpose> (<v_switch>)"
+                else:
+                    _svc_tpl = None
+                    for _ptpl in _active_hyp_presets:
+                        if _ptpl.get("code") == "PortGroup" and not _ptpl.get("hidden", False):
+                            _svc_tpl = _ptpl.get("pattern", "")
+                            break
+                    if not _svc_tpl:
+                        for _pk in ("esxi_portgroup", "esxinet_portgroup"):
+                            _pat = _naming_pats.get(_pk)
+                            if _pat:
+                                _svc_tpl = _pat
+                                break
+                    if not _svc_tpl:
+                        _svc_tpl = "<purpose> (<v_switch>)"
 
-            # VMkernel descriptions
-            if _sw_vmks:
-                for _vk in _sw_vmks:
-                    _vk_iface = str(_vk.get("interface", "")).strip()
-                    _vk_purpose = str(_vk.get("purpose", "")).strip()
-                    _label = _vk_purpose or _vk_iface
-                    if _label:
-                        _out_lines.append(f"{_label} ({_gparent})")
+                _svc_vals = {
+                    "purpose": _svc_name,
+                    "port_group": _svc_name,
+                    "v_switch": _gparent,
+                    "interface": _svc_iface,
+                }
+                _rendered_svc = render_dynamic_pattern(_svc_tpl, _svc_vals, _pattern_vars)
+                _rendered_svc = re.sub(r"\s{2,}", " ", _rendered_svc).strip()
+                if _rendered_svc:
+                    _out_lines.append(_rendered_svc)
 
-            # If switch has no services and no physical uplinks, emit the switch header with teaming clause
-            if not _sw_services and not _sw_uplinks:
-                if teaming_str:
-                    _out_lines.append(f"{_gparent} ({teaming_str})")
+            # Fallback: if switch has no services and no physical uplinks, emit header only
+            # (already handled above via the Switch_Teaming block)
 
         _output_bulk_text = "\n".join(_out_lines).strip()
 

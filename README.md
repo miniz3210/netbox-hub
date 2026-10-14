@@ -1,12 +1,26 @@
 # NetBox Universal Library Hub
 
-[![Version](https://img.shields.io/badge/version-4.4.39-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.4.40-blue.svg)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)]()
 
 A Streamlit-based hub for managing NetBox IPAM, device naming conventions, and infrastructure data — with offline-first architecture and zero cloud leakage.
 
-## v4.4.39 — Standards-Driven Noise Filtering & Inline Text Editing
+## v4.4.40 — Standards-Driven Description Rendering (Eliminate Teaming Duplication & Zero Hardcode)
+
+### Changes
+* Bumped version to **4.4.40** across `config/constants.py`, `README.md`, and `ARCHITECTURE_SOP.md`.
+* **Switch Teaming template added**: New `Switch_Teaming` preset in `hypervisor_presets["VMware ESXi"]` with pattern `<v_switch> (<teaming>)` rendered ONCE per switch container.
+* **PortGroup / VMkernel templates simplified**: Changed from legacy `<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)` to `<purpose> (<v_switch>)` — eliminating teaming clause duplication across every service line.
+* **Uplink template unchanged**: `<vmnic> - <v_switch> <purpose> <uplink_role>` renders per physical adapter only.
+* **Zero hardcoded string formats**: All descriptions now rendered through `render_dynamic_pattern(template, row_vals, pattern_vars)` driven by `data/naming_rules.yaml` standards templates. Removed hardcoded `f"{_gparent} ({teaming_str})"` and `f"{_label} ({_gparent})"` lines.
+
+### Bug Fixes
+* **Teaming duplication eliminated**: Switch teaming summary now appears exactly once as a header; Port Groups and VMkernel interfaces render only their `<purpose> (<v_switch>)` without repeating the teaming clause.
+* **No uplink switches**: Switches with zero physical uplinks emit `<switch> (No Uplink)` exactly once via the Switch_Teaming template.
+
+### Bug Fixes
+* (Previous fixes from v4.4.39 remain)
 
 ### Changes
 * Bumped version to **4.4.39** across `config/constants.py`, `README.md`, and `ARCHITECTURE_SOP.md`.
