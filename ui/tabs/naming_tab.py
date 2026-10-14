@@ -1520,240 +1520,106 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             progress_bar = st.progress(0, text="Initializing topology analysis...")
             total_imgs = len(uploaded_imgs)
             combined_raw_lines = []
+            all_raw_tokens = []
+            cumulative_y = 0
 
             for idx, img in enumerate(uploaded_imgs):
                 step_label = f"Analyzing screenshot [{idx + 1}/{total_imgs}]: {getattr(img, 'name', f'Image #{idx+1}')}"
-                progress_bar.progress((idx) / total_imgs, text=step_label)
+                progress_bar.progress(idx / total_imgs, text=step_label)
 
-                extracted_txt = ""
-                try:
-                    raw_bytes = None
-                    if hasattr(img, "seek"):
-                        img.seek(0)
-                    raw_bytes = None
-                    if hasattr(img, "getvalue"):
-                        raw_bytes = img.getvalue()
-                    elif hasattr(img, "read"):
-                        raw_bytes = img.read()
-                        if hasattr(img, "seek"):
-                            img.seek(0)
-                    elif isinstance(img, (bytes, bytearray)):
-                        raw_bytes = bytes(img)
+                # Safe rewind before read
+                if hasattr(img, "seek"):
+                    img.seek(0)
+                raw_bytes = img.getvalue() if hasattr(img, "getvalue") else img.read()
+                if hasattr(img, "seek"):
+                    img.seek(0)
 
-                    if raw_bytes and len(raw_bytes) > 0:
-                        ocr_res = run_local_ocr_pipeline([raw_bytes])
-                    else:
-                        ocr_res = run_local_ocr_pipeline([img])
-                    extracted_txt = ocr_res.get("combined_text", "").strip()
-                except Exception as exc:
-                    import logging
-                    logging.getLogger(__name__).warning("OCR failed for image: %s", str(exc))
-
-                if not extracted_txt:
+                if not raw_bytes or len(raw_bytes) == 0:
                     continue
-                combined_raw_lines.append(f"--- Screenshot {idx+1}: {getattr(img, 'name', '')} ---\n{extracted_txt}")
 
-            progress_bar.progress(0.9, text="Sanitizing and invoking AI parser...")
+                ocr_res = run_local_ocr_pipeline([raw_bytes])
+                extracted_txt = ocr_res.get("combined_text", "").strip()
+
+                if extracted_txt:
+                    combined_raw_lines.append(f"--- Screenshot {idx+1}: {getattr(img, 'name', '')} ---\n{extracted_txt}")
+
+                toks = ocr_res.get("raw_tokens", [])
+                img_heights = ocr_res.get("image_heights", [])
+                img_h = img_heights[0] if img_heights else 0
+                for t in toks:
+                    t["_src"] = idx
+                    box = t.get("box")
+                    if box and len(box) >= 2 and cumulative_y > 0:
+                        t["box"] = [box[0], box[1] + cumulative_y, box[2], box[3]]
+                all_raw_tokens.extend(toks)
+                cumulative_y += img_h
+
+            progress_bar.progress(0.8, text="Sanitizing data locally and invoking AI parser...")
             combined_raw_text = "\n\n".join(combined_raw_lines).strip()
-            # Auto-correct OCR text before ingestion per Standards Auto-Correction Rules
-            if st.session_state.get("auto_correct", True):
-                try:
-                    from utils.formatters import apply_auto_corrections
-                    corrected_text = apply_auto_corrections(combined_raw_text, "ocr_cleaning")
-                    corrected_text = apply_auto_corrections(corrected_text, "vmware")
-                    combined_raw_text = corrected_text
-                except Exception:
-                    pass
             st.session_state["latest_ocr_raw_text"] = combined_raw_text
 
-            # ── Collect raw OCR tokens with cumulative Y-offset across screenshots ──
-            all_raw_tokens: List[Dict] = []
-            cumulative_y = 0
-            for idx, img in enumerate(uploaded_imgs):
-                try:
-                    raw_bytes = None
-                    if hasattr(img, "seek"):
-                        img.seek(0)
-                    if hasattr(img, "getvalue"):
-                        raw_bytes = img.getvalue()
-                    elif hasattr(img, "read"):
-                        raw_bytes = img.read()
-                        if hasattr(img, "seek"):
-                            img.seek(0)
-                    elif isinstance(img, (bytes, bytearray)):
-                        raw_bytes = bytes(img)
-                    if raw_bytes and len(raw_bytes) > 0:
-                        ocr_res = run_local_ocr_pipeline([raw_bytes])
-                    else:
-                        ocr_res = run_local_ocr_pipeline([img])
-                    toks = ocr_res.get("raw_tokens", [])
-                    img_heights = ocr_res.get("image_heights", [])
-                    img_h = img_heights[0] if img_heights else 0
-                    for t in toks:
-                        t["_src"] = idx
-                        box = t.get("box")
-                        if box and len(box) >= 2 and cumulative_y > 0:
-                            t["box"] = [box[0], box[1] + cumulative_y, box[2], box[3]]
-                    all_raw_tokens.extend(toks)
-                    cumulative_y += img_h
-                except Exception:
-                    pass
+            true_ocr_content = re.sub(r"(?m)^---\s*Screenshot\s*\d+.*---\s*$", "", combined_raw_text).strip()
 
-            # ── Spatial redaction hook ──────────────────────────────────────
-            structured_text = None
-            spatial_redaction_map: Dict[str, str] = {}
-            try:
-                from core.spatial_redactor import process_spatial_topology
-                active_plat_name = st.session_state.get("naming_target_platform", "VMware ESXi")
-                _sp_cfg = (
-                    (naming_rules.get("topology_parsing_presets") or {})
-                    .get(active_plat_name, {})
-                    .get("spatial_anchors_and_redaction")
-                    if isinstance(naming_rules.get("topology_parsing_presets"), dict)
-                    else {}
-                )
-                if not isinstance(_sp_cfg, dict):
-                    _sp_cfg = {}
-                if _sp_cfg.get("enabled", False) and all_raw_tokens:
-                    structured_text, spatial_redaction_map = process_spatial_topology(
-                        all_raw_tokens, _sp_cfg
-                    )
-                    st.session_state["active_redaction_map"] = spatial_redaction_map
-                    logger.info(
-                        "Spatial grouping applied. Redacted %d sensitive tokens locally.",
-                        len(spatial_redaction_map),
-                    )
-            except Exception as exc:
-                import logging as _log
-                _log.getLogger(__name__).warning(
-                    "Spatial redaction hook failed, falling back to flat text: %s", exc
-                )
-                structured_text = None
-                spatial_redaction_map = {}
-
-            try:
-                from utils.formatters import apply_auto_corrections
-                if structured_text:
-                    cleaned_ocr_text = structured_text
-                else:
-                    cleaned_ocr_text = apply_auto_corrections(combined_raw_text, "ocr_cleaning")
-                    if not cleaned_ocr_text or cleaned_ocr_text == (structured_text or combined_raw_text):
-                        cleaned_ocr_text = apply_auto_corrections(combined_raw_text, "vmware")
-            except Exception:
-                cleaned_ocr_text = combined_raw_text
-
-            # Payload validation: prevent empty/sub-threshold payloads from reaching the LLM.
-            if len(cleaned_ocr_text.strip()) < 50:
-                logger.warning(
-                    "Payload too short (%d chars). Falling back to raw OCR text.",
-                    len(cleaned_ocr_text.strip()),
-                )
-                cleaned_ocr_text = combined_raw_text
-
-            if not cleaned_ocr_text or not cleaned_ocr_text.strip():
-                cleaned_ocr_text = combined_raw_text
-
-            sanitized_combined, session_id = vault.sanitize(cleaned_ocr_text)
-            st.session_state["latest_vault_session"] = session_id
-
-            system_prompt = """You are an expert VMware and infrastructure network data modeling specialist.
-Analyze the provided sanitized OCR text from hypervisor topologies (Standard Switches vSS and Distributed Switches vDS).
-
-Extract all observed network entities into a flat JSON array of objects using strictly lowercase keys:
-[
-  {
-    "switch": "<Root Virtual Switch Name (e.g. vSwitch0, dvSwitch0, iDMZ-vdSwitch02). Strip any child uplink group suffix like -DvUplinks-xx>",
-    "interface": "<Interface name if applicable: physical adapter (e.g. vmnic0) or VMkernel (e.g. vmk0). Empty string for pure VM Port Groups>",
-    "type": "<One of: 'Uplink', 'VMkernel', 'Port Group'>",
-    "ip": "<IP token placeholder if present (e.g. {{IP_1}}), otherwise empty string>",
-    "purpose": "<Exact name of the Port Group or Service (e.g. Management Network, VM Network, iSCSI, OT Routable, vMotion Network). Empty string for pure physical uplinks>",
-    "role": "<For Uplinks: 'Active Uplink', 'Standby Uplink', or 'None'. For VMkernel: 'Management' if management/vmk0 else 'None'. For Port Group: 'VM Traffic' or 'None'>",
-    "speed": "<Link speed if visible, e.g. 10000 Full, otherwise empty string>"
-  }
-]
-
-CRITICAL EXTRACTION RULES:
-1. CONTAINER NORMALIZATION: In Distributed Switches (vDS), containers named like dvSwitch0-DvUplinks-47 or iDMZ-vdSwitch02-DVUplinks-95 are child uplink groups. Normalize their switch to the root Distributed Switch name (e.g. dvSwitch0, iDMZ-vdSwitch02). Never output an uplink group as a separate switch.
-2. NO PHYSICAL ADAPTERS: If a virtual switch explicitly states 'No physical network adapters' or has 0 physical uplinks, create an entry with interface: 'No Uplink', type: 'Uplink', role: 'None'.
-3. OCR TYPO RESILIENCE:
-   - Recognize that 'ymk0' or 'mk2' are VMkernel interfaces ('vmk0', 'vmk2').
-   - Recognize that 'ymnic0' or 'ymnk3' are physical adapters ('vmnic0', 'vmnic3').
-   - Ignore UI action noise such as 'MANAGE PHYSICAL ADAPTERS', 'ADD NETWORKING', 'EDIT', 'REFRESH'.
-4. STRICT JSON OUTPUT: Return ONLY a valid JSON array of objects. No markdown explanations or fences."""
-
-            user_prompt = f"Parse this consolidated sanitized topology text:\n\n{sanitized_combined}"
-            response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt, max_tokens=8192)
-            progress_bar.progress(1.0, text="✅ Parsing and enriching results...")
-
-            raw_items = _safe_parse_json_array(response)
-            clean_records = []
-            for item in raw_items:
-                if isinstance(item, dict) and not any(k in item for k in ("finish_reason", "index", "message", "role")):
-                    clean_records.append({str(k).strip().lower(): str(v).strip() if v is not None else "" for k, v in item.items()})
-
-            if session_id:
-                try:
-                    clean_records = [
-                        {k: vault.restore(str(v), session_id=session_id) for k, v in item.items()}
-                        for item in clean_records
-                    ]
-                except Exception as e:
-                    logger.warning("Vault de-tokenization failed: %s — keeping raw records.", e)
-
-            if spatial_redaction_map:
-                try:
-                    clean_records = [
-                        {
-                            k: spatial_redaction_map.get(str(v), str(v))
-                            for k, v in item.items()
-                        }
-                        for item in clean_records
-                    ]
-                except Exception as e:
-                    logger.warning("Spatial redaction map apply failed: %s — keeping records as-is.", e)
-
-            for r in clean_records:
-                if r.get("switch"):
-                    r["switch"] = _normalize_switch_name(r["switch"])
-
-            discovered_switches = sorted(
-                set(r["switch"] for r in clean_records if r.get("switch")),
-                key=_natsort_key
-            )
-            if not discovered_switches:
-                discovered_switches = [_dynamic_switch_pfx + "0"]
-
-            discovered_services = set()
-            discovered_ips = set()
-            discovered_uplinks = set()
-            for r in clean_records:
-                iface = str(r.get("interface") or "").strip()
-                purpose = str(r.get("purpose") or "").strip()
-                ip_val = str(r.get("ip") or "").strip()
-                rtype = str(r.get("type") or "").strip()
-                if iface and not _is_junk_token(iface, active_junk_filter):
-                    discovered_services.add(iface)
-                if purpose and not _is_junk_token(purpose, active_junk_filter):
-                    discovered_services.add(purpose)
-                if ip_val and re.match(r"^\d{1,3}(?:\.\d{1,3}){3}$", ip_val):
-                    discovered_ips.add(ip_val)
-                if rtype == "Uplink" and iface:
-                    discovered_uplinks.add(iface)
-
-            st.session_state["topology_records"] = clean_records
-            st.session_state["discovered_switches"] = discovered_switches
-            st.session_state["discovered_service_candidates"] = sorted(discovered_services, key=_natsort_key)
-            st.session_state["discovered_ip_candidates"] = sorted(discovered_ips, key=_natsort_key)
-            st.session_state["discovered_uplink_candidates"] = sorted(discovered_uplinks, key=_natsort_key)
-
-            if not combined_raw_text:
-                st.warning("⚠️ No text detected by local OCR. Ensure screenshot contains legible topology labels.")
-            elif not clean_records:
-                st.warning("⚠️ OCR detected text but no structured records were parsed. Check screenshot quality.")
+            if not true_ocr_content:
+                st.warning("No text detected by local OCR. Ensure screenshot contains legible topology labels.")
             else:
-                st.toast(f"Successfully analyzed {total_imgs} screenshots and extracted {len(clean_records)} unique records!", icon="🚀")
+                # Apply local autocorrection
+                try:
+                    from utils.formatters import apply_auto_corrections
+                    cleaned_ocr = apply_auto_corrections(combined_raw_text, "ocr_cleaning")
+                    cleaned_ocr = apply_auto_corrections(cleaned_ocr or combined_raw_text, "vmware")
+                except Exception:
+                    cleaned_ocr = combined_raw_text
 
-            st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
+                # Local Vault sanitization
+                sanitized_combined, session_id = vault.sanitize(cleaned_ocr or combined_raw_text)
+                st.session_state["latest_vault_session"] = session_id
+
+                # 100% Standards-driven AI System Prompt from Section 3
+                target_platform = st.session_state.get("naming_target_platform", "VMware ESXi")
+                tpp = naming_rules.get("topology_parsing_presets") or {}
+                plat_cfg = tpp.get(target_platform, {}) if isinstance(tpp.get(target_platform), dict) else {}
+                system_prompt = plat_cfg.get("instructions", "").strip()
+
+                user_prompt = f"Parse this sanitized topology text:\n\n{sanitized_combined}"
+                response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt, max_tokens=8192)
+
+                raw_items = _safe_parse_json_array(response)
+
+                # Local Vault de-tokenization
+                if session_id:
+                    try:
+                        raw_items = [
+                            {k: vault.restore(str(v), session_id=session_id) for k, v in item.items()}
+                            for item in raw_items if isinstance(item, dict)
+                        ]
+                    except Exception as e:
+                        logger.warning("Vault restore failed: %s", e)
+
+                clean_records = []
+                for item in raw_items:
+                    if isinstance(item, dict) and not any(k in item for k in ("finish_reason", "index", "message", "role")):
+                        sw_clean = _normalize_switch_name(str(item.get("switch") or "").strip())
+                        if sw_clean:
+                            clean_records.append({
+                                "switch": sw_clean,
+                                "interface": str(item.get("interface") or "").strip(),
+                                "type": str(item.get("type") or "Port Group").strip(),
+                                "ip": str(item.get("ip") or "").strip(),
+                                "purpose": str(item.get("purpose") or "").strip(),
+                                "role": str(item.get("role") or "None").strip(),
+                                "speed": str(item.get("speed") or "").strip(),
+                            })
+
+                if clean_records:
+                    st.session_state["topology_records"] = clean_records
+                    discovered_sw = sorted(list({r["switch"] for r in clean_records if r.get("switch")}), key=_natsort_key)
+                    st.session_state["discovered_switches"] = discovered_sw
+                    st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
+                    st.toast(f"Successfully parsed {len(clean_records)} records across {len(discovered_sw)} switches!", icon="🚀")
+                    st.rerun()
+                else:
+                    st.warning("No structured topology records could be extracted. Check screenshot clarity.")
 
         except Exception as e:
             import traceback

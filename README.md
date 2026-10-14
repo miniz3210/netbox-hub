@@ -1,16 +1,23 @@
 # NetBox Universal Library Hub
 
-[![Version](https://img.shields.io/badge/version-4.4.44-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.4.45-blue.svg)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)]()
 
 A Streamlit-based hub for managing NetBox IPAM, device naming conventions, and infrastructure data — with offline-first architecture and zero cloud leakage.
 
-## v4.4.44 — 100% Standards-Driven Topology Parsing, Auto-Correction Pipeline & Container Suffix Stripping
+## v4.4.45 — AI System Prompt Moved to Standards (Section 3) & OCR Stream Rewind Fix
 
 ### Changes
-* Bumped version to **4.4.44** across `config/constants.py`, `README.md`, and `ARCHITECTURE_SOP.md`.
-* **Dynamic container suffix stripping**: `_normalize_switch_name` now reads `container_strip_suffixes` from `topology_parsing_presets[platform]` in naming_rules.yaml — no hardcoded `-dvuplinks` in Python.
+* Bumped version to **4.4.45** across `config/constants.py`, `README.md`, and `ARCHITECTURE_SOP.md`.
+* **AI system prompt now loaded from Standards (Section 3)**: The AI extraction prompt for topology parsing is dynamically loaded from `topology_parsing_presets[platform]["instructions"]` in `data/naming_rules.yaml`. Editing the prompt in the Standards Tab takes effect immediately without touching Python code.
+* **OCR stream rewind fix**: Added `img.seek(0)` before and after reading Streamlit UploadedFile/BytesIO streams to prevent stream exhaustion when processing multiple screenshots in batch mode.
+* **Clean record normalization**: Added explicit field normalization for `switch`, `interface`, `type`, `ip`, `purpose`, `role`, and `speed` with proper defaults and stripping.
+* **Improved toast messaging**: Shows record count and switch count for better user feedback.
+
+### Bug Fixes
+* **Stream exhaustion fixed**: OCR pipeline now correctly rewinds image streams between reads, preventing `ValueError: I/O operation on closed file` errors.
+* **Standards-driven prompt**: Removed hardcoded system prompt from `naming_tab.py`; now reads from YAML configuration.
 * **Auto-correction at OCR ingestion**: Raw OCR text is passed through `apply_auto_corrections(text, "ocr_cleaning")` and `apply_auto_corrections(text, "vmware")` before being stored in `latest_ocr_raw_text`.
 * **Standardized whitespace matching for service delimiters**: Look-ahead delimiter checks now normalize whitespace via `re.sub(r"\s+", " ", ...)` so OCR-fused tokens like "VLANID:" match cleanly after autocorrection normalizes them to "VLAN ID:".
 * **New autocorrect rules**: Added `ocr_cleaning` category with VMkernel/VMK normalization, VLAN ID OCR variation normalization, and physical adapter typo correction.
