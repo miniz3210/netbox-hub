@@ -1,15 +1,17 @@
 # NetBox Universal Library Hub
 
-[![Version](https://img.shields.io/badge/version-4.4.40-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.4.41-blue.svg)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)]()
 
 A Streamlit-based hub for managing NetBox IPAM, device naming conventions, and infrastructure data — with offline-first architecture and zero cloud leakage.
 
-## v4.4.40 — Standards-Driven Description Rendering (Eliminate Teaming Duplication & Zero Hardcode)
+## v4.4.41 — VMkernel IP Display on Overview Cards
 
 ### Changes
-* Bumped version to **4.4.40** across `config/constants.py`, `README.md`, and `ARCHITECTURE_SOP.md`.
+* Bumped version to **4.4.41** across `config/constants.py`, `README.md`, and `ARCHITECTURE_SOP.md`.
+* **VMkernel IP address display**: Overview cards now show the assigned IP next to each VMkernel interface (e.g. `◆ vmk0 • 10.27.177.246`).
+* **Service rename synchronization**: Inline `new_s_val` edits on cards now correctly update `records[s_idx]["purpose"]` while preserving `interface` and `ip` fields.
 * **Switch Teaming template added**: New `Switch_Teaming` preset in `hypervisor_presets["VMware ESXi"]` with pattern `<v_switch> (<teaming>)` rendered ONCE per switch container.
 * **PortGroup / VMkernel templates simplified**: Changed from legacy `<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)` to `<purpose> (<v_switch>)` — eliminating teaming clause duplication across every service line.
 * **Uplink template unchanged**: `<vmnic> - <v_switch> <purpose> <uplink_role>` renders per physical adapter only.

@@ -2502,22 +2502,27 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                             s_row = records[s_idx]
                             s_iface = str(s_row.get("interface", "")).strip()
                             s_purpose = str(s_row.get("purpose", "")).strip()
-                            if not s_purpose and not s_iface:
+                            _s_ip = str(s_row.get("ip") or "").strip()
+                            if not s_purpose and not s_iface and not _s_ip:
                                 continue
-                            # VMkernel: display "purpose (vmk)" pairing
-                            is_vmkernel = s_row.get("type") == "VMkernel" and s_purpose and s_iface
-
+                            # VMkernel: display "purpose (vmk)" pairing with IP
+                            is_vmkernel = s_row.get("type") == "VMkernel" and s_iface
                             edit_target_val = s_purpose if s_purpose else s_iface
                             sc_label, sc_del = st.columns([5, 1])
                             with sc_label:
+                                if is_vmkernel:
+                                    if _s_ip:
+                                        st.caption(f"◆ {s_iface} • {_s_ip}")
+                                    else:
+                                        st.caption(f"◆ {s_iface}")
+                                elif _s_ip:
+                                    st.caption(f"◆ IP: {_s_ip}")
                                 new_s_val = st.text_input(
                                     "Service Name",
                                     value=edit_target_val,
                                     key=f"card_svc_edit_{idx}_{s_idx}_{edit_target_val}",
                                     label_visibility="collapsed"
                                 ).strip()
-                                if is_vmkernel:
-                                    st.caption(f"🔹 {s_iface}")
                                 if new_s_val and new_s_val != edit_target_val:
                                     if s_purpose:
                                         records[s_idx]["purpose"] = new_s_val
