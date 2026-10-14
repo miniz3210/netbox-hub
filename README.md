@@ -1,15 +1,20 @@
 # NetBox Universal Library Hub
 
-[![Version](https://img.shields.io/badge/version-4.4.37-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.4.38-blue.svg)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)]()
 
 A Streamlit-based hub for managing NetBox IPAM, device naming conventions, and infrastructure data — with offline-first architecture and zero cloud leakage.
 
-## v4.4.37 — Critical State Overwrite Fix, Delimiter Regex & Auto-Fill in Naming Tab
+## v4.4.38 — OCR Sidebar Interleaving Fix & IP Address Dropdown in Naming Tab
 
 ### Changes
-* Bumped version to **4.4.37** across `config/constants.py`, `README.md`, and `ARCHITECTURE_SOP.md`.
+* Bumped version to **4.4.38** across `config/constants.py`, `README.md`, and `ARCHITECTURE_SOP.md`.
+
+### Bug Fixes
+* **OCR sidebar interleaving fix**: Replaced fragile next-line `i+1` delimiter check with a cleaned token-stream approach that strips all sidebar noise and right-column physical adapter segments from pipe-split lines before look-ahead. Every Port Group is now correctly detected even when sidebar menu lines (Certificate, Licensing, Host Profile, etc.) interleave between the service title and its `VLAN ID:` line.
+* **Harvesting runs on existing OCR text**: Added `_harvest_ocr_topology_candidates()` helper called both during analysis and live render pass, so existing `latest_ocr_raw_text` immediately populates `discovered_service_candidates`, `discovered_service_map`, and `discovered_ip_candidates` without requiring a re-analyze.
+* **"+ Service" popover IP dropdown**: Replaced manual-only IP text input with a selectable `st.selectbox` of all OCR-detected IP addresses, defaulting to the service's matched IP (e.g. `10.27.177.246` for Management Network/vmk0). Includes `"None (No IP)"` and `"➕ Custom / Manual IP"` options. Fixed bug where `_init_name` was incorrectly set to `"➕ Custom / Manual Entry"` instead of `""`.
 
 ### Bug Fixes
 * **Fatal data wipe fix**: Incremented `editor_ver` during analysis so `st.data_editor` key changes and no longer overwrites topology records with empty data on every analyze pass.
