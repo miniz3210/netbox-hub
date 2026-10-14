@@ -47,7 +47,8 @@ from core.db_manager import (get_all_site_names,
 )
 from core.shared_backup_state import SharedBackupState
 from utils.formatters import to_title_case_preserve_acronyms
-from ui.components import render_ai_chat
+from ui.components import render_ai_chat, render_backup_uploader
+from ui.tabs.naming_tab import _cached_fetch_toolbar_stats
 
 _last_site_lookup = {}  # tracks (site_name, scope_id, supernet) to avoid redundant DB queries
 
@@ -964,6 +965,33 @@ def render_ipam_tab(active_model: str):
     # TAB 1: Site Subnet Allocation
     # ==================================================================
     with tab_subnet:
+        # 0. Ingest NetBox Data Toolbar (Mirrors Naming Tab, points to shared SQLite DB)
+        total_recs, device_count, vm_count = _cached_fetch_toolbar_stats()
+        status_tag = f"🟢 ({device_count} Devices, {vm_count} VMs in DB)" if total_recs > 0 else "⚪ (Default Examples)"
+
+        with st.expander(f"📥 Ingest NetBox Data (Backup / CSV) {status_tag}", expanded=False):
+            from core.universal_schema_registry import UniversalSchemaRegistry
+            registry = UniversalSchemaRegistry.load_from_session_state()
+
+            if registry and registry.model_signatures:
+                model_count = len(registry.model_signatures)
+                st.success(f"✅ **Schema Registry Active:** {model_count} NetBox models loaded. CSV files will be automatically classified.", icon="🔍")
+            else:
+                st.warning(
+                    "⚠️ **Schema Registry Not Initialized:** CSV files will be stored in 'unclassified' tables. "
+                    "Upload a NetBox backup JSON below to enable automatic classification.",
+                    icon="⚠️"
+                )
+
+            if total_recs > 0:
+                meta_devices = get_sync_metadata("netbox_devices")
+                meta_vms = get_sync_metadata("netbox_virtual_machines")
+                sources = [m['source'] for m in [meta_devices, meta_vms] if m.get('source') != "None"]
+                display_source = sources[0] if sources else "Manual CSV Upload"
+                st.markdown(f"**DB Status:** `Source: {display_source}`")
+
+            render_backup_uploader("ipam")
+
         # 1. AI IPAM & Subnet Assistant
         render_ai_chat(
             history_key="ipam_chat_history",
