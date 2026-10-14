@@ -1385,6 +1385,35 @@ def restore_backup_to_session_state():
         
         logger.info(f"Successfully restored full backup inspector with {len(SharedBackupState.get_object_registry())} object types")
 
+        # Verify and restore structured database tables (sites, IPAM, inventory)
+        # These can become empty if clear_ipam_records() or clear_sites_records()
+        # is called after backup upload, but before a session restore.
+        try:
+            conn2 = sqlite3.connect(DB_PATH)
+            c = conn2.cursor()
+            c.execute("SELECT COUNT(*) FROM sites_records")
+            sites_count = c.fetchone()[0]
+            c.execute("SELECT COUNT(*) FROM ipam_records")
+            ipam_count = c.fetchone()[0]
+            c.execute("SELECT COUNT(*) FROM inventory_records")
+            inventory_count = c.fetchone()[0]
+            conn2.close()
+
+            if sites_count == 0 or ipam_count == 0 or inventory_count == 0:
+                logger.warning(
+                    f"Structured tables empty (sites={sites_count}, ipam={ipam_count}, inventory={inventory_count}) — re-ingesting from compressed backup"
+                )
+                buckets = _bucket_payload(backup_data)
+                parent_sites = _build_parent_site_map(buckets)
+                _ingest_sites(buckets)
+                _ingest_ipam(buckets)
+                _ingest_inventory(buckets)
+                _ingest_structured_interfaces(buckets, parent_sites, meta.get("uploaded_at", ""))
+                _ingest_structured_cables(buckets, parent_sites, meta.get("uploaded_at", ""))
+                logger.info("Structured table re-ingestion complete")
+        except Exception as e:
+            logger.warning(f"Structured table verification failed: {e}")
+
         # Verify structured tables match backup_records counts
         try:
             conn2 = sqlite3.connect(DB_PATH)
@@ -1399,7 +1428,7 @@ def restore_backup_to_session_state():
                         f"Mismatch: {table} has {structured_count} but backup_records has {backup_count} — re-ingesting"
                     )
                     # Trigger re-ingestion by calling the ingest functions
-                    buckets = _bucket_payload(json.loads(gzip.decompress(row[0]).decode('utf-8')))
+                    buckets = _bucket_payload(backup_data)
                     parent_sites = _build_parent_site_map(buckets)
                     _ingest_structured_interfaces(buckets, parent_sites, meta.get("uploaded_at", ""))
                     _ingest_structured_cables(buckets, parent_sites, meta.get("uploaded_at", ""))

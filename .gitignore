@@ -21,6 +21,7 @@ venv/
 # Extra prompt & diagnostic dump variants
 project-prompt*.md
 repomix-output*
+ARCHITECTURE_SOP*.md
 *.log
 *.jpg
 *.png

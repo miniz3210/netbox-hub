@@ -1,5 +1,5 @@
 # NetBox Hub — Living Architecture SOP & Handover Guide
-# Target Baseline: v4.3.11 | Platform: Oracle Cloud Ampere A1 (ARM64)
+# Target Baseline: v4.4.29 | Platform: Oracle Cloud Ampere A1 (ARM64)
 
 ---
 
@@ -8,7 +8,7 @@
 | Property              | Value                                                        |
 |-----------------------|--------------------------------------------------------------|
 | Application           | NetBox Universal Library Hub                                 |
-| Target Version        | v4.3.11                                                      |
+| Target Version        | v4.4.29                                                      |
 | Runtime               | Python 3.11+ / Streamlit                                     |
 | Cloud Infrastructure  | Oracle Cloud Ampere A1 (ARM64 / aarch64, Linux)              |
 | Container Registry    | `ghcr.io/miniz3210/netbox-hub`                               |
@@ -49,7 +49,7 @@
 - After the LLM returns structured JSON, the restoration map is applied locally to reinject real IPs/MACs/domains.
 - The original data never leaves the process memory boundary.
 
-### Topology & Spatial Invariants (v4.3.11)
+### Topology & Spatial Invariants (v4.4.29)
 
 #### Left/Right Parent Column Separation
 
@@ -166,7 +166,7 @@ When a cell in the DataGrid is edited, `_apply_cascade_to_rows()` in `ui/tabs/na
 Capture a baseline snapshot of the Standards Tab configuration into `data/naming_rules.yaml`. Verify all section definitions (2.5 UX rules, 4.0 Blueprint guide) are present and consistent.
 
 ### Step 2 — Version Assert Verification
-Confirm `config/constants.py::APP_VERSION == "4.3.11"`. Ensure no release notes or version bump scripts are pending.
+Confirm `config/constants.py::APP_VERSION == "4.4.29"`. Ensure no release notes or version bump scripts are pending.
 
 ### Step 3 — Safe Local Container Cache Cleanup
 ```bash
@@ -177,8 +177,8 @@ docker builder prune -a -f
 
 ### Step 4 — Docker Build & Tag Release
 ```bash
-docker build -t ghcr.io/miniz3210/netbox-hub:v4.3.11 -t ghcr.io/miniz3210/netbox-hub:latest .
-docker push ghcr.io/miniz3210/netbox-hub:v4.3.11
+docker build -t ghcr.io/miniz3210/netbox-hub:v4.4.29 -t ghcr.io/miniz3210/netbox-hub:latest .
+docker push ghcr.io/miniz3210/netbox-hub:v4.4.29
 docker push ghcr.io/miniz3210/netbox-hub:latest
 ```
 
@@ -186,7 +186,7 @@ docker push ghcr.io/miniz3210/netbox-hub:latest
 
 ## 6. Living Task Checklist
 
-### ✅ Completed Checklist (v4.3.11 Baseline)
+### ✅ Completed Checklist (v4.4.29 Baseline)
 
 - [x] Relative spatial clustering engine & resolution-agnostic geometry partitioning.
 - [x] Boundary card fix (eliminated collapsed header overlap, e.g. iSCSI Veeam).
@@ -199,16 +199,16 @@ docker push ghcr.io/miniz3210/netbox-hub:latest
 - [x] Notification migration: replaced disruptive alert banners with `st.toast`.
 - [x] Naming tab performance cache fix (`_interface_ref_examples_cached` at module top level).
 - [x] Cleaned up obsolete standalone scripts and consolidated tests (114+ passing tests).
-- [x] **Topology Spatial Reconciliation Axioms** — Left/right parent column separation, ghost interface filtering, switch name fidelity, icon stripping all verified and implemented in `spatial_redactor.py` v4.3.11.
+- [x] **Topology Spatial Reconciliation Axioms** — Left/right parent column separation, ghost interface filtering, switch name fidelity, icon stripping all verified and implemented in `spatial_redactor.py` v4.4.29.
 - [x] **DataGrid uncertainty tagging** — `is_uncertain` flag + `note` field propagation through the pipeline, verified in `tests/test_spatial_redactor.py` and naming tab integration.
 - [x] **Session-only in-memory cascade replacement** — `_apply_cascade_to_rows()` in `naming_tab.py` cascades cell corrections across all rows in `hypervisor_parsed_descriptions` without persisting to disk.
 
 ### ⬜ Pending Roadmap
 
-- [ ] Implement unit test coverage for `core/spatial_redactor.py` in `tests/test_spatial_redactor.py` (expand existing test suite to cover v4.3.11 invariants: ghost interface filtering, icon stripping, switch name fidelity, cascade replacement edge cases).
+- [ ] Implement unit test coverage for `core/spatial_redactor.py` in `tests/test_spatial_redactor.py` (expand existing test suite to cover v4.4.29 invariants: ghost interface filtering, icon stripping, switch name fidelity, cascade replacement edge cases).
 - [ ] Build Excel IPAM offline reconciliation script against `AW IPs & VLANs_Final (2).xlsx`.
-- [ ] Prune stale local git tags prior to v4.3.11 release.
-- [ ] Publish GHCR image release `v4.3.11` (`ghcr.io/miniz3210/netbox-hub:v4.3.11`).
+- [ ] Prune stale local git tags prior to v4.4.29 release.
+- [ ] Publish GHCR image release `v4.4.29` (`ghcr.io/miniz3210/netbox-hub:v4.4.29`).
 - [ ] Build platform expansion templates for Proxmox VE and Azure Portal.
 
 ---
@@ -256,3 +256,48 @@ python3 -m py_compile core/spatial_redactor.py
 # Safe Docker cache cleanup (NO volume prune)
 docker image prune -a -f && docker builder prune -a -f
 ```
+
+---
+
+## 9. Project Status Checklist: Completed (Done) vs Pending (Roadmap)
+
+### 9.1 Completed & Verified (Baseline v4.4.29)
+- [x] Hybrid Topology Editor Architecture:
+  * Completely replaced the unstable 60+ individual widget Chips Pool with a unified Hybrid Architecture (Visual Cards Overview + Authoritative native `st.data_editor` + Live NetBox Output).
+  * Eradicated Streamlit widget state race conditions, infinite rerun cascades, and 100% CPU lockups.
+- [x] Dynamic Teaming Synthesizer (Zero Hardcoding):
+  * Implemented adaptive teaming builder supporting single uplink (`vmnic1 Active`), dual-active load balancing (`vmnic2 Active / vmnic6 Active`), and active/standby pairs (`vmnic4 Active / vmnic5 Standby`).
+  * Eliminated trailing delimiter artifacts (e.g. dangling ` / Standby` or orphaned slashes).
+  * Seamlessly interpolates both `<teaming>` dynamic tokens and legacy template variables.
+- [x] Standards-Driven Variables & Platform Tokens:
+  * Replaced hardcoded Python role strings (`Active Uplink`, `Standby Uplink`) with dynamic `<uplink_role>` options loaded strictly from `data/naming_rules.yaml`.
+  * Abstracted interface prefixes (`uplink_prefix`, `switch_prefix`, `vmk_prefix`) into platform tokens within `naming_rules.yaml` presets, removing hardcoded `vmnic` / `vSwitch` literals from Python code.
+- [x] Interactive Switch Card Controls:
+  * Inline container renaming directly in the card header with automatic synchronization across all associated table rows.
+  * 1-click switch deletion (`✖`) removing containers and unassigning child adapters cleanly.
+  * Upgraded "➕ Uplink" and "➕ Service" buttons to interactive `st.popover` modals offering OCR/AI-discovered candidate dropdowns plus manual custom entry fallback.
+  * Inline badge-level deletion (`✖`) and direct uplink role switching directly on overview cards.
+- [x] State Management & True Empty State:
+  * Introduced dynamic `editor_ver` keying to force remount `st.data_editor` whenever card actions occur, eliminating stale widget state desynchronization.
+  * Refactored "Clear All" to thoroughly purge candidate pools, topology records, discovered switch lists, and editor cache back to a pristine state.
+  * Eradicated the phantom fallback `vSwitch0` card; displays a clean guidance banner and manual switch creation entry when unpopulated.
+- [x] Relative Spatial Clustering & Boundary Invariants:
+  * Relative spatial partition anchors automatically prune UI navigation menus.
+  * Active exclusion of collapsed header indicators (`>` or `›`) to prevent boundary truncation of tail switches (e.g. `PR Spain Fuenmayor VLab`).
+  * Global Y-axis cumulative offset (`cumulative_y += img_height`) completely eliminates multi-screenshot coordinate collisions.
+  * Local deterministic zero-leakage redaction (IPv4, internal domains, MAC) prior to cloud LLM transit, with transparent in-memory de-tokenization.
+
+### 9.2 Pending & Future Roadmap
+- [ ] Excel IPAM Database Diff & Ingestion:
+  * Develop a standalone offline reconciliation script connecting directly to the local SQLite database.
+  * Diff static Excel IPAM worksheets against live NetBox state and output normalized NetBox CSV imports.
+- [ ] Comprehensive Unit Test Suite Expansion (`tests/test_naming_and_synthesizer.py`):
+  * Add unit tests for `_build_dynamic_teaming_clause` covering single, dual-active, and custom role topologies.
+  * Add regression tests ensuring `<uplink_role>` and platform token schema resolution from `naming_rules.yaml`.
+  * Add unit tests verifying `spatial_redactor.py` dynamic anchor detection, collapsed header pruning, and redaction de-tokenization.
+- [ ] Session-Only In-Memory Cascade Replace:
+  * Implement callback-driven in-memory find-and-replace for typo correction across all matching fields within the active editing session, releasing on host change without disk persistence.
+- [ ] Multi-Platform Preset Expansion (Proxmox VE & Azure):
+  * Add and validate spatial anchors, prefix tokens, and naming patterns for Proxmox VE (Linux Bridges `vmbr`, bonding `slaves`) and Azure Portal (VNet / Subnet blade).
+- [ ] Git Tag Pruning & Official Container Release:
+  * Prune legacy transition tags, tag official release `v4.4.29`, and push multi-arch images to GitHub Container Registry (GHCR).
