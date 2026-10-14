@@ -611,46 +611,71 @@ def _interface_ref_examples(intf_code):
     return _interface_ref_examples_cached(intf_code, _ts)
 
 
-def _safe_parse_json_array(response: str) -> list:
-    """Extract and parse a JSON array from LLM response, handling truncated/invalid JSON and markdown fences."""
+# ---------------------------------------------------------------------------
+# Fallback system prompt — ensures structured JSON even when SSM cache is stale
+# ---------------------------------------------------------------------------
+DEFAULT_VMWARE_SYSTEM_PROMPT = """You are an expert VMware and infrastructure network data modeling specialist.
+Analyze the provided sanitized OCR text from hypervisor topologies (Standard Switches vSS and Distributed Switches vDS).
+
+Extract all observed network entities into a flat JSON array of objects using strictly lowercase keys:
+[
+  {
+    "switch": "<Root Virtual Switch Name (e.g. vSwitch0, dvSwitch0, iDMZ-vdSwitch02). Strip any child uplink group suffix like -DvUplinks-xx>",
+    "interface": "<Interface name if applicable: physical adapter (e.g. vmnic0) or VMkernel (e.g. vmk0). Empty string for pure VM Port Groups>",
+    "type": "<One of: 'Uplink', 'VMkernel', 'Port Group'>",
+    "ip": "<IP token placeholder if present (e.g. {{IP_1}}), otherwise empty string>",
+    "purpose": "<Exact name of the Port Group or Service (e.g. Management Network, VM Network, iSCSI, OT Routable, vMotion Network). Empty string for pure physical uplinks>",
+    "role": "<For Uplinks: 'Active Uplink', 'Standby Uplink', or 'None'. For VMkernel: 'Management' if management/vmk0 else 'None'. For Port Group: 'VM Traffic' or 'None'>",
+    "speed": "<Link speed if visible, e.g. 10000 Full, otherwise empty string>"
+  }
+]
+
+CRITICAL EXTRACTION RULES:
+1. CONTAINER NORMALIZATION: In Distributed Switches (vDS), containers named like dvSwitch0-DvUplinks-47 or iDMZ-vdSwitch02-DVUplinks-95 are child uplink groups. Normalize their switch to the root Distributed Switch name (e.g. dvSwitch0, iDMZ-vdSwitch02). Never output an uplink group as a separate switch.
+2. NO PHYSICAL ADAPTERS: If a virtual switch explicitly states 'No physical network adapters' or has 0 physical uplinks, create an entry with interface: 'No Uplink', type: 'Uplink', role: 'None'.
+3. OCR TYPO RESILIENCE:
+   - Recognize that 'ymk0' or 'mk2' are VMkernel interfaces ('vmk0', 'vmk2').
+   - Recognize that 'ymnic0' or 'ymnk3' are physical adapters ('vmnic0', 'vmnic3').
+   - Ignore UI action noise such as 'MANAGE PHYSICAL ADAPTERS', 'ADD NETWORKING', 'EDIT', 'REFRESH'.
+4. STRICT JSON OUTPUT: Return ONLY a valid JSON array of objects. No markdown explanations or fences."""
+
+
+def _safe_parse_json_array(text: str) -> List[Dict[str, Any]]:
     import json as _json
-    # Strip markdown code fences if present
-    cleaned = response.strip()
-    fence = re.match(r"^```(?:json)?\s*(.*?)\s*```$", cleaned, re.DOTALL)
-    if fence:
-        cleaned = fence.group(1).strip()
-    m_json = re.search(r"\[\s*\{.*\}\s*\]", cleaned, re.DOTALL)
-    if m_json:
-        json_str = m_json.group(0)
-    else:
-        stripped = cleaned.strip()
-        if stripped.startswith("[") and stripped.endswith("]"):
-            json_str = stripped
-        else:
-            # Handle wrapped dictionaries like {"interfaces": [...]} or markdown blocks
-            m_obj = re.search(r"\{\s*.*?\s*\}", cleaned, re.DOTALL)
-            if m_obj:
-                try:
-                    obj = _json.loads(m_obj.group(0))
-                    if isinstance(obj, dict):
-                        for v in obj.values():
-                            if isinstance(v, list) and v and isinstance(v[0], dict):
-                                return v
-                except _json.JSONDecodeError:
-                    pass
-            return []
+    if not text:
+        return []
+    cleaned = re.sub(r"^```(?:json)?\s*|```$", "", text.strip(), flags=re.IGNORECASE).strip()
     try:
-        return _json.loads(json_str)
-    except _json.JSONDecodeError:
+        val = _json.loads(cleaned)
+        if isinstance(val, list):
+            return [x for x in val if isinstance(x, dict)]
+        if isinstance(val, dict):
+            for k in ("records", "topology", "data", "items", "entities", "switches"):
+                if isinstance(val.get(k), list):
+                    return [x for x in val[k] if isinstance(x, dict)]
+            return [val]
+    except Exception:
         pass
-    # Attempt recovery: close unclosed brackets/braces and fix unterminated strings
-    for fix in (lambda s: s.rstrip().rstrip(",") + "\n]",
-                lambda s: s.rstrip().rstrip(",") + "\n}",
-                lambda s: s.replace("\n", " ").replace("  ", " ")):
+
+    m_arr = re.search(r"\[[\s\S]*\]", cleaned)
+    if m_arr:
         try:
-            return _json.loads(fix(json_str))
-        except _json.JSONDecodeError:
-            continue
+            val = _json.loads(m_arr.group(0))
+            if isinstance(val, list):
+                return [x for x in val if isinstance(x, dict)]
+        except Exception:
+            pass
+
+    m_obj = re.search(r"\{[\s\S]*\}", cleaned)
+    if m_obj:
+        try:
+            val = _json.loads(m_obj.group(0))
+            if isinstance(val, dict):
+                for k in ("records", "topology", "data", "items", "entities", "switches"):
+                    if isinstance(val.get(k), list):
+                        return [x for x in val[k] if isinstance(x, dict)]
+        except Exception:
+            pass
     return []
 
 
@@ -1489,6 +1514,14 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         st.caption(f"ℹ️ Extracted {char_count:,} characters across {img_count} screenshot(s)")
         st.text_area("Extracted OCR Tokens", value=raw_ocr_text, height=420, disabled=True)
 
+    # AI Raw Response Inspector (collapsible)
+    ai_raw_resp = st.session_state.get("latest_ai_raw_response", "")
+    with st.expander("🤖 AI Raw Response Inspector (Click to expand)", expanded=False):
+        if ai_raw_resp:
+            st.text_area("AI Response", value=ai_raw_resp, height=250, key="inspect_ai_raw_resp")
+        else:
+            st.info("No AI response generated yet. Run 'Analyze & Auto-Populate' to view raw model output.")
+
     # Execute analyze when button clicked
     start_analyze = btn_analyze
 
@@ -1579,10 +1612,12 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 target_platform = st.session_state.get("naming_target_platform", "VMware ESXi")
                 tpp = naming_rules.get("topology_parsing_presets") or {}
                 plat_cfg = tpp.get(target_platform, {}) if isinstance(tpp.get(target_platform), dict) else {}
-                system_prompt = plat_cfg.get("instructions", "").strip()
+                system_prompt = plat_cfg.get("instructions", "").strip() or DEFAULT_VMWARE_SYSTEM_PROMPT
 
                 user_prompt = f"Parse this sanitized topology text:\n\n{sanitized_combined}"
                 response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt, max_tokens=8192)
+
+                st.session_state["latest_ai_raw_response"] = response or ""
 
                 raw_items = _safe_parse_json_array(response)
 
@@ -1599,14 +1634,15 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 clean_records = []
                 for item in raw_items:
                     if isinstance(item, dict) and not any(k in item for k in ("finish_reason", "index", "message", "role")):
-                        sw_clean = _normalize_switch_name(str(item.get("switch") or "").strip())
+                        raw_sw = item.get("switch") or item.get("parent") or item.get("switch_name") or item.get("container") or ""
+                        sw_clean = _normalize_switch_name(str(raw_sw).strip())
                         if sw_clean:
                             clean_records.append({
                                 "switch": sw_clean,
-                                "interface": str(item.get("interface") or "").strip(),
+                                "interface": str(item.get("interface") or item.get("port") or item.get("nic") or "").strip(),
                                 "type": str(item.get("type") or "Port Group").strip(),
-                                "ip": str(item.get("ip") or "").strip(),
-                                "purpose": str(item.get("purpose") or "").strip(),
+                                "ip": str(item.get("ip") or item.get("ipv4") or "").strip(),
+                                "purpose": str(item.get("purpose") or item.get("name") or item.get("service") or "").strip(),
                                 "role": str(item.get("role") or "None").strip(),
                                 "speed": str(item.get("speed") or "").strip(),
                             })
@@ -1999,7 +2035,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         _plat_key = st.session_state.get("naming_target_platform", "VMware ESXi")
         _active_hyp_presets = _hyp_presets_map.get(_plat_key, [])
 
-        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.4.40.\n"]
+        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.4.46.\n"]
         for _gparent in sorted(_groups.keys(), key=_natsort_key):
             _out_lines.append(f"=== {_gparent} ===")
             _sw_uplinks = [r for r in _groups[_gparent] if r.get("type") == "Uplink" and r.get("interface")]

@@ -1,15 +1,28 @@
 # NetBox Universal Library Hub
 
-[![Version](https://img.shields.io/badge/version-4.4.45-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.4.46-blue.svg)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)]()
 
 A Streamlit-based hub for managing NetBox IPAM, device naming conventions, and infrastructure data — with offline-first architecture and zero cloud leakage.
 
-## v4.4.45 — AI System Prompt Moved to Standards (Section 3) & OCR Stream Rewind Fix
+## v4.4.46 — Fallback System Prompt, Resilient JSON Parsing & AI Raw Response Inspector
 
 ### Changes
-* Bumped version to **4.4.45** across `config/constants.py`, `README.md`, and `ARCHITECTURE_SOP.md`.
+* Bumped version to **4.4.46** across `config/constants.py`, `README.md`, and `ARCHITECTURE_SOP.md`.
+* **Built-in fallback system prompt**: When SSM session state cache lacks YAML instructions (system_prompt empty ""), a robust embedded VMware ESXi system prompt is used as default, preventing freeform text output from the AI.
+* **Resilient greedy JSON parser**: Replaced `_safe_parse_json_array` with a new greedy regex parser that handles markdown fences, wrapped objects, and truncated responses far more reliably.
+* **Tolerant key mapping**: Clean record extraction now resolves alternative LLM-produced keys (`parent`, `container`, `switch_name`) to the canonical `switch` field, preventing valid entries from being silently dropped.
+* **AI Raw Response Inspector**: New collapsible panel directly below the OCR Raw Text Inspector exposes the exact raw model output for debugging failed extractions.
+
+### Bug Fixes
+* **Session state cache masking fixed**: Empty `system_prompt` no longer causes the AI to emit unstructured freeform text.
+* **JSON parsing on Markdown fences and wrapped objects**: Non-greedy regex and narrow bracket-only matching replaced with greedy `[\\s\\S]*` and `[{\\s\\S}*` patterns.
+* **Key name mismatch discarded valid entries**: LLM outputs using `parent`/`container`/`switch_name` instead of `switch` are now normalized during clean record construction.
+* **Debugging black box**: Raw AI response is persisted in `st.session_state["latest_ai_raw_response"]` and surfaced in the UI inspector.
+
+### Changes
+* Bumped version to **4.4.46** across `config/constants.py`, `README.md`, and `ARCHITECTURE_SOP.md`.
 * **AI system prompt now loaded from Standards (Section 3)**: The AI extraction prompt for topology parsing is dynamically loaded from `topology_parsing_presets[platform]["instructions"]` in `data/naming_rules.yaml`. Editing the prompt in the Standards Tab takes effect immediately without touching Python code.
 * **OCR stream rewind fix**: Added `img.seek(0)` before and after reading Streamlit UploadedFile/BytesIO streams to prevent stream exhaustion when processing multiple screenshots in batch mode.
 * **Clean record normalization**: Added explicit field normalization for `switch`, `interface`, `type`, `ip`, `purpose`, `role`, and `speed` with proper defaults and stripping.
