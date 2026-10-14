@@ -1,15 +1,23 @@
 # NetBox Universal Library Hub
 
-[![Version](https://img.shields.io/badge/version-4.4.38-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.4.39-blue.svg)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)]()
 
 A Streamlit-based hub for managing NetBox IPAM, device naming conventions, and infrastructure data — with offline-first architecture and zero cloud leakage.
 
-## v4.4.38 — OCR Sidebar Interleaving Fix & IP Address Dropdown in Naming Tab
+## v4.4.39 — Standards-Driven Noise Filtering & Inline Text Editing
 
 ### Changes
-* Bumped version to **4.4.38** across `config/constants.py`, `README.md`, and `ARCHITECTURE_SOP.md`.
+* Bumped version to **4.4.39** across `config/constants.py`, `README.md`, and `ARCHITECTURE_SOP.md`.
+* **Pure standards-driven noise filtering**: All UI noise words are now driven exclusively by `ui_noise_blacklist` in `data/naming_rules.yaml` (Standards Tab → Section 2.6). Removed hardcoded `UI_CHROME_WORDS`, `_SIDEBAR_NOISE`, and `_UI_CHROME` sets from `ui/tabs/naming_tab.py`.
+* **Added noise tokens**: `"addnetworking"`, `"refres"`, `"e热"` added to `ui_noise_blacklist` for VMware ESXi platform.
+* **Auto-correction for service names**: Removed hardcoded `iscsi` → `iSCSI` replacement. Service name casing is now handled via `apply_auto_corrections(name, "vmware")` when `auto_correct` is enabled.
+* **Inline text editing in popovers**: Both "+ Service" and "+ Uplink" popovers now feature editable text inputs that pre-fill from detected candidates, allowing instant typo correction before adding.
+* **Inline rename on overview cards**: Service and Uplink names on topology cards are now inline-editable via `st.text_input` with auto-rerun on change.
+
+### Bug Fixes
+* **Noise filtering normalization**: Both OCR tokens and blacklist entries are normalized by stripping spaces and trailing punctuation when comparing, so `"add networking"` in Section 2.6 automatically matches `"ADDNETWORKING"`, `"ADD NETWORKING..."`, etc.
 
 ### Bug Fixes
 * **OCR sidebar interleaving fix**: Replaced fragile next-line `i+1` delimiter check with a cleaned token-stream approach that strips all sidebar noise and right-column physical adapter segments from pipe-split lines before look-ahead. Every Port Group is now correctly detected even when sidebar menu lines (Certificate, Licensing, Host Profile, etc.) interleave between the service title and its `VLAN ID:` line.

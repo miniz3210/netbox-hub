@@ -129,6 +129,46 @@ def _is_junk_token(text: str, dynamic_filter: set | None = None) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Standards-driven noise set helper — reads ui_noise_blacklist from YAML
+# ---------------------------------------------------------------------------
+def _get_platform_noise_set(naming_rules: dict, platform_name: str) -> Tuple[Set[str], Set[str]]:
+    """Return (exact_lower_set, nospace_alnum_set) from ui_noise_blacklist.
+
+    exact_lower_set contains every blacklist entry lower-cased and stripped.
+    nospace_alnum_set contains every entry with all spaces and trailing
+    punctuation/ellipses removed, also lower-cased.  A token is noise if its
+    lower-cased form matches exact_lower_set OR its space-stripped form matches
+    nospace_alnum_set.
+    """
+    plat_cfg = (naming_rules.get("topology_parsing_presets") or {}).get(platform_name, {})
+    if not isinstance(plat_cfg, dict):
+        plat_cfg = {}
+    raw_entries = plat_cfg.get("ui_noise_blacklist") or []
+    exact_lower_set: Set[str] = set()
+    nospace_alnum_set: Set[str] = set()
+    for entry in raw_entries:
+        if not isinstance(entry, str) or not entry.strip():
+            continue
+        low = entry.strip().lower()
+        exact_lower_set.add(low)
+        stripped = re.sub(r"[\s\.]+", "", low)
+        nospace_alnum_set.add(stripped)
+    return exact_lower_set, nospace_alnum_set
+
+
+def _is_noise_token(text: str, naming_rules: dict, platform_name: str) -> bool:
+    """Check whether a token matches the platform's ui_noise_blacklist."""
+    t = text.strip()
+    if not t or len(t) <= 1:
+        return True
+    low = t.lower()
+    if low in UI_NAV_NOISE:
+        return True
+    exact_set, nospace_set = _get_platform_noise_set(naming_rules, platform_name)
+    return low in exact_set or re.sub(r"[\s\.]+", "", low) in nospace_set
+
+
+# ---------------------------------------------------------------------------
 # Session-level cascade replacement helpers
 # ---------------------------------------------------------------------------
 _CASCADE_FIELDS = ("interface", "parent", "note")
@@ -1219,24 +1259,8 @@ def _harvest_ocr_topology_candidates(raw_text: str, naming_rules: dict, active_p
         service_delimiters = ["VLAN ID:", "VMkernel Ports", "Virtual Machines"]
 
     dyn_bl = {str(s).strip().lower() for s in (plat_cfg_svc.get("ui_noise_blacklist") or []) if s and str(s).strip()}
-    sidebar_noise = UI_NAV_NOISE | dyn_bl | {
-        "summary", "monitor", "configure", "permissions", "vms", "datastores",
-        "networks", "updates", "storage", "actions", "add networking", "add networking...",
-        "refresh", "refres", "edit", "manage physical adapters", "managephysicaladapters",
-        "protocol endpoints", "system", "hardware", "storageadapters", "storagedevices",
-        "host cache configuration", "hostcache configuration", "1/o filters", "i/o filters",
-        "storageproviders", "storage providers", "networking", "virtual switches",
-        "virtualswitches", "vmkernel adapters", "vmkerneladapters", "physical adapters",
-        "physicaladapters", "tcp/ip configuration", "virtual machines", "vm startup/shutdown",
-        "vmstartup/shutdown", "agent vm settings", "agentvmsettings",
-        "default vm compatibility", "defaultvmcompatibility", "swap file location",
-        "licensing", "host profile", "time configuration", "authentication services",
-        "authenticationservices", "certificate", "power management",
-        "advanced system settings", "advanced systemsettin...", "system resource reservation",
-        "systemresourcereser...", "firewall", "services", "security profile",
-        "securityprofile", "system swap", "packages", "no associated port groups",
-        "no physical network adapters",
-    }
+    _, _plat_noise_nospace = _get_platform_noise_set(naming_rules, active_plat_display)
+    sidebar_noise = UI_NAV_NOISE | dyn_bl | _plat_noise_nospace
 
     # Build a clean stream of topology tokens with sidebar noise removed
     cleaned_tokens = []
@@ -1333,12 +1357,9 @@ def _harvest_ocr_topology_candidates(raw_text: str, naming_rules: dict, active_p
 
         if is_service_title:
             clean_name = tok
-            if clean_name.lower() == "iscsi":
-                clean_name = "iSCSI"
-            elif clean_name.lower() == "vmnetwork":
-                clean_name = "VM Network"
-            elif clean_name.lower() == "managementnetwork":
-                clean_name = "Management Network"
+            if st.session_state.get("auto_correct", True):
+                from utils.formatters import apply_auto_corrections
+                clean_name = apply_auto_corrections(clean_name, "vmware")
             current_svc_label = clean_name
             service_map.setdefault(clean_name, {
                 "name": clean_name,
@@ -1914,9 +1935,9 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                             discovered_uplinks.add(iface)
                         elif iface.lower().startswith(vmk_pfx.lower()):
                             discovered_services.add(iface)
-                        elif len(iface) > 2 and iface.lower() not in UI_CHROME_WORDS:
+                        elif len(iface) > 2 and not _is_noise_token(iface, naming_rules, active_plat_display):
                             discovered_services.add(iface)
-                    if purpose and len(purpose) > 2 and purpose.lower() not in UI_CHROME_WORDS:
+                    if purpose and len(purpose) > 2 and not _is_noise_token(purpose, naming_rules, active_plat_display):
                         discovered_services.add(purpose)
 
                 ocr_uplink_matches = re.findall(rf"\b{re.escape(uplink_pfx)}\d+\b", combined_raw_text, re.IGNORECASE)
@@ -2005,16 +2026,11 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                 discovered_switches.add(_norm_sw)
 
                 sorted_switches = sorted(discovered_switches, key=_natsort_key) if discovered_switches else [_dynamic_switch_pfx + "0"]
-                UI_CHROME_WORDS = {
-                    "summary", "monitor", "configure", "permissions", "vms", "datastores",
-                    "networks", "updates", "storage", "actions", "add networking", "refresh",
-                    "edit", "manage physical adapters", "protocol endpoints", "system", "hardware"
-                }
 
                 clean_switches = []
                 for _s in sorted_switches:
                     _s_str = str(_s).strip()
-                    if len(_s_str) > 2 and _s_str.lower() != "es" and _s_str.lower() not in UI_CHROME_WORDS:
+                    if len(_s_str) > 2 and _s_str.lower() != "es" and not _is_noise_token(_s_str, naming_rules, active_plat_display):
                         clean_switches.append(_s_str)
 
                 st.session_state["discovered_switches"] = clean_switches if clean_switches else [_dynamic_switch_pfx + "0"]
@@ -2027,7 +2043,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     iface = str(r.get("interface", "")).strip()
                     if not iface or len(iface) <= 1:
                         continue
-                    if any(_cw in iface.lower() for _cw in UI_CHROME_WORDS):
+                    if any(_cw in iface.lower() for _cw in _get_platform_noise_set(naming_rules, active_plat_display)[0]):
                         continue
                     parent_sw = _normalize_switch_name(str(r.get("parent", "")).strip())
                     if parent_sw not in sorted_switches:
@@ -2085,19 +2101,9 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 _current_switch = clean_switches[0] if clean_switches else (_dynamic_switch_pfx + "0")
                 _current_svc_label = None
 
-                # Extra UI sidebar noise words to exclude when splitting by pipe
-                _SIDEBAR_NOISE = UI_CHROME_WORDS | active_junk_filter | {
-                    "storage", "storageadapters", "storagedevices", "hostcache configuration",
-                    "protocol endpoints", "1/o filters", "i/o filters", "storageproviders",
-                    "networking", "virtualswitches", "vmkerneladapters", "physical adapters",
-                    "physicaladapters", "tcp/ip configuration", "virtual machines",
-                    "vmstartup/shutdown", "agentvmsettings", "defaultvmcompatibility",
-                    "swap file location", "system", "licensing", "host profile",
-                    "time configuration", "authenticationservices", "certificate",
-                    "power management", "advanced systemsettin...", "systemresourcereser...",
-                    "firewall", "services", "securityprofile", "system swap", "packages",
-                    "hardware", "actions", "add networking...", "refres", "refresh"
-                }
+                # Noise set driven entirely by ui_noise_blacklist from Standards (Section 2.6)
+                _plat_noise_exact, _plat_noise_nospace = _get_platform_noise_set(naming_rules, active_plat_display)
+                _SIDEBAR_NOISE = UI_NAV_NOISE | active_junk_filter | _plat_noise_exact | _plat_noise_nospace
 
                 _ocr_lines = combined_raw_text.splitlines()
                 for i, raw_line in enumerate(_ocr_lines):
@@ -2148,11 +2154,9 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                 or "no associated" in low_seg
                             ):
                                 continue
-                            # Fix common OCR casing typo 'iscSI' -> 'iSCSI'
-                            if low_seg == "iscsi":
-                                seg_clean = "iSCSI"
-                            elif low_seg == "vmnetwork":
-                                seg_clean = "VM Network"
+                            if st.session_state.get("auto_correct", True):
+                                from utils.formatters import apply_auto_corrections
+                                seg_clean = apply_auto_corrections(seg_clean, "vmware")
                             _current_svc_label = seg_clean
                             _service_map.setdefault(seg_clean, {
                                 "name": seg_clean,
@@ -2307,12 +2311,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             _new_deck[_s] = {"name": _s, "port_groups": [], "uplinks": []}
         st.session_state["switch_deck"] = _new_deck
 
-        _UI_CHROME = {
-            "summary", "monitor", "configure", "permissions", "vms", "datastores",
-            "networks", "updates", "storage", "actions", "add networking", "refresh",
-            "edit", "manage physical adapters", "protocol endpoints", "system", "hardware",
-            "no associated port groups", "no physical network adapters", "virtual switches",
-        }
+        _plat_noise_exact, _plat_noise_nospace = _get_platform_noise_set(naming_rules, active_plat_display)
 
         def _is_valid_entity_token(_text: str) -> bool:
             _t = str(_text).strip()
@@ -2323,7 +2322,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 return False
             if _low in ("false", "true", "null", "none", "is_uncertain"):
                 return False
-            if any(_chrome in _low for _chrome in _UI_CHROME):
+            if _low in _plat_noise_exact or re.sub(r"[\s\.]+", "", _low) in _plat_noise_nospace:
                 return False
             if re.match(r"^virtual\s*machines\s*\(\d+\)", _low):
                 return False
@@ -2463,7 +2462,17 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
 
                             uc_label, uc_role, uc_del = st.columns([3, 3, 1])
                             with uc_label:
-                                st.markdown(f"🟢 **{u_iface}**")
+                                new_u_iface = st.text_input(
+                                    "Uplink Name",
+                                    value=u_iface,
+                                    key=f"card_up_edit_{idx}_{u_idx}_{u_iface}",
+                                    label_visibility="collapsed"
+                                ).strip()
+                                if new_u_iface and new_u_iface != u_iface:
+                                    records[u_idx]["interface"] = new_u_iface
+                                    st.session_state["topology_records"] = records
+                                    st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
+                                    st.rerun()
                             with uc_role:
                                 cur_r_idx = role_options.index(u_role) if u_role in role_options else 0
                                 sel_role = st.selectbox(
@@ -2496,14 +2505,27 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                             if not s_purpose and not s_iface:
                                 continue
                             # VMkernel: display "purpose (vmk)" pairing
-                            if s_row.get("type") == "VMkernel" and s_purpose and s_iface:
-                                s_name = f"{s_purpose} ({s_iface})"
-                            else:
-                                s_name = s_purpose or s_iface
+                            is_vmkernel = s_row.get("type") == "VMkernel" and s_purpose and s_iface
 
+                            edit_target_val = s_purpose if s_purpose else s_iface
                             sc_label, sc_del = st.columns([5, 1])
                             with sc_label:
-                                st.markdown(f"🟡 **{s_name}**")
+                                new_s_val = st.text_input(
+                                    "Service Name",
+                                    value=edit_target_val,
+                                    key=f"card_svc_edit_{idx}_{s_idx}_{edit_target_val}",
+                                    label_visibility="collapsed"
+                                ).strip()
+                                if is_vmkernel:
+                                    st.caption(f"🔹 {s_iface}")
+                                if new_s_val and new_s_val != edit_target_val:
+                                    if s_purpose:
+                                        records[s_idx]["purpose"] = new_s_val
+                                    else:
+                                        records[s_idx]["interface"] = new_s_val
+                                    st.session_state["topology_records"] = records
+                                    st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
+                                    st.rerun()
                             with sc_del:
                                 if st.button("✖", key=f"btn_del_svc_{s_idx}", help="Remove service"):
                                     records.pop(s_idx)
@@ -2531,15 +2553,17 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                 options=up_choice_options,
                                 key=f"pop_up_sel_{idx}_{sw}"
                             )
+                            _up_choice_slug = re.sub(r"[^a-zA-Z0-9_]", "", selected_up_choice)
                             if selected_up_choice == "➕ Custom / Manual Entry":
-                                final_up_name = st.text_input(
-                                    "Adapter Name",
-                                    placeholder=f"e.g. {_dynamic_uplink_pfx}0, {_dynamic_uplink_pfx}4",
-                                    key=f"pop_up_custom_{idx}_{sw}"
-                                ).strip()
+                                _init_up_name = ""
                             else:
-                                final_up_name = selected_up_choice.strip()
-                                st.caption(f"Selected: `{final_up_name}`")
+                                _init_up_name = selected_up_choice.strip()
+                            final_up_name = st.text_input(
+                                "✏️ Adapter Name (Editable)",
+                                value=_init_up_name,
+                                placeholder=f"e.g. {_dynamic_uplink_pfx}0, {_dynamic_uplink_pfx}4",
+                                key=f"pop_up_name_{idx}_{sw}_{_up_choice_slug}"
+                            ).strip()
 
                             new_up_role = st.selectbox("Initial Role", options=role_options, index=0, key=f"pop_up_role_{idx}_{sw}")
                             new_up_speed = st.selectbox("Speed (optional)", options=["", "10000 Full", "1000 Full", "25000 Full"], index=0, key=f"pop_up_spd_{idx}_{sw}")
@@ -2564,7 +2588,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                 else:
                                     records.append({
                                         "switch": sw,
-                                        "interface": final_up_name.strip(),
+                                        "interface": final_up_name,
                                         "type": "Uplink",
                                         "ip": "",
                                         "purpose": "",
@@ -2616,7 +2640,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                 )
 
                             final_svc_name = st.text_input(
-                                "Service / Port Group Name",
+                                "✏️ Service / Port Group Name (Editable)",
                                 value=_init_name,
                                 placeholder=f"e.g. Management Network, VM Network, iSCSI",
                                 key=f"pop_svc_name_{idx}_{sw}_{_svc_choice_slug}"
@@ -2651,25 +2675,40 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                 new_svc_ip = selected_ip_choice.strip()
 
                             if st.button("Add to Switch", key=f"pop_svc_confirm_{idx}_{sw}", use_container_width=True):
-                                effective_name = final_svc_name or (selected_svc_choice if selected_svc_choice != "➕ Custom / Manual Entry" else "")
-                                if not effective_name:
-                                    st.warning("Please select or enter a Service / Port Group name.")
-                                else:
-                                    _matched_iface = str(_autofill.get("interface") or "").strip()
-                                    if new_svc_type == "VMkernel" and not _matched_iface and effective_name.lower().startswith(_dynamic_vmk_pfx.lower()):
-                                        _matched_iface = effective_name
-                                    records.append({
-                                        "switch": sw,
-                                        "interface": _matched_iface if new_svc_type == "VMkernel" else "",
-                                        "type": new_svc_type,
-                                        "ip": new_svc_ip,
-                                        "purpose": effective_name,
-                                        "role": "Management" if "mgmt" in effective_name.lower() or "management" in effective_name.lower() else "None",
-                                        "speed": ""
-                                    })
-                                    st.session_state["topology_records"] = records
-                                    st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
-                                    st.rerun()
+                                 effective_name = final_svc_name or (selected_svc_choice if selected_svc_choice != "➕ Custom / Manual Entry" else "")
+                                 if not effective_name:
+                                     st.warning("Please select or enter a Service / Port Group name.")
+                                 else:
+                                     _matched_iface = str(_autofill.get("interface") or "").strip()
+                                     if new_svc_type == "VMkernel" and not _matched_iface and effective_name.lower().startswith(_dynamic_vmk_pfx.lower()):
+                                         _matched_iface = effective_name
+                                     records.append({
+                                         "switch": sw,
+                                         "interface": _matched_iface if new_svc_type == "VMkernel" else "",
+                                         "type": new_svc_type,
+                                         "ip": new_svc_ip,
+                                         "purpose": effective_name,
+                                         "role": "Management" if "mgmt" in effective_name.lower() or "management" in effective_name.lower() else "None",
+                                         "speed": ""
+                                     })
+                                     # Sync corrected name back to session state so it replaces the old spelling
+                                     if selected_svc_choice != "➕ Custom / Manual Entry" and final_svc_name != selected_svc_choice:
+                                         _existing_map = st.session_state.get("discovered_service_map") or {}
+                                         if not isinstance(_existing_map, dict):
+                                             _existing_map = {}
+                                         _existing_map[final_svc_name] = {**_autofill, "name": final_svc_name}
+                                         if selected_svc_choice in _existing_map:
+                                             _existing_map.pop(selected_svc_choice, None)
+                                         st.session_state["discovered_service_map"] = _existing_map
+                                         _existing_svcs = list(st.session_state.get("discovered_service_candidates") or [])
+                                         if selected_svc_choice in _existing_svcs:
+                                             _existing_svcs.remove(selected_svc_choice)
+                                         if final_svc_name not in _existing_svcs:
+                                             _existing_svcs.append(final_svc_name)
+                                         st.session_state["discovered_service_candidates"] = sorted(_existing_svcs, key=_natsort_key)
+                                     st.session_state["topology_records"] = records
+                                     st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
+                                     st.rerun()
 
     st.markdown("#### 🎛️ Topology Data Grid")
     st.caption("Edit switch assignments, interface roles, and IPs directly. Changes update NetBox descriptions instantly.")
@@ -2721,7 +2760,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         _plat_key = st.session_state.get("naming_target_platform", "VMware ESXi")
         _active_hyp_presets = _hyp_presets_map.get(_plat_key, [])
 
-        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.4.38.\n"]
+        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.4.39.\n"]
         for _gparent in sorted(_groups.keys(), key=_natsort_key):
             _out_lines.append(f"=== {_gparent} ===")
             _sw_uplinks = [r for r in _groups[_gparent] if r.get("type") == "Uplink" and r.get("interface")]
