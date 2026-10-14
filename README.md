@@ -1,17 +1,20 @@
 # NetBox Universal Library Hub
 
-[![Version](https://img.shields.io/badge/version-4.4.41-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.4.42-blue.svg)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)]()
 
 A Streamlit-based hub for managing NetBox IPAM, device naming conventions, and infrastructure data — with offline-first architecture and zero cloud leakage.
 
-## v4.4.41 — VMkernel IP Display on Overview Cards
+## v4.4.42 — 100% Standards-Driven Topology Parsing, Auto-Correction Pipeline & Container Suffix Stripping
 
 ### Changes
-* Bumped version to **4.4.41** across `config/constants.py`, `README.md`, and `ARCHITECTURE_SOP.md`.
-* **VMkernel IP address display**: Overview cards now show the assigned IP next to each VMkernel interface (e.g. `◆ vmk0 • 10.27.177.246`).
-* **Service rename synchronization**: Inline `new_s_val` edits on cards now correctly update `records[s_idx]["purpose"]` while preserving `interface` and `ip` fields.
+* Bumped version to **4.4.42** across `config/constants.py`, `README.md`, and `ARCHITECTURE_SOP.md`.
+* **Dynamic container suffix stripping**: `_normalize_switch_name` now reads `container_strip_suffixes` from `topology_parsing_presets[platform]` in naming_rules.yaml — no hardcoded `-dvuplinks` in Python.
+* **Auto-correction at OCR ingestion**: Raw OCR text is passed through `apply_auto_corrections(text, "ocr_cleaning")` and `apply_auto_corrections(text, "vmware")` before being stored in `latest_ocr_raw_text`.
+* **Standardized whitespace matching for service delimiters**: Look-ahead delimiter checks now normalize whitespace via `re.sub(r"\s+", " ", ...)` so OCR-fused tokens like "VLANID:" match cleanly after autocorrection normalizes them to "VLAN ID:".
+* **New autocorrect rules**: Added `ocr_cleaning` category with VMkernel/VMK normalization, VLAN ID OCR variation normalization, and physical adapter typo correction.
+* **Updated ui_noise_blacklist**: Added "manage physkal adapters" and "managephyskaladapters" residual OCR misreads.
 * **Switch Teaming template added**: New `Switch_Teaming` preset in `hypervisor_presets["VMware ESXi"]` with pattern `<v_switch> (<teaming>)` rendered ONCE per switch container.
 * **PortGroup / VMkernel templates simplified**: Changed from legacy `<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)` to `<purpose> (<v_switch>)` — eliminating teaming clause duplication across every service line.
 * **Uplink template unchanged**: `<vmnic> - <v_switch> <purpose> <uplink_role>` renders per physical adapter only.

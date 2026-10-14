@@ -68,13 +68,23 @@ def _normalize_switch_name(name: str) -> str:
     from prior manual adds.  Normalizes OCR substitution of letter 'o'/'O' for
     digit '0' (e.g. vSwitcho -> vSwitch0, vSwitcho1 -> vSwitch01) while
     preserving leading zeros — 'vSwitch01' and 'vSwitch02' remain distinct.
+    Container suffix stripping is driven dynamically by
+    topology_parsing_presets[platform].container_strip_suffixes from naming_rules.yaml.
     """
     n = str(name).strip()
     if n.startswith("manual:"):
         n = n[len("manual:"):]
-    # Normalize OCR substitution of letter 'o'/'O' for digit '0' (e.g. vSwitcho -> vSwitch0, vSwitcho1 -> vSwitch01)
+    # Dynamic container suffix stripping driven by Standards
+    _rules = SSM.get_naming_rules() or {}
+    _tpp = _rules.get("topology_parsing_presets") or {}
+    _plat = st.session_state.get("naming_target_platform", "VMware ESXi")
+    _plat_cfg = _tpp.get(_plat, {}) if isinstance(_tpp.get(_plat), dict) else {}
+    for sfx in _plat_cfg.get("container_strip_suffixes", []):
+        if sfx and sfx.lower() in n.lower():
+            n = re.split(re.escape(sfx), n, flags=re.IGNORECASE)[0].strip()
+    # Normalize OCR substitution of letter 'o'/'O' for digit '0'
     n = re.sub(r"(?i)(switch)o(\d*)", r"\g<1>0\2", n)
-    return n
+    return n.strip()
 
 
 # ---------------------------------------------------------------------------
@@ -1341,15 +1351,17 @@ def _harvest_ocr_topology_candidates(raw_text: str, naming_rules: dict, active_p
             if not ip_hit.startswith("255.") and ip_hit != "0.0.0.0":
                 discovered_ips.add(ip_hit)
 
-        # 3. Skip delimiter lines themselves
-        if any(low_tok.startswith(d.lower()) for d in service_delimiters):
+        # 3. Skip delimiter lines themselves (standardize whitespace for matching)
+        _norm_tok = re.sub(r"\s+", " ", low_tok).strip()
+        if any(_norm_tok.startswith(re.sub(r"\s+", " ", d).strip().lower()) for d in service_delimiters):
             continue
 
         # 4. Look-ahead in cleaned_tokens: if any of the next 1..2 tokens starts with a service delimiter, `tok` is a Service / Port Group Name!
         is_service_title = False
         for look_idx in range(idx + 1, min(idx + 3, len(cleaned_tokens))):
             nxt_tok, _ = cleaned_tokens[look_idx]
-            if any(nxt_tok.lower().startswith(d.lower()) for d in service_delimiters):
+            _norm_nxt = re.sub(r"\s+", " ", nxt_tok.strip().lower()).strip()
+            if any(_norm_nxt.startswith(re.sub(r"\s+", " ", d).strip().lower()) for d in service_delimiters):
                 is_service_title = True
                 break
             if SW_HEADER_RE.search(nxt_tok):
@@ -1682,6 +1694,15 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
 
             progress_bar.progress(0.9, text="Sanitizing and invoking AI parser...")
             combined_raw_text = "\n\n".join(combined_raw_lines).strip()
+            # Auto-correct OCR text before ingestion per Standards Auto-Correction Rules
+            if st.session_state.get("auto_correct", True):
+                try:
+                    from utils.formatters import apply_auto_corrections
+                    corrected_text = apply_auto_corrections(combined_raw_text, "ocr_cleaning")
+                    corrected_text = apply_auto_corrections(corrected_text, "vmware")
+                    combined_raw_text = corrected_text
+                except Exception:
+                    pass
             st.session_state["latest_ocr_raw_text"] = combined_raw_text
 
             # ── Collect raw OCR tokens with cumulative Y-offset across screenshots ──

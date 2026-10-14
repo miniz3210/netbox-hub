@@ -117,3 +117,20 @@ auto_corrections:
     replacement: \1
     description: hostname correction
     enabled: true
+  ocr_cleaning:
+  - pattern: '(?i)\b([vy])mk(\d+)\b'
+    replacement: vmk\2
+    description: Normalize OCR ymk/vmk to vmk
+    enabled: true
+  - pattern: '(?i)\bmk(\d+)\s*:'
+    replacement: 'vmk\1 :'
+    description: Restore missing v prefix in vmk interfaces
+    enabled: true
+  - pattern: '(?i)\bv[l1][a&@]?[nm]?\s*[i!1]?d\s*:'
+    replacement: 'VLAN ID:'
+    description: Normalize OCR VLAN ID variations
+    enabled: true
+  - pattern: '(?i)\bphyskal\b'
+    replacement: physical
+    description: Correct physical adapter OCR typo
+    enabled: true

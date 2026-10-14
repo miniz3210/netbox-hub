@@ -960,8 +960,12 @@
         ],
         "redact_mac": true
       },
+      "container_strip_suffixes": [
+        "-dvuplinks"
+      ],
       "service_delimiters": [
         "VLAN ID:",
+        "VLANID:",
         "VMkernel Ports",
         "Virtual Machines"
       ],
@@ -997,8 +1001,9 @@
           "firewall", "services", "security profile",
           "system swap", "packages", "hardware", "refresh", "refres", "edit",
           "add networking", "addnetworking", "add networking...",
-          "manage physical adapters", "managephysicaladapters",
-          "no associated port groups",
+           "manage physical adapters", "managephysicaladapters",
+           "manage physkal adapters", "managephyskaladapters",
+           "no associated port groups",
           "no physical network adapters",
           "e热"
         ]
