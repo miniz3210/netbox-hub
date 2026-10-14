@@ -1,22 +1,21 @@
 # NetBox Universal Library Hub
 
-[![Version](https://img.shields.io/badge/version-4.4.35-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.4.36-blue.svg)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)]()
 
 A Streamlit-based hub for managing NetBox IPAM, device naming conventions, and infrastructure data — with offline-first architecture and zero cloud leakage.
 
-## v4.4.35 — Pure Lego Modular Refactor: Standards-Driven Tokens, Popover Crash Fix & Version Bump
+## v4.4.36 — Critical State Overwrite Fix, Delimiter Regex & Auto-Fill in Naming Tab
 
 ### Changes
-* Bumped version to **4.4.35** across `config/constants.py`, `data/naming_rules.yaml`, `README.md`, and `ARCHITECTURE_SOP.md`.
+* Bumped version to **4.4.36** across `config/constants.py`, `README.md`, and `ARCHITECTURE_SOP.md`.
 
 ### Bug Fixes
-* **Popover crash fix**: Added defensive dictionary resolution for `discovered_service_map` — prevents `AttributeError: 'NoneType' object has no attribute 'get'` when the session state map is missing or not a dict.
-* **Ghost uplinks eliminated**: Removed dummy empty-row initialization in the topology DataGrid; empty records now render a clean empty DataFrame instead of a phantom "Uplink" row. Visual card uplink rendering already skips empty/junk interfaces.
-* **Switch name normalization**: Fixed letter 'o' → digit '0' OCR substitution (e.g. `vSwitcho` → `vSwitch0`, `vSwitcho1` → `vSwitch01`) while preserving leading zeros.
-* **Pure Lego teaming synthesis**: Replaced Python `re.sub(r"\s*Uplink$", "", role_raw)` regex stripping with pure Standards-driven dictionary mapping via `teaming_rules.uplink_to_teaming_mapping`.
-* **Multi-line service & IP discovery**: Fixed single-line regex matching failure by switching to line-by-line iteration with look-ahead to the next line for service delimiters. Services and VMkernel IPs are now accurately harvested and linked to their parent switch container.
+* **Fatal data wipe fix**: Incremented `editor_ver` during analysis so `st.data_editor` key changes and no longer overwrites topology records with empty data on every analyze pass.
+* **Service regex look-ahead**: Line-by-line service detection now correctly uses next-line look-ahead against `_service_delimiters` instead of broken regex matching on single-line strings.
+* **Ghost vmnic0 eliminated**: Blank Adapter Name in "+ Uplink" popover now shows a warning instead of inventing `vmnic0`. Speed is optional (empty default). Switches with no physical adapters output `(No Uplink)`.
+* **Popover dynamic sync**: "+ Service" popover now uses dynamic widget keys based on `selected_svc_choice`, so selecting a discovered service (e.g. `Management Network`) dynamically fills Name, sets Type to `VMkernel`, and populates the IP immediately.
 
 ### New Configuration
 * **`<uplink_role>` variable**: Added under `pattern_variables` with select options (Active Uplink, Standby Uplink, Primary, Backup, None), `empty_role_token`, and `no_uplink_fallback`.

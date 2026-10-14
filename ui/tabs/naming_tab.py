@@ -1951,6 +1951,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         })
 
                 st.session_state["topology_records"] = records
+                st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
                 st.session_state["hypervisor_editor_version"] = st.session_state.get("hypervisor_editor_version", 0) + 1
                 st.toast(f"Successfully analyzed {total_imgs} screenshots and merged {len(deduped)} unique records!", icon="🚀")
         except Exception as e:
@@ -2241,23 +2242,24 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                 st.caption(f"Selected: `{final_up_name}`")
 
                             new_up_role = st.selectbox("Initial Role", options=role_options, index=0, key=f"pop_up_role_{idx}_{sw}")
-                            new_up_speed = st.selectbox("Speed", options=["10000 Full", "1000 Full", "25000 Full", ""], index=0, key=f"pop_up_spd_{idx}_{sw}")
+                            new_up_speed = st.selectbox("Speed (optional)", options=["", "10000 Full", "1000 Full", "25000 Full"], index=0, key=f"pop_up_spd_{idx}_{sw}")
 
                             if st.button("Add to Switch", key=f"pop_up_confirm_{idx}_{sw}", use_container_width=True):
-                                if not final_up_name:
-                                    final_up_name = f"{_dynamic_uplink_pfx}{len([r for r in records if r.get('type') == 'Uplink'])}"
-                                records.append({
-                                    "switch": sw,
-                                    "interface": final_up_name,
-                                    "type": "Uplink",
-                                    "ip": "",
-                                    "purpose": "",
-                                    "role": new_up_role,
-                                    "speed": new_up_speed
-                                })
-                                st.session_state["topology_records"] = records
-                                st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
-                                st.rerun()
+                                if not final_up_name or not final_up_name.strip():
+                                    st.warning("Please enter an adapter name. If switch has no adapters, no uplink is needed.")
+                                else:
+                                    records.append({
+                                        "switch": sw,
+                                        "interface": final_up_name.strip(),
+                                        "type": "Uplink",
+                                        "ip": "",
+                                        "purpose": "",
+                                        "role": new_up_role,
+                                        "speed": new_up_speed
+                                    })
+                                    st.session_state["topology_records"] = records
+                                    st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
+                                    st.rerun()
 
                     with btn_col2:
                         with st.popover("➕ Service", use_container_width=True):
@@ -2265,47 +2267,41 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                             _disc_svc_map = st.session_state.get("discovered_service_map") or {}
                             if not isinstance(_disc_svc_map, dict):
                                 _disc_svc_map = {}
-                            _mapped_svc_labels = {str(e.get("name") or "").strip() for e in _disc_svc_map.values() if isinstance(e, dict)}
                             svc_choice_options = ["➕ Custom / Manual Entry"] + [c for c in service_candidates if not any((r.get("purpose") == c or r.get("interface") == c) and r.get("switch") == sw for r in records)]
                             selected_svc_choice = st.selectbox(
                                 "Select Detected Service or Enter New",
                                 options=svc_choice_options,
                                 key=f"pop_svc_sel_{idx}_{sw}"
                             )
-                            if selected_svc_choice == "➕ Custom / Manual Entry":
+                            _svc_choice_slug = re.sub(r"[^a-zA-Z0-9_]", "", selected_svc_choice)
+
+                            _autofill = _disc_svc_map.get(selected_svc_choice) or {} if selected_svc_choice != "➕ Custom / Manual Entry" else {}
+                            if not isinstance(_autofill, dict):
                                 _autofill = {}
-                                _auto_name = ""
-                                _auto_ip = ""
-                                _is_vm = False
-                            else:
-                                _autofill = _disc_svc_map.get(selected_svc_choice) or {}
-                                if not isinstance(_autofill, dict):
-                                    _autofill = {}
-                                _auto_name = str(_autofill.get("name") or selected_svc_choice).strip()
-                                _auto_ip = str(_autofill.get("ip") or "").strip()
-                                _is_vm = str(_autofill.get("type") or "").lower() == "vmkernel" or _auto_name.lower().startswith(_dynamic_vmk_pfx.lower())
-                            if selected_svc_choice == "➕ Custom / Manual Entry":
-                                final_svc_name = st.text_input(
-                                    "Service / Port Group Name",
-                                    placeholder=f"e.g. Management Network, {_dynamic_vmk_pfx}0",
-                                    key=f"pop_svc_custom_{idx}_{sw}"
-                                ).strip()
-                            else:
-                                final_svc_name = st.text_input(
-                                    "Service / Port Group Name",
-                                    value=_auto_name,
-                                    placeholder=f"e.g. Management Network, {_dynamic_vmk_pfx}0",
-                                    key=f"pop_svc_custom_{idx}_{sw}"
-                                ).strip()
-                                st.caption(f"Selected: `{final_svc_name}`")
+                            _init_name = str(_autofill.get("name") or "").strip()
+                            _init_ip = str(_autofill.get("ip") or "").strip()
+                            _is_vm = str(_autofill.get("type") or "").lower() == "vmkernel" or _init_name.lower().startswith(_dynamic_vmk_pfx.lower())
+
+                            final_svc_name = st.text_input(
+                                "Service / Port Group Name",
+                                value=_init_name,
+                                placeholder=f"e.g. Management Network, {_dynamic_vmk_pfx}0",
+                                key=f"pop_svc_name_{idx}_{sw}_{_svc_choice_slug}"
+                            ).strip()
 
                             new_svc_type = st.selectbox(
                                 "Type",
                                 options=["Port Group", "VMkernel"],
                                 index=1 if _is_vm else 0,
-                                key=f"pop_svc_type_{idx}_{sw}"
+                                key=f"pop_svc_type_{idx}_{sw}_{_svc_choice_slug}"
                             )
-                            new_svc_ip = st.text_input("IP Address (optional)", placeholder="e.g. 10.0.0.1/24", value=_auto_ip, key=f"pop_svc_ip_{idx}_{sw}").strip()
+
+                            new_svc_ip = st.text_input(
+                                "IP Address (optional)",
+                                value=_init_ip,
+                                placeholder="e.g. 10.0.0.1/24",
+                                key=f"pop_svc_ip_{idx}_{sw}_{_svc_choice_slug}"
+                            ).strip()
 
                             if st.button("Add to Switch", key=f"pop_svc_confirm_{idx}_{sw}", use_container_width=True):
                                 records.append({
