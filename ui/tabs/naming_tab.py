@@ -1383,6 +1383,8 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             st.session_state.pop("_pool_initialized_v4", None)
             st.session_state["topology_records"] = []
             st.session_state["discovered_switches"] = []
+            st.session_state["discovered_uplink_candidates"] = []
+            st.session_state["discovered_service_candidates"] = []
             st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
             st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
             st.session_state["hypervisor_editor_version"] = st.session_state.get("hypervisor_editor_version", 0) + 1
@@ -1415,6 +1417,13 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         s.strip().lower() for s in (plat_cfg.get("ui_noise_blacklist") or []) if s and str(s).strip()
     )
     active_junk_filter: Set[str] = UI_NAV_NOISE.union(dynamic_blacklist)
+
+    # Dynamic platform token prefixes (zero hardcoding) — available in both analyze and render paths
+    _plat_tok = ((naming_rules.get("platform_tokens") or {})
+                 .get(active_plat_display, {})) if isinstance(naming_rules.get("platform_tokens"), dict) else {}
+    _dynamic_uplink_pfx = str(_plat_tok.get("uplink_prefix", "vmnic")).strip()
+    _dynamic_vmk_pfx = str(_plat_tok.get("vmk_prefix", "vmk")).strip()
+    _dynamic_switch_pfx = str(_plat_tok.get("switch_prefix", "vSwitch")).strip()
 
     if start_analyze:
         try:
@@ -1693,6 +1702,38 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 st.session_state["hypervisor_parsed_descriptions"] = deduped
                 st.session_state.pop("hypervisor_cascade_mappings", None)
 
+                # ── Harvest discovered uplink / service candidates from OCR ─────
+                plat_tokens_cfg = ((naming_rules.get("platform_tokens") or {})
+                                   .get(active_plat_display, {})) if isinstance(naming_rules.get("platform_tokens"), dict) else {}
+                uplink_pfx = str(plat_tokens_cfg.get("uplink_prefix", _dynamic_uplink_pfx)).strip()
+                vmk_pfx = str(plat_tokens_cfg.get("vmk_prefix", _dynamic_vmk_pfx)).strip()
+
+                discovered_uplinks = set()
+                discovered_services = set()
+                for item in deduped:
+                    iface = str(item.get("interface", "")).strip()
+                    purpose = str(item.get("purpose", "")).strip()
+                    if iface:
+                        if iface.lower().startswith(uplink_pfx.lower()):
+                            discovered_uplinks.add(iface)
+                        elif iface.lower().startswith(vmk_pfx.lower()):
+                            discovered_services.add(iface)
+                        elif len(iface) > 2 and iface.lower() not in UI_CHROME_WORDS:
+                            discovered_services.add(iface)
+                    if purpose and len(purpose) > 2 and purpose.lower() not in UI_CHROME_WORDS:
+                        discovered_services.add(purpose)
+
+                ocr_uplink_matches = re.findall(rf"\b{re.escape(uplink_pfx)}\d+\b", combined_raw_text, re.IGNORECASE)
+                for u in ocr_uplink_matches:
+                    discovered_uplinks.add(u.strip())
+
+                ocr_vmk_matches = re.findall(rf"\b{re.escape(vmk_pfx)}\d+\b", combined_raw_text, re.IGNORECASE)
+                for v in ocr_vmk_matches:
+                    discovered_services.add(v.strip())
+
+                st.session_state["discovered_uplink_candidates"] = sorted(discovered_uplinks, key=_natsort_key)
+                st.session_state["discovered_service_candidates"] = sorted(discovered_services, key=_natsort_key)
+
                 # ── Hybrid Architecture: Topology Records Ingestion ───────────
                 discovered_switches = set()
 
@@ -1723,7 +1764,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                             if norm_sw and len(norm_sw) > 1:
                                 discovered_switches.add(norm_sw)
 
-                sorted_switches = sorted(discovered_switches, key=_natsort_key) if discovered_switches else ["vSwitch0"]
+                sorted_switches = sorted(discovered_switches, key=_natsort_key) if discovered_switches else [_dynamic_switch_pfx + "0"]
                 UI_CHROME_WORDS = {
                     "summary", "monitor", "configure", "permissions", "vms", "datastores",
                     "networks", "updates", "storage", "actions", "add networking", "refresh",
@@ -1736,7 +1777,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     if len(s_str) > 2 and s_str.lower() != "es" and s_str.lower() not in UI_CHROME_WORDS:
                         clean_switches.append(s_str)
 
-                st.session_state["discovered_switches"] = clean_switches if clean_switches else ["vSwitch0"]
+                st.session_state["discovered_switches"] = clean_switches if clean_switches else [_dynamic_switch_pfx + "0"]
 
                 # 3. Build initial topology records list
                 records = []
@@ -1762,7 +1803,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     purpose_val = str(r.get("purpose", "")).strip()
                     speed_val = str(r.get("speed", "")).strip()
 
-                    if iface.lower().startswith("vmnic"):
+                    if iface.lower().startswith(uplink_pfx):
                         row_type = "Uplink"
                         _init_role_cfg = ((_std_rules.get("pattern_variables") or {})
                                           .get("uplink_role") or
@@ -1771,7 +1812,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                             "Active Uplink", "Standby Uplink", "Active", "Standby", "Primary", "Backup", "None"
                         ]
                         role_val = _init_role_cfg.get("default", _init_role_opts[0] if _init_role_opts else "Active Uplink")
-                    elif iface.lower().startswith("vmk"):
+                    elif iface.lower().startswith(vmk_pfx):
                         row_type = "VMkernel"
                         role_val = "Management" if "mgmt" in purpose_val.lower() or "management" in purpose_val.lower() else "None"
                     else:
@@ -1956,7 +1997,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         st.info("ℹ️ No virtual switches discovered yet. Upload and analyze screenshots above, or add a switch manually below.")
         col_add_swn, col_add_swb = st.columns([4, 1])
         with col_add_swn:
-            manual_sw_name = st.text_input("New Switch Name", placeholder="e.g. vSwitch0, vmbr0", key="manual_add_sw_input", label_visibility="collapsed")
+            manual_sw_name = st.text_input("New Switch Name", placeholder=f"e.g. {_dynamic_switch_pfx}0, vmbr0", key="manual_add_sw_input", label_visibility="collapsed")
         with col_add_swb:
             if st.button("➕ Add Switch", key="manual_add_sw_btn", use_container_width=True):
                 if manual_sw_name.strip():
@@ -2054,16 +2095,37 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     st.divider()
 
                     btn_col1, btn_col2 = st.columns(2)
+                    uplink_candidates = st.session_state.get("discovered_uplink_candidates", [])
+                    service_candidates = st.session_state.get("discovered_service_candidates", [])
+
                     with btn_col1:
                         with st.popover("➕ Uplink", use_container_width=True):
                             st.markdown("**Add Physical Uplink**")
-                            new_up_name = st.text_input("Adapter Name", placeholder="e.g. vmnic0, vmnic4", key=f"pop_up_name_{idx}_{sw}")
+                            up_choice_options = ["➕ Custom / Manual Entry"] + [c for c in uplink_candidates if not any(r.get("interface") == c and r.get("switch") == sw for r in records)]
+                            selected_up_choice = st.selectbox(
+                                "Select Detected Adapter or Enter New",
+                                options=up_choice_options,
+                                key=f"pop_up_sel_{idx}_{sw}"
+                            )
+                            if selected_up_choice == "➕ Custom / Manual Entry":
+                                final_up_name = st.text_input(
+                                    "Adapter Name",
+                                    placeholder=f"e.g. {_dynamic_uplink_pfx}0, {_dynamic_uplink_pfx}4",
+                                    key=f"pop_up_custom_{idx}_{sw}"
+                                ).strip()
+                            else:
+                                final_up_name = selected_up_choice.strip()
+                                st.caption(f"Selected: `{final_up_name}`")
+
                             new_up_role = st.selectbox("Initial Role", options=role_options, index=0, key=f"pop_up_role_{idx}_{sw}")
                             new_up_speed = st.selectbox("Speed", options=["10000 Full", "1000 Full", "25000 Full", ""], index=0, key=f"pop_up_spd_{idx}_{sw}")
+
                             if st.button("Add to Switch", key=f"pop_up_confirm_{idx}_{sw}", use_container_width=True):
+                                if not final_up_name:
+                                    final_up_name = f"{_dynamic_uplink_pfx}{len([r for r in records if r.get('type') == 'Uplink'])}"
                                 records.append({
                                     "switch": sw,
-                                    "interface": new_up_name.strip() if new_up_name.strip() else f"vmnic{len([r for r in records if r.get('type') == 'Uplink'])}",
+                                    "interface": final_up_name,
                                     "type": "Uplink",
                                     "ip": "",
                                     "purpose": "",
@@ -2077,16 +2139,38 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     with btn_col2:
                         with st.popover("➕ Service", use_container_width=True):
                             st.markdown("**Add Port Group / VMkernel**")
-                            new_svc_name = st.text_input("Name", placeholder="e.g. Management Network, vmk0", key=f"pop_svc_name_{idx}_{sw}")
-                            new_svc_type = st.selectbox("Type", options=["Port Group", "VMkernel"], index=0, key=f"pop_svc_type_{idx}_{sw}")
-                            new_svc_ip = st.text_input("IP Address (optional)", placeholder="e.g. 10.0.0.1/24", key=f"pop_svc_ip_{idx}_{sw}")
+                            svc_choice_options = ["➕ Custom / Manual Entry"] + [c for c in service_candidates if not any((r.get("purpose") == c or r.get("interface") == c) and r.get("switch") == sw for r in records)]
+                            selected_svc_choice = st.selectbox(
+                                "Select Detected Service or Enter New",
+                                options=svc_choice_options,
+                                key=f"pop_svc_sel_{idx}_{sw}"
+                            )
+                            if selected_svc_choice == "➕ Custom / Manual Entry":
+                                final_svc_name = st.text_input(
+                                    "Service / Port Group Name",
+                                    placeholder=f"e.g. Management Network, {_dynamic_vmk_pfx}0",
+                                    key=f"pop_svc_custom_{idx}_{sw}"
+                                ).strip()
+                            else:
+                                final_svc_name = selected_svc_choice.strip()
+                                st.caption(f"Selected: `{final_svc_name}`")
+
+                            is_vmk_guess = final_svc_name.lower().startswith(_dynamic_vmk_pfx.lower())
+                            new_svc_type = st.selectbox(
+                                "Type",
+                                options=["Port Group", "VMkernel"],
+                                index=1 if is_vmk_guess else 0,
+                                key=f"pop_svc_type_{idx}_{sw}"
+                            )
+                            new_svc_ip = st.text_input("IP Address (optional)", placeholder="e.g. 10.0.0.1/24", key=f"pop_svc_ip_{idx}_{sw}").strip()
+
                             if st.button("Add to Switch", key=f"pop_svc_confirm_{idx}_{sw}", use_container_width=True):
                                 records.append({
                                     "switch": sw,
-                                    "interface": new_svc_name.strip() if new_svc_type == "VMkernel" else "",
+                                    "interface": final_svc_name if new_svc_type == "VMkernel" else "",
                                     "type": new_svc_type,
-                                    "ip": new_svc_ip.strip(),
-                                    "purpose": new_svc_name.strip(),
+                                    "ip": new_svc_ip,
+                                    "purpose": final_svc_name,
                                     "role": "Management" if new_svc_type == "VMkernel" else "None",
                                     "speed": ""
                                 })
@@ -2098,7 +2182,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     st.caption("Edit switch assignments, interface roles, and IPs directly. Changes update NetBox descriptions instantly.")
 
     df = pd.DataFrame(records if records else [{
-        "switch": sw_options[0] if sw_options else "vSwitch0",
+        "switch": sw_options[0] if sw_options else (_dynamic_switch_pfx + "0"),
         "interface": "",
         "type": "Uplink",
         "ip": "",
@@ -2108,7 +2192,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     }])
 
     column_config = {
-        "switch": st.column_config.SelectboxColumn("Switch Container", options=sw_options if sw_options else ["vSwitch0"], required=False),
+        "switch": st.column_config.SelectboxColumn("Switch Container", options=sw_options if sw_options else [_dynamic_switch_pfx + "0"], required=False),
         "interface": st.column_config.TextColumn("Interface / Port", required=False),
         "type": st.column_config.SelectboxColumn("Type", options=["Uplink", "VMkernel", "Port Group"], required=False),
         "ip": st.column_config.TextColumn("IPv4 Address", required=False),
@@ -2148,7 +2232,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         _plat_key = st.session_state.get("naming_target_platform", "VMware ESXi")
         _active_hyp_presets = _hyp_presets_map.get(_plat_key, [])
 
-        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.4.28.\n"]
+        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.4.29.\n"]
         for _gparent in sorted(_groups.keys(), key=_natsort_key):
             _out_lines.append(f"=== {_gparent} ===")
             _sw_uplinks = [r for r in _groups[_gparent] if r.get("type") == "Uplink" and r.get("interface")]

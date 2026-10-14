@@ -893,6 +893,13 @@ def _normalize_rules(raw: dict) -> dict:
     else:
         merged["hypervisor_presets"] = {}
 
+    # Platform token presets (e.g. vmnic/vSwitch prefixes per hypervisor)
+    _raw_pt = raw.get("platform_tokens")
+    if isinstance(_raw_pt, dict) and _raw_pt:
+        merged["platform_tokens"] = _raw_pt
+    else:
+        merged["platform_tokens"] = {}
+
     if isinstance(raw.get("token_order"), dict):
         normalized_to = {}
         for k, v in raw["token_order"].items():
