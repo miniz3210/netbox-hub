@@ -1658,20 +1658,50 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         or ""
                     )
                     sw_clean = _normalize_switch_name(str(raw_sw).strip())
-                    if sw_clean:
-                        raw_iface = str(item.get("interface") or item.get("port") or item.get("nic") or item.get("vmnic") or item.get("vmk") or "").strip()
-                        clean_iface = re.sub(r"^[xX\-\*]\s*", "", raw_iface).strip()
-                        if clean_iface.lower() in ("none", "null", "no physical adapters"):
-                            clean_iface = "No Uplink" if item.get("type") == "Uplink" else ""
-                        clean_records.append({
-                            "switch": sw_clean,
-                            "interface": clean_iface,
-                            "type": str(item.get("type") or "Port Group").strip(),
-                            "ip": str(item.get("ip") or item.get("ipv4") or item.get("ip_address") or "").strip(),
-                            "purpose": str(item.get("purpose") or item.get("name") or item.get("service") or item.get("portgroup") or item.get("port_group") or "").strip(),
-                            "role": str(item.get("role") or "None").strip(),
-                            "speed": str(item.get("speed") or "").strip(),
-                        })
+                    if not sw_clean:
+                        continue
+
+                    # Case-insensitive universal type normalization
+                    raw_type = str(item.get("type") or "").strip().lower()
+                    if raw_type == "uplink":
+                        norm_type = "Uplink"
+                    elif raw_type in ("vmkernel", "vmk"):
+                        norm_type = "VMkernel"
+                    else:
+                        norm_type = "Port Group"
+
+                    raw_iface = str(item.get("interface") or item.get("port") or item.get("nic") or item.get("vmnic") or item.get("vmk") or "").strip()
+                    clean_iface = re.sub(r"^[xX\-\*]\s*", "", raw_iface).strip()
+                    if clean_iface.lower() in ("none", "null", "no physical adapters"):
+                        clean_iface = "No Uplink" if norm_type == "Uplink" else ""
+
+                    if norm_type == "Uplink" and not clean_iface and not item.get("purpose"):
+                        continue
+
+                    raw_purpose = str(item.get("purpose") or item.get("name") or item.get("service") or item.get("portgroup") or item.get("port_group") or "").strip()
+
+                    # Dynamic noise check against Standards blacklist
+                    if _is_noise_token(raw_purpose, naming_rules, target_platform):
+                        raw_purpose = ""
+
+                    clean_records.append({
+                        "switch": sw_clean,
+                        "interface": clean_iface,
+                        "type": norm_type,
+                        "ip": str(item.get("ip") or item.get("ipv4") or item.get("ip_address") or "").strip(),
+                        "purpose": raw_purpose,
+                        "role": str(item.get("role") or "None").strip(),
+                        "speed": str(item.get("speed") or "").strip(),
+                    })
+
+                # Deduplicate: if VMkernel exists with purpose X on switch S, remove pure Port Group with same purpose X on switch S
+                vmk_purposes = {(r["switch"], r["purpose"].lower()) for r in clean_records if r.get("type") == "VMkernel" and r.get("purpose")}
+                deduped_records = []
+                for r in clean_records:
+                    if r.get("type") == "Port Group" and (r.get("switch"), (r.get("purpose") or "").lower()) in vmk_purposes:
+                        continue
+                    deduped_records.append(r)
+                clean_records = deduped_records
 
                 if clean_records:
                     st.session_state["topology_records"] = clean_records
@@ -1769,8 +1799,8 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                             st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
                             st.rerun()
 
-                    assigned_uplink_indices = [i for i, r in enumerate(records) if r.get("switch") == sw and r.get("type") == "Uplink" and r.get("interface")]
-                    assigned_service_indices = [i for i, r in enumerate(records) if r.get("switch") == sw and r.get("type") != "Uplink" and (r.get("purpose") or r.get("interface"))]
+                    assigned_uplink_indices = [i for i, r in enumerate(records) if r.get("switch") == sw and str(r.get("type", "")).strip().lower() == "uplink" and r.get("interface")]
+                    assigned_service_indices = [i for i, r in enumerate(records) if r.get("switch") == sw and str(r.get("type", "")).strip().lower() != "uplink" and (r.get("purpose") or r.get("interface"))]
 
                     st.caption(f"Uplinks ({len(assigned_uplink_indices)}):")
                     if assigned_uplink_indices:
