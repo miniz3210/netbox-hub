@@ -1640,6 +1640,16 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     except Exception as e:
                         logger.warning("Vault restore failed: %s", e)
 
+                # Dynamically load platform preset dictionaries
+                plat_cfg = tpp.get(target_platform, {}) if isinstance(tpp.get(target_platform), dict) else {}
+                allowed_types = plat_cfg.get("allowed_types", ["Uplink", "VMkernel", "Port Group"])
+                role_options = plat_cfg.get("role_options", ["Active Uplink", "Standby Uplink", "None"])
+                default_connected_role = plat_cfg.get("default_connected_role", "Active Uplink")
+                default_disconnected_role = plat_cfg.get("default_disconnected_role", "None")
+                sentinel_no_adapter = plat_cfg.get("sentinel_no_adapter", "No Uplink")
+
+                primary_uplink_type = allowed_types[0] if allowed_types else "Uplink"
+
                 clean_records = []
                 for raw_item in raw_items:
                     if not isinstance(raw_item, dict):
@@ -1663,42 +1673,54 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         continue
 
                     raw_iface = str(item.get("interface") or item.get("port") or item.get("nic") or item.get("vmnic") or item.get("vmk") or "").strip()
-                    clean_iface = re.sub(r"^[xX\-\*]\s*", "", raw_iface).strip()
-                    if clean_iface.lower() in ("none", "null", "no physical adapters"):
+                    # Strip status glyphs (e.g. 'x vmnic1' -> 'vmnic1')
+                    clean_iface = re.sub(r"^[xX\-\*\>\s]+", "", raw_iface).strip()
+                    if clean_iface.lower() in ("none", "null", "no physical adapters", "no physical network adapters"):
                         clean_iface = ""
 
-                    # Universal Dynamic Type Inference
-                    raw_type = str(item.get("type") or "").strip().lower()
-                    if not raw_type:
-                        # Infer type from interface prefix or uplink_role
-                        if clean_iface.lower().startswith("vmnic") or clean_iface.lower().startswith("uplink") or item.get("uplink_role"):
-                            norm_type = "Uplink"
-                        elif clean_iface.lower().startswith("vmk"):
-                            norm_type = "VMkernel"
-                        else:
-                            norm_type = "Port Group"
-                    else:
-                        if "uplink" in raw_type:
-                            norm_type = "Uplink"
-                        elif "vmkernel" in raw_type or "vmk" in raw_type:
-                            norm_type = "VMkernel"
-                        else:
-                            norm_type = "Port Group"
+                    # Repair OCR prefix truncation (e.g. mk2 -> vmk2)
+                    if re.match(r"^mk\d+$", clean_iface, re.I):
+                        clean_iface = f"v{clean_iface.lower()}"
 
-                    if norm_type == "Uplink" and not clean_iface:
-                        clean_iface = "No Uplink"
+                    # Dynamic Type Inference matching platform taxonomy
+                    raw_type = str(item.get("type") or "").strip()
+                    norm_type = ""
+                    for at in allowed_types:
+                        if at.lower() in raw_type.lower():
+                            norm_type = at
+                            break
+
+                    if not norm_type:
+                        if clean_iface.lower().startswith("vmnic") or clean_iface.lower().startswith("uplink") or item.get("uplink_role"):
+                            norm_type = primary_uplink_type
+                        elif clean_iface.lower().startswith("vmk"):
+                            norm_type = allowed_types[1] if len(allowed_types) > 1 else "VMkernel"
+                        else:
+                            norm_type = allowed_types[2] if len(allowed_types) > 2 else "Port Group"
+
+                    # Handle zero-physical-adapter sentinels
+                    if norm_type == primary_uplink_type and not clean_iface:
+                        clean_iface = sentinel_no_adapter
 
                     raw_purpose = str(item.get("purpose") or item.get("name") or item.get("service") or item.get("portgroup") or item.get("port_group") or "").strip()
 
-                    # Uplinks must NEVER carry a port group / service purpose
-                    if norm_type == "Uplink":
+                    # Uplinks must NEVER carry port group names
+                    if norm_type == primary_uplink_type:
                         raw_purpose = ""
                     else:
-                        # Dynamic noise check against Standards blacklist
                         if _is_noise_token(raw_purpose, naming_rules, target_platform):
                             raw_purpose = ""
 
-                    raw_role = str(item.get("role") or item.get("uplink_role") or "None").strip()
+                    # Enforce deterministic default roles
+                    raw_role = str(item.get("role") or item.get("uplink_role") or "").strip()
+                    if norm_type == primary_uplink_type:
+                        if clean_iface == sentinel_no_adapter:
+                            raw_role = default_disconnected_role
+                        elif not raw_role or raw_role.lower() in ("none", "null", ""):
+                            raw_role = default_connected_role
+                    else:
+                        if not raw_role:
+                            raw_role = "Management" if clean_iface.lower() == "vmk0" else "None"
 
                     clean_records.append({
                         "switch": sw_clean,
@@ -1710,11 +1732,11 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         "speed": str(item.get("speed") or "").strip(),
                     })
 
-                # Deduplicate: if VMkernel exists with purpose X on switch S, remove pure Port Group with same purpose X on switch S
-                vmk_purposes = {(r["switch"], r["purpose"].lower()) for r in clean_records if r.get("type") == "VMkernel" and r.get("purpose")}
+                # Deduplicate: if VMkernel exists with purpose X on switch S, remove pure Port Group with same purpose
+                vmk_purposes = {(r["switch"], r["purpose"].lower()) for r in clean_records if r.get("type") == allowed_types[1] and r.get("purpose")}
                 deduped_records = []
                 for r in clean_records:
-                    if r.get("type") == "Port Group" and (r.get("switch"), (r.get("purpose") or "").lower()) in vmk_purposes:
+                    if r.get("type") == allowed_types[2] and (r.get("switch"), (r.get("purpose") or "").lower()) in vmk_purposes:
                         continue
                     deduped_records.append(r)
                 clean_records = deduped_records
@@ -1762,12 +1784,14 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     records = st.session_state.get("topology_records", [])
     sw_options = st.session_state.get("discovered_switches", [])
 
-    # Dynamic role options from Standards
-    role_cfg = (_std_rules.get("pattern_variables") or {}).get("uplink_role") or (_std_rules.get("pattern_variables") or {}).get("role") or {}
-    role_options = role_cfg.get("options") if isinstance(role_cfg.get("options"), list) else [
-        "Active Uplink", "Standby Uplink", "Active", "Standby", "Primary", "Backup", "None"
-    ]
-    default_role = role_cfg.get("default", role_options[0] if role_options else "Active Uplink")
+    # Dynamic role options from active platform preset
+    target_platform = st.session_state.get("naming_target_platform", "VMware ESXi")
+    tpp = naming_rules.get("topology_parsing_presets") or {}
+    plat_cfg = tpp.get(target_platform, {}) if isinstance(tpp.get(target_platform), dict) else {}
+    role_options = plat_cfg.get("role_options", ["Active Uplink", "Standby Uplink", "None"])
+    default_connected_role = plat_cfg.get("default_connected_role", role_options[0] if role_options else "Active Uplink")
+    default_disconnected_role = plat_cfg.get("default_disconnected_role", "None")
+    sentinel_no_adapter = plat_cfg.get("sentinel_no_adapter", "No Uplink")
 
     # Clean Empty State
     if not sw_options and not records:
@@ -1825,7 +1849,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                             u_iface = u_row.get("interface", "").strip()
                             if not u_iface or _is_junk_token(u_iface, active_junk_filter) or re.search(r"\b\d+\s*(?:Gbit/s|Mbit/s|Kbit/s|Full|Half)\b", u_iface, re.I):
                                 continue
-                            u_role = u_row.get("role") or default_role
+                            u_role = u_row.get("role") or default_connected_role
 
                             uc_label, uc_role, uc_del = st.columns([3, 3, 1])
                             with uc_label:
@@ -1841,11 +1865,12 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                     st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
                                     st.rerun()
                             with uc_role:
-                                cur_r_idx = role_options.index(u_role) if u_role in role_options else 0
+                                current_role = u_role
+                                sel_idx = role_options.index(current_role) if current_role in role_options else 0
                                 sel_role = st.selectbox(
                                     "Role",
                                     options=role_options,
-                                    index=cur_r_idx,
+                                    index=sel_idx,
                                     key=f"card_up_role_{u_idx}_{u_iface}",
                                     label_visibility="collapsed"
                                 )
