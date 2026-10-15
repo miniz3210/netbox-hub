@@ -1,4 +1,4 @@
-metadata: '{''version'': ''4.4.50'', ''last_updated'': ''2026-10-15''}'
+metadata: '{''version'': ''4.4.51'', ''last_updated'': ''2026-10-15''}'
 branch_switch: SW<country><state><site><zone><seq>-<stack_id>
 branch_stack: VS<country><state><site><seq>-<stack_id>
 branch_ap: WAP<country><state><site><seq>
@@ -175,7 +175,7 @@ vlan_presets:
     prefix_pattern: <site> <role> -- VLAN <vid>
     items: []
 naming_patterns:
-  metadata: '{''version'': ''4.4.50'', ''last_updated'': ''2026-10-15''}'
+  metadata: '{''version'': ''4.4.51'', ''last_updated'': ''2026-10-15''}'
   branch_switch: SW<country><state><site><zone><seq>-<stack_id>
   branch_stack: VS<country><state><site><seq>-<stack_id>
   branch_ap: WAP<country><state><site><seq>
@@ -748,67 +748,48 @@ topology_parsing_presets:
       speed:
       - speed
       - link_speed
-    instructions: "You are an expert VMware hypervisor network architect and topology\
-      \ data modeling specialist.\nParse the provided sanitized OCR text from VMware\
-      \ ESXi Standard Switches (vSS) and Distributed Switches (vDS).\n\nExtract ALL\
-      \ observed network entities into a flat JSON array of objects:\n[\n  {\n   \
-      \ \"switch\": \"<Root Virtual Switch Name (e.g. vSwitch0, vSwitch01, vSwitch02,\
-      \ vSwitch1, dvSwitch0, iDMZ-vdSwitch02, PR Spain Fuenmayor VLab)>\",\n    \"\
-      interface\": \"<Interface name if applicable: physical adapter (e.g. vmnic0,\
-      \ vmnic1) or VMkernel (e.g. vmk0, vmk1). Empty string for pure VM Port Groups>\"\
-      ,\n    \"type\": \"<Strictly one of: 'Uplink', 'VMkernel', 'Port Group'>\",\n\
-      \    \"ip\": \"<Preserve exact IP token placeholder present in the text (e.g.\
-      \ <SAFE_IP_1> or {{IP_1}}), otherwise empty string>\",\n    \"purpose\": \"\
-      <Exact Port Group or Service Name (e.g. Management Network, VM Network, iSCSI01,\
-      \ iSCSI02, vMotion, vSAN Network, OT Routable, iDMZ-VLAN610). Empty string for\
-      \ pure physical uplinks>\",\n    \"role\": \"<For Uplinks: 'None'. For VMkernel:\
-      \ 'Management' if management/vmk0 else 'None'. For Port Group: 'VM Traffic'\
-      \ or 'None'>\",\n    \"speed\": \"<Link speed if visible (e.g. 10000 Full, 1000\
-      \ Full), otherwise empty string>\"\n  }\n]\n\nCRITICAL TOPOLOGY INVARIANTS:\n\
-      \n1. HARD SWITCH BOUNDARIES (DO NOT MERGE SWITCHES):\n   - Every occurrence\
-      \ of 'Standard Switch: <Name>' or 'Distributed Switch: <Name>' defines a NEW,\
-      \ INDEPENDENT switch container.\n   - Strip OCR chevron prefixes (e.g. '>',\
-      \ 'v', 'V', '^', '`', '|', 'VStandard Switch:') to extract the clean switch\
-      \ name.\n   - IMMEDIATELY terminate assignment for the previous switch whenever\
-      \ a new switch header appears. Never bleed adapters, VMkernels, or port groups\
-      \ across switch boundaries.\n   - SPECIFIC BOUNDARY RULE: 'PR Spain Fuenmayor\
-      \ VLab' and 'vSwitch0' are TWO DISTINCT switches.\n     * 'PR Spain Fuenmayor\
-      \ VLab' contains 'No physical network adapters' and its local VM port groups.\n\
-      \     * 'vSwitch0' is a separate switch containing physical adapters 'vmnic4'\
-      \ and 'vmnic5', and 'vmk0' under 'Management Network'. NEVER merge vSwitch0\
-      \ into PR Spain Fuenmayor VLab!\n   - In Distributed Switches (vDS), normalize\
-      \ child uplink groups like '<Switch>-DVUplinks-<ID>' (e.g. 'dvSwitch0-DVUplinks-47',\
-      \ 'iDMZ-vdSwitch02-DVUplinks-95') to their root Distributed Switch name (e.g.\
-      \ 'dvSwitch0', 'iDMZ-vdSwitch02'). Never output an uplink group as a standalone\
-      \ switch container.\n\n2. VMKERNEL & PURPOSE COUPLING:\n   - The card title\
-      \ directly preceding 'VMkernel Ports (X)' or 'VLAN ID:' is the authoritative\
-      \ PURPOSE/NAME for that VMkernel interface (e.g. 'Management Network', 'iSCSI01',\
-      \ 'iSCSI02', 'vMotion', 'vSAN Network').\n   - NEVER set 'purpose' to generic\
-      \ type words like 'VMkernel', 'Port Group', 'Virtual Machines', or empty string\
-      \ for a VMkernel.\n   - You MUST merge the VMkernel interface and its purpose\
-      \ title into a SINGLE object:\n     {\"switch\": \"<CurrentSwitch>\", \"interface\"\
-      : \"vmkX\", \"purpose\": \"<CardTitle>\", \"type\": \"VMkernel\", \"ip\": \"\
-      <Token>\", \"role\": \"Management\" (if vmk0/management) else \"None\", \"speed\"\
-      : \"\"}.\n\n3. PURE VM PORT GROUPS & NOISE AVOIDANCE:\n   - Port groups displaying\
-      \ 'Virtual Machines (X)' (e.g. 'VM Network', 'OT Routable', 'OT_Routable2-Vlan_604',\
-      \ 'OT-Routable3-Vlan_605', 'iDMZ-VLAN610', 'iDMZ Servers') MUST be extracted\
-      \ as independent records:\n     {\"switch\": \"<CurrentSwitch>\", \"interface\"\
-      : \"\", \"purpose\": \"<PortGroupName>\", \"type\": \"Port Group\", \"ip\":\
-      \ \"\", \"role\": \"VM Traffic\", \"speed\": \"\"}.\n   - NEVER output the label\
-      \ 'Virtual Machines' itself as a purpose!\n   - DO NOT emit duplicate pure Port\
-      \ Groups if that name already belongs to a VMkernel on the same switch (e.g.\
-      \ do not emit an empty-interface 'iSCSI01' Port Group if 'vmk1' already uses\
-      \ 'iSCSI01').\n\n4. PHYSICAL UPLINK EXTRACTION & NOISE SUPPRESSION:\n   - Extract\
-      \ physical adapters (e.g. 'vmnic0', 'vmnic1', 'vmnic4') and link speeds (e.g.\
-      \ '10000 Full', '1000 Full') located under 'Physical Adapters' or within uplink\
-      \ containers.\n   - Strip leading status icons or error marks from interface\
-      \ names (e.g. 'x vmnic1' -> extract as 'vmnic1').\n   - Uplink slots marked\
-      \ with '(0 NIC Adapters)' (e.g. 'uplink3 (0 NIC Adapters)') indicate unpopulated\
-      \ slots. IGNORE them completely; NEVER emit records with interface: 'none'.\n\
-      \   - If a virtual switch explicitly states 'No physical network adapters',\
-      \ emit an entry with interface: 'No Uplink', type: 'Uplink', role: 'None'.\n\
-      \n5. STRICT OUTPUT:\n   - Return ONLY a valid JSON array of objects.\n   - Do\
-      \ NOT include markdown code fences, comments, or conversational text."
+    instructions: |
+      You are an expert VMware hypervisor network architect and topology data modeling specialist.
+      Parse the provided sanitized OCR text from VMware ESXi Standard Switches (vSS) and Distributed Switches (vDS).
+
+      Extract ALL observed network entities into a flat JSON array of objects. EVERY object MUST include the 'type' field:
+      [
+        {
+          "switch": "<Root Virtual Switch Name (e.g. vSwitch0, vSwitch01, vSwitch02, vSwitch1, dvSwitch0, iDMZ-vdSwitch02)>",
+          "interface": "<Interface name: physical adapter (e.g. vmnic0, vmnic4) or VMkernel (e.g. vmk0, vmk1). Empty string for pure VM Port Groups>",
+          "type": "<MANDATORY. Strictly one of: 'Uplink', 'VMkernel', 'Port Group'>",
+          "ip": "<Preserve exact IP token placeholder present in the text (e.g. <SAFE_IP_1> or {{IP_1}}), otherwise empty string>",
+          "purpose": "<Exact Port Group or Service Name (e.g. Management Network, VM Network, iSCSI01, iSCSI02, vMotion, vSAN Network). MUST BE EMPTY STRING for physical Uplinks!>",
+          "role": "<For Uplinks: 'None'. For VMkernel: 'Management' if management/vmk0 else 'None'. For Port Group: 'VM Traffic' or 'None'>",
+          "speed": "<Link speed if visible (e.g. 10000 Full, 1000 Full), otherwise empty string>"
+        }
+      ]
+
+      CRITICAL TOPOLOGY INVARIANTS:
+
+      1. UPLINKS (TYPE: 'Uplink'):
+         - Physical adapters (e.g. 'vmnic0', 'vmnic1', 'vmnic4', 'vmnic5') MUST ALWAYS have type: 'Uplink'.
+         - Uplinks NEVER have a Port Group / purpose! Set purpose: '' (empty string). NEVER assign 'Management Network' or other port group names to a physical vmnic!
+         - Strip disconnect markers like 'x vmnic1' -> extract as 'vmnic1'.
+         - Ignore unassigned slots like 'uplink3 (0 NIC Adapters)'. Never emit interface: 'none'.
+
+      2. VMKERNELS (TYPE: 'VMkernel'):
+         - Interfaces starting with 'vmk' (e.g. 'vmk0', 'vmk1', 'vmk2', 'vmk3') MUST have type: 'VMkernel'.
+         - The card title directly preceding 'VMkernel Ports (X)' or 'VLAN ID:' is its PURPOSE (e.g. 'Management Network', 'iSCSI01', 'iSCSI02', 'vMotion').
+         - Merge the VMkernel interface and its purpose into a SINGLE object:
+           {"switch": "...", "interface": "vmk0", "purpose": "Management Network", "type": "VMkernel", "ip": "<Token>", "role": "Management", "speed": ""}
+
+      3. PURE VM PORT GROUPS (TYPE: 'Port Group'):
+         - Port groups displaying 'Virtual Machines (X)' (e.g. 'VM Network', 'OT Routable', 'iDMZ-VLAN610') MUST have type: 'Port Group', interface: '', purpose: '<PortGroupName>'.
+         - NEVER output the label 'Virtual Machines' itself as a purpose.
+
+      4. SWITCH BOUNDARIES:
+         - Every occurrence of 'Standard Switch: <Name>' or 'Distributed Switch: <Name>' defines a NEW switch scope. Terminate previous switch immediately.
+         - 'PR Spain Fuenmayor VLab' has NO uplinks (interface: 'No Uplink', type: 'Uplink').
+         - 'vSwitch0' is a separate switch containing vmnic4, vmnic5, and vmk0. Do not merge them!
+
+      5. STRICT OUTPUT:
+         - Return ONLY a valid JSON array of objects. No markdown explanations.
     export_prompt: 'You are an expert infrastructure network engineer specializing
       in VMware ESXi.
 

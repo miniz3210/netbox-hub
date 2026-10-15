@@ -1661,28 +1661,43 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     if not sw_clean:
                         continue
 
-                    # Case-insensitive universal type normalization
-                    raw_type = str(item.get("type") or "").strip().lower()
-                    if raw_type == "uplink":
-                        norm_type = "Uplink"
-                    elif raw_type in ("vmkernel", "vmk"):
-                        norm_type = "VMkernel"
-                    else:
-                        norm_type = "Port Group"
-
                     raw_iface = str(item.get("interface") or item.get("port") or item.get("nic") or item.get("vmnic") or item.get("vmk") or "").strip()
                     clean_iface = re.sub(r"^[xX\-\*]\s*", "", raw_iface).strip()
                     if clean_iface.lower() in ("none", "null", "no physical adapters"):
-                        clean_iface = "No Uplink" if norm_type == "Uplink" else ""
+                        clean_iface = ""
 
-                    if norm_type == "Uplink" and not clean_iface and not item.get("purpose"):
-                        continue
+                    # Universal Dynamic Type Inference
+                    raw_type = str(item.get("type") or "").strip().lower()
+                    if not raw_type:
+                        # Infer type from interface prefix or uplink_role
+                        if clean_iface.lower().startswith("vmnic") or clean_iface.lower().startswith("uplink") or item.get("uplink_role"):
+                            norm_type = "Uplink"
+                        elif clean_iface.lower().startswith("vmk"):
+                            norm_type = "VMkernel"
+                        else:
+                            norm_type = "Port Group"
+                    else:
+                        if "uplink" in raw_type:
+                            norm_type = "Uplink"
+                        elif "vmkernel" in raw_type or "vmk" in raw_type:
+                            norm_type = "VMkernel"
+                        else:
+                            norm_type = "Port Group"
+
+                    if norm_type == "Uplink" and not clean_iface:
+                        clean_iface = "No Uplink"
 
                     raw_purpose = str(item.get("purpose") or item.get("name") or item.get("service") or item.get("portgroup") or item.get("port_group") or "").strip()
 
-                    # Dynamic noise check against Standards blacklist
-                    if _is_noise_token(raw_purpose, naming_rules, target_platform):
+                    # Uplinks must NEVER carry a port group / service purpose
+                    if norm_type == "Uplink":
                         raw_purpose = ""
+                    else:
+                        # Dynamic noise check against Standards blacklist
+                        if _is_noise_token(raw_purpose, naming_rules, target_platform):
+                            raw_purpose = ""
+
+                    raw_role = str(item.get("role") or item.get("uplink_role") or "None").strip()
 
                     clean_records.append({
                         "switch": sw_clean,
@@ -1690,7 +1705,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         "type": norm_type,
                         "ip": str(item.get("ip") or item.get("ipv4") or item.get("ip_address") or "").strip(),
                         "purpose": raw_purpose,
-                        "role": str(item.get("role") or "None").strip(),
+                        "role": raw_role,
                         "speed": str(item.get("speed") or "").strip(),
                     })
 
