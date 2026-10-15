@@ -1,24 +1,23 @@
 # NetBox Universal Library Hub
 
-[![Version](https://img.shields.io/badge/version-4.4.52-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.4.53-blue.svg)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)]()
 
 A Streamlit-based hub for managing NetBox IPAM, device naming conventions, and infrastructure data — with offline-first architecture and zero cloud leakage.
 
-## v4.4.52 — Pure Standards-Driven Rule Enforcement & Universal Case-Insensitive UI Routing
+## v4.4.53 — Eliminate Vault Over-Sanitization, Clean Deprecated Anchor Hack & Unify Single Topology Schema
 
 ### Changes
-* Bumped version to **4.4.52** across `config/constants.py`, `README.md`, and `ARCHITECTURE_SOP.md`.
-* **Case-Insensitive Type Normalization**: Python UI card routing now uses `.lower() == "uplink"` and `.lower() in ("vmkernel", "vmk")` so LLM outputs like "uplink", "Uplink", or "UPLINK" always route correctly.
-* **Standards-Driven Noise Filtering**: UI noise labels (e.g. "Virtual Machines", "Physical Adapters", "VMkernel Ports") are strictly filtered via `ui_noise_blacklist` in `data/naming_rules.yaml` — no hardcoded Python checks.
-* **Updated VMware ESXi Instructions**: Added explicit topology invariants in the YAML system prompt: hard switch boundaries (vSwitch0 ≠ PR Spain Fuenmayor VLab), VMkernel/purpose coupling, pure port group extraction rules, and unpopulated uplink slot suppression.
-* **Dynamic Deduplication**: If a VMkernel exists with purpose X on switch S, pure Port Groups with the same purpose X on switch S are automatically removed.
+* Bumped version to **4.4.53** across `config/constants.py`, `README.md`, and `ARCHITECTURE_SOP.md`.
+* **Vault Decommissioned SW/PG Tokenization**: Steps 10 and 11 in `core/vault.py` that replaced switch names and generic port group names with `<SAFE_SW_N>` / `<SAFE_PG_N>` tokens have been removed. Architectural labels remain in plaintext for correct LLM parsing.
+* **Removed STRUCTURAL_ANCHORS Hack**: The inverted anchor placeholder system (`STRUCTURAL_ANCHORS` / `anchor_placeholder_map`) in `ui/tabs/naming_tab.py` is deleted. OCR text now flows directly into `vault.sanitize()` after IP dot-repair.
+* **Unified Topology Schema**: `data/naming_rules.yaml` now uses a single authoritative schema (`switch`, `interface`, `type`, `ip`, `purpose`, `role`, `speed`) for both `instructions` and `export_prompt` under the VMware ESXi preset, eliminating contradictory legacy keys (`parent`, `uplink_role`, `slot`).
 
 ### Bug Fixes
-* **LLM casing mismatch**: Records with lowercase/mixed-case `type` fields from LLM responses are now correctly routed regardless of casing.
-* **Noise label pollution**: Generic UI labels like "Virtual Machines (X)" no longer leak into Port Group cards.
-* **Switch boundary bleeding**: Distinct switches sharing similar names are now strictly separated per the invariants in `naming_rules.yaml`.
+* **No more empty LLM responses**: Removing the destructive PG tokenization stops the vault from replacing generic title-case phrases like "Management Network" or "Physical Adapters" with incomprehensible `<SAFE_PG_N>` tokens.
+* **No leaked anchor placeholders**: `__ANCHOR_N__` tokens no longer appear in the LLM prompt or UI output.
+* **No duplicate Port Group inflation**: Pure port groups sharing names with VMkernel ports on the same switch are now correctly deduplicated.
 
 ## v4.4.47 — Pure Standards-Driven AI Extraction, Case-Insensitive Key Mapping & Direct Diagnostic Reporting
 

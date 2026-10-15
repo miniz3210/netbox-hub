@@ -512,43 +512,11 @@ class SanitizerVault:
                 processed = pat.sub(hostname_matches[orig], processed)
                 used_tokens.append((orig, hostname_matches[orig]))
 
-        # 10. Custom switch container names — tokenise topology headers to prevent
-        #     real site/building names leaking to external LLMs.
-        sw_matches: Dict[str, str] = {}
-        for m in _SWITCH_NAME_RE.finditer(processed):
-            sw_name = m.group(0).strip()
-            if not sw_name or len(sw_name) < 3:
-                continue
-            start, end = m.span()
-            surrounding = processed[max(0, start - 10): end + 10]
-            if "<SAFE_" in surrounding:
-                continue
-            if sw_name not in sw_matches:
-                tok = self._get_or_create_token(sw_name, "SW", session_id)
-                sw_matches[sw_name] = tok
-        for orig in sorted(sw_matches, key=len, reverse=True):
-            processed = processed.replace(orig, sw_matches[orig], 1)
-            used_tokens.append((orig, sw_matches[orig]))
+        # 10 & 11 (SW & PG tokenization) are bypassed to preserve hypervisor
+        # topology invariants. Architectural labels, port group names, and switch
+        # structural keywords are non-sensitive network schema primitives and must
+        # remain in plaintext for correct LLM parsing.
 
-        # 11. Port group / service names — tokenise network service labels.
-        pg_matches: Dict[str, str] = {}
-        for m in _PG_NAME_RE.finditer(processed):
-            pg_name = m.group(0).strip()
-            if not pg_name or len(pg_name) < 2:
-                continue
-            start, end = m.span()
-            surrounding = processed[max(0, start - 10): end + 10]
-            if "<SAFE_" in surrounding:
-                continue
-            if pg_name not in pg_matches:
-                tok = self._get_or_create_token(pg_name, "PG", session_id)
-                pg_matches[pg_name] = tok
-        for orig in sorted(pg_matches, key=len, reverse=True):
-            processed = processed.replace(orig, pg_matches[orig], 1)
-            used_tokens.append((orig, pg_matches[orig]))
-
-        # Deterministic session token from all tokens consumed in this pass.
-        # Uses SHA-256 (stable across processes) instead of Python's randomised hash().
         if session_id is None:
             token_names = tuple(sorted(t[1] for t in used_tokens))
             session_id = (

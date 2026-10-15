@@ -1579,7 +1579,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 except Exception:
                     cleaned_ocr = combined_raw_text
 
-                # Step 2.1: Fix OCR IP typo where dots are dropped (e.g. 192.16840.166 -> 192.168.40.166)
+                # 1. Pre-clean OCR typo where dots are dropped in IP addresses
                 def _repair_merged_octet(m):
                     first, middle, last = m.group(1), m.group(2), m.group(3)
                     for i in range(1, len(middle)):
@@ -1592,47 +1592,9 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 _OCR_IP_REPAIR = re.compile(r"\b(\d{1,3})\.(\d{4,5})\.(\d{1,3})\b")
                 cleaned_ocr = _OCR_IP_REPAIR.sub(_repair_merged_octet, cleaned_ocr or combined_raw_text)
 
-                # Step 2.2: Preserve structural hypervisor anchors before vault sanitization.
-                # The vault's PG matcher (_PG_NAME_RE) greedily rewrites generic title-case
-                # phrases like "Management Network", "Physical Adapters", "VMkernel Ports",
-                # and the word "Switch" inside switch headers — collapsing the topology into
-                # incomprehensible <SAFE_PG_N> tokens and causing empty LLM responses ([]).
-                # Reserve every structural anchor by temporarily swapping it for a unique
-                # placeholder that the vault cannot match, then restore after sanitization.
-                STRUCTURAL_ANCHORS = [
-                    "Standard Switch", "Distributed Switch", "Physical Adapters",
-                    "VMkernel Ports", "Virtual Machines", "No physical network adapters",
-                    "No associated port groups", "VLAN ID", "ADD NETWORKING",
-                    "MANAGE PHYSICAL ADAPTERS", "vSwitch", "dvSwitch",
-                    "vmnic", "vmk", "ntnx-internal", "OnbaseBubbleNet",
-                    "vSwitchNutanix",
-                ]
-                anchor_placeholder_map: dict = {}
-                if cleaned_ocr:
-                    _anchor_idx = [0]
-                    def _reserve_anchor(m: re.Match) -> str:
-                        key = m.group(0)
-                        if key not in anchor_placeholder_map:
-                            _anchor_idx[0] += 1
-                            anchor_placeholder_map[key] = f"__ANCHOR_{_anchor_idx[0]}__"
-                        return anchor_placeholder_map[key]
-                    for anc in sorted(STRUCTURAL_ANCHORS, key=len, reverse=True):
-                        cleaned_ocr = re.sub(re.escape(anc), _reserve_anchor, cleaned_ocr, flags=re.IGNORECASE)
-                    cleaned_ocr = re.sub(
-                        r"\b([A-Za-z]+(?:Switch|Adapters|Ports|Machines|Networking|Adapter))\b",
-                        _reserve_anchor,
-                        cleaned_ocr,
-                    )
-
+                # 2. Local Vault sanitization (IPs, MACs, Serials, Domains, Hostnames only)
                 sanitized_combined, session_id = vault.sanitize(cleaned_ocr or combined_raw_text)
                 st.session_state["latest_vault_session"] = session_id
-
-                # Restore structural anchors so the LLM sees the topology headers intact.
-                if anchor_placeholder_map:
-                    sanitized_combined = sanitized_combined or ""
-                    for ph, anc in sorted(anchor_placeholder_map.items(), key=lambda x: -len(x[0])):
-                        sanitized_combined = sanitized_combined.replace(ph, anc)
-                    st.session_state["vault_anchor_reservations"] = anchor_placeholder_map
 
                 target_platform = st.session_state.get("naming_target_platform", "VMware ESXi")
                 tpp = naming_rules.get("topology_parsing_presets") or {}
