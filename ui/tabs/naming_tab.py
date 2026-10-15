@@ -1579,6 +1579,19 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 except Exception:
                     cleaned_ocr = combined_raw_text
 
+                # Step 2.1: Fix OCR IP typo where dots are dropped (e.g. 192.16840.166 -> 192.168.40.166)
+                def _repair_merged_octet(m):
+                    first, middle, last = m.group(1), m.group(2), m.group(3)
+                    for i in range(1, len(middle)):
+                        a, b = middle[:i], middle[i:]
+                        if 1 <= len(a) <= 3 and 1 <= len(b) <= 3:
+                            if int(a) <= 255 and int(b) <= 255:
+                                return f"{first}.{a}.{b}.{last}"
+                    mid = len(middle) // 2
+                    return f"{first}.{middle[:mid]}.{middle[mid:]}.{last}"
+                _OCR_IP_REPAIR = re.compile(r"\b(\d{1,3})\.(\d{4,5})\.(\d{1,3})\b")
+                cleaned_ocr = _OCR_IP_REPAIR.sub(_repair_merged_octet, cleaned_ocr or combined_raw_text)
+
                 sanitized_combined, session_id = vault.sanitize(cleaned_ocr or combined_raw_text)
                 st.session_state["latest_vault_session"] = session_id
 
@@ -1606,10 +1619,23 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
 
                 if session_id and raw_items:
                     try:
-                        raw_items = [
-                            {k: vault.restore(str(v), session_id=session_id) for k, v in item.items()}
-                            for item in raw_items if isinstance(item, dict)
-                        ]
+                        restored_items = []
+                        for item in raw_items:
+                            if not isinstance(item, dict):
+                                continue
+                            restored_item = {}
+                            for k, v in item.items():
+                                val_str = str(v)
+                                if hasattr(vault, "_session_store") or hasattr(vault, "restore"):
+                                    restored_val = vault.restore(val_str, session_id=session_id)
+                                    if "{{" in restored_val:
+                                        m_alt = re.sub(r"\{\{IP_(\d+)\}\}", r"<SAFE_IP_\1>", restored_val)
+                                        restored_val = vault.restore(m_alt, session_id=session_id)
+                                    restored_item[k] = restored_val
+                                else:
+                                    restored_item[k] = val_str
+                            restored_items.append(restored_item)
+                        raw_items = restored_items
                     except Exception as e:
                         logger.warning("Vault restore failed: %s", e)
 
@@ -1633,9 +1659,13 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     )
                     sw_clean = _normalize_switch_name(str(raw_sw).strip())
                     if sw_clean:
+                        raw_iface = str(item.get("interface") or item.get("port") or item.get("nic") or item.get("vmnic") or item.get("vmk") or "").strip()
+                        clean_iface = re.sub(r"^[xX\-\*]\s*", "", raw_iface).strip()
+                        if clean_iface.lower() in ("none", "null", "no physical adapters"):
+                            clean_iface = "No Uplink" if item.get("type") == "Uplink" else ""
                         clean_records.append({
                             "switch": sw_clean,
-                            "interface": str(item.get("interface") or item.get("port") or item.get("nic") or item.get("vmnic") or item.get("vmk") or "").strip(),
+                            "interface": clean_iface,
                             "type": str(item.get("type") or "Port Group").strip(),
                             "ip": str(item.get("ip") or item.get("ipv4") or item.get("ip_address") or "").strip(),
                             "purpose": str(item.get("purpose") or item.get("name") or item.get("service") or item.get("portgroup") or item.get("port_group") or "").strip(),

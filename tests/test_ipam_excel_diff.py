@@ -544,8 +544,8 @@ class TestParseFileBytes:
 # ============================================================================
 
 class TestVersion:
-    def test_app_version_is_4448(self):
-        assert APP_VERSION.startswith("4.4.48"), f"Expected '4.4.48', got {APP_VERSION!r}"
+    def test_app_version_is_4449(self):
+        assert APP_VERSION.startswith("4.4.49"), f"Expected '4.4.49', got {APP_VERSION!r}"
 
     def test_version_no_v_prefix(self):
         assert not APP_VERSION.startswith("v"), f"Version should not have 'v' prefix: {APP_VERSION!r}"
