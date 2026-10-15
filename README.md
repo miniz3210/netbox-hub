@@ -1,10 +1,24 @@
 # NetBox Universal Library Hub
 
-[![Version](https://img.shields.io/badge/version-4.4.46-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.4.47-blue.svg)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)]()
 
 A Streamlit-based hub for managing NetBox IPAM, device naming conventions, and infrastructure data — with offline-first architecture and zero cloud leakage.
+
+## v4.4.47 — Pure Standards-Driven AI Extraction, Case-Insensitive Key Mapping & Direct Diagnostic Reporting
+
+### Changes
+* Bumped version to **4.4.47** across `config/constants.py`, `README.md`, and `ARCHITECTURE_SOP.md`.
+* **Removed DEFAULT_VMWARE_SYSTEM_PROMPT fallback**: Hardcoded system prompt constant fully deleted from `ui/tabs/naming_tab.py`. System prompts now come exclusively from `data/naming_rules.yaml` (`topology_parsing_presets[platform]["instructions"]`). If empty, the pipeline aborts immediately with an explicit error.
+* **Case-Insensitive Key Normalization**: All LLM response dictionary keys are normalized to lowercase before field lookup (`{"Switch": ...}` → `{"switch": ...}`). Added fallback aliases for `virtual_switch`, `vswitch`, `port`, `nic`, `vmnic`, `vmk`, `ipv4`, `ip_address`, `name`, `service`, `portgroup`, `port_group`.
+* **Direct Diagnostic Expander**: When parsing fails or returns no records, an auto-expanded expander shows the raw AI response and sanitized OCR payload for immediate debugging.
+* **OCR-empty abort**: When OCR extracts no text, the pipeline now calls `st.error()` instead of proceeding.
+
+### Bug Fixes
+* **Hardcoded fallback removed**: Eliminates bypass of Standards-driven prompts that could cause inconsistent behavior.
+* **LLM key casing mismatch**: Records with uppercase/mixed-case keys from LLM responses are no longer silently dropped.
+* **Diagnostic visibility**: Failed extractions now surface raw model output and sanitized input directly in the UI.
 
 ## v4.4.46 — Fallback System Prompt, Resilient JSON Parsing & AI Raw Response Inspector
 

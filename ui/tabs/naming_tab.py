@@ -611,33 +611,8 @@ def _interface_ref_examples(intf_code):
     return _interface_ref_examples_cached(intf_code, _ts)
 
 
-# ---------------------------------------------------------------------------
-# Fallback system prompt — ensures structured JSON even when SSM cache is stale
-# ---------------------------------------------------------------------------
-DEFAULT_VMWARE_SYSTEM_PROMPT = """You are an expert VMware and infrastructure network data modeling specialist.
-Analyze the provided sanitized OCR text from hypervisor topologies (Standard Switches vSS and Distributed Switches vDS).
 
-Extract all observed network entities into a flat JSON array of objects using strictly lowercase keys:
-[
-  {
-    "switch": "<Root Virtual Switch Name (e.g. vSwitch0, dvSwitch0, iDMZ-vdSwitch02). Strip any child uplink group suffix like -DvUplinks-xx>",
-    "interface": "<Interface name if applicable: physical adapter (e.g. vmnic0) or VMkernel (e.g. vmk0). Empty string for pure VM Port Groups>",
-    "type": "<One of: 'Uplink', 'VMkernel', 'Port Group'>",
-    "ip": "<IP token placeholder if present (e.g. {{IP_1}}), otherwise empty string>",
-    "purpose": "<Exact name of the Port Group or Service (e.g. Management Network, VM Network, iSCSI, OT Routable, vMotion Network). Empty string for pure physical uplinks>",
-    "role": "<For Uplinks: 'Active Uplink', 'Standby Uplink', or 'None'. For VMkernel: 'Management' if management/vmk0 else 'None'. For Port Group: 'VM Traffic' or 'None'>",
-    "speed": "<Link speed if visible, e.g. 10000 Full, otherwise empty string>"
-  }
-]
 
-CRITICAL EXTRACTION RULES:
-1. CONTAINER NORMALIZATION: In Distributed Switches (vDS), containers named like dvSwitch0-DvUplinks-47 or iDMZ-vdSwitch02-DVUplinks-95 are child uplink groups. Normalize their switch to the root Distributed Switch name (e.g. dvSwitch0, iDMZ-vdSwitch02). Never output an uplink group as a separate switch.
-2. NO PHYSICAL ADAPTERS: If a virtual switch explicitly states 'No physical network adapters' or has 0 physical uplinks, create an entry with interface: 'No Uplink', type: 'Uplink', role: 'None'.
-3. OCR TYPO RESILIENCE:
-   - Recognize that 'ymk0' or 'mk2' are VMkernel interfaces ('vmk0', 'vmk2').
-   - Recognize that 'ymnic0' or 'ymnk3' are physical adapters ('vmnic0', 'vmnic3').
-   - Ignore UI action noise such as 'MANAGE PHYSICAL ADAPTERS', 'ADD NETWORKING', 'EDIT', 'REFRESH'.
-4. STRICT JSON OUTPUT: Return ONLY a valid JSON array of objects. No markdown explanations or fences."""
 
 
 def _safe_parse_json_array(text: str) -> List[Dict[str, Any]]:
@@ -1587,16 +1562,16 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 all_raw_tokens.extend(toks)
                 cumulative_y += img_h
 
-            progress_bar.progress(0.8, text="Sanitizing data locally and invoking AI parser...")
             combined_raw_text = "\n\n".join(combined_raw_lines).strip()
             st.session_state["latest_ocr_raw_text"] = combined_raw_text
 
             true_ocr_content = re.sub(r"(?m)^---\s*Screenshot\s*\d+.*---\s*$", "", combined_raw_text).strip()
 
             if not true_ocr_content:
-                st.warning("No text detected by local OCR. Ensure screenshot contains legible topology labels.")
+                st.error("No valid text detected by OCR. Verify screenshot clarity and labels.")
             else:
-                # Apply local autocorrection
+                progress_bar.progress(0.8, text="Sanitizing data locally and invoking AI parser...")
+
                 try:
                     from utils.formatters import apply_auto_corrections
                     cleaned_ocr = apply_auto_corrections(combined_raw_text, "ocr_cleaning")
@@ -1604,25 +1579,32 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 except Exception:
                     cleaned_ocr = combined_raw_text
 
-                # Local Vault sanitization
                 sanitized_combined, session_id = vault.sanitize(cleaned_ocr or combined_raw_text)
                 st.session_state["latest_vault_session"] = session_id
 
-                # 100% Standards-driven AI System Prompt from Section 3
                 target_platform = st.session_state.get("naming_target_platform", "VMware ESXi")
                 tpp = naming_rules.get("topology_parsing_presets") or {}
                 plat_cfg = tpp.get(target_platform, {}) if isinstance(tpp.get(target_platform), dict) else {}
-                system_prompt = plat_cfg.get("instructions", "").strip() or DEFAULT_VMWARE_SYSTEM_PROMPT
+                system_prompt = plat_cfg.get("instructions", "").strip()
 
-                user_prompt = f"Parse this sanitized topology text:\n\n{sanitized_combined}"
-                response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt, max_tokens=8192)
+                if not system_prompt:
+                    st.error(f"Missing AI Parsing Rules for platform '{target_platform}' in Standards Tab. Please configure instructions first.")
+                    return
 
-                st.session_state["latest_ai_raw_response"] = response or ""
+                user_prompt = f"Parse this sanitized topology text into JSON entities array:\n\n{sanitized_combined}"
+                response = ""
+                ai_error_msg = ""
+                try:
+                    response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt, max_tokens=8192)
+                except Exception as ai_exc:
+                    ai_error_msg = str(ai_exc)
+                    logger.error("call_ai failed: %s", ai_error_msg)
 
-                raw_items = _safe_parse_json_array(response)
+                st.session_state["latest_ai_raw_response"] = response or (f"ERROR: {ai_error_msg}" if ai_error_msg else "")
 
-                # Local Vault de-tokenization
-                if session_id:
+                raw_items = _safe_parse_json_array(response) if response else []
+
+                if session_id and raw_items:
                     try:
                         raw_items = [
                             {k: vault.restore(str(v), session_id=session_id) for k, v in item.items()}
@@ -1632,20 +1614,34 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         logger.warning("Vault restore failed: %s", e)
 
                 clean_records = []
-                for item in raw_items:
-                    if isinstance(item, dict) and not any(k in item for k in ("finish_reason", "index", "message", "role")):
-                        raw_sw = item.get("switch") or item.get("parent") or item.get("switch_name") or item.get("container") or ""
-                        sw_clean = _normalize_switch_name(str(raw_sw).strip())
-                        if sw_clean:
-                            clean_records.append({
-                                "switch": sw_clean,
-                                "interface": str(item.get("interface") or item.get("port") or item.get("nic") or "").strip(),
-                                "type": str(item.get("type") or "Port Group").strip(),
-                                "ip": str(item.get("ip") or item.get("ipv4") or "").strip(),
-                                "purpose": str(item.get("purpose") or item.get("name") or item.get("service") or "").strip(),
-                                "role": str(item.get("role") or "None").strip(),
-                                "speed": str(item.get("speed") or "").strip(),
-                            })
+                for raw_item in raw_items:
+                    if not isinstance(raw_item, dict):
+                        continue
+                    if any(k in raw_item for k in ("finish_reason", "index", "message", "role")):
+                        continue
+
+                    item = {str(k).strip().lower(): v for k, v in raw_item.items()}
+
+                    raw_sw = (
+                        item.get("switch")
+                        or item.get("parent")
+                        or item.get("switch_name")
+                        or item.get("virtual_switch")
+                        or item.get("vswitch")
+                        or item.get("container")
+                        or ""
+                    )
+                    sw_clean = _normalize_switch_name(str(raw_sw).strip())
+                    if sw_clean:
+                        clean_records.append({
+                            "switch": sw_clean,
+                            "interface": str(item.get("interface") or item.get("port") or item.get("nic") or item.get("vmnic") or item.get("vmk") or "").strip(),
+                            "type": str(item.get("type") or "Port Group").strip(),
+                            "ip": str(item.get("ip") or item.get("ipv4") or item.get("ip_address") or "").strip(),
+                            "purpose": str(item.get("purpose") or item.get("name") or item.get("service") or item.get("portgroup") or item.get("port_group") or "").strip(),
+                            "role": str(item.get("role") or "None").strip(),
+                            "speed": str(item.get("speed") or "").strip(),
+                        })
 
                 if clean_records:
                     st.session_state["topology_records"] = clean_records
@@ -1655,7 +1651,14 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     st.toast(f"Successfully parsed {len(clean_records)} records across {len(discovered_sw)} switches!", icon="🚀")
                     st.rerun()
                 else:
-                    st.warning("No structured topology records could be extracted. Check screenshot clarity.")
+                    st.warning("No structured topology records could be extracted from AI response.")
+                    with st.expander("Diagnostic Details: Raw AI Response & Sanitized OCR", expanded=True):
+                        if ai_error_msg:
+                            st.error(f"AI Call Exception: {ai_error_msg}")
+                        st.subheader("Raw AI Response Received:")
+                        st.text_area("Model Output", value=response or "(Empty response)", height=220, key="diag_ai_raw_out")
+                        st.subheader("Sanitized OCR Input Sent to Model:")
+                        st.text_area("Sanitized Payload", value=sanitized_combined, height=220, key="diag_sanitized_payload")
 
         except Exception as e:
             import traceback
@@ -2035,7 +2038,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         _plat_key = st.session_state.get("naming_target_platform", "VMware ESXi")
         _active_hyp_presets = _hyp_presets_map.get(_plat_key, [])
 
-        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.4.46.\n"]
+        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.4.47.\n"]
         for _gparent in sorted(_groups.keys(), key=_natsort_key):
             _out_lines.append(f"=== {_gparent} ===")
             _sw_uplinks = [r for r in _groups[_gparent] if r.get("type") == "Uplink" and r.get("interface")]

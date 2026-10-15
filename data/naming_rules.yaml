@@ -1,4 +1,8 @@
 {
+  "metadata": {
+    "version": "4.4.47",
+    "last_updated": "2026-10-15"
+  },
   "branch_switch": "SW<country><state><site><zone><seq>-<stack_id>",
   "branch_stack": "VS<country><state><site><seq>-<stack_id>",
   "branch_ap": "WAP<country><state><site><seq>",
@@ -250,7 +254,11 @@
     }
   },
   "naming_patterns": {
-    "branch_switch": "SW<country><state><site><zone><seq>-<stack_id>",
+  "metadata": {
+    "version": "4.4.47",
+    "last_updated": "2026-10-15"
+  },
+  "branch_switch": "SW<country><state><site><zone><seq>-<stack_id>",
     "branch_stack": "VS<country><state><site><seq>-<stack_id>",
     "branch_ap": "WAP<country><state><site><seq>",
     "branch_firewall": "FW<country><state><site><vendor><seq>",
