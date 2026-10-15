@@ -395,6 +395,46 @@ DEFAULT_VLAN_DESCRIPTION_MAPPINGS = {
 
 LEGACY_PATTERN_KEYS = list(DEFAULT_NAMING_PATTERNS.keys())
 
+# Factory-default hypervisor description templates.  These live here so that
+# _normalize_rules can deep-copy them when the on-disk file is missing or empty,
+# and so the Standards tab can import them as a single source of truth.
+DEFAULT_HYPERVISOR_PRESETS = {
+    "VMware ESXi": [
+        {
+            "code": "Switch_Teaming",
+            "label": "Switch Teaming Header",
+            "pattern": "<v_switch> (<teaming>)",
+        },
+        {
+            "code": "Uplink",
+            "label": "Physical Uplink",
+            "pattern": "<vmnic> - <v_switch> <purpose> <uplink_role>",
+        },
+        {
+            "code": "PortGroup",
+            "label": "Port Group",
+            "pattern": "<purpose> (<v_switch>)",
+        },
+        {
+            "code": "VMkernel",
+            "label": "VMkernel",
+            "pattern": "<purpose> (<v_switch>)",
+        },
+    ],
+    "Proxmox VE": [
+        {
+            "code": "Bond",
+            "label": "Linux Bond",
+            "pattern": "<bond> (<slaves> Active)",
+        },
+        {
+            "code": "Bridge",
+            "label": "Linux Bridge",
+            "pattern": "<bridge> - <purpose>",
+        },
+    ],
+}
+
 # Canonical variable key consolidation: legacy/pre-normalization keys map onto their
 # canonical snake_case counterpart so templates referencing old spellings still resolve.
 VARIABLE_ALIASES = {
@@ -783,9 +823,13 @@ def _normalize_rules(raw: dict) -> dict:
         k: (v.replace("<Domain>", "<domain>").replace("<Role>", "<role>").replace("<host_seq>", "<seq>") if isinstance(v, str) else v)
         for k, v in patterns.items()
     }
-    for key in LEGACY_PATTERN_KEYS:
-        if key not in patterns:
-            patterns[key] = DEFAULT_NAMING_PATTERNS.get(key, "")
+    # Do NOT auto-repopulate LEGACY_PATTERN_KEYS — only patterns explicitly
+    # present in the source rules survive normalization.  Stale keys are left
+    # missing so the UI knows they have been retired rather than silently
+    # re-injecting obsolete variables.
+    # for key in LEGACY_PATTERN_KEYS:
+    #     if key not in patterns:
+    #         patterns[key] = DEFAULT_NAMING_PATTERNS.get(key, "")
 
     merged = dict(patterns)
 
@@ -890,8 +934,15 @@ def _normalize_rules(raw: dict) -> dict:
         _raw_hyp = _norm_hyp
     if isinstance(_raw_hyp, dict) and _raw_hyp:
         merged["hypervisor_presets"] = _raw_hyp
+        # Ensure every platform in factory defaults has at least a shallow copy;
+        # missing platforms are seeded so Zone 3 never silently falls back to
+        # hardcoded esxi_* pattern keys.
+        _factory = DEFAULT_HYPERVISOR_PRESETS
+        for _plat, _default_items in _factory.items():
+            if _plat not in merged["hypervisor_presets"]:
+                merged["hypervisor_presets"][_plat] = copy.deepcopy(_default_items)
     else:
-        merged["hypervisor_presets"] = {}
+        merged["hypervisor_presets"] = copy.deepcopy(DEFAULT_HYPERVISOR_PRESETS)
 
     # Platform token presets (e.g. vmnic/vSwitch prefixes per hypervisor)
     _raw_pt = raw.get("platform_tokens")

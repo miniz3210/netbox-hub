@@ -22,7 +22,7 @@
   "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
   "vlan_name_pattern": "<role>",
   "metadata": {
-    "version": "4.5.1",
+    "version": "4.5.2",
     "last_updated": "2026-10-15"
   },
   "naming_patterns": {
@@ -48,10 +48,10 @@
     "esxi_vmkernel": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
     "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
     "vlan_name_pattern": "<role>",
-    "metadata": {
-      "version": "4.5.1",
-      "last_updated": "2026-10-15"
-    }
+      "metadata": {
+        "version": "4.5.2",
+        "last_updated": "2026-10-15"
+      }
   },
   "topology_parsing_presets": {
     "VMware ESXi": {
@@ -453,5 +453,41 @@
       "optional": true,
       "scope": "hypervisor"
     }
+  },
+  "hypervisor_presets": {
+    "VMware ESXi": [
+      {
+        "code": "Switch_Teaming",
+        "label": "Switch Teaming Header",
+        "pattern": "<v_switch> (<teaming>)"
+      },
+      {
+        "code": "Uplink",
+        "label": "Physical Uplink",
+        "pattern": "<vmnic> - <v_switch> <purpose> <uplink_role>"
+      },
+      {
+        "code": "PortGroup",
+        "label": "Port Group",
+        "pattern": "<purpose> (<v_switch>)"
+      },
+      {
+        "code": "VMkernel",
+        "label": "VMkernel",
+        "pattern": "<purpose> (<v_switch>)"
+      }
+    ],
+    "Proxmox VE": [
+      {
+        "code": "Bond",
+        "label": "Linux Bond",
+        "pattern": "<bond> (<slaves> Active)"
+      },
+      {
+        "code": "Bridge",
+        "label": "Linux Bridge",
+        "pattern": "<bridge> - <purpose>"
+      }
+    ]
   }
 }

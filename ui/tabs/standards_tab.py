@@ -18,6 +18,7 @@ from config.naming_rules import (
     DEFAULT_RULES, DEFAULT_VLAN_PRESETS, DEFAULT_VLAN_DESCRIPTION_MAPPINGS,
     get_ipam_role_mappings, DEFAULT_IPAM_ROLE_MAPPINGS,
     get_hardware_baseline_standards, DEFAULT_HARDWARE_BASELINE_STANDARDS,
+    DEFAULT_HYPERVISOR_PRESETS,
 )
 from core.naming_engine import generate_naming_pattern, generate_autocorrect_rule
 from core.session_manager import SessionStateManager as SSM
@@ -874,49 +875,6 @@ def _save_vlan_desc_mappings(rules: dict, section: str = "vlan_desc_mappings", s
     st.rerun()
 
 
-DEFAULT_HYPERVISOR_PRESETS = {
-    "VMware ESXi": [
-        {
-            "code": "Uplink",
-            "label": "Physical Uplink",
-            "pattern": "<vmnic> - <v_switch> <purpose> <uplink_role>",
-        },
-        {
-            "code": "Uplink_Simple",
-            "label": "Physical Uplink (No Purpose)",
-            "pattern": "<vmnic> - <v_switch> <uplink_role>",
-        },
-        {
-            "code": "PortGroup",
-            "label": "Port Group",
-            "pattern": "<v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
-        },
-        {
-            "code": "VMkernel",
-            "label": "VMkernel",
-            "pattern": "<purpose> (<v_switch>)",
-        },
-        {
-            "code": "PG_Header",
-            "label": "PortGroup Interface Name",
-            "pattern": "PG-<port_group>",
-        },
-    ],
-    "Proxmox VE": [
-        {
-            "code": "Bond",
-            "label": "Linux Bond",
-            "pattern": "<bond> (<slaves> Active)",
-        },
-        {
-            "code": "Bridge",
-            "label": "Linux Bridge",
-            "pattern": "<bridge> - <purpose>",
-        },
-    ],
-}
-
-
 def _render_spatial_anchors_redaction_editor(
     plat_parsing: dict,
     active_plat: str,
@@ -1282,10 +1240,16 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
         plat_parsing["aliases"] = {}
 
     default_fallback = DEFAULT_PARSING_PRESETS.get(active_plat, {})
-    if not plat_parsing.get("instructions"):
-        plat_parsing["instructions"] = default_fallback.get("instructions", "")
-    if not plat_parsing.get("export_prompt"):
-        plat_parsing["export_prompt"] = default_fallback.get("export_prompt", "")
+    # Only seed missing keys when the user has NOT explicitly saved a value
+    # (empty string is a valid intentional choice).  Check session-state flags
+    # written by save handlers to distinguish "first render" from "user cleared".
+    _seeded_key = f"_plat_parsing_seeded_{active_plat}"
+    if not st.session_state.get(_seeded_key, False):
+        if not plat_parsing.get("instructions") and default_fallback.get("instructions"):
+            plat_parsing["instructions"] = default_fallback["instructions"]
+        if not plat_parsing.get("export_prompt") and default_fallback.get("export_prompt"):
+            plat_parsing["export_prompt"] = default_fallback["export_prompt"]
+        st.session_state[_seeded_key] = True
 
     # ──────────────────────────────────────────────────────────────────────
     # Section 1: NetBox Description Templates
@@ -1515,6 +1479,42 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 st.rerun()
 
     # ──────────────────────────────────────────────────────────────────────
+    # Section 2.5: Relative Spatial Anchors & Local Privacy Redaction
+    # ──────────────────────────────────────────────────────────────────────
+    with st.expander("📐 2.5. Relative Spatial Anchors & Local Privacy Redaction", expanded=False):
+        _render_spatial_anchors_redaction_editor(plat_parsing, active_plat)
+        st.divider()
+        col_save_s25, col_reset_s25 = st.columns(2, vertical_alignment="center")
+        with col_save_s25:
+            if st.button("💾 Save & Apply Changes", key=f"btn_save_s25_{active_plat}", type="primary", width="stretch"):
+                parsing_presets[active_plat] = plat_parsing
+                rules["topology_parsing_presets"] = parsing_presets
+                save_naming_rules(rules, source=f"Save Section 2.5 for {active_plat}")
+                fresh = SSM.get_cached_naming_rules() or load_naming_rules()
+                rules.clear()
+                rules.update(fresh)
+                SSM.set_naming_rules(fresh.copy())
+                SSM.refresh_naming_rules()
+                st.session_state.pop(f"_plat_parsing_seeded_{active_plat}", None)
+                st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
+                st.toast(f"✅ Section 2.5 (Spatial Anchors) for '{active_plat}' saved & applied!", icon="💾")
+                st.rerun()
+        with col_reset_s25:
+            if st.button("🔄 Reset to Defaults", key=f"btn_reset_s25_{active_plat}", width="stretch"):
+                default_pars = DEFAULT_PARSING_PRESETS.get(active_plat, {})
+                if isinstance(default_pars, dict):
+                    default_sp = default_pars.get("spatial_anchors_and_redaction", {})
+                    if default_sp:
+                        plat_parsing["spatial_anchors_and_redaction"] = dict(default_sp)
+                parsing_presets[active_plat] = plat_parsing
+                rules["topology_parsing_presets"] = parsing_presets
+                save_naming_rules(rules, source=f"Reset Section 2.5 for {active_plat}")
+                SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
+                _clear_session_state_prefixes(f"spat_")
+                st.toast(f"✅ Section 2.5 reset to defaults for '{active_plat}'!", icon="🔄")
+                st.rerun()
+
+    # ──────────────────────────────────────────────────────────────────────
     # Section 2.6: UI Noise Blacklist (Dynamic Chip Filtering)
     # ──────────────────────────────────────────────────────────────────────
     with st.expander("🔇 2.6. UI Noise Blacklist", expanded=False):
@@ -1550,6 +1550,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 rules.update(fresh)
                 SSM.set_naming_rules(fresh.copy())
                 SSM.refresh_naming_rules()
+                st.session_state.pop(f"_plat_parsing_seeded_{active_plat}", None)
                 st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
                 st.toast(f"✅ Section 2.6 (Noise Blacklist) for '{active_plat}' saved & applied!", icon="💾")
                 st.rerun()
@@ -1562,41 +1563,6 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
                 _clear_session_state_prefixes(f"plat_noise_bl_{active_plat}")
                 st.toast(f"✅ Section 2.6 reset to defaults for '{active_plat}'!", icon="🔄")
-                st.rerun()
-
-    # ──────────────────────────────────────────────────────────────────────
-    # Section 2.5: Relative Spatial Anchors & Local Privacy Redaction
-    # ──────────────────────────────────────────────────────────────────────
-    with st.expander("📐 2.5. Relative Spatial Anchors & Local Privacy Redaction", expanded=False):
-        _render_spatial_anchors_redaction_editor(plat_parsing, active_plat)
-        st.divider()
-        col_save_s25, col_reset_s25 = st.columns(2, vertical_alignment="center")
-        with col_save_s25:
-            if st.button("💾 Save & Apply Changes", key=f"btn_save_s25_{active_plat}", type="primary", width="stretch"):
-                parsing_presets[active_plat] = plat_parsing
-                rules["topology_parsing_presets"] = parsing_presets
-                save_naming_rules(rules, source=f"Save Section 2.5 for {active_plat}")
-                fresh = SSM.get_cached_naming_rules() or load_naming_rules()
-                rules.clear()
-                rules.update(fresh)
-                SSM.set_naming_rules(fresh.copy())
-                SSM.refresh_naming_rules()
-                st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
-                st.toast(f"✅ Section 2.5 (Spatial Anchors) for '{active_plat}' saved & applied!", icon="💾")
-                st.rerun()
-        with col_reset_s25:
-            if st.button("🔄 Reset to Defaults", key=f"btn_reset_s25_{active_plat}", width="stretch"):
-                default_pars = DEFAULT_PARSING_PRESETS.get(active_plat, {})
-                if isinstance(default_pars, dict):
-                    default_sp = default_pars.get("spatial_anchors_and_redaction", {})
-                    if default_sp:
-                        plat_parsing["spatial_anchors_and_redaction"] = dict(default_sp)
-                parsing_presets[active_plat] = plat_parsing
-                rules["topology_parsing_presets"] = parsing_presets
-                save_naming_rules(rules, source=f"Reset Section 2.5 for {active_plat}")
-                SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
-                _clear_session_state_prefixes(f"spat_")
-                st.toast(f"✅ Section 2.5 reset to defaults for '{active_plat}'!", icon="🔄")
                 st.rerun()
 
     # ──────────────────────────────────────────────────────────────────────
@@ -1695,6 +1661,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 rules.update(fresh)
                 SSM.set_naming_rules(fresh.copy())
                 SSM.refresh_naming_rules()
+                st.session_state.pop(f"_plat_parsing_seeded_{active_plat}", None)
                 st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
                 st.toast(f"✅ Section 3 (AI Parsing Rules) for '{active_plat}' saved & applied!", icon="💾")
                 st.rerun()

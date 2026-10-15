@@ -1044,33 +1044,6 @@ def _clean_rendered_clause(rendered: str) -> str:
     return rendered.strip()
 
 
-def _select_best_template(row_dict: dict, preset_templates: list) -> str:
-    """Select template based strictly on token availability and penalty for missing required tokens."""
-    if not preset_templates:
-        return "<interface> - <parent> <purpose>"
-
-    present_keys = {k for k, v in row_dict.items() if str(v).strip()}
-    best_tpl = preset_templates[0].get("pattern", "<interface> - <parent> <purpose>")
-    max_score = -999.0
-
-    for item in preset_templates:
-        tpl = item.get("pattern", "")
-        tpl_tokens = list(dict.fromkeys(re.findall(r"<([a-zA-Z0-9_]+)>", tpl)))
-        if not tpl_tokens:
-            continue
-
-        matched = sum(1 for t in tpl_tokens if t in present_keys)
-        missing = len(tpl_tokens) - matched
-
-        score = (matched * 20.0) - (missing * 50.0)
-
-        if score > max_score:
-            max_score = score
-            best_tpl = tpl
-
-    return best_tpl
-
-
 def render_hypervisor_edit_mode_ui(pattern_key: str, current_preset: dict, platform: str, naming_rules: dict):
     """Edit mode UI for hypervisor presets, syncing pattern back to hypervisor_presets and persisting."""
     from config.naming_rules import save_naming_rules as _save_naming_rules
@@ -2082,7 +2055,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                          "type": new_svc_type,
                                          "ip": new_svc_ip,
                                          "purpose": effective_name,
-                                         "role": "Management" if "mgmt" in effective_name.lower() or "management" in effective_name.lower() else "None",
+                                          "role": default_connected_role if new_svc_type == "VMkernel" and not _matched_iface else "None",
                                          "speed": ""
                                      })
                                      # Sync corrected name back to session state so it replaces the old spelling
@@ -2147,7 +2120,30 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         _plat_key = st.session_state.get("naming_target_platform", "VMware ESXi")
         _active_hyp_presets = _hyp_presets_map.get(_plat_key, [])
 
-        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.4.47.\n"]
+        if not _active_hyp_presets:
+            st.error(
+                f"❌ Missing template definitions for platform '{_plat_key}' in Standards Tab "
+                f"(Hypervisor > Description Templates). Please configure templates there before generating output."
+            )
+            st.stop()
+
+        _required_codes = {"Switch_Teaming", "Uplink", "PortGroup", "VMkernel"}
+        _available_codes = {
+            p.get("code", "").strip()
+            for p in _active_hyp_presets
+            if not p.get("hidden", False)
+        }
+        _missing_codes = _required_codes - _available_codes
+        if _missing_codes:
+            st.error(
+                f"❌ Missing required template codes for platform '{_plat_key}': "
+                f"{', '.join(sorted(_missing_codes))}. "
+                f"Configure all four templates (Switch_Teaming, Uplink, PortGroup, VMkernel) "
+                f"in the Standards Tab under Hypervisor > Description Templates, then retry."
+            )
+            st.stop()
+
+        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.5.2.\n"]
         for _gparent in sorted(_groups.keys(), key=_natsort_key):
             _out_lines.append(f"=== {_gparent} ===")
             _sw_uplinks = [r for r in _groups[_gparent] if r.get("type") == "Uplink" and r.get("interface")]
@@ -2163,16 +2159,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 if _ptpl.get("code") == "Switch_Teaming" and not _ptpl.get("hidden", False):
                     _switch_teaming_tpl = _ptpl.get("pattern", "")
                     break
-            if not _switch_teaming_tpl:
-                # Fallback: find template with <teaming> but no <purpose>
-                for _ptpl in _active_hyp_presets:
-                    _p = _ptpl.get("pattern", "")
-                    if "<teaming>" in _p and "<purpose>" not in _p and not _ptpl.get("hidden", False):
-                        _switch_teaming_tpl = _p
-                        break
-            if not _switch_teaming_tpl:
-                _switch_teaming_tpl = "<v_switch> (<teaming>)"
-
             _sw_vals = {"v_switch": _gparent, "teaming": teaming_str}
             _rendered_header = render_dynamic_pattern(_switch_teaming_tpl, _sw_vals, _pattern_vars)
             _rendered_header = re.sub(r"\s{2,}", " ", _rendered_header).strip()
@@ -2185,14 +2171,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 if _upt.get("code") == "Uplink" and not _upt.get("hidden", False):
                     _uplink_tpl = _upt.get("pattern", "")
                     break
-            if not _uplink_tpl:
-                for _pk in ("esxi_uplink", "esxinet_uplink"):
-                    _pat = _naming_pats.get(_pk)
-                    if _pat:
-                        _uplink_tpl = _pat
-                        break
-            if not _uplink_tpl:
-                _uplink_tpl = "<vmnic> - <v_switch> <purpose> <uplink_role>"
 
             _valid_uplinks = [u for u in _sw_uplinks if str(u.get("interface", "")).strip() not in ("", "No Uplink")]
             for _ug in _valid_uplinks:
@@ -2209,6 +2187,14 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 }
                 _upline = render_dynamic_pattern(_uplink_tpl, _uplink_row, _pattern_vars)
                 _upline = re.sub(r"\s{2,}", " ", _upline).strip()
+                _unresolved = re.findall(r"<([a-zA-Z0-9_]+)>", _upline)
+                if _unresolved:
+                    st.error(
+                        f"❌ Unassigned variables in Uplink template for '{_gparent}': "
+                        f"{', '.join(_unresolved)}. Template: `{_uplink_tpl}`. "
+                        f"Provide values for these tokens in the topology DataGrid."
+                    )
+                    st.stop()
                 if _upline:
                     _out_lines.append(_upline)
 
@@ -2231,28 +2217,12 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         if _stpl.get("code") == "VMkernel" and not _stpl.get("hidden", False):
                             _svc_tpl = _stpl.get("pattern", "")
                             break
-                    if not _svc_tpl:
-                        for _pk in ("esxi_vmkernel", "esxinet_vmkernel"):
-                            _pat = _naming_pats.get(_pk)
-                            if _pat:
-                                _svc_tpl = _pat
-                                break
-                    if not _svc_tpl:
-                        _svc_tpl = "<purpose> (<v_switch>)"
                 else:
                     _svc_tpl = None
                     for _ptpl in _active_hyp_presets:
                         if _ptpl.get("code") == "PortGroup" and not _ptpl.get("hidden", False):
                             _svc_tpl = _ptpl.get("pattern", "")
                             break
-                    if not _svc_tpl:
-                        for _pk in ("esxi_portgroup", "esxinet_portgroup"):
-                            _pat = _naming_pats.get(_pk)
-                            if _pat:
-                                _svc_tpl = _pat
-                                break
-                    if not _svc_tpl:
-                        _svc_tpl = "<purpose> (<v_switch>)"
 
                 _svc_vals = {
                     "purpose": _svc_name,
@@ -2262,11 +2232,16 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 }
                 _rendered_svc = render_dynamic_pattern(_svc_tpl, _svc_vals, _pattern_vars)
                 _rendered_svc = re.sub(r"\s{2,}", " ", _rendered_svc).strip()
+                _unresolved_svc = re.findall(r"<([a-zA-Z0-9_]+)>", _rendered_svc)
+                if _unresolved_svc:
+                    st.error(
+                        f"❌ Unassigned variables in {_svc_type} template for '{_gparent}/{_svc_name}': "
+                        f"{', '.join(_unresolved_svc)}. Template: `{_svc_tpl}`. "
+                        f"Provide values for these tokens in the topology DataGrid."
+                    )
+                    st.stop()
                 if _rendered_svc:
                     _out_lines.append(_rendered_svc)
-
-            # Fallback: if switch has no services and no physical uplinks, emit header only
-            # (already handled above via the Switch_Teaming block)
 
         _output_bulk_text = "\n".join(_out_lines).strip()
 

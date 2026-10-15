@@ -1,5 +1,5 @@
 # NetBox Hub — Living Architecture SOP & Handover Guide
-# Target Baseline: v4.4.53 | Platform: Oracle Cloud Ampere A1 (ARM64)
+# Target Baseline: v4.5.2 | Platform: Oracle Cloud Ampere A1 (ARM64)
 
 ---
 
@@ -8,7 +8,7 @@
 | Property              | Value                                                        |
 |-----------------------|--------------------------------------------------------------|
 | Application           | NetBox Universal Library Hub                                 |
-| Target Version        | v4.4.53                                                      |
+| Target Version        | v4.5.2                                                       |
 | Runtime               | Python 3.11+ / Streamlit                                     |
 | Cloud Infrastructure  | Oracle Cloud Ampere A1 (ARM64 / aarch64, Linux)              |
 | Container Registry    | `ghcr.io/miniz3210/netbox-hub`                               |
@@ -166,7 +166,7 @@ When a cell in the DataGrid is edited, `_apply_cascade_to_rows()` in `ui/tabs/na
 Capture a baseline snapshot of the Standards Tab configuration into `data/naming_rules.yaml`. Verify all section definitions (2.5 UX rules, 4.0 Blueprint guide) are present and consistent.
 
 ### Step 2 — Version Assert Verification
-Confirm `config/constants.py::APP_VERSION == "4.4.53"`. Ensure no release notes or version bump scripts are pending.
+Confirm `config/constants.py::APP_VERSION == "4.5.2"`. Ensure no release notes or version bump scripts are pending.
 
 ### Step 3 — Safe Local Container Cache Cleanup
 ```bash
@@ -259,45 +259,52 @@ docker image prune -a -f && docker builder prune -a -f
 
 ---
 
-## 9. Project Status Checklist: Completed (Done) vs Pending (Roadmap)
+## 9. 專案狀態檢核：做完咩 (Done) vs 未做咩 (Pending)
+======================================================================
 
-### 9.1 Completed & Verified (Baseline v4.4.44)
-- [x] Hybrid Topology Editor Architecture:
-  * Completely replaced the unstable 60+ individual widget Chips Pool with a unified Hybrid Architecture (Visual Cards Overview + Authoritative native `st.data_editor` + Live NetBox Output).
-  * Eradicated Streamlit widget state race conditions, infinite rerun cascades, and 100% CPU lockups.
-- [x] Dynamic Teaming Synthesizer (Zero Hardcoding):
-  * Implemented adaptive teaming builder supporting single uplink (`vmnic1 Active`), dual-active load balancing (`vmnic2 Active / vmnic6 Active`), and active/standby pairs (`vmnic4 Active / vmnic5 Standby`).
-  * Eliminated trailing delimiter artifacts (e.g. dangling ` / Standby` or orphaned slashes).
-  * Seamlessly interpolates both `<teaming>` dynamic tokens and legacy template variables.
-- [x] Standards-Driven Variables & Platform Tokens:
-  * Replaced hardcoded Python role strings (`Active Uplink`, `Standby Uplink`) with dynamic `<uplink_role>` options loaded strictly from `data/naming_rules.yaml`.
-  * Abstracted interface prefixes (`uplink_prefix`, `switch_prefix`, `vmk_prefix`) into platform tokens within `naming_rules.yaml` presets, removing hardcoded `vmnic` / `vSwitch` literals from Python code.
-- [x] Interactive Switch Card Controls:
-  * Inline container renaming directly in the card header with automatic synchronization across all associated table rows.
-  * 1-click switch deletion (`✖`) removing containers and unassigning child adapters cleanly.
-  * Upgraded "➕ Uplink" and "➕ Service" buttons to interactive `st.popover` modals offering OCR/AI-discovered candidate dropdowns plus manual custom entry fallback.
-  * Inline badge-level deletion (`✖`) and direct uplink role switching directly on overview cards.
-- [x] State Management & True Empty State:
-  * Introduced dynamic `editor_ver` keying to force remount `st.data_editor` whenever card actions occur, eliminating stale widget state desynchronization.
-  * Refactored "Clear All" to thoroughly purge candidate pools, topology records, discovered switch lists, and editor cache back to a pristine state.
-  * Eradicated the phantom fallback `vSwitch0` card; displays a clean guidance banner and manual switch creation entry when unpopulated.
-- [x] Relative Spatial Clustering & Boundary Invariants:
-  * Relative spatial partition anchors automatically prune UI navigation menus.
-  * Active exclusion of collapsed header indicators (`>` or `›`) to prevent boundary truncation of tail switches (e.g. `PR Spain Fuenmayor VLab`).
-  * Global Y-axis cumulative offset (`cumulative_y += img_height`) completely eliminates multi-screenshot coordinate collisions.
-  * Local deterministic zero-leakage redaction (IPv4, internal domains, MAC) prior to cloud LLM transit, with transparent in-memory de-tokenization.
+9.1 做完咩 (Completed & Verified in v4.5.2)
+- [x] 混合編輯架構落地 (Hybrid Architecture):
+  * 徹底廢除不穩定的單獨 Chips Pool 元件池，改用頂部視覺卡片概覽 + 中間原生 st.data_editor 表格。
+  * 徹底根除因數十個 Streamlit Widget 引發的狀態競爭、無窮迴圈與 CPU 100% 卡死問題。
+- [x] RapidOCR 極致效能壓榨 (ARM64 Optimization):
+  * 關閉角度分類器 (use_angle_cls=False)，鎖定 ONNX Runtime 雙核心執行緒 (intra_op_num_threads=2)。
+  * 單張截圖 OCR 延遲由 6s 降至 2-3s，徹底消除 CPU context switch 開銷。
+- [x] 本地脫敏金庫非破壞性重構 (Vault Decoupling):
+  * 永久停用 core/vault.py 的 Step 10 (_SWITCH_NAME_RE) 與 Step 11 (_PG_NAME_RE)。
+  * 僅脫敏真實敏感原語 (IP/CIDR, MAC, Serial, FQDN suffix, Hostname)；拓撲結構關鍵字 100% 原生傳遞給 AI。
+  * 徹底拔除 naming_tab.py 內容易倒置出錯的 __ANCHOR_X__ 置換邏輯。
+- [x] 多平台標準字典解耦 (Platform Presets Decoupling):
+  * 於 data/naming_rules.yaml 定義 allowed_types, role_options, default_connected_role, default_disconnected_role, sentinel_no_adapter。
+  * ui/tabs/naming_tab.py 與卡片 Dropdown 100% 動態載入，Python 代碼完全無硬編碼。
+- [x] vDS 分散式交換機葉子節點突破 (Leaf-Node Extraction):
+  * 穿透 vDS 槽位層級 (uplink1/2/3/4)，深度抽取底層真實 vmnicX 網卡。
+  * 自動忽略 (0 NIC Adapters) 空槽位，徹底過濾 V日 uplinki 圖標雜訊。
+- [x] 超融合 (HCI) 與零實體卡內部交換機支援:
+  * 完美支援 vSwitchNutanix (雙軌識別 ntnx-internal-pg 與 ntnx-internal-vmk)。
+  * 支援氣泡隔離網 (OnbaseBubbleNet) 與實驗室 Switch (PR Spain Fuenmayor Age VLab) 以動態 sentinel_no_adapter (No Uplink) 獨立成卡。
+- [x] Python 端確定性容錯防線:
+  * 實裝實體網卡連線角色自動保底 (已連線網卡預設為 Active Uplink，不再誤判為 None)。
+  * 實裝 OCR 首字母修復 (mk2 自動修復為 vmk2)。
+  * 實裝介面前綴狀態清理 (自動剝離 x, !, 叉號等符號)。
+  * 實裝同一 Switch 下 VMkernel 與 Port Group 重複名稱自動去重。
+- [x] 思考型模型 (Reasoning Model) 截斷與空 Content 防護:
+   * 於 core/ai_client.py 實裝 message.content 為空時自動 fallback 至 reasoning_content / reasoning。
+   * 於 ui/tabs/naming_tab.py 實裝 _safe_parse_json_array 對未解包 API 封裝及 finish_reason="length" 截斷 JSON 的自動補齊與正規化。
+- [x] Zero-Hardcode Strict Lego Description Engine: 徹底拔除 Zone 3 全域隱式 Fallback (esxi_vmkernel/esxi_portgroup)，所有模板 100% 由 Standards 平台字典驅動，缺漏模板或變數未賦值直接拋錯 (Fail-Fast)。
+- [x] 標準預設模板全面清理: 修正 DEFAULT_HYPERVISOR_PRESETS 內遺留之未賦值變數，補齊 Switch_Teaming 標頭模板。
+- [x] Standards UI 排版順序校正: 將 Section 2.5 (Spatial Anchors) 與 Section 2.6 (Noise Blacklist) 調正為合邏輯順序。
+- [x] 廢除 LEGACY_PATTERN_KEYS 強制回填: 切斷啟動時自動寫入過期舊變數的邏輯。
 
-### 9.2 Pending & Future Roadmap
-- [ ] Excel IPAM Database Diff & Ingestion:
-  * Develop a standalone offline reconciliation script connecting directly to the local SQLite database.
-  * Diff static Excel IPAM worksheets against live NetBox state and output normalized NetBox CSV imports.
-- [ ] Comprehensive Unit Test Suite Expansion (`tests/test_naming_and_synthesizer.py`):
-  * Add unit tests for `_build_dynamic_teaming_clause` covering single, dual-active, and custom role topologies.
-  * Add regression tests ensuring `<uplink_role>` and platform token schema resolution from `naming_rules.yaml`.
-  * Add unit tests verifying `spatial_redactor.py` dynamic anchor detection, collapsed header pruning, and redaction de-tokenization.
-- [ ] Session-Only In-Memory Cascade Replace:
-  * Implement callback-driven in-memory find-and-replace for typo correction across all matching fields within the active editing session, releasing on host change without disk persistence.
-- [ ] Multi-Platform Preset Expansion (Proxmox VE & Azure):
-  * Add and validate spatial anchors, prefix tokens, and naming patterns for Proxmox VE (Linux Bridges `vmbr`, bonding `slaves`) and Azure Portal (VNet / Subnet blade).
-- [ ] Git Tag Pruning & Official Container Release:
-    * Prune legacy transition tags, tag official release `v4.4.44`, and push multi-arch images to GitHub Container Registry (GHCR).
+9.2 未做咩 (Pending & Future Roadmap)
+- [ ] 緊鄰 Switch 物理文字切片 (Python-Side Switch Chunking):
+  * 在 10vs2 等密集截圖中，PR Spain Fuenmayor VLab 與 vSwitch0 距離過近偶發容器重疊。
+  * 規劃於 Python 端先按 Standard Switch: / Distributed Switch: 進行純文字區間切片，再分段交由 AI 處理，徹底隔絕跨 Switch 污染。
+- [ ] 長列表首尾邊緣截斷保護 (Edge-Truncation Guard):
+  * 在極長端口組截圖中，加強首項 (如 Backplane Network) 與尾項 (如 iSCSI Veeam) 的清點校驗。
+- [ ] 空間幾何分欄聚類 (Spatial Bounding-Box Clustering - 終極免 LLM 方案):
+  * 直接利用 RapidOCR 輸出的 raw_tokens 幾何座標 [x1, y1, x2, y2]，在 Python 端用 X 軸 (<45% 為 Service，>65% 為 Uplink) 與 Y 軸 (Switch 區間) 直接完成幾何歸屬組裝，將 LLM 角色退居為純文字校對器。
+- [ ] Excel IPAM 資料庫比對與差異補齊 (IPAM Database Diff):
+  * 撰寫本地獨立比對腳本，直連 SQLite 比對 Excel IPAM 紀錄與 NetBox 現存資料，產出差異報告與正規化 CSV。
+- [ ] 單元測試套件全面補齊:
+   * 更新 tests/ 中對 APP_VERSION 的斷言為 4.5.2。
+  * 補齊多平台 Presets 動態載入與 _safe_parse_json_array 截斷修復單元測試。
