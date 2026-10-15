@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "version": "4.4.47",
+    "version": "4.4.48",
     "last_updated": "2026-10-15"
   },
   "branch_switch": "SW<country><state><site><zone><seq>-<stack_id>",
@@ -255,7 +255,7 @@
   },
   "naming_patterns": {
   "metadata": {
-    "version": "4.4.47",
+    "version": "4.4.48",
     "last_updated": "2026-10-15"
   },
   "branch_switch": "SW<country><state><site><zone><seq>-<stack_id>",

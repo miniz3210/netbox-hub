@@ -1617,7 +1617,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 for raw_item in raw_items:
                     if not isinstance(raw_item, dict):
                         continue
-                    if any(k in raw_item for k in ("finish_reason", "index", "message", "role")):
+                    if "finish_reason" in raw_item or "message" in raw_item:
                         continue
 
                     item = {str(k).strip().lower(): v for k, v in raw_item.items()}
@@ -1647,6 +1647,14 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     st.session_state["topology_records"] = clean_records
                     discovered_sw = sorted(list({r["switch"] for r in clean_records if r.get("switch")}), key=_natsort_key)
                     st.session_state["discovered_switches"] = discovered_sw
+                    st.session_state["discovered_uplink_candidates"] = sorted(
+                        list({r["interface"] for r in clean_records if r.get("type") == "Uplink" and r.get("interface")}),
+                        key=_natsort_key
+                    )
+                    st.session_state["discovered_service_candidates"] = sorted(
+                        list({r["purpose"] for r in clean_records if r.get("type") != "Uplink" and r.get("purpose")}),
+                        key=_natsort_key
+                    )
                     st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
                     st.toast(f"Successfully parsed {len(clean_records)} records across {len(discovered_sw)} switches!", icon="🚀")
                     st.rerun()
