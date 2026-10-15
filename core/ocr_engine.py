@@ -15,6 +15,7 @@ import numpy as np
 from typing import List, Dict, Any, Tuple
 from PIL import Image, ImageEnhance
 from rapidocr_onnxruntime import RapidOCR
+import onnxruntime as ort
 
 try:
     import cv2
@@ -23,6 +24,11 @@ except ImportError:
     HAS_CV2 = False
 
 _logger = logging.getLogger(__name__) or logging
+
+_ort_options = ort.SessionOptions()
+_ort_options.intra_op_num_threads = 2
+_ort_options.inter_op_num_threads = 1
+_ort_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
 
 _ocr_engine = None
 
@@ -38,7 +44,7 @@ def _flush():
 def get_ocr_engine() -> RapidOCR:
     global _ocr_engine
     if _ocr_engine is None:
-        _ocr_engine = RapidOCR()
+        _ocr_engine = RapidOCR(use_angle_cls=False, intra_op_num_threads=2)
     return _ocr_engine
 
 
