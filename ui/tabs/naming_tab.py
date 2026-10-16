@@ -65,13 +65,16 @@ def _normalize_switch_name(name: str) -> str:
     """Normalize a switch/container name for consistent deck-key usage.
 
     Strips whitespace and removes any 'manual:' prefix that may have been left
-    from prior manual adds.  Normalizes OCR substitution of letter 'o'/'O' for
-    digit '0' (e.g. vSwitcho -> vSwitch0, vSwitcho1 -> vSwitch01) while
+    from prior manual adds. Normalizes consecutive whitespace to single spaces
+    so OCR spacing discrepancies (e.g. "PR Spain Fuenmayor Age VLab" vs
+    "PRSpainFuenmayorAgeVLab") resolve to a single unified switch container.
+    Normalizes OCR substitution of letter 'o'/'O' for digit '0' (e.g. vSwitcho -> vSwitch0, vSwitcho1 -> vSwitch01) while
     preserving leading zeros — 'vSwitch01' and 'vSwitch02' remain distinct.
     Container suffix stripping is driven dynamically by
     topology_parsing_presets[platform].container_strip_suffixes from naming_rules.yaml.
     """
     n = str(name).strip()
+    n = re.sub(r"\s+", " ", n).strip()
     if n.startswith("manual:"):
         n = n[len("manual:"):]
     # Dynamic container suffix stripping driven by Standards
@@ -1713,6 +1716,59 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         continue
                     deduped_records.append(r)
                 clean_records = deduped_records
+
+                # Cross-screenshot global deduplication before assigning to session state
+                seen_sigs: set = set()
+                deduped_records = []
+                for r in clean_records:
+                    sig = (
+                        r.get("switch", "").strip().lower(),
+                        r.get("interface", "").strip().lower(),
+                        r.get("type", "").strip().lower(),
+                        r.get("purpose", "").strip().lower(),
+                        r.get("ip", "").strip(),
+                    )
+                    if sig in seen_sigs:
+                        continue
+                    seen_sigs.add(sig)
+                    deduped_records.append(r)
+
+                # Sentinel dedup: switches with no adapters retain at most ONE "No Uplink" record
+                sentinel_no_adapter_set: Set[str] = set()
+                final_records = []
+                for r in deduped_records:
+                    if r.get("interface") == sentinel_no_adapter:
+                        sw_key = r.get("switch", "").strip().lower()
+                        if sw_key in sentinel_no_adapter_set:
+                            continue
+                        sentinel_no_adapter_set.add(sw_key)
+                    final_records.append(r)
+                clean_records = final_records
+
+                # Boundary bleed-through prevention:
+                # If a switch has only sentinel_no_adapter entries (no physical adapters, no services),
+                # ensure it does not absorb records belonging to subsequent switch headers.
+                # We identify switches that should have NO physical uplinks and remove any such records.
+                switches_with_no_physical = {
+                    r["switch"] for r in clean_records
+                    if r.get("interface") == sentinel_no_adapter
+                }
+                if switches_with_no_physical:
+                    # Find any switch header that lists a physical interface alongside sentinels
+                    # and remove the phantom sentinel-only entries that may have bled through
+                    final_records = []
+                    for r in clean_records:
+                        sw = r.get("switch", "")
+                        iface = r.get("interface", "")
+                        if sw in switches_with_no_physical and iface == sentinel_no_adapter:
+                            # Keep the sentinel — it's the real entry for this switch
+                            final_records.append(r)
+                        elif sw in switches_with_no_physical and iface and iface != sentinel_no_adapter:
+                            # Skip: this physical record doesn't belong to a no-adapter switch
+                            continue
+                        else:
+                            final_records.append(r)
+                    clean_records = final_records
 
                 if clean_records:
                     st.session_state["topology_records"] = clean_records
