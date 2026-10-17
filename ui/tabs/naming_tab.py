@@ -963,7 +963,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
     mode = st.radio(
         "Operation Mode",
-        ["🛠️ Interactive Single Item Mode", "📸 Screenshot Batch Mode (OCR)"],
+        ["🛠️ Interactive Single Item Mode", "📸 Screenshot Batch Mode (OCR)", "🔭 Screenshot Batch Mode (Local VLM)"],
         index=0,
         horizontal=True,
         label_visibility="collapsed"
@@ -971,8 +971,10 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
     if mode == "🛠️ Interactive Single Item Mode":
         _render_interactive_hypervisor_mode(naming_rules, casing, active_model)
+    elif mode == "📸 Screenshot Batch Mode (OCR)":
+        _render_screenshot_batch_mode(naming_rules, casing, active_model, vault, use_vlm=False)
     else:
-        _render_screenshot_batch_mode(naming_rules, casing, active_model, vault)
+        _render_screenshot_batch_mode(naming_rules, casing, active_model, vault, use_vlm=True)
 
 
 def _build_dynamic_teaming_clause(uplinks: list) -> str:
@@ -1226,8 +1228,57 @@ def _render_interactive_hypervisor_mode(naming_rules: dict, casing: str, active_
         st.code(cleaned_output, language="text")
 
 
-def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model: str, vault):
-    """Render the full screenshot OCR pipeline openly (no expanders hiding the workflow)."""
+def _run_vlm_topology_analysis(image_files, naming_rules, target_platform, progress_callback=None):
+    """Run VLM-based topology analysis and return results compatible with downstream processing."""
+    from core.vlm_engine import run_vlm_topology_analysis as _vlm_analyze
+    from core.vault import SanitizerVault
+
+    vault = SanitizerVault()
+    results = _vlm_analyze(
+        image_files=image_files,
+        naming_rules=naming_rules,
+        target_platform=target_platform,
+        progress_callback=progress_callback,
+    )
+    raw_items = results.get("records", [])
+    errors = results.get("errors", [])
+
+    # Apply vault restore if any session was tracked
+    session_id = results.get("vault_session")
+    if session_id and raw_items:
+        try:
+            restored_items = []
+            for item in raw_items:
+                if not isinstance(item, dict):
+                    continue
+                restored_item = {}
+                for k, v in item.items():
+                    val_str = str(v)
+                    if hasattr(vault, "_session_store") or hasattr(vault, "restore"):
+                        restored_val = vault.restore(val_str, session_id=session_id)
+                        if "{{" in restored_val:
+                            m_alt = re.sub(r"\{\{IP_(\d+)\}\}", r"<SAFE_IP_\1>", restored_val)
+                            restored_val = vault.restore(m_alt, session_id=session_id)
+                        restored_item[k] = restored_val
+                    else:
+                        restored_item[k] = val_str
+                restored_items.append(restored_item)
+            raw_items = restored_items
+        except Exception as e:
+            logger.warning("VLM vault restore failed: %s", e)
+
+    return {
+        "records": raw_items,
+        "errors": errors,
+        "raw_responses": results.get("raw_responses", []),
+        "timing": results.get("timing", {}),
+        "vault_session": session_id,
+        "sanitized_text": results.get("sanitized_text", ""),
+    }
+
+
+def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model: str, vault, use_vlm: bool = False):
+    """Render the full screenshot OCR/VLM pipeline openly (no expanders hiding the workflow)."""
     from core.ocr_engine import run_local_ocr_pipeline
     from data.standards_manager import StandardsManager
     import json as _json
@@ -1503,118 +1554,137 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         try:
             progress_bar = st.progress(0, text="Initializing topology analysis...")
             total_imgs = len(uploaded_imgs)
-            combined_raw_lines = []
-            all_raw_tokens = []
-            cumulative_y = 0
 
-            for idx, img in enumerate(uploaded_imgs):
-                step_label = f"Analyzing screenshot [{idx + 1}/{total_imgs}]: {getattr(img, 'name', f'Image #{idx+1}')}"
-                progress_bar.progress(idx / total_imgs, text=step_label)
-
-                # Safe rewind before read
-                if hasattr(img, "seek"):
-                    img.seek(0)
-                raw_bytes = img.getvalue() if hasattr(img, "getvalue") else img.read()
-                if hasattr(img, "seek"):
-                    img.seek(0)
-
-                if not raw_bytes or len(raw_bytes) == 0:
-                    continue
-
-                ocr_res = run_local_ocr_pipeline([raw_bytes])
-                extracted_txt = ocr_res.get("combined_text", "").strip()
-
-                if extracted_txt:
-                    combined_raw_lines.append(f"--- Screenshot {idx+1}: {getattr(img, 'name', '')} ---\n{extracted_txt}")
-
-                toks = ocr_res.get("raw_tokens", [])
-                img_heights = ocr_res.get("image_heights", [])
-                img_h = img_heights[0] if img_heights else 0
-                for t in toks:
-                    t["_src"] = idx
-                    box = t.get("box")
-                    if box and len(box) >= 2 and cumulative_y > 0:
-                        t["box"] = [box[0], box[1] + cumulative_y, box[2], box[3]]
-                all_raw_tokens.extend(toks)
-                cumulative_y += img_h
-
-            combined_raw_text = "\n\n".join(combined_raw_lines).strip()
-            st.session_state["latest_ocr_raw_text"] = combined_raw_text
-
-            true_ocr_content = re.sub(r"(?m)^---\s*Screenshot\s*\d+.*---\s*$", "", combined_raw_text).strip()
-
-            if not true_ocr_content:
-                st.error("No valid text detected by OCR. Verify screenshot clarity and labels.")
+            if use_vlm:
+                vlm_results = _run_vlm_topology_analysis(
+                    image_files=uploaded_imgs,
+                    naming_rules=naming_rules,
+                    target_platform=st.session_state.get("naming_target_platform", "VMware ESXi"),
+                    progress_callback=lambda idx, total, msg: progress_bar.progress(
+                        (idx + 1) / total, text=msg
+                    ) if total > 0 else None,
+                )
+                raw_items = vlm_results.get("records", [])
+                errors = vlm_results.get("errors", [])
+                session_id = vlm_results.get("vault_session")
+                ai_error_msg = "; ".join(errors) if errors else ""
+                st.session_state["latest_ai_raw_response"] = _json.dumps(vlm_results.get("raw_responses", []), indent=2)[:500]
+                # Skip OCR pipeline — go straight to shared record processing below
+                _vlm_mode = True
             else:
-                progress_bar.progress(0.8, text="Sanitizing data locally and invoking AI parser...")
+                _vlm_mode = False
+                combined_raw_lines = []
+                all_raw_tokens = []
+                cumulative_y = 0
 
-                try:
-                    from utils.formatters import apply_auto_corrections
-                    cleaned_ocr = apply_auto_corrections(combined_raw_text, "ocr_cleaning")
-                    cleaned_ocr = apply_auto_corrections(cleaned_ocr or combined_raw_text, "vmware")
-                except Exception:
-                    cleaned_ocr = combined_raw_text
+                for idx, img in enumerate(uploaded_imgs):
+                    step_label = f"Analyzing screenshot [{idx + 1}/{total_imgs}]: {getattr(img, 'name', f'Image #{idx+1}')}"
+                    progress_bar.progress(idx / total_imgs, text=step_label)
 
-                # 1. Pre-clean OCR typo where dots are dropped in IP addresses
-                def _repair_merged_octet(m):
-                    first, middle, last = m.group(1), m.group(2), m.group(3)
-                    for i in range(1, len(middle)):
-                        a, b = middle[:i], middle[i:]
-                        if 1 <= len(a) <= 3 and 1 <= len(b) <= 3:
-                            if int(a) <= 255 and int(b) <= 255:
-                                return f"{first}.{a}.{b}.{last}"
-                    mid = len(middle) // 2
-                    return f"{first}.{middle[:mid]}.{middle[mid:]}.{last}"
-                _OCR_IP_REPAIR = re.compile(r"\b(\d{1,3})\.(\d{4,5})\.(\d{1,3})\b")
-                cleaned_ocr = _OCR_IP_REPAIR.sub(_repair_merged_octet, cleaned_ocr or combined_raw_text)
+                    # Safe rewind before read
+                    if hasattr(img, "seek"):
+                        img.seek(0)
+                    raw_bytes = img.getvalue() if hasattr(img, "getvalue") else img.read()
+                    if hasattr(img, "seek"):
+                        img.seek(0)
 
-                # 2. Local Vault sanitization (IPs, MACs, Serials, Domains, Hostnames only)
-                sanitized_combined, session_id = vault.sanitize(cleaned_ocr or combined_raw_text)
-                st.session_state["latest_vault_session"] = session_id
+                    if not raw_bytes or len(raw_bytes) == 0:
+                        continue
 
-                target_platform = st.session_state.get("naming_target_platform", "VMware ESXi")
-                tpp = naming_rules.get("topology_parsing_presets") or {}
-                plat_cfg = tpp.get(target_platform, {}) if isinstance(tpp.get(target_platform), dict) else {}
-                system_prompt = plat_cfg.get("instructions", "").strip()
+                    ocr_res = run_local_ocr_pipeline([raw_bytes])
+                    extracted_txt = ocr_res.get("combined_text", "").strip()
 
-                if not system_prompt:
-                    st.error(f"Missing AI Parsing Rules for platform '{target_platform}' in Standards Tab. Please configure instructions first.")
-                    return
+                    if extracted_txt:
+                        combined_raw_lines.append(f"--- Screenshot {idx+1}: {getattr(img, 'name', '')} ---\n{extracted_txt}")
 
-                user_prompt = f"Parse this sanitized topology text into JSON entities array:\n\n{sanitized_combined}"
-                response = ""
-                ai_error_msg = ""
-                try:
-                    response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt, max_tokens=8192)
-                except Exception as ai_exc:
-                    ai_error_msg = str(ai_exc)
-                    logger.error("call_ai failed: %s", ai_error_msg)
+                    toks = ocr_res.get("raw_tokens", [])
+                    img_heights = ocr_res.get("image_heights", [])
+                    img_h = img_heights[0] if img_heights else 0
+                    for t in toks:
+                        t["_src"] = idx
+                        box = t.get("box")
+                        if box and len(box) >= 2 and cumulative_y > 0:
+                            t["box"] = [box[0], box[1] + cumulative_y, box[2], box[3]]
+                    all_raw_tokens.extend(toks)
+                    cumulative_y += img_h
 
-                st.session_state["latest_ai_raw_response"] = response or (f"ERROR: {ai_error_msg}" if ai_error_msg else "")
+                combined_raw_text = "\n\n".join(combined_raw_lines).strip()
+                st.session_state["latest_ocr_raw_text"] = combined_raw_text
 
-                raw_items = _safe_parse_json_array(response) if response else []
+                true_ocr_content = re.sub(r"(?m)^---\s*Screenshot\s*\d+.*---\s*$", "", combined_raw_text).strip()
 
-                if session_id and raw_items:
+                if not true_ocr_content:
+                    st.error("No valid text detected by OCR. Verify screenshot clarity and labels.")
+                else:
+                    progress_bar.progress(0.8, text="Sanitizing data locally and invoking AI parser...")
+
                     try:
-                        restored_items = []
-                        for item in raw_items:
-                            if not isinstance(item, dict):
-                                continue
-                            restored_item = {}
-                            for k, v in item.items():
-                                val_str = str(v)
-                                if hasattr(vault, "_session_store") or hasattr(vault, "restore"):
-                                    restored_val = vault.restore(val_str, session_id=session_id)
-                                    if "{{" in restored_val:
-                                        m_alt = re.sub(r"\{\{IP_(\d+)\}\}", r"<SAFE_IP_\1>", restored_val)
-                                        restored_val = vault.restore(m_alt, session_id=session_id)
-                                    restored_item[k] = restored_val
-                                else:
-                                    restored_item[k] = val_str
-                            restored_items.append(restored_item)
-                        raw_items = restored_items
-                    except Exception as e:
-                        logger.warning("Vault restore failed: %s", e)
+                        from utils.formatters import apply_auto_corrections
+                        cleaned_ocr = apply_auto_corrections(combined_raw_text, "ocr_cleaning")
+                        cleaned_ocr = apply_auto_corrections(cleaned_ocr or combined_raw_text, "vmware")
+                    except Exception:
+                        cleaned_ocr = combined_raw_text
+
+                    # 1. Pre-clean OCR typo where dots are dropped in IP addresses
+                    def _repair_merged_octet(m):
+                        first, middle, last = m.group(1), m.group(2), m.group(3)
+                        for i in range(1, len(middle)):
+                            a, b = middle[:i], middle[i:]
+                            if 1 <= len(a) <= 3 and 1 <= len(b) <= 3:
+                                if int(a) <= 255 and int(b) <= 255:
+                                    return f"{first}.{a}.{b}.{last}"
+                        mid = len(middle) // 2
+                        return f"{first}.{middle[:mid]}.{middle[mid:]}.{last}"
+                    _OCR_IP_REPAIR = re.compile(r"\b(\d{1,3})\.(\d{4,5})\.(\d{1,3})\b")
+                    cleaned_ocr = _OCR_IP_REPAIR.sub(_repair_merged_octet, cleaned_ocr or combined_raw_text)
+
+                    # 2. Local Vault sanitization (IPs, MACs, Serials, Domains, Hostnames only)
+                    sanitized_combined, session_id = vault.sanitize(cleaned_ocr or combined_raw_text)
+                    st.session_state["latest_vault_session"] = session_id
+
+                    target_platform = st.session_state.get("naming_target_platform", "VMware ESXi")
+                    tpp = naming_rules.get("topology_parsing_presets") or {}
+                    plat_cfg = tpp.get(target_platform, {}) if isinstance(tpp.get(target_platform), dict) else {}
+                    system_prompt = plat_cfg.get("instructions", "").strip()
+
+                    if not system_prompt:
+                        st.error(f"Missing AI Parsing Rules for platform '{target_platform}' in Standards Tab. Please configure instructions first.")
+                        return
+
+                    user_prompt = f"Parse this sanitized topology text into JSON entities array:\n\n{sanitized_combined}"
+                    response = ""
+                    ai_error_msg = ""
+                    try:
+                        response = call_ai(user_prompt, active_model, custom_system_msg=system_prompt, max_tokens=8192)
+                    except Exception as ai_exc:
+                        ai_error_msg = str(ai_exc)
+                        logger.error("call_ai failed: %s", ai_error_msg)
+
+                    st.session_state["latest_ai_raw_response"] = response or (f"ERROR: {ai_error_msg}" if ai_error_msg else "")
+
+                    raw_items = _safe_parse_json_array(response) if response else []
+
+                    if session_id and raw_items:
+                        try:
+                            restored_items = []
+                            for item in raw_items:
+                                if not isinstance(item, dict):
+                                    continue
+                                restored_item = {}
+                                for k, v in item.items():
+                                    val_str = str(v)
+                                    if hasattr(vault, "_session_store") or hasattr(vault, "restore"):
+                                        restored_val = vault.restore(val_str, session_id=session_id)
+                                        if "{{" in restored_val:
+                                            m_alt = re.sub(r"\{\{IP_(\d+)\}\}", r"<SAFE_IP_\1>", restored_val)
+                                            restored_val = vault.restore(m_alt, session_id=session_id)
+                                        restored_item[k] = restored_val
+                                    else:
+                                        restored_item[k] = val_str
+                                restored_items.append(restored_item)
+                            raw_items = restored_items
+                        except Exception as e:
+                            logger.warning("Vault restore failed: %s", e)
 
                 # Dynamically load platform preset dictionaries
                 plat_cfg = tpp.get(target_platform, {}) if isinstance(tpp.get(target_platform), dict) else {}

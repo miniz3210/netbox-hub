@@ -1,5 +1,5 @@
 # NetBox Hub — Living Architecture SOP & Handover Guide
-# Target Baseline: v4.5.4 | Platform: Oracle Cloud Ampere A1 (ARM64)
+# Target Baseline: v4.5.10 | Platform: Oracle Cloud Ampere A1 (ARM64)
 
 ---
 
@@ -8,7 +8,7 @@
 | Property              | Value                                                        |
 |-----------------------|--------------------------------------------------------------|
 | Application           | NetBox Universal Library Hub                                 |
-| Target Version        | v4.5.4                                                       |
+| Target Version        | v4.5.10                                                      |
 | Runtime               | Python 3.11+ / Streamlit                                     |
 | Cloud Infrastructure  | Oracle Cloud Ampere A1 (ARM64 / aarch64, Linux)              |
 | Container Registry    | `ghcr.io/miniz3210/netbox-hub`                               |
@@ -166,7 +166,7 @@ When a cell in the DataGrid is edited, `_apply_cascade_to_rows()` in `ui/tabs/na
 Capture a baseline snapshot of the Standards Tab configuration into `data/naming_rules.yaml`. Verify all section definitions (2.5 UX rules, 4.0 Blueprint guide) are present and consistent.
 
 ### Step 2 — Version Assert Verification
-Confirm `config/constants.py::APP_VERSION == "4.5.4"`. Ensure no release notes or version bump scripts are pending.
+Confirm `config/constants.py::APP_VERSION == "4.5.10"`. Ensure no release notes or version bump scripts are pending.
 
 ### Step 3 — Safe Local Container Cache Cleanup
 ```bash
@@ -262,7 +262,7 @@ docker image prune -a -f && docker builder prune -a -f
 ## 9. 專案狀態檢核：做完咩 (Done) vs 未做咩 (Pending)
 ======================================================================
 
-9.1 做完咩 (Completed & Verified in v4.5.4)
+9.1 做完咩 (Completed & Verified in v4.5.10)
 - [x] 混合編輯架構落地 (Hybrid Architecture): 廢除 Chips Pool，改用頂部視覺卡片概覽 + 中間原生 st.data_editor 表格。
 - [x] RapidOCR 極致效能壓榨: 關閉 use_angle_cls，鎖定 intra_op_num_threads=2，單圖 OCR 耗時降至 2-3s。
 - [x] 本地脫敏金庫非破壞性重構: 永久停用 vault Step 10 與 Step 11，保留原生交換機與端口組拓撲關鍵字。
@@ -271,6 +271,12 @@ docker image prune -a -f && docker builder prune -a -f
 - [x] 跨截圖全域去重防線 (Cross-Screenshot Deduplication): 建立 (switch, interface, type, purpose, ip) 五元組簽名機制，徹底根除重疊截圖造成的雙倍網卡與重複服務。
 - [x] 交換機名稱空白正規化 (Switch Whitespace Canonicalization): 自動壓縮連續空格與字符黏合，杜絕同名交換機分裂成多張分身卡片。
 - [x] 邊界隔絕防吞併機制: 徹底防止無實體卡交換機 (PR Spain Fuenmayor VLab) 吞併緊鄰實體交換機 (vSwitch0)。
+- [x] On-Demand Local VLM Pipeline: 零留存模型生命周期 (`keep_alive: 0`)，防止 2 vCPU / 11.6 GB 主機 RAM 飢渴。
+- [x] 動態解析度 capped: 輸入影像限制至 1280px 最大維度，視覺 Token 減少 65%，CPU 單圖節省 15-20 秒。
+- [x] 序列自動隊列: 多圖上傳以串行方式處理，避免低資源伺服器 OOM 崩潰。
+- [x] 完整語義 Schema 保留: 維持 `{"switch", "interface", "type", "ip", "purpose", "role"}` 結構，不使用緊湊單字母鍵，保障 3B/7B 模型推理完整性。
+- [x] 全域五元組跨圖去重: 解決重疊截圖重複問題 (如 vSwitch02 上重複的 vmnic3 / iSCSI02)。
+- [x] 交換機邊界與間距隔離: 正規化交換機名稱防止錯誤合併或卡片分裂。
 
 9.2 未做咩 (Pending & Future Roadmap)
 - [ ] 緊鄰 Switch 物理文字切片 (Python-Side Switch Chunking):
@@ -282,6 +288,7 @@ docker image prune -a -f && docker builder prune -a -f
   * 直接利用 RapidOCR 輸出的 raw_tokens 幾何座標 [x1, y1, x2, y2]，在 Python 端用 X 軸 (<45% 為 Service，>65% 為 Uplink) 與 Y 軸 (Switch 區間) 直接完成幾何歸屬組裝，將 LLM 角色退居為純文字校對器。
 - [ ] Excel IPAM 資料庫比對與差異補齊 (IPAM Database Diff):
   * 撰寫本地獨立比對腳本，直連 SQLite 比對 Excel IPAM 紀錄與 NetBox 現存資料，產出差異報告與正規化 CSV。
+- [ ] 多平台視覺卡片渲染預設 (Proxmox VE / Nutanix Prism 適配)。
 - [ ] 單元測試套件全面補齊:
-   * 更新 tests/ 中對 APP_VERSION 的斷言為 4.5.4。
-  * 補齊多平台 Presets 動態載入與 _safe_parse_json_array 截斷修復單元測試。
+    * 更新 tests/ 中對 APP_VERSION 的斷言為 4.5.10。
+   * 補齊多平台 Presets 動態載入與 _safe_parse_json_array 截斷修復單元測試。
