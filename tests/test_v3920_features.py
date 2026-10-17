@@ -56,8 +56,8 @@ def section(title: str):
 # PART 1: VERSION BUMP
 # ============================================================================
 def test_version_bump():
-    section("TEST 0: Version Bump → v4.5.10")
-    assert_true(APP_VERSION == "4.5.10", f"APP_VERSION == '4.5.10' (got {APP_VERSION!r})")
+    section("TEST 0: Version Bump → v4.5.11")
+    assert_true(APP_VERSION == "4.5.11", f"APP_VERSION == '4.5.11' (got {APP_VERSION!r})")
 
 
 # ============================================================================

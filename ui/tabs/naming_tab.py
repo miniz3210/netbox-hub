@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 from typing import Dict, List, Optional, Tuple, Any, Set
 import streamlit as st
@@ -1228,17 +1229,23 @@ def _render_interactive_hypervisor_mode(naming_rules: dict, casing: str, active_
         st.code(cleaned_output, language="text")
 
 
-def _run_vlm_topology_analysis(image_files, naming_rules, target_platform, progress_callback=None):
+def _run_vlm_topology_analysis(image_files, naming_rules, target_platform, progress_callback=None, model_override=None, endpoint_override=None):
     """Run VLM-based topology analysis and return results compatible with downstream processing."""
     from core.vlm_engine import run_vlm_topology_analysis as _vlm_analyze
     from core.vault import SanitizerVault
 
     vault = SanitizerVault()
+    extra_kwargs = {}
+    if model_override:
+        extra_kwargs["model"] = model_override
+    if endpoint_override:
+        extra_kwargs["endpoint"] = endpoint_override
     results = _vlm_analyze(
         image_files=image_files,
         naming_rules=naming_rules,
         target_platform=target_platform,
         progress_callback=progress_callback,
+        **extra_kwargs,
     )
     raw_items = results.get("records", [])
     errors = results.get("errors", [])
@@ -1472,7 +1479,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         if cur_selected_plat in naming_platform_options:
             default_idx = naming_platform_options.index(cur_selected_plat)
 
-        col_plat, col_btn_an, col_btn_clr = st.columns([5, 3, 2], vertical_alignment="center")
+        col_plat, col_eng, col_btn_an, col_btn_clr = st.columns([5, 3, 3, 2], vertical_alignment="center")
         with col_plat:
             target_platform = st.selectbox(
                 "Target Platform",
@@ -1483,6 +1490,43 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 help=None
             )
             st.session_state["ocr_target_platform"] = target_platform
+        with col_eng:
+            vlm_cfg = naming_rules.get("vlm_config") or {}
+            yaml_endpoint = str(vlm_cfg.get("api_endpoint", "http://netbox-ollama:11434")).strip()
+            env_endpoint = os.getenv("OLLAMA_API_ENDPOINT", "").strip() or yaml_endpoint
+            env_model = os.getenv("DEFAULT_VLM_MODEL", "qwen2.5vl:3b").strip()
+            yaml_model = str(vlm_cfg.get("default_model", "qwen2.5vl:3b")).strip()
+            default_vlm_model = (
+                st.session_state.get("_selected_vlm_model")
+                or env_model
+                or yaml_model
+            )
+            vlm_engine_options = [
+                f"{default_vlm_model} (Local VLM - Recommended)",
+                "qwen2.5vl:7b (Local VLM - High RAM)",
+                "RapidOCR (Legacy Text-Only)",
+            ]
+            vlm_engine_label_map = {
+                "qwen2.5vl:3b (Local VLM - Recommended)": "qwen2.5vl:3b",
+                "qwen2.5vl:7b (Local VLM - High RAM)": "qwen2.5vl:7b",
+                "RapidOCR (Legacy Text-Only)": "rapidocr",
+            }
+            reverse_label_map = {v: k for k, v in vlm_engine_label_map.items()}
+            default_idx_eng = 0
+            if default_vlm_model == "qwen2.5vl:7b":
+                default_idx_eng = 1
+            elif default_vlm_model == "rapidocr":
+                default_idx_eng = 2
+            sel_vlm = st.selectbox(
+                "Vision / OCR Engine",
+                options=vlm_engine_options,
+                index=default_idx_eng,
+                key="naming_vlm_engine_sel",
+                label_visibility="collapsed",
+                help="Select the vision or OCR engine for topology analysis.",
+            )
+            resolved_model = vlm_engine_label_map[sel_vlm]
+            st.session_state["_selected_vlm_model"] = resolved_model
         with col_btn_an:
             btn_analyze = st.button("🚀 Analyze & Auto-Populate", type="primary", width="stretch")
         with col_btn_clr:
@@ -1556,14 +1600,23 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             total_imgs = len(uploaded_imgs)
 
             if use_vlm:
-                vlm_results = _run_vlm_topology_analysis(
-                    image_files=uploaded_imgs,
-                    naming_rules=naming_rules,
-                    target_platform=st.session_state.get("naming_target_platform", "VMware ESXi"),
-                    progress_callback=lambda idx, total, msg: progress_bar.progress(
-                        (idx + 1) / total, text=msg
-                    ) if total > 0 else None,
-                )
+                resolved_engine = st.session_state.get("_selected_vlm_model", "qwen2.5vl:3b")
+                if resolved_engine == "rapidocr":
+                    use_vlm = False
+                else:
+                    from core.vlm_engine import resolve_vlm_config as _resolve_vlm
+                    _ui_override = {"model": resolved_engine}
+                    _vlm_cfg = _resolve_vlm(ui_override=_ui_override, naming_rules=naming_rules)
+                    vlm_results = _run_vlm_topology_analysis(
+                        image_files=uploaded_imgs,
+                        naming_rules=naming_rules,
+                        target_platform=st.session_state.get("naming_target_platform", "VMware ESXi"),
+                        progress_callback=lambda idx, total, msg: progress_bar.progress(
+                            (idx + 1) / total, text=msg
+                        ) if total > 0 else None,
+                        model_override=_vlm_cfg["model"],
+                        endpoint_override=_vlm_cfg["endpoint"],
+                    )
                 raw_items = vlm_results.get("records", [])
                 errors = vlm_results.get("errors", [])
                 session_id = vlm_results.get("vault_session")

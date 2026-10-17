@@ -21,7 +21,7 @@
   "esxi_vmkernel": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
   "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
   "vlan_name_pattern": "<role>",
-      "metadata": '{"version": "4.5.10", "last_updated": "2026-10-17"}',
+      "metadata": '{"version": "4.5.11", "last_updated": "2026-10-17"}',
       "device_presets": [
     {
       "code": "SW",
@@ -246,7 +246,7 @@
     "esxi_vmkernel": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
     "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
     "vlan_name_pattern": "<role>",
-    "metadata": '{"version": "4.5.10", "last_updated": "2026-10-17"}'
+    "metadata": '{"version": "4.5.11", "last_updated": "2026-10-17"}'
   },
   "pattern_variables": {
     "site": {
@@ -622,17 +622,16 @@
       "port_start_index": 1
     }
    },
-   "vlm_config": {
+    "vlm_config": {
      "enabled": true,
      "engine": "ollama",
-     "default_model": "qwen2.5-vl:3b",
-     "fallback_model": "qwen2.5-vl:7b",
-     "api_endpoint": "http://localhost:11434",
+     "default_model": "qwen2.5vl:3b",
+     "api_endpoint": "http://netbox-ollama:11434",
      "max_image_dimension": 1280,
      "keep_alive": 0,
      "temperature": 0.0,
      "system_prompt": "You are a network infrastructure topology extraction specialist.\nAnalyze the provided hypervisor network topology screenshot (VMware ESXi, Proxmox, or similar).\nIdentify each distinct Virtual Switch container card.\nFor each switch, extract:\n1. Physical Adapters / Uplinks (e.g., vmnic1, vmnic2) and their teaming role (Active Uplink, Standby Uplink, or None). If no physical adapter is present, use interface: \"No Uplink\" and role: \"None\".\n2. VMkernel ports (e.g., vmk0, vmk1), IPv4 addresses, and their service purpose (e.g., Management Network, vMotion, iSCSI).\n3. Virtual Machine Port Groups (even if they do not have an IP address) and their purpose names.\n\nCRITICAL RULES:\n- Each switch is physically separated by borders/headers. DO NOT merge different switches together (e.g., vSwitch0 and vSwitch01 are strictly separate).\n- Return ONLY a valid JSON array of objects with the exact keys:\n  [{\"switch\": \"...\", \"interface\": \"...\", \"type\": \"Uplink|VMkernel|Port Group\", \"ip\": \"...\", \"purpose\": \"...\", \"role\": \"Active Uplink|Standby Uplink|None\"}]\n- Do not wrap in conversational prose. Output compact raw JSON only."
-   },
+    },
    "topology_parsing_presets": {
     "VMware ESXi": {
       "platform": "VMware ESXi",

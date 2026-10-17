@@ -1,5 +1,5 @@
 # NetBox Hub — Living Architecture SOP & Handover Guide
-# Target Baseline: v4.5.10 | Platform: Oracle Cloud Ampere A1 (ARM64)
+# Target Baseline: v4.5.11 | Platform: Oracle Cloud Ampere A1 (ARM64)
 
 ---
 
@@ -8,7 +8,7 @@
 | Property              | Value                                                        |
 |-----------------------|--------------------------------------------------------------|
 | Application           | NetBox Universal Library Hub                                 |
-| Target Version        | v4.5.10                                                      |
+| Target Version        | v4.5.11                                                      |
 | Runtime               | Python 3.11+ / Streamlit                                     |
 | Cloud Infrastructure  | Oracle Cloud Ampere A1 (ARM64 / aarch64, Linux)              |
 | Container Registry    | `ghcr.io/miniz3210/netbox-hub`                               |
@@ -166,7 +166,7 @@ When a cell in the DataGrid is edited, `_apply_cascade_to_rows()` in `ui/tabs/na
 Capture a baseline snapshot of the Standards Tab configuration into `data/naming_rules.yaml`. Verify all section definitions (2.5 UX rules, 4.0 Blueprint guide) are present and consistent.
 
 ### Step 2 — Version Assert Verification
-Confirm `config/constants.py::APP_VERSION == "4.5.10"`. Ensure no release notes or version bump scripts are pending.
+Confirm `config/constants.py::APP_VERSION == "4.5.11"`. Ensure no release notes or version bump scripts are pending.
 
 ### Step 3 — Safe Local Container Cache Cleanup
 ```bash
@@ -262,7 +262,7 @@ docker image prune -a -f && docker builder prune -a -f
 ## 9. 專案狀態檢核：做完咩 (Done) vs 未做咩 (Pending)
 ======================================================================
 
-9.1 做完咩 (Completed & Verified in v4.5.10)
+9.1 做完咩 (Completed & Verified in v4.5.11)
 - [x] 混合編輯架構落地 (Hybrid Architecture): 廢除 Chips Pool，改用頂部視覺卡片概覽 + 中間原生 st.data_editor 表格。
 - [x] RapidOCR 極致效能壓榨: 關閉 use_angle_cls，鎖定 intra_op_num_threads=2，單圖 OCR 耗時降至 2-3s。
 - [x] 本地脫敏金庫非破壞性重構: 永久停用 vault Step 10 與 Step 11，保留原生交換機與端口組拓撲關鍵字。
@@ -277,6 +277,10 @@ docker image prune -a -f && docker builder prune -a -f
 - [x] 完整語義 Schema 保留: 維持 `{"switch", "interface", "type", "ip", "purpose", "role"}` 結構，不使用緊湊單字母鍵，保障 3B/7B 模型推理完整性。
 - [x] 全域五元組跨圖去重: 解決重疊截圖重複問題 (如 vSwitch02 上重複的 vmnic3 / iSCSI02)。
 - [x] 交換機邊界與間距隔離: 正規化交換機名稱防止錯誤合併或卡片分裂。
+- [x] In-Tab Vision Engine Selector (Plan B): 視覺引擎選擇器內嵌於 Topology Analysis 標籤頁，位於「🚀 Analyze & Auto-Populate」按鈕之前，與側邊欄 AI Assistant 解耦。
+- [x] 階層式配置統一 (Hierarchical Config Resolution): UI 選擇 > `.env` 環境變數 > `naming_rules.yaml` 預設值，Docker 預設 Ollama 端點為 `http://netbox-ollama:11434`。
+- [x] Fallback Model 移除: 移除 `fallback_model` 配置，單一模型執行路徑。
+- [x] On-Demand Lifecycle: `keep_alive: 0` 模型淘汰與 1280px 解析度降頻。
 
 9.2 未做咩 (Pending & Future Roadmap)
 - [ ] 緊鄰 Switch 物理文字切片 (Python-Side Switch Chunking):
@@ -290,5 +294,5 @@ docker image prune -a -f && docker builder prune -a -f
   * 撰寫本地獨立比對腳本，直連 SQLite 比對 Excel IPAM 紀錄與 NetBox 現存資料，產出差異報告與正規化 CSV。
 - [ ] 多平台視覺卡片渲染預設 (Proxmox VE / Nutanix Prism 適配)。
 - [ ] 單元測試套件全面補齊:
-    * 更新 tests/ 中對 APP_VERSION 的斷言為 4.5.10。
+    * 更新 tests/ 中對 APP_VERSION 的斷言為 4.5.11。
    * 補齊多平台 Presets 動態載入與 _safe_parse_json_array 截斷修復單元測試。

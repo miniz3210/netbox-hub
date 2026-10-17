@@ -10,6 +10,7 @@ Key design decisions:
   * Sequential auto-queue for multi-image uploads to prevent OOM spikes.
   * Full semantic JSON keys (switch, interface, type, ip, purpose, role)
     to maintain model reasoning integrity on 3 B / 7 B parameter models.
+  * Hierarchical configuration resolution: UI session state > env vars > YAML defaults.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import base64
 import io
 import json
 import logging
+import os
 import time
 from typing import Any, Dict, List, Optional, Callable
 
@@ -29,6 +31,72 @@ except ImportError:
     HAS_VISION_DEPS = False
 
 logger = logging.getLogger(__name__)
+
+DOCKER_DEFAULT_ENDPOINT = "http://netbox-ollama:11434"
+
+DEFAULT_VLM_MODEL = os.getenv("DEFAULT_VLM_MODEL", "qwen2.5vl:3b")
+DEFAULT_VLM_ENDPOINT = os.getenv(
+    "OLLAMA_API_ENDPOINT",
+    DOCKER_DEFAULT_ENDPOINT,
+)
+DEFAULT_VLM_KEEP_ALIVE = int(os.getenv("VLM_KEEP_ALIVE", "0"))
+DEFAULT_VLM_MAX_DIM = int(os.getenv("VLM_MAX_IMAGE_DIM", "1280"))
+
+
+def resolve_vlm_config(
+    ui_override: Optional[Dict[str, Any]] = None,
+    naming_rules: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Resolve VLM configuration hierarchically.
+
+    Priority: UI session state override > .env variables > naming_rules.yaml defaults.
+    Returns a dict with keys: model, endpoint, keep_alive, max_dimension, temperature.
+    """
+    result: Dict[str, Any] = {}
+
+    yaml_cfg = (naming_rules.get("vlm_config") or {}) if isinstance(naming_rules, dict) else {}
+
+    result["model"] = (
+        (ui_override or {}).get("model")
+        or os.getenv("DEFAULT_VLM_MODEL")
+        or yaml_cfg.get("default_model", DEFAULT_VLM_MODEL)
+    )
+    result["endpoint"] = (
+        (ui_override or {}).get("endpoint")
+        or os.getenv("OLLAMA_API_ENDPOINT")
+        or yaml_cfg.get("api_endpoint", DOCKER_DEFAULT_ENDPOINT)
+    )
+    result["keep_alive"] = (
+        (ui_override or {}).get("keep_alive")
+        if (ui_override or {}).get("keep_alive") is not None
+        else int(
+            os.getenv("VLM_KEEP_ALIVE", str(yaml_cfg.get("keep_alive", DEFAULT_VLM_KEEP_ALIVE)))
+        )
+    )
+    result["max_dimension"] = (
+        (ui_override or {}).get("max_dimension")
+        if (ui_override or {}).get("max_dimension") is not None
+        else int(
+            os.getenv("VLM_MAX_IMAGE_DIM", str(yaml_cfg.get("max_image_dimension", DEFAULT_VLM_MAX_DIM)))
+        )
+    )
+    result["temperature"] = float(
+        (ui_override or {}).get("temperature", yaml_cfg.get("temperature", 0.0))
+    )
+
+    return result
+
+
+def get_vlm_endpoint(naming_rules: Optional[Dict[str, Any]] = None) -> str:
+    """Return the resolved Ollama endpoint using hierarchical config."""
+    config = resolve_vlm_config(naming_rules=naming_rules)
+    return config["endpoint"]
+
+
+def get_vlm_model(naming_rules: Optional[Dict[str, Any]] = None) -> str:
+    """Return the resolved VLM model name using hierarchical config."""
+    config = resolve_vlm_config(naming_rules=naming_rules)
+    return config["model"]
 
 
 # ---------------------------------------------------------------------------
@@ -395,27 +463,26 @@ def run_vlm_topology_analysis(
     naming_rules: Dict[str, Any],
     target_platform: str,
     progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    model: Optional[str] = None,
+    endpoint: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Full VLM-based topology analysis that mirrors the OCR pipeline.
 
-    Returns a dict compatible with the downstream UI processing:
-    {
-        "records": [...],
-        "errors": [...],
-        "raw_responses": [...],
-        "timing": {...},
-    }
+    Parameters
+    ----------
+    model : str, optional
+        Override the model resolved from hierarchical config.
+    endpoint : str, optional
+        Override the endpoint resolved from hierarchical config.
     """
     from core.vault import SanitizerVault
 
     vault = SanitizerVault()
-    vlm_cfg = (naming_rules.get("vlm_config") or {}) if isinstance(naming_rules.get("vlm_config"), dict) else {}
-
-    model = vlm_cfg.get("default_model", "qwen2.5-vl:3b")
-    endpoint = vlm_cfg.get("api_endpoint", "http://localhost:11434")
-    keep_alive = int(vlm_cfg.get("keep_alive", 0))
-    temperature = float(vlm_cfg.get("temperature", 0.0))
-    max_dim = int(vlm_cfg.get("max_image_dimension", 1280))
+    vlm_cfg = resolve_vlm_config(naming_rules=naming_rules)
+    if model is not None:
+        vlm_cfg["model"] = model
+    if endpoint is not None:
+        vlm_cfg["endpoint"] = endpoint
 
     tpp = naming_rules.get("topology_parsing_presets") or {}
     plat_cfg = tpp.get(target_platform, {}) if isinstance(tpp.get(target_platform), dict) else {}
@@ -440,11 +507,11 @@ def run_vlm_topology_analysis(
     results = process_vlm_queue(
         image_files=image_files,
         progress_callback=progress_callback,
-        model=model,
-        endpoint=endpoint,
-        keep_alive=keep_alive,
-        temperature=temperature,
-        max_dimension=max_dim,
+        model=vlm_cfg["model"],
+        endpoint=vlm_cfg["endpoint"],
+        keep_alive=vlm_cfg["keep_alive"],
+        temperature=vlm_cfg["temperature"],
+        max_dimension=vlm_cfg["max_dimension"],
         system_prompt=system_prompt_text,
         user_prompt_template=user_prompt_template,
     )
