@@ -1,16 +1,21 @@
 """
 On-Demand Local VLM Engine — Qwen2.5-VL Pipeline
 
-Implements zero-retention model lifecycle (keep_alive: 0) for on-premises
-vision-language inference on constrained host hardware (2 vCPU / 11.6 GB RAM).
+Implements progressive in-tab VLM inference with keep_alive: "10m" lifecycle
+for on-premises vision-language extraction on constrained host hardware
+(4 OCPU ARM).
 
 Key design decisions:
   * Dynamic resolution capping to 1280 px max dimension — slashes visual
     tokens from ~1300 to ~450 and saves 15-20 s per image on CPU.
+  * Progressive streaming: yields (idx, total, records) per image so the UI
+    can append switch cards in real-time without waiting for the full batch.
   * Sequential auto-queue for multi-image uploads to prevent OOM spikes.
   * Full semantic JSON keys (switch, interface, type, ip, purpose, role)
     to maintain model reasoning integrity on 3 B / 7 B parameter models.
   * Hierarchical configuration resolution: UI session state > env vars > YAML defaults.
+  * 300s HTTP timeout prevents premature kills on cold model load.
+  * num_thread: 4 and num_ctx: 2048 optimized for 4-OCPU ARM execution.
 """
 
 from __future__ import annotations
@@ -39,8 +44,11 @@ DEFAULT_VLM_ENDPOINT = os.getenv(
     "OLLAMA_API_ENDPOINT",
     DOCKER_DEFAULT_ENDPOINT,
 )
-DEFAULT_VLM_KEEP_ALIVE = int(os.getenv("VLM_KEEP_ALIVE", "0"))
+DEFAULT_VLM_KEEP_ALIVE = os.getenv("VLM_KEEP_ALIVE", "10m")
 DEFAULT_VLM_MAX_DIM = int(os.getenv("VLM_MAX_IMAGE_DIM", "1280"))
+DEFAULT_VLM_TIMEOUT = int(os.getenv("VLM_TIMEOUT", "300"))
+DEFAULT_VLM_NUM_THREADS = int(os.getenv("VLM_NUM_THREADS", "4"))
+DEFAULT_VLM_NUM_CTX = int(os.getenv("VLM_NUM_CTX", "2048"))
 
 
 def resolve_vlm_config(
@@ -69,9 +77,7 @@ def resolve_vlm_config(
     result["keep_alive"] = (
         (ui_override or {}).get("keep_alive")
         if (ui_override or {}).get("keep_alive") is not None
-        else int(
-            os.getenv("VLM_KEEP_ALIVE", str(yaml_cfg.get("keep_alive", DEFAULT_VLM_KEEP_ALIVE)))
-        )
+        else os.getenv("VLM_KEEP_ALIVE") or str(yaml_cfg.get("keep_alive", DEFAULT_VLM_KEEP_ALIVE))
     )
     result["max_dimension"] = (
         (ui_override or {}).get("max_dimension")
@@ -82,6 +88,21 @@ def resolve_vlm_config(
     )
     result["temperature"] = float(
         (ui_override or {}).get("temperature", yaml_cfg.get("temperature", 0.0))
+    )
+    result["timeout"] = int(
+        (ui_override or {}).get("timeout")
+        if (ui_override or {}).get("timeout") is not None
+        else os.getenv("VLM_TIMEOUT", str(yaml_cfg.get("timeout", DEFAULT_VLM_TIMEOUT)))
+    )
+    result["num_ctx"] = int(
+        (ui_override or {}).get("num_ctx")
+        if (ui_override or {}).get("num_ctx") is not None
+        else os.getenv("VLM_NUM_CTX", str(yaml_cfg.get("num_ctx", DEFAULT_VLM_NUM_CTX)))
+    )
+    result["num_thread"] = int(
+        (ui_override or {}).get("num_thread")
+        if (ui_override or {}).get("num_thread") is not None
+        else os.getenv("VLM_NUM_THREADS", str(yaml_cfg.get("num_threads", DEFAULT_VLM_NUM_THREADS)))
     )
 
     return result
@@ -165,10 +186,13 @@ def call_local_vlm_single(
     prompt: str,
     model: str = "qwen2.5-vl:3b",
     endpoint: str = "http://localhost:11434",
-    keep_alive: int = 0,
+    keep_alive: str = "10m",
     temperature: float = 0.0,
-    num_ctx: int = 4096,
+    num_ctx: int = 2048,
     num_predict: int = 1024,
+    num_thread: int = 4,
+    timeout: int = 300,
+    system_prompt: str = "",
 ) -> List[Dict[str, Any]]:
     """Send a single image to a local VLM via Ollama /api/chat.
 
@@ -182,14 +206,20 @@ def call_local_vlm_single(
         Model identifier (e.g. ``"qwen2.5-vl:3b"``).
     endpoint : str
         Ollama base URL.
-    keep_alive : int
-        Seconds to keep model in memory; 0 = unload immediately.
+    keep_alive : str
+        Model retention duration (e.g. ``"10m"``).
     temperature : float
         Sampling temperature (0.0 = deterministic).
     num_ctx : int
         Context window size.
     num_predict : int
         Max tokens to generate.
+    num_thread : int
+        Number of CPU threads for matrix execution.
+    timeout : int
+        HTTP request timeout in seconds.
+    system_prompt : str
+        System prompt for the VLM (platform-specific extraction instructions).
 
     Returns
     -------
@@ -198,20 +228,24 @@ def call_local_vlm_single(
     """
     import urllib.request
 
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({
+        "role": "user",
+        "content": prompt,
+        "images": [image_b64],
+    })
+
     payload = {
         "model": model,
-        "messages": [
-            {
-                "role": "user",
-                "content": prompt,
-                "images": [image_b64],
-            }
-        ],
+        "messages": messages,
         "keep_alive": keep_alive,
         "options": {
             "temperature": temperature,
             "num_ctx": num_ctx,
             "num_predict": num_predict,
+            "num_thread": num_thread,
         },
         "stream": False,
     }
@@ -224,13 +258,11 @@ def call_local_vlm_single(
         method="POST",
     )
 
-    deadline = time.time() + 180  # 3 min hard timeout for CPU inference
     try:
-        with urllib.request.urlopen(req, timeout=180) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = json.loads(resp.read().decode("utf-8"))
     except Exception as exc:
-        elapsed = time.time() - deadline + 180
-        logger.error("VLM call failed after %.1fs: %s", elapsed, exc)
+        logger.error("VLM call failed after %.1fs: %s", timeout, exc)
         raise RuntimeError(f"VLM inference failed: {exc}") from exc
 
     message = raw.get("message", {})
@@ -244,10 +276,12 @@ def call_local_vlm_single_openai(
     prompt: str,
     model: str = "qwen2.5-vl:3b",
     endpoint: str = "http://localhost:11434",
-    keep_alive: int = 0,
+    keep_alive: str = "10m",
     temperature: float = 0.0,
-    num_ctx: int = 4096,
+    num_ctx: int = 2048,
     num_predict: int = 1024,
+    num_thread: int = 4,
+    timeout: int = 300,
 ) -> List[Dict[str, Any]]:
     """Send a single image to an OpenAI-compatible endpoint."""
     import urllib.request
@@ -282,7 +316,7 @@ def call_local_vlm_single_openai(
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=180) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = json.loads(resp.read().decode("utf-8"))
     except Exception as exc:
         logger.error("VLM OpenAI call failed: %s", exc)
@@ -338,9 +372,12 @@ def process_vlm_queue(
     progress_callback: Optional[Callable[[int, int, str], None]] = None,
     model: str = "qwen2.5-vl:3b",
     endpoint: str = "http://localhost:11434",
-    keep_alive: int = 0,
+    keep_alive: str = "10m",
     temperature: float = 0.0,
     max_dimension: int = 1280,
+    num_ctx: int = 2048,
+    num_thread: int = 4,
+    timeout: int = 300,
     system_prompt: str = "",
     user_prompt_template: str = (
         "Parse this sanitized topology text into JSON entities array:\n\n{text}"
@@ -358,12 +395,18 @@ def process_vlm_queue(
         Ollama model identifier.
     endpoint : str
         Ollama base URL.
-    keep_alive : int
-        Model retention seconds (0 = unload after inference).
+    keep_alive : str
+        Model retention duration (e.g. "10m").
     temperature : float
         Sampling temperature.
     max_dimension : int
         Max image dimension before resize.
+    num_ctx : int
+        Context window size.
+    num_thread : int
+        Number of CPU threads for matrix execution.
+    timeout : int
+        HTTP request timeout in seconds.
     system_prompt : str
         System prompt for the VLM.
     user_prompt_template : str
@@ -419,6 +462,10 @@ def process_vlm_queue(
                 endpoint=endpoint,
                 keep_alive=keep_alive,
                 temperature=temperature,
+                num_ctx=num_ctx,
+                num_thread=num_thread,
+                timeout=timeout,
+                system_prompt=system_prompt,
             )
             img_time = time.time() - img_start
             image_results.append({
@@ -452,6 +499,87 @@ def process_vlm_queue(
         "total_time_s": round(total_time, 2),
         "errors": errors,
     }
+
+
+# ---------------------------------------------------------------------------
+# Progressive streaming generator for real-time UI rendering
+# ---------------------------------------------------------------------------
+
+def process_vlm_queue_stream(
+    image_files: List[Any],
+    model: str = "qwen2.5-vl:3b",
+    endpoint: str = "http://localhost:11434",
+    keep_alive: str = "10m",
+    temperature: float = 0.0,
+    max_dimension: int = 1280,
+    num_ctx: int = 2048,
+    num_thread: int = 4,
+    timeout: int = 300,
+    system_prompt: str = "",
+):
+    """Yield (image_index, total_images, single_image_records) as each image
+    completes inference, enabling progressive UI rendering without batch
+    wait. Returns parsed JSON array items for each image.
+
+    Parameters
+    ----------
+    image_files : list
+        List of image inputs (BytesIO, PIL Image, bytes, or file paths).
+    model : str
+        Ollama model identifier.
+    endpoint : str
+        Ollama base URL.
+    keep_alive : str
+        Model retention duration string (e.g. "10m").
+    temperature : float
+        Sampling temperature.
+    max_dimension : int
+        Max image dimension before resize.
+    num_ctx : int
+        Context window size.
+    num_thread : int
+        Number of CPU threads for matrix execution.
+    timeout : int
+        HTTP request timeout in seconds.
+    system_prompt : str
+        System prompt for the VLM (platform-specific extraction instructions).
+
+    Yields
+    ------
+    tuple
+        (image_index: int, total_images: int, records: List[Dict])
+    """
+    if not HAS_VISION_DEPS:
+        yield (0, len(image_files), [])
+        return
+
+    total = len(image_files)
+    for idx, img in enumerate(image_files):
+        try:
+            image_b64 = preprocess_and_resize_for_vlm(img, max_dimension=max_dimension)
+        except Exception as exc:
+            logger.warning("Image #%d preprocessing failed: %s", idx + 1, exc)
+            yield (idx, total, [])
+            continue
+
+        try:
+            records = call_local_vlm_single(
+                image_b64=image_b64,
+                prompt="Extract the network topology from this screenshot as JSON.",
+                model=model,
+                endpoint=endpoint,
+                keep_alive=keep_alive,
+                temperature=temperature,
+                num_ctx=num_ctx,
+                num_predict=1024,
+                num_thread=num_thread,
+                timeout=timeout,
+                system_prompt=system_prompt,
+            )
+            yield (idx, total, records)
+        except Exception as exc:
+            logger.warning("Image #%d VLM call failed: %s", idx + 1, exc)
+            yield (idx, total, [])
 
 
 # ---------------------------------------------------------------------------
@@ -509,9 +637,12 @@ def run_vlm_topology_analysis(
         progress_callback=progress_callback,
         model=vlm_cfg["model"],
         endpoint=vlm_cfg["endpoint"],
-        keep_alive=vlm_cfg["keep_alive"],
+        keep_alive=vlm_cfg.get("keep_alive", "10m"),
         temperature=vlm_cfg["temperature"],
         max_dimension=vlm_cfg["max_dimension"],
+        num_ctx=vlm_cfg.get("num_ctx", 2048),
+        num_thread=vlm_cfg.get("num_thread", 4),
+        timeout=vlm_cfg.get("timeout", 300),
         system_prompt=system_prompt_text,
         user_prompt_template=user_prompt_template,
     )

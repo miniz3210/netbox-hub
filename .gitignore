@@ -29,3 +29,4 @@ ARCHITECTURE_SOP*.md
 *.jpg
 *.png
 ollama/
+ollama/cache/

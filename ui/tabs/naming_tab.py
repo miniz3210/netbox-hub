@@ -40,6 +40,47 @@ from config.naming_rules import (
 )
 
 # ---------------------------------------------------------------------------
+# Progressive VLM rendering helpers
+# ---------------------------------------------------------------------------
+def _render_topology_cards(records: List[Dict[str, Any]]):
+    """Render switch container cards from topology records (progressive)."""
+    if not records:
+        return
+    discovered_sw = sorted(
+        list({r["switch"] for r in records if r.get("switch")}),
+        key=_natsort_key,
+    )
+    if not discovered_sw:
+        return
+    cols = st.columns(min(len(discovered_sw), 4))
+    for idx, sw in enumerate(discovered_sw):
+        with cols[idx % len(cols)]:
+            with st.container(border=True):
+                sw_records = [r for r in records if r.get("switch") == sw]
+                uplinks = [r for r in sw_records if str(r.get("type", "")).strip().lower() == "uplink" and r.get("interface")]
+                services = [r for r in sw_records if str(r.get("type", "")).strip().lower() != "uplink" and (r.get("purpose") or r.get("interface"))]
+                st.markdown(f"**{sw}**")
+                if uplinks:
+                    st.caption(f"Uplinks ({len(uplinks)}):")
+                    for u in uplinks:
+                        st.caption(f"  - {u.get('interface', '')} ({u.get('role', '')})")
+                if services:
+                    st.caption(f"Services ({len(services)}):")
+                    for s in services:
+                        label = s.get("purpose") or s.get("interface") or ""
+                        ip = s.get("ip") or ""
+                        st.caption(f"  - {label}{f' [{ip}]' if ip else ''}")
+
+
+def _render_topology_datagrid(records: List[Dict[str, Any]]):
+    """Render the topology data grid from records (progressive)."""
+    if not records:
+        return
+    df = pd.DataFrame(records, columns=["switch", "interface", "type", "ip", "purpose", "role", "speed"])
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+
+# ---------------------------------------------------------------------------
 # Cache helpers for toolbar stats and reference records
 # ---------------------------------------------------------------------------
 @st.cache_data(ttl=60, show_spinner=False)
@@ -1240,6 +1281,11 @@ def _run_vlm_topology_analysis(image_files, naming_rules, target_platform, progr
         extra_kwargs["model"] = model_override
     if endpoint_override:
         extra_kwargs["endpoint"] = endpoint_override
+    vlm_cfg = naming_rules.get("vlm_config") or {}
+    extra_kwargs["keep_alive"] = vlm_cfg.get("keep_alive", "10m")
+    extra_kwargs["num_ctx"] = vlm_cfg.get("num_ctx", 2048)
+    extra_kwargs["num_thread"] = vlm_cfg.get("num_threads", 4)
+    extra_kwargs["timeout"] = vlm_cfg.get("timeout", 300)
     results = _vlm_analyze(
         image_files=image_files,
         naming_rules=naming_rules,
@@ -1605,25 +1651,83 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     use_vlm = False
                 else:
                     from core.vlm_engine import resolve_vlm_config as _resolve_vlm
+                    from core.vlm_engine import process_vlm_queue_stream as _vlm_stream
                     _ui_override = {"model": resolved_engine}
                     _vlm_cfg = _resolve_vlm(ui_override=_ui_override, naming_rules=naming_rules)
-                    vlm_results = _run_vlm_topology_analysis(
+                    _target_platform = st.session_state.get("naming_target_platform", "VMware ESXi")
+
+                    # Dynamic prompt injection from platform preset (separation of concerns)
+                    _tpp = naming_rules.get("topology_parsing_presets") or {}
+                    _plat_preset = _tpp.get(_target_platform, {}) if isinstance(_tpp.get(_target_platform), dict) else {}
+                    _vlm_prompt = _plat_preset.get("vlm_prompt", "").strip()
+
+                    # Progressive rendering containers — no st.rerun() inside the loop
+                    progress_bar = st.progress(0.0, text="Initializing VLM inference...")
+                    status_box = st.empty()
+                    results_container = st.container()
+
+                    _existing_sigs: Set[Tuple] = set()
+                    _vlm_records: List[Dict[str, Any]] = []
+                    _vlm_errors: List[str] = []
+
+                    for idx, total, new_records in _vlm_stream(
                         image_files=uploaded_imgs,
-                        naming_rules=naming_rules,
-                        target_platform=st.session_state.get("naming_target_platform", "VMware ESXi"),
-                        progress_callback=lambda idx, total, msg: progress_bar.progress(
-                            (idx + 1) / total, text=msg
-                        ) if total > 0 else None,
-                        model_override=_vlm_cfg["model"],
-                        endpoint_override=_vlm_cfg["endpoint"],
-                    )
-                raw_items = vlm_results.get("records", [])
-                errors = vlm_results.get("errors", [])
-                session_id = vlm_results.get("vault_session")
-                ai_error_msg = "; ".join(errors) if errors else ""
-                st.session_state["latest_ai_raw_response"] = _json.dumps(vlm_results.get("raw_responses", []), indent=2)[:500]
-                # Skip OCR pipeline — go straight to shared record processing below
-                _vlm_mode = True
+                        model=_vlm_cfg["model"],
+                        endpoint=_vlm_cfg["endpoint"],
+                        keep_alive=_vlm_cfg.get("keep_alive", "10m"),
+                        temperature=_vlm_cfg.get("temperature", 0.0),
+                        max_dimension=_vlm_cfg.get("max_dimension", 1280),
+                        num_ctx=_vlm_cfg.get("num_ctx", 2048),
+                        num_thread=_vlm_cfg.get("num_thread", 4),
+                        timeout=_vlm_cfg.get("timeout", 300),
+                        system_prompt=_vlm_prompt,
+                    ):
+                        # 5-tuple deduplication
+                        for r in new_records:
+                            sig = (
+                                r.get("switch", "").strip().lower(),
+                                r.get("interface", "").strip().lower(),
+                                r.get("type", "").strip().lower(),
+                                r.get("purpose", "").strip().lower(),
+                                r.get("ip", "").strip(),
+                            )
+                            if sig not in _existing_sigs:
+                                _existing_sigs.add(sig)
+                                _vlm_records.append(r)
+
+                        # Update session state (no rerun)
+                        st.session_state["topology_records"] = _vlm_records
+                        st.session_state["discovered_switches"] = sorted(
+                            list({r["switch"] for r in _vlm_records if r.get("switch")}),
+                            key=_natsort_key
+                        )
+                        st.session_state["discovered_uplink_candidates"] = sorted(
+                            list({r["interface"] for r in _vlm_records if r.get("type") == "Uplink" and r.get("interface")}),
+                            key=_natsort_key
+                        )
+                        st.session_state["discovered_service_candidates"] = sorted(
+                            list({r["purpose"] for r in _vlm_records if r.get("type") != "Uplink" and r.get("purpose")}),
+                            key=_natsort_key
+                        )
+                        st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
+
+                        # In-place progressive render — no page reload
+                        progress_bar.progress((idx + 1) / total,
+                            text=f"VLM Inference: Image {idx + 1}/{total} — {len(_vlm_records)} records so far")
+                        with results_container:
+                            status_box.info(f"Image {idx + 1}/{total}: {len(new_records)} new records parsed")
+                            _render_topology_cards(_vlm_records)
+                            _render_topology_datagrid(_vlm_records)
+
+                    # All images processed
+                    progress_bar.empty()
+                    status_box.success(f"Analysis complete! Extracted {len(_vlm_records)} topology items across {len(set(r['switch'] for r in _vlm_records if r.get('switch')))} switches.")
+                    raw_items = _vlm_records
+                    errors = _vlm_errors
+                    session_id = None
+                    ai_error_msg = ""
+                    _vlm_mode = True
+                    st.session_state["latest_ai_raw_response"] = _json.dumps([], indent=2)[:500]
             else:
                 _vlm_mode = False
                 combined_raw_lines = []

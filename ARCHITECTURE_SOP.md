@@ -271,16 +271,22 @@ docker image prune -a -f && docker builder prune -a -f
 - [x] 跨截圖全域去重防線 (Cross-Screenshot Deduplication): 建立 (switch, interface, type, purpose, ip) 五元組簽名機制，徹底根除重疊截圖造成的雙倍網卡與重複服務。
 - [x] 交換機名稱空白正規化 (Switch Whitespace Canonicalization): 自動壓縮連續空格與字符黏合，杜絕同名交換機分裂成多張分身卡片。
 - [x] 邊界隔絕防吞併機制: 徹底防止無實體卡交換機 (PR Spain Fuenmayor VLab) 吞併緊鄰實體交換機 (vSwitch0)。
-- [x] On-Demand Local VLM Pipeline: 零留存模型生命周期 (`keep_alive: 0`)，防止 2 vCPU / 11.6 GB 主機 RAM 飢渴。
+- [x] On-Demand Local VLM Pipeline: `keep_alive: "10m"` 生命周期管理，防止 4 OCPU / 11.6 GB 主機 RAM 飢渴；300s HTTP 超時防止冷啟動提前終止。
 - [x] 動態解析度 capped: 輸入影像限制至 1280px 最大維度，視覺 Token 減少 65%，CPU 單圖節省 15-20 秒。
 - [x] 序列自動隊列: 多圖上傳以串行方式處理，避免低資源伺服器 OOM 崩潰。
 - [x] 完整語義 Schema 保留: 維持 `{"switch", "interface", "type", "ip", "purpose", "role"}` 結構，不使用緊湊單字母鍵，保障 3B/7B 模型推理完整性。
 - [x] 全域五元組跨圖去重: 解決重疊截圖重複問題 (如 vSwitch02 上重複的 vmnic3 / iSCSI02)。
 - [x] 交換機邊界與間距隔離: 正規化交換機名稱防止錯誤合併或卡片分裂。
+- [x] Standards Decoupling: `vlm_config` 僅含引擎基礎設施參數，`standards.<platform>.vlm_prompt` 包含語義提取指令，實現關注點分離。
+- [x] Progressive Container Rendering (無 st.rerun): 使用 `st.container()` + `st.empty()` 進行原地渲染刷新，消除頁面重新執行造成的流程中斷。
+- [x] Dynamic Platform Prompt Injection: VLM 系統提示根據當前選擇的平台 (VMware ESXi / Proxmox VE) 動態加載對應 `vlm_prompt`。
 - [x] In-Tab Vision Engine Selector (Plan B): 視覺引擎選擇器內嵌於 Topology Analysis 標籤頁，位於「🚀 Analyze & Auto-Populate」按鈕之前，與側邊欄 AI Assistant 解耦。
+- [x] Progressive Streaming Rendering: 消除空白畫面批量等待；每張圖片完成推理後立即追加記錄並實時重渲 switch 卡片。
+- [x] Strict 1280px Cap & Model Strategy: 維持 1280px 解析度上限確保跨平台相容性；完全移除 fallback_model，嚴格依賴單一選定模型（預設：`qwen2.5vl:3b`）。
+- [x] Global 5-tuple Deduplication: `(switch, interface, type, purpose, ip)` 全域簽名去重，消除重疊截圖造成的重複網卡與服務。
 - [x] 階層式配置統一 (Hierarchical Config Resolution): UI 選擇 > `.env` 環境變數 > `naming_rules.yaml` 預設值，Docker 預設 Ollama 端點為 `http://netbox-ollama:11434`。
 - [x] Fallback Model 移除: 移除 `fallback_model` 配置，單一模型執行路徑。
-- [x] On-Demand Lifecycle: `keep_alive: 0` 模型淘汰與 1280px 解析度降頻。
+- [x] On-Demand Lifecycle: `keep_alive: "10m"` 模型保留與 300s 超時；`num_thread: 4` + `num_ctx: 2048` 優化 4 OCPU ARM 執行。
 
 9.2 未做咩 (Pending & Future Roadmap)
 - [ ] 緊鄰 Switch 物理文字切片 (Python-Side Switch Chunking):
