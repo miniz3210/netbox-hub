@@ -1,5 +1,5 @@
 # NetBox Hub — Living Architecture SOP & Handover Guide
-# Target Baseline: v4.5.11 | Platform: Oracle Cloud Ampere A1 (ARM64)
+# Target Baseline: v4.5.12 | Platform: Oracle Cloud Ampere A1 (ARM64)
 
 ---
 
@@ -8,7 +8,7 @@
 | Property              | Value                                                        |
 |-----------------------|--------------------------------------------------------------|
 | Application           | NetBox Universal Library Hub                                 |
-| Target Version        | v4.5.11                                                      |
+| Target Version        | v4.5.12                                                      |
 | Runtime               | Python 3.11+ / Streamlit                                     |
 | Cloud Infrastructure  | Oracle Cloud Ampere A1 (ARM64 / aarch64, Linux)              |
 | Container Registry    | `ghcr.io/miniz3210/netbox-hub`                               |
@@ -166,7 +166,7 @@ When a cell in the DataGrid is edited, `_apply_cascade_to_rows()` in `ui/tabs/na
 Capture a baseline snapshot of the Standards Tab configuration into `data/naming_rules.yaml`. Verify all section definitions (2.5 UX rules, 4.0 Blueprint guide) are present and consistent.
 
 ### Step 2 — Version Assert Verification
-Confirm `config/constants.py::APP_VERSION == "4.5.11"`. Ensure no release notes or version bump scripts are pending.
+Confirm `config/constants.py::APP_VERSION == "4.5.12"`. Ensure no release notes or version bump scripts are pending.
 
 ### Step 3 — Safe Local Container Cache Cleanup
 ```bash
@@ -262,31 +262,27 @@ docker image prune -a -f && docker builder prune -a -f
 ## 9. 專案狀態檢核：做完咩 (Done) vs 未做咩 (Pending)
 ======================================================================
 
-9.1 做完咩 (Completed & Verified in v4.5.11)
+9.1 做完咩 (Completed & Verified in v4.5.12)
+- [x] Hybrid OCR + Text-Only LLM Pipeline: 替代原生 VLM 影像編碼；RapidOCR 提取文字 + 空間序列化 → `qwen2.5:3b` 純文字推論，單圖延遲降至 ~4s（原 ~10–15s）。
+- [x] Legacy VLM Model Removal: 刪除 `qwen2.5vl:3b` (~3.2 GB)，改用文本模型 `qwen2.5:3b` 及 `qwen2.5:1.5b`。
+- [x] Spatial Text Serialization (`core/ocr_spatial_engine.py`): 按 Y 座標分組行、X 座標排序，生成 `[y=N, x=M] token` 格式的空間布局字串。
+- [x] Pandas Float Type Crash Fix: `st.data_editor` 輸入前強制 `df[col].fillna("").astype(str)` 避免類型衝突。
+- [x] UI Container Stacking Bug Fix: 改用 `results_placeholder = st.empty()` 替代累加的 `st.container()`，實現原地 progressive 刷新。
+- [x] Engine Selector Updated: 選項為 `qwen2.5:3b (Hybrid RapidOCR + LLM - Recommended: ~4s)` / `qwen2.5:1.5b (Ultra-fast LLM: ~2s)` / `RapidOCR (Legacy Pure Heuristics)`。
+- [x] Multi-Platform Prompt Decoupling: `standards.esxi.vlm_prompt` 與 `standards.proxmox.vlm_prompt` 均更新為 OCR 空間文字版。
 - [x] 混合編輯架構落地 (Hybrid Architecture): 廢除 Chips Pool，改用頂部視覺卡片概覽 + 中間原生 st.data_editor 表格。
-- [x] RapidOCR 極致效能壓榨: 關閉 use_angle_cls，鎖定 intra_op_num_threads=2，單圖 OCR 耗時降至 2-3s。
+- [x] RapidOCR 極致效能壓榨: 關閉 use_angle_cls，鎖定 intra_op_num_threads=2，單圖 OCR 耗時降至 0.3s。
 - [x] 本地脫敏金庫非破壞性重構: 永久停用 vault Step 10 與 Step 11，保留原生交換機與端口組拓撲關鍵字。
 - [x] 多平台標準字典解耦: 於 naming_rules.yaml 定義 allowed_types, role_options, sentinel_no_adapter，Python 零硬編碼。
 - [x] 零 Fallback 確定性拼裝引擎 (Zero-Hardcode Strict Lego Engine): 廢除所有隱式全局 Fallback，模板 100% 由 Standards 平台字典驅動，缺漏模板或變數未賦值直接拋錯 (Fail-Fast)。
 - [x] 跨截圖全域去重防線 (Cross-Screenshot Deduplication): 建立 (switch, interface, type, purpose, ip) 五元組簽名機制，徹底根除重疊截圖造成的雙倍網卡與重複服務。
 - [x] 交換機名稱空白正規化 (Switch Whitespace Canonicalization): 自動壓縮連續空格與字符黏合，杜絕同名交換機分裂成多張分身卡片。
 - [x] 邊界隔絕防吞併機制: 徹底防止無實體卡交換機 (PR Spain Fuenmayor VLab) 吞併緊鄰實體交換機 (vSwitch0)。
-- [x] On-Demand Local VLM Pipeline: `keep_alive: "10m"` 生命周期管理，防止 4 OCPU / 11.6 GB 主機 RAM 飢渴；300s HTTP 超時防止冷啟動提前終止。
-- [x] 動態解析度 capped: 輸入影像限制至 1280px 最大維度，視覺 Token 減少 65%，CPU 單圖節省 15-20 秒。
-- [x] 序列自動隊列: 多圖上傳以串行方式處理，避免低資源伺服器 OOM 崩潰。
-- [x] 完整語義 Schema 保留: 維持 `{"switch", "interface", "type", "ip", "purpose", "role"}` 結構，不使用緊湊單字母鍵，保障 3B/7B 模型推理完整性。
-- [x] 全域五元組跨圖去重: 解決重疊截圖重複問題 (如 vSwitch02 上重複的 vmnic3 / iSCSI02)。
-- [x] 交換機邊界與間距隔離: 正規化交換機名稱防止錯誤合併或卡片分裂。
 - [x] Standards Decoupling: `vlm_config` 僅含引擎基礎設施參數，`standards.<platform>.vlm_prompt` 包含語義提取指令，實現關注點分離。
-- [x] Progressive Container Rendering (無 st.rerun): 使用 `st.container()` + `st.empty()` 進行原地渲染刷新，消除頁面重新執行造成的流程中斷。
-- [x] Dynamic Platform Prompt Injection: VLM 系統提示根據當前選擇的平台 (VMware ESXi / Proxmox VE) 動態加載對應 `vlm_prompt`。
-- [x] In-Tab Vision Engine Selector (Plan B): 視覺引擎選擇器內嵌於 Topology Analysis 標籤頁，位於「🚀 Analyze & Auto-Populate」按鈕之前，與側邊欄 AI Assistant 解耦。
-- [x] Progressive Streaming Rendering: 消除空白畫面批量等待；每張圖片完成推理後立即追加記錄並實時重渲 switch 卡片。
-- [x] Strict 1280px Cap & Model Strategy: 維持 1280px 解析度上限確保跨平台相容性；完全移除 fallback_model，嚴格依賴單一選定模型（預設：`qwen2.5vl:3b`）。
-- [x] Global 5-tuple Deduplication: `(switch, interface, type, purpose, ip)` 全域簽名去重，消除重疊截圖造成的重複網卡與服務。
+- [x] Progressive Container Rendering (無 st.rerun): 使用 `st.empty()` + `results_placeholder.container()` 進行原地渲染刷新，消除頁面重新執行造成的流程中斷。
+- [x] Dynamic Platform Prompt Injection: 系統提示根據當前選擇的平台 (VMware ESXi / Proxmox VE) 動態加載對應 `vlm_prompt`。
+- [x] In-Tab Vision Engine Selector: 視覺引擎選擇器內嵌於 Topology Analysis 標籤頁，與側邊欄 AI Assistant 解耦。
 - [x] 階層式配置統一 (Hierarchical Config Resolution): UI 選擇 > `.env` 環境變數 > `naming_rules.yaml` 預設值，Docker 預設 Ollama 端點為 `http://netbox-ollama:11434`。
-- [x] Fallback Model 移除: 移除 `fallback_model` 配置，單一模型執行路徑。
-- [x] On-Demand Lifecycle: `keep_alive: "10m"` 模型保留與 300s 超時；`num_thread: 4` + `num_ctx: 2048` 優化 4 OCPU ARM 執行。
 
 9.2 未做咩 (Pending & Future Roadmap)
 - [ ] 緊鄰 Switch 物理文字切片 (Python-Side Switch Chunking):
@@ -300,5 +296,5 @@ docker image prune -a -f && docker builder prune -a -f
   * 撰寫本地獨立比對腳本，直連 SQLite 比對 Excel IPAM 紀錄與 NetBox 現存資料，產出差異報告與正規化 CSV。
 - [ ] 多平台視覺卡片渲染預設 (Proxmox VE / Nutanix Prism 適配)。
 - [ ] 單元測試套件全面補齊:
-    * 更新 tests/ 中對 APP_VERSION 的斷言為 4.5.11。
+    * 更新 tests/ 中對 APP_VERSION 的斷言為 4.5.12。
    * 補齊多平台 Presets 動態載入與 _safe_parse_json_array 截斷修復單元測試。

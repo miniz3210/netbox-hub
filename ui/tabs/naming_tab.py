@@ -76,7 +76,12 @@ def _render_topology_datagrid(records: List[Dict[str, Any]]):
     """Render the topology data grid from records (progressive)."""
     if not records:
         return
-    df = pd.DataFrame(records, columns=["switch", "interface", "type", "ip", "purpose", "role", "speed"])
+    df = pd.DataFrame(records)
+    expected_cols = ["switch", "interface", "type", "ip", "purpose", "role", "speed"]
+    for col in expected_cols:
+        if col not in df.columns:
+            df[col] = ""
+        df[col] = df[col].fillna("").astype(str)
     st.dataframe(df, use_container_width=True, hide_index=True)
 
 
@@ -1005,7 +1010,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
     mode = st.radio(
         "Operation Mode",
-        ["🛠️ Interactive Single Item Mode", "📸 Screenshot Batch Mode (OCR)", "🔭 Screenshot Batch Mode (Local VLM)"],
+        ["🛠️ Interactive Single Item Mode", "📸 Screenshot Batch Mode (Hybrid OCR+LLM)", "📸 Screenshot Batch Mode (RapidOCR Only)"],
         index=0,
         horizontal=True,
         label_visibility="collapsed"
@@ -1013,7 +1018,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
     if mode == "🛠️ Interactive Single Item Mode":
         _render_interactive_hypervisor_mode(naming_rules, casing, active_model)
-    elif mode == "📸 Screenshot Batch Mode (OCR)":
+    elif mode == "📸 Screenshot Batch Mode (RapidOCR Only)":
         _render_screenshot_batch_mode(naming_rules, casing, active_model, vault, use_vlm=False)
     else:
         _render_screenshot_batch_mode(naming_rules, casing, active_model, vault, use_vlm=True)
@@ -1540,26 +1545,26 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             vlm_cfg = naming_rules.get("vlm_config") or {}
             yaml_endpoint = str(vlm_cfg.get("api_endpoint", "http://netbox-ollama:11434")).strip()
             env_endpoint = os.getenv("OLLAMA_API_ENDPOINT", "").strip() or yaml_endpoint
-            env_model = os.getenv("DEFAULT_VLM_MODEL", "qwen2.5vl:3b").strip()
-            yaml_model = str(vlm_cfg.get("default_model", "qwen2.5vl:3b")).strip()
+            env_model = os.getenv("DEFAULT_LLM_MODEL", os.getenv("DEFAULT_VLM_MODEL", "qwen2.5:3b")).strip()
+            yaml_model = str(vlm_cfg.get("default_model", "qwen2.5:3b")).strip()
             default_vlm_model = (
                 st.session_state.get("_selected_vlm_model")
                 or env_model
                 or yaml_model
             )
             vlm_engine_options = [
-                f"{default_vlm_model} (Local VLM - Recommended)",
-                "qwen2.5vl:7b (Local VLM - High RAM)",
-                "RapidOCR (Legacy Text-Only)",
+                f"{default_vlm_model} (Hybrid RapidOCR + LLM - Recommended: ~4s)",
+                "qwen2.5:1.5b (Ultra-fast LLM: ~2s)",
+                "RapidOCR (Legacy Pure Heuristics)",
             ]
             vlm_engine_label_map = {
-                "qwen2.5vl:3b (Local VLM - Recommended)": "qwen2.5vl:3b",
-                "qwen2.5vl:7b (Local VLM - High RAM)": "qwen2.5vl:7b",
-                "RapidOCR (Legacy Text-Only)": "rapidocr",
+                "qwen2.5:3b (Hybrid RapidOCR + LLM - Recommended: ~4s)": "qwen2.5:3b",
+                "qwen2.5:1.5b (Ultra-fast LLM: ~2s)": "qwen2.5:1.5b",
+                "RapidOCR (Legacy Pure Heuristics)": "rapidocr",
             }
             reverse_label_map = {v: k for k, v in vlm_engine_label_map.items()}
             default_idx_eng = 0
-            if default_vlm_model == "qwen2.5vl:7b":
+            if default_vlm_model == "qwen2.5:1.5b":
                 default_idx_eng = 1
             elif default_vlm_model == "rapidocr":
                 default_idx_eng = 2
@@ -1646,14 +1651,11 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             total_imgs = len(uploaded_imgs)
 
             if use_vlm:
-                resolved_engine = st.session_state.get("_selected_vlm_model", "qwen2.5vl:3b")
+                resolved_engine = st.session_state.get("_selected_vlm_model", "qwen2.5:3b")
                 if resolved_engine == "rapidocr":
                     use_vlm = False
                 else:
-                    from core.vlm_engine import resolve_vlm_config as _resolve_vlm
-                    from core.vlm_engine import process_vlm_queue_stream as _vlm_stream
-                    _ui_override = {"model": resolved_engine}
-                    _vlm_cfg = _resolve_vlm(ui_override=_ui_override, naming_rules=naming_rules)
+                    from core.ocr_spatial_engine import process_hybrid_queue_stream as _hybrid_stream
                     _target_platform = st.session_state.get("naming_target_platform", "VMware ESXi")
 
                     # Dynamic prompt injection from platform preset (separation of concerns)
@@ -1662,24 +1664,21 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     _vlm_prompt = _plat_preset.get("vlm_prompt", "").strip()
 
                     # Progressive rendering containers — no st.rerun() inside the loop
-                    progress_bar = st.progress(0.0, text="Initializing VLM inference...")
+                    progress_bar = st.progress(0.0, text="Initializing Hybrid OCR+LLM inference...")
                     status_box = st.empty()
-                    results_container = st.container()
+                    results_placeholder = st.empty()
 
                     _existing_sigs: Set[Tuple] = set()
                     _vlm_records: List[Dict[str, Any]] = []
                     _vlm_errors: List[str] = []
 
-                    for idx, total, new_records in _vlm_stream(
+                    for idx, total, new_records in _hybrid_stream(
                         image_files=uploaded_imgs,
-                        model=_vlm_cfg["model"],
-                        endpoint=_vlm_cfg["endpoint"],
-                        keep_alive=_vlm_cfg.get("keep_alive", "10m"),
-                        temperature=_vlm_cfg.get("temperature", 0.0),
-                        max_dimension=_vlm_cfg.get("max_dimension", 1280),
-                        num_ctx=_vlm_cfg.get("num_ctx", 2048),
-                        num_thread=_vlm_cfg.get("num_thread", 4),
-                        timeout=_vlm_cfg.get("timeout", 300),
+                        model=resolved_engine,
+                        keep_alive="10m",
+                        num_ctx=2048,
+                        num_thread=4,
+                        timeout=60,
                         system_prompt=_vlm_prompt,
                     ):
                         # 5-tuple deduplication
@@ -1713,8 +1712,8 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
 
                         # In-place progressive render — no page reload
                         progress_bar.progress((idx + 1) / total,
-                            text=f"VLM Inference: Image {idx + 1}/{total} — {len(_vlm_records)} records so far")
-                        with results_container:
+                            text=f"Hybrid Inference: Image {idx + 1}/{total} — {len(_vlm_records)} records so far")
+                        with results_placeholder.container():
                             status_box.info(f"Image {idx + 1}/{total}: {len(new_records)} new records parsed")
                             _render_topology_cards(_vlm_records)
                             _render_topology_datagrid(_vlm_records)
@@ -2357,6 +2356,9 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     st.caption("Edit switch assignments, interface roles, and IPs directly. Changes update NetBox descriptions instantly.")
 
     df = pd.DataFrame(records if records else [], columns=["switch", "interface", "type", "ip", "purpose", "role", "speed"])
+    # Explicitly cast all columns to string to prevent pandas float-type conflicts
+    for col in df.columns:
+        df[col] = df[col].fillna("").astype(str)
 
     column_config = {
         "switch": st.column_config.SelectboxColumn("Switch Container", options=sw_options if sw_options else [_dynamic_switch_pfx + "0"], required=False),

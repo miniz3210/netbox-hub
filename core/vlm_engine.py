@@ -39,16 +39,20 @@ logger = logging.getLogger(__name__)
 
 DOCKER_DEFAULT_ENDPOINT = "http://netbox-ollama:11434"
 
-DEFAULT_VLM_MODEL = os.getenv("DEFAULT_VLM_MODEL", "qwen2.5vl:3b")
+DEFAULT_VLM_MODEL = os.getenv("DEFAULT_VLM_MODEL", "qwen2.5:3b")
+DEFAULT_LLM_MODEL = os.getenv("DEFAULT_LLM_MODEL", "qwen2.5:3b")
 DEFAULT_VLM_ENDPOINT = os.getenv(
     "OLLAMA_API_ENDPOINT",
     DOCKER_DEFAULT_ENDPOINT,
 )
 DEFAULT_VLM_KEEP_ALIVE = os.getenv("VLM_KEEP_ALIVE", "10m")
 DEFAULT_VLM_MAX_DIM = int(os.getenv("VLM_MAX_IMAGE_DIM", "1280"))
-DEFAULT_VLM_TIMEOUT = int(os.getenv("VLM_TIMEOUT", "300"))
+DEFAULT_VLM_TIMEOUT = int(os.getenv("VLM_TIMEOUT", "60"))
+DEFAULT_LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "60"))
 DEFAULT_VLM_NUM_THREADS = int(os.getenv("VLM_NUM_THREADS", "4"))
+DEFAULT_LLM_NUM_THREADS = int(os.getenv("LLM_NUM_THREADS", "4"))
 DEFAULT_VLM_NUM_CTX = int(os.getenv("VLM_NUM_CTX", "2048"))
+DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "2048"))
 
 
 def resolve_vlm_config(
@@ -361,6 +365,64 @@ def _parse_vlm_response(text: str) -> List[Dict[str, Any]]:
             pass
 
     return []
+
+
+def call_text_llm_single(
+    layout_text: str,
+    prompt: str,
+    model: str = "qwen2.5:3b",
+    endpoint: str = "http://localhost:11434",
+    keep_alive: str = "10m",
+    temperature: float = 0.0,
+    num_ctx: int = 2048,
+    num_thread: int = 4,
+    timeout: int = 60,
+) -> List[Dict[str, Any]]:
+    """Send purely textual layout prompt to Ollama text model (no images).
+
+    This is the core of the hybrid pipeline: RapidOCR extracts text + boxes,
+    the layout is serialized to spatial text, and qwen2.5:3b parses it.
+    """
+    import urllib.request
+
+    messages: List[Dict[str, Any]] = []
+    if prompt:
+        messages.append({"role": "system", "content": prompt})
+    messages.append({
+        "role": "user",
+        "content": f"OCR Spatial Layout:\n```\n{layout_text}\n```",
+    })
+
+    payload: Dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "keep_alive": keep_alive,
+        "options": {
+            "temperature": temperature,
+            "num_ctx": num_ctx,
+            "num_thread": num_thread,
+        },
+        "stream": False,
+    }
+
+    url = f"{endpoint.strip('/')}/api/chat"
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = json.loads(resp.read().decode("utf-8"))
+    except Exception as exc:
+        logger.error("Text LLM call failed after %.1fs: %s", timeout, exc)
+        raise RuntimeError(f"Text LLM inference failed: {exc}") from exc
+
+    message = raw.get("message", {})
+    response_text = message.get("content", "") or ""
+    return _parse_vlm_response(response_text)
 
 
 # ---------------------------------------------------------------------------
