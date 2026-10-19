@@ -1,6 +1,7 @@
 """
-Universal Topology Reducer (v4.7.2)
-100% Platform-Agnostic: Applies dynamic precedence, normalizations, and deduplication.
+Universal Topology Reducer (v4.7.3)
+100% Platform-Agnostic: Merges multi-screenshot records, enforces expanded-state
+precedence (expanded cards purge collapsed placeholders), and deduplicates 5-tuples.
 """
 
 import re
@@ -33,20 +34,24 @@ def reduce_topology_pipeline(
     else:
         noise_re = None
 
-    # 1. Canonicalize Switch Names across all records using YAML normalizations
+    # 1. Clean switch names using YAML normalizations
     for r in raw_records:
         raw_sw = str(r.get("switch", "")).strip()
         r["switch"] = _apply_token_normalizations(raw_sw, normalizations)
 
     # 2. Expanded State Precedence:
-    # Identify switches that possess real physical NICs
-    switches_with_real_nics: Set[str] = set()
+    # Identify switches that have REAL content in subsequent frames (either physical NICs or real port groups)
+    switches_with_real_content: Set[str] = set()
     for r in raw_records:
         sw = str(r.get("switch", "")).strip()
         iface = str(r.get("interface", "")).strip()
+        purpose = str(r.get("purpose", "")).strip()
         rtype = str(r.get("type", "")).strip()
+
         if rtype == "Uplink" and iface and iface != "No Uplink":
-            switches_with_real_nics.add(sw)
+            switches_with_real_content.add(sw)
+        elif rtype != "Uplink" and purpose:
+            switches_with_real_content.add(sw)
 
     # 3. Filter & Deduplicate
     seen_sigs: Set[Tuple[str, str, str, str, str]] = set()
@@ -61,11 +66,17 @@ def reduce_topology_pipeline(
         role = str(r.get("role", "None")).strip()
         speed = str(r.get("speed", "")).strip()
 
-        # If switch has real NICs, drop dummy "No Uplink" placeholders
-        if iface == "No Uplink" and sw in switches_with_real_nics:
+        # If switch has real content in an expanded frame, drop empty collapsed placeholder records
+        if iface == "No Uplink" and purpose == "" and sw in switches_with_real_content:
             continue
 
-        # Drop noise leaks using dynamic YAML noise_filters
+        # Drop any leaked switch headers or collapsed glyphs
+        if re.search(r"(?:Standard|Distributed)\s*Switch:", purpose, re.I) or purpose.startswith(">"):
+            continue
+        if re.search(r"(?:Standard|Distributed)\s*Switch:", iface, re.I):
+            continue
+
+        # Drop dynamic noise
         if noise_re and (noise_re.search(purpose) or noise_re.search(iface)):
             continue
 

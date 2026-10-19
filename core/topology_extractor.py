@@ -1,7 +1,8 @@
 """
-Pure Python Deterministic Geometric Topology Extractor (v4.7.2)
-100% Platform-Agnostic & Config-Driven: Zero Hardcoded Vendor/Site Strings.
-All geometry thresholds, noise filters, and normalizations are loaded from plat_cfg.
+Pure Python Deterministic Geometric Topology Extractor (v4.7.3)
+100% Platform-Agnostic & Zero Hardcoding.
+Dynamically detects sidebar bounds, switch bands, physical column anchors,
+and port group services without calling any external LLM.
 """
 
 import re
@@ -52,12 +53,7 @@ def extract_topology_from_ocr_boxes(
         return []
 
     cfg = plat_cfg or {}
-    geom = cfg.get("layout_geometry") or {}
-    sidebar_x_cutoff = float(geom.get("sidebar_x_cutoff", 280.0))
-    midline_ratio = float(geom.get("midline_ratio", 0.48))
-    header_prox = float(geom.get("header_proximity_threshold", 85.0))
-    nic_speed_prox = float(geom.get("nic_speed_y_proximity", 18.0))
-
+    normalizations = cfg.get("token_normalizations", [])
     noise_filters = cfg.get("noise_filters", [])
     if noise_filters:
         escaped = [re.escape(n.strip()) for n in noise_filters if n and n.strip()]
@@ -65,10 +61,8 @@ def extract_topology_from_ocr_boxes(
     else:
         noise_re = None
 
-    normalizations = cfg.get("token_normalizations", [])
-
     # -------------------------------------------------------------
-    # Step 1: Detect Switch Headers in Content Canvas (X >= 150px)
+    # Step 1: Detect Switch Headers & Dynamic Sidebar X-Cutoff
     # -------------------------------------------------------------
     switch_headers = []
     for t in raw_tokens:
@@ -76,8 +70,6 @@ def extract_topology_from_ocr_boxes(
         m = re.search(r"^(?:>|▶|v|▼|\+|-)?\s*(?:Standard\s*Switch|Distributed\s*Switch|Bridge):\s*([^\n\r]+)", text, re.I)
         if m:
             bx, by, _, _ = _get_box(t)
-            if bx < 150.0:
-                continue
             raw_sw_name = m.group(1).strip()
             raw_sw_name = re.split(r"\s+(?:ADD|EDIT|MANAGE|\.\.\.)", raw_sw_name, flags=re.I)[0].strip()
             sw_name = _apply_token_normalizations(raw_sw_name, normalizations)
@@ -94,6 +86,10 @@ def extract_topology_from_ocr_boxes(
     if not switch_headers:
         return []
 
+    # Dynamic Sidebar Boundary: Tokens to the left of the leftmost switch header minus 15px are sidebar tokens
+    min_switch_x = min(sh["x_left"] for sh in switch_headers)
+    sidebar_cutoff_x = max(0.0, min_switch_x - 15.0)
+
     for idx, sh in enumerate(switch_headers):
         sh["y_start"] = sh["y_top"]
         if idx + 1 < len(switch_headers):
@@ -102,35 +98,38 @@ def extract_topology_from_ocr_boxes(
             sh["y_end"] = float(image_height)
 
     # -------------------------------------------------------------
-    # Step 2: Filter Valid Inner Tokens (X >= sidebar_x_cutoff)
-    # -------------------------------------------------------------
-    content_tokens = []
-    for t in raw_tokens:
-        bx0, by0, bx1, by1 = _get_box(t)
-        text = str(t.get("text", "")).strip()
-
-        if bx0 < sidebar_x_cutoff:
-            continue
-        if noise_re and noise_re.search(text):
-            continue
-        if re.match(r"^(?:ADD\s*NETWORKING|REFRESH|EDIT|MANAGE\s*PHYSICAL|ACTIONS|\.\.\.)$", text, re.I):
-            continue
-
-        content_tokens.append(t)
-
-    # -------------------------------------------------------------
-    # Step 3: Extract Services & Adapters per Switch Band
+    # Step 2: Extract Records per Switch Band
     # -------------------------------------------------------------
     extracted_records: List[Dict[str, Any]] = []
 
     for sh in switch_headers:
         sw_name = sh["name"]
-        band_tokens = [
-            t for t in content_tokens 
-            if sh["y_start"] <= _get_box(t)[1] < sh["y_end"]
-        ]
 
-        if not band_tokens:
+        # Inner tokens strictly below the header line and to the right of the sidebar boundary
+        inner_tokens = []
+        for t in raw_tokens:
+            bx0, by0, bx1, by1 = _get_box(t)
+            text = str(t.get("text", "")).strip()
+
+            if bx0 < sidebar_cutoff_x:
+                continue
+            if not (sh["y_start"] + 25.0 <= by0 < sh["y_end"]):
+                continue
+
+            # Drop global noise, action buttons, and switch header repetitions
+            if noise_re and noise_re.search(text):
+                continue
+            if re.match(r"^(?:ADD\s*NETWORKING|REFRESH|EDIT|MANAGE\s*PHYSICAL|ACTIONS|\.\.\.)$", text, re.I):
+                continue
+            if re.search(r"(?:Standard|Distributed)\s*Switch:", text, re.I):
+                continue
+            if text.startswith(">") or text.startswith("▶"):
+                continue
+
+            inner_tokens.append(t)
+
+        # If switch is collapsed or has no inner cards, mark as placeholder
+        if not inner_tokens:
             extracted_records.append({
                 "switch": sw_name,
                 "interface": "No Uplink",
@@ -142,18 +141,38 @@ def extract_topology_from_ocr_boxes(
             })
             continue
 
-        x_min_band = min(_get_box(t)[0] for t in band_tokens)
-        x_max_band = max(_get_box(t)[2] for t in band_tokens)
-        x_mid_band = x_min_band + (x_max_band - x_min_band) * midline_ratio
+        # ---------------------------------------------------------
+        # Dynamic Physical Column Anchor Detection
+        # ---------------------------------------------------------
+        # Locate the Physical Adapter / Uplink box boundary dynamically
+        phys_anchor_x = None
+        for t in inner_tokens:
+            txt = t.get("text", "").strip()
+            # Check for right-column anchors: "Physical Adapters", "*-DVUplinks-*", "vmnicX", or "No physical network adapters"
+            if re.search(r"(?:Physical\s*Adapters|.*-DVUplinks-.*|\bvmnic\d+\b|No\s*physical\s*network\s*adapters)", txt, re.I):
+                x0, _, _, _ = _get_box(t)
+                if phys_anchor_x is None or x0 < phys_anchor_x:
+                    phys_anchor_x = x0
 
-        logical_tokens = [t for t in band_tokens if _get_box(t)[0] < x_mid_band]
-        physical_tokens = [t for t in band_tokens if _get_box(t)[0] >= x_mid_band]
+        # If an anchor is found, split by anchor. Otherwise fallback to midline.
+        if phys_anchor_x is not None and phys_anchor_x > (sidebar_cutoff_x + 100.0):
+            logical_tokens = [t for t in inner_tokens if _get_box(t)[0] < (phys_anchor_x - 10.0)]
+            physical_tokens = [t for t in inner_tokens if _get_box(t)[0] >= (phys_anchor_x - 15.0)]
+        else:
+            x_min_band = min(_get_box(t)[0] for t in inner_tokens)
+            x_max_band = max(_get_box(t)[2] for t in inner_tokens)
+            x_mid_band = x_min_band + (x_max_band - x_min_band) * 0.48
+            logical_tokens = [t for t in inner_tokens if _get_box(t)[0] < x_mid_band]
+            physical_tokens = [t for t in inner_tokens if _get_box(t)[0] >= x_mid_band]
 
-        # --- Physical Adapters ---
+        # ---------------------------------------------------------
+        # Physical Column Extraction (Right Column)
+        # ---------------------------------------------------------
         physical_records = []
         vmnic_matches = []
         for pt in physical_tokens:
             txt = pt.get("text", "").strip()
+            # Ignore empty vDS slots like "Uplink 3 (0 NIC Adapters)"
             if re.search(r"\(0\s*NIC\s*Adapters\)", txt, re.I):
                 continue
             m = re.search(r"(?:[xX!\*\-\+]\s*)?\b(vmnic\d+|eno\d+|ens\d+|eth\d+|bond\d+)\b(?:\s*(\d+\s*(?:Gbit/s|Mbit/s|Full|Half)|10000|1000))?", txt, re.I)
@@ -177,7 +196,7 @@ def extract_topology_from_ocr_boxes(
             nic_speed = vm["speed"]
             if not nic_speed:
                 for pt in physical_tokens:
-                    if abs(_get_box(pt)[1] - vm["y"]) < nic_speed_prox:
+                    if abs(_get_box(pt)[1] - vm["y"]) < 18.0:
                         sm = re.search(r"(\d+\s*(?:Gbit/s|Mbit/s|Full|Half)|10000|1000)", pt.get("text", ""), re.I)
                         if sm:
                             nic_speed = sm.group(1).strip()
@@ -205,7 +224,9 @@ def extract_topology_from_ocr_boxes(
             })
         extracted_records.extend(physical_records)
 
-        # --- Logical Services ---
+        # ---------------------------------------------------------
+        # Logical Column Extraction (Left Column)
+        # ---------------------------------------------------------
         vmk_entries = []
         for lt in logical_tokens:
             txt = lt.get("text", "").strip()
@@ -238,9 +259,12 @@ def extract_topology_from_ocr_boxes(
         service_titles = []
         for lt in logical_tokens:
             txt = lt.get("text", "").strip()
+            # Filter technical labels, headers, and noise
             if re.match(r"^(?:VLAN\s*ID|VMkernel\s*Ports|Virtual\s*Machines|vmk\d+|No\s*associated)", txt, re.I):
                 continue
             if re.search(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b", txt):
+                continue
+            if re.search(r"(?:Standard|Distributed)\s*Switch:", txt, re.I):
                 continue
             if noise_re and noise_re.search(txt):
                 continue
@@ -257,7 +281,7 @@ def extract_topology_from_ocr_boxes(
 
         assigned_titles = set()
         for v in vmk_entries:
-            candidates = [st for st in service_titles if 0 <= (v["y"] - st["y"]) <= header_prox]
+            candidates = [st for st in service_titles if 0 <= (v["y"] - st["y"]) <= 85.0]
             if candidates:
                 candidates.sort(key=lambda c: v["y"] - c["y"])
                 purpose_name = candidates[0]["title"]

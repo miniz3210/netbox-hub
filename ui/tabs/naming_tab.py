@@ -1645,12 +1645,17 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         from core.topology_reducer import reduce_topology_pipeline
         from core.ocr_engine import run_local_ocr_pipeline
 
+        plat_cfg = (naming_rules.get("topology_parsing_presets") or {}).get(target_platform, {})
+        if not plat_cfg:
+            plat_cfg = (naming_rules.get("standards") or {}).get("esxi", {})
+        platform_tokens = (naming_rules.get("platform_tokens") or {}).get(target_platform, {})
+
         progress_bar = st.progress(0.0, text="Starting pure geometric topology extraction...")
         all_extracted_records = []
         total_imgs = len(uploaded_imgs)
 
         for idx, img in enumerate(uploaded_imgs):
-            progress_bar.progress((idx + 0.2) / total_imgs, text=f"Scanning image {idx + 1}/{total_imgs} via RapidOCR...")
+            progress_bar.progress((idx + 0.2) / total_imgs, text=f"Scanning screenshot {idx + 1}/{total_imgs} via RapidOCR...")
 
             if hasattr(img, "seek"):
                 img.seek(0)
@@ -1664,23 +1669,16 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             img_w = ocr_res.get("image_width", 1920)
             img_h = ocr_res.get("image_height", 1080)
 
-            # 2. Pure Python Geometric Extraction (0.01s - No LLM, No Truncation, No Deadlocks!)
-            plat_cfg = (naming_rules.get("topology_parsing_presets") or {}).get(target_platform, {})
-            if not plat_cfg:
-                plat_cfg = (naming_rules.get("standards") or {}).get("esxi", {})
-            platform_tokens = (naming_rules.get("platform_tokens") or {}).get(target_platform, {})
-
+            # 2. Pure Python Geometric Extraction (0.01s - Zero LLM)
             records = extract_topology_from_ocr_boxes(
-                raw_boxes, 
-                image_width=img_w, 
+                raw_boxes,
+                image_width=img_w,
                 image_height=img_h,
                 plat_cfg=plat_cfg
             )
             all_extracted_records.extend(records)
 
         # 3. Universal State Reducer & Deduplication
-        plat_cfg = (naming_rules.get("topology_parsing_presets") or {}).get(target_platform, {})
-        platform_tokens = (naming_rules.get("platform_tokens") or {}).get(target_platform, {})
         reduced = reduce_topology_pipeline(all_extracted_records, plat_cfg, platform_tokens)
 
         st.session_state["topology_records"] = reduced
