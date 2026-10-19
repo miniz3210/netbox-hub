@@ -38,6 +38,7 @@ from config.naming_rules import (
     get_device_presets, get_interface_presets, get_host_vm_presets,
     get_esxi_network_presets, compute_suggested_site_code,
 )
+from core.topology_reducer import reduce_topology_pipeline
 
 # ---------------------------------------------------------------------------
 # Progressive VLM rendering helpers
@@ -1665,8 +1666,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 status_box = st.empty()
                 results_placeholder = st.empty()
 
-                _existing_sigs: Set[Tuple] = set()
-                _vlm_records: List[Dict[str, Any]] = []
+                accumulated_raw: List[Dict[str, Any]] = []
                 _vlm_errors: List[str] = []
 
                 for idx, total, new_records, raw_text in _hybrid_stream(
@@ -1680,42 +1680,34 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     preset_config=_preset_config,
                 ):
                     st.session_state["latest_ai_raw_response"] = raw_text or ""
-                    for r in new_records:
-                        sig = (
-                            r.get("switch", "").strip().lower(),
-                            r.get("interface", "").strip().lower(),
-                            r.get("type", "").strip().lower(),
-                            r.get("purpose", "").strip().lower(),
-                            r.get("ip", "").strip(),
-                        )
-                        if sig not in _existing_sigs:
-                            _existing_sigs.add(sig)
-                            _vlm_records.append(r)
-
-                    st.session_state["topology_records"] = _vlm_records
+                    if isinstance(new_records, list):
+                        accumulated_raw.extend(new_records)
+                    reduced = reduce_topology_pipeline(accumulated_raw, _plat_preset, _plat_tok)
+                    st.session_state["topology_records"] = reduced
                     st.session_state["discovered_switches"] = sorted(
-                        list({r["switch"] for r in _vlm_records if r.get("switch")}),
+                        list({r["switch"] for r in reduced if r.get("switch")}),
                         key=_natsort_key
                     )
                     st.session_state["discovered_uplink_candidates"] = sorted(
-                        list({r["interface"] for r in _vlm_records if r.get("type") == "Uplink" and r.get("interface")}),
+                        list({r["interface"] for r in reduced if r.get("type") == "Uplink" and r.get("interface")}),
                         key=_natsort_key
                     )
                     st.session_state["discovered_service_candidates"] = sorted(
-                        list({r["purpose"] for r in _vlm_records if r.get("type") != "Uplink" and r.get("purpose")}),
+                        list({r["purpose"] for r in reduced if r.get("type") != "Uplink" and r.get("purpose")}),
                         key=_natsort_key
                     )
                     st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
 
                     progress_bar.progress((idx + 1) / total,
-                        text=f"Hybrid Inference: Image {idx + 1}/{total} — {len(_vlm_records)} records so far")
+                        text=f"Hybrid Inference: Image {idx + 1}/{total} — {len(reduced)} records so far")
                     with results_placeholder.container():
-                        status_box.info(f"Image {idx + 1}/{total}: {len(new_records)} new records parsed")
-                        _render_topology_cards(_vlm_records)
-                        _render_topology_datagrid(_vlm_records)
+                        status_box.info(f"Image {idx + 1}/{total}: {len(new_records) if isinstance(new_records, list) else 0} new records parsed")
+                        _render_topology_cards(reduced)
+                        _render_topology_datagrid(reduced)
 
                 progress_bar.empty()
-                status_box.success(f"Analysis complete! Extracted {len(_vlm_records)} topology items across {len(set(r['switch'] for r in _vlm_records if r.get('switch')))} switches.")
+                reduced_final = st.session_state.get("topology_records", [])
+                status_box.success(f"Analysis complete! Extracted {len(reduced_final)} topology items across {len(set(r['switch'] for r in reduced_final if r.get('switch')))} switches.")
                 errors = _vlm_errors
                 session_id = None
                 ai_error_msg = ""
@@ -1794,174 +1786,24 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     st.session_state["latest_ai_raw_response"] = response or (f"ERROR: {ai_error_msg}" if ai_error_msg else "")
                     raw_items = _safe_parse_json_array(response) if response else []
 
-                # Dynamically load platform preset dictionaries
+                # Unified state reduction via topology_reducer
                 plat_cfg = tpp.get(target_platform, {}) if isinstance(tpp.get(target_platform), dict) else {}
-                allowed_types = plat_cfg.get("allowed_types", ["Uplink", "VMkernel", "Port Group"])
-                role_options = plat_cfg.get("role_options", ["Active Uplink", "Standby Uplink", "None"])
-                default_connected_role = plat_cfg.get("default_connected_role", "Active Uplink")
-                default_disconnected_role = plat_cfg.get("default_disconnected_role", "None")
-                sentinel_no_adapter = plat_cfg.get("sentinel_no_adapter", "No Uplink")
+                reduced_records = reduce_topology_pipeline(raw_items, plat_cfg, _plat_tok)
 
-                primary_uplink_type = allowed_types[0] if allowed_types else "Uplink"
-
-                clean_records = []
-                for raw_item in raw_items:
-                    if not isinstance(raw_item, dict):
-                        continue
-                    if "finish_reason" in raw_item or "message" in raw_item:
-                        continue
-
-                    item = {str(k).strip().lower(): v for k, v in raw_item.items()}
-
-                    raw_sw = (
-                        item.get("switch")
-                        or item.get("parent")
-                        or item.get("switch_name")
-                        or item.get("virtual_switch")
-                        or item.get("vswitch")
-                        or item.get("container")
-                        or ""
-                    )
-                    sw_clean = _normalize_switch_name(str(raw_sw).strip())
-                    if not sw_clean:
-                        continue
-
-                    raw_iface = str(item.get("interface") or item.get("port") or item.get("nic") or item.get("vmnic") or item.get("vmk") or "").strip()
-                    # Strip status glyphs (e.g. 'x vmnic1' -> 'vmnic1')
-                    clean_iface = re.sub(r"^[xX\-\*\>\s]+", "", raw_iface).strip()
-                    if clean_iface.lower() in ("none", "null", "no physical adapters", "no physical network adapters"):
-                        clean_iface = ""
-
-                    # Repair OCR prefix truncation (e.g. mk2 -> vmk2)
-                    if re.match(r"^mk\d+$", clean_iface, re.I):
-                        clean_iface = f"v{clean_iface.lower()}"
-
-                    # Dynamic Type Inference matching platform taxonomy
-                    raw_type = str(item.get("type") or "").strip()
-                    norm_type = ""
-                    for at in allowed_types:
-                        if at.lower() in raw_type.lower():
-                            norm_type = at
-                            break
-
-                    if not norm_type:
-                        if clean_iface.lower().startswith("vmnic") or clean_iface.lower().startswith("uplink") or item.get("uplink_role"):
-                            norm_type = primary_uplink_type
-                        elif clean_iface.lower().startswith("vmk"):
-                            norm_type = allowed_types[1] if len(allowed_types) > 1 else "VMkernel"
-                        else:
-                            norm_type = allowed_types[2] if len(allowed_types) > 2 else "Port Group"
-
-                    # Handle zero-physical-adapter sentinels
-                    if norm_type == primary_uplink_type and not clean_iface:
-                        clean_iface = sentinel_no_adapter
-
-                    raw_purpose = str(item.get("purpose") or item.get("name") or item.get("service") or item.get("portgroup") or item.get("port_group") or "").strip()
-
-                    # Uplinks must NEVER carry port group names
-                    if norm_type == primary_uplink_type:
-                        raw_purpose = ""
-                    else:
-                        if _is_noise_token(raw_purpose, naming_rules, target_platform):
-                            raw_purpose = ""
-
-                    # Enforce deterministic default roles
-                    raw_role = str(item.get("role") or item.get("uplink_role") or "").strip()
-                    if norm_type == primary_uplink_type:
-                        if clean_iface == sentinel_no_adapter:
-                            raw_role = default_disconnected_role
-                        elif not raw_role or raw_role.lower() in ("none", "null", ""):
-                            raw_role = default_connected_role
-                    else:
-                        if not raw_role:
-                            raw_role = "Management" if clean_iface.lower() == "vmk0" else "None"
-
-                    clean_records.append({
-                        "switch": sw_clean,
-                        "interface": clean_iface,
-                        "type": norm_type,
-                        "ip": str(item.get("ip") or item.get("ipv4") or item.get("ip_address") or "").strip(),
-                        "purpose": raw_purpose,
-                        "role": raw_role,
-                        "speed": str(item.get("speed") or "").strip(),
-                    })
-
-                # Deduplicate: if VMkernel exists with purpose X on switch S, remove pure Port Group with same purpose
-                vmk_purposes = {(r["switch"], r["purpose"].lower()) for r in clean_records if r.get("type") == allowed_types[1] and r.get("purpose")}
-                deduped_records = []
-                for r in clean_records:
-                    if r.get("type") == allowed_types[2] and (r.get("switch"), (r.get("purpose") or "").lower()) in vmk_purposes:
-                        continue
-                    deduped_records.append(r)
-                clean_records = deduped_records
-
-                # Cross-screenshot global deduplication before assigning to session state
-                seen_sigs: set = set()
-                deduped_records = []
-                for r in clean_records:
-                    sig = (
-                        r.get("switch", "").strip().lower(),
-                        r.get("interface", "").strip().lower(),
-                        r.get("type", "").strip().lower(),
-                        r.get("purpose", "").strip().lower(),
-                        r.get("ip", "").strip(),
-                    )
-                    if sig in seen_sigs:
-                        continue
-                    seen_sigs.add(sig)
-                    deduped_records.append(r)
-
-                # Sentinel dedup: switches with no adapters retain at most ONE "No Uplink" record
-                sentinel_no_adapter_set: Set[str] = set()
-                final_records = []
-                for r in deduped_records:
-                    if r.get("interface") == sentinel_no_adapter:
-                        sw_key = r.get("switch", "").strip().lower()
-                        if sw_key in sentinel_no_adapter_set:
-                            continue
-                        sentinel_no_adapter_set.add(sw_key)
-                    final_records.append(r)
-                clean_records = final_records
-
-                # Boundary bleed-through prevention:
-                # If a switch has only sentinel_no_adapter entries (no physical adapters, no services),
-                # ensure it does not absorb records belonging to subsequent switch headers.
-                # We identify switches that should have NO physical uplinks and remove any such records.
-                switches_with_no_physical = {
-                    r["switch"] for r in clean_records
-                    if r.get("interface") == sentinel_no_adapter
-                }
-                if switches_with_no_physical:
-                    # Find any switch header that lists a physical interface alongside sentinels
-                    # and remove the phantom sentinel-only entries that may have bled through
-                    final_records = []
-                    for r in clean_records:
-                        sw = r.get("switch", "")
-                        iface = r.get("interface", "")
-                        if sw in switches_with_no_physical and iface == sentinel_no_adapter:
-                            # Keep the sentinel — it's the real entry for this switch
-                            final_records.append(r)
-                        elif sw in switches_with_no_physical and iface and iface != sentinel_no_adapter:
-                            # Skip: this physical record doesn't belong to a no-adapter switch
-                            continue
-                        else:
-                            final_records.append(r)
-                    clean_records = final_records
-
-                if clean_records:
-                    st.session_state["topology_records"] = clean_records
-                    discovered_sw = sorted(list({r["switch"] for r in clean_records if r.get("switch")}), key=_natsort_key)
+                if reduced_records:
+                    st.session_state["topology_records"] = reduced_records
+                    discovered_sw = sorted(list({r["switch"] for r in reduced_records if r.get("switch")}), key=_natsort_key)
                     st.session_state["discovered_switches"] = discovered_sw
                     st.session_state["discovered_uplink_candidates"] = sorted(
-                        list({r["interface"] for r in clean_records if r.get("type") == "Uplink" and r.get("interface")}),
+                        list({r["interface"] for r in reduced_records if r.get("type") == "Uplink" and r.get("interface")}),
                         key=_natsort_key
                     )
                     st.session_state["discovered_service_candidates"] = sorted(
-                        list({r["purpose"] for r in clean_records if r.get("type") != "Uplink" and r.get("purpose")}),
+                        list({r["purpose"] for r in reduced_records if r.get("type") != "Uplink" and r.get("purpose")}),
                         key=_natsort_key
                     )
                     st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
-                    st.toast(f"Successfully parsed {len(clean_records)} records across {len(discovered_sw)} switches!", icon="🚀")
+                    st.toast(f"Successfully parsed {len(reduced_records)} records across {len(discovered_sw)} switches!", icon="🚀")
                     st.rerun()
                 else:
                     st.warning("No structured topology records could be extracted from AI response.")
@@ -2380,7 +2222,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             )
             st.stop()
 
-        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.5.18.\n"]
+        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.6.0.\n"]
         for _gparent in sorted(_groups.keys(), key=_natsort_key):
             _out_lines.append(f"=== {_gparent} ===")
             _sw_uplinks = [r for r in _groups[_gparent] if r.get("type") == "Uplink" and r.get("interface")]

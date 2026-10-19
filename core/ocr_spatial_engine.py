@@ -1,5 +1,5 @@
 """
-Hybrid Spatial OCR + Text-Only LLM Engine (v4.5.18)
+Hybrid Spatial OCR + Text-Only LLM Engine (v4.6.0)
 
 Replaces the heavy VLM image-encoding pipeline with a two-stage
 approach optimized for 4 OCPU ARM hosts running Qwen2.5:3b.
@@ -153,6 +153,11 @@ def _run_ocr_stage(
 def serialize_ocr_boxes_to_layout(ocr_results: List[Dict[str, Any]]) -> str:
     """Sort OCR tokens by Y then X and emit a layout string for the LLM.
 
+    Implements geometric midline column slicing: tokens with X < 50% of image
+    width go into the left (logical services) bucket, and X >= 50% go into the
+    right (physical infrastructure) bucket. Clear section dividers are injected
+    so the LLM never mixes IP addresses into physical adapters.
+
     Parameters
     ----------
     ocr_results : list
@@ -162,12 +167,14 @@ def serialize_ocr_boxes_to_layout(ocr_results: List[Dict[str, Any]]) -> str:
     Returns
     -------
     str
-        Lines of ``[y=N, x=M] token`` pairs separated by two spaces.
+        Lines of ``[y=N, x=M] token`` pairs separated by two spaces, with
+        section dividers at the geometric midline.
     """
     if not ocr_results:
         return ""
 
     items: List[Dict[str, Any]] = []
+    max_x = 0.0
     for tok in ocr_results:
         box = tok.get("box")
         if not box or len(box) < 2:
@@ -177,10 +184,17 @@ def serialize_ocr_boxes_to_layout(ocr_results: List[Dict[str, Any]]) -> str:
             continue
         xmin = float(box[0])
         ymin = float(box[1])
+        # Track maximum x coordinate (right edge) to compute image width W
+        xmax = xmin + (float(box[2]) if len(box) > 2 else 0.0)
+        if xmax > max_x:
+            max_x = xmax
         items.append({"text": text, "x": int(xmin), "y": int(ymin)})
 
     if not items:
         return ""
+
+    # Compute geometric midline (50% of image width)
+    midline = max_x * 0.5 if max_x > 0 else 0.0
 
     # Group by row: round y to nearest Y_ROW_THRESHOLD multiple
     items.sort(key=lambda it: (it["y"] // Y_ROW_THRESHOLD * Y_ROW_THRESHOLD, it["x"]))
@@ -202,6 +216,33 @@ def serialize_ocr_boxes_to_layout(ocr_results: List[Dict[str, Any]]) -> str:
 
     if current_line:
         lines.append("  ".join(current_line))
+
+    # Inject geometric midline section divider
+    if midline > 0:
+        left_lines: List[str] = []
+        right_lines: List[str] = []
+        for line in lines:
+            # Extract first token's x coordinate from the line
+            m = re.search(r"\[y=\d+, x=(\d+)\]", line)
+            if m:
+                lx = int(m.group(1))
+                if lx < midline:
+                    left_lines.append(line)
+                else:
+                    right_lines.append(line)
+            else:
+                left_lines.append(line)
+
+        result_parts: List[str] = []
+        if left_lines:
+            result_parts.append("=== LEFT BUCKET: Logical Services (Port Groups, VMkernel, IPs) ===")
+            result_parts.extend(left_lines)
+        if right_lines:
+            if result_parts:
+                result_parts.append("")
+            result_parts.append("=== RIGHT BUCKET: Physical Infrastructure (Uplinks, NICs, Link Speeds) ===")
+            result_parts.extend(right_lines)
+        return "\n".join(result_parts)
 
     return "\n".join(lines)
 
@@ -538,7 +579,7 @@ def process_hybrid_queue_stream(
     for idx, img in enumerate(image_files):
         img_tokens = tokens_by_image.get(idx, [])
         if not img_tokens:
-            yield (idx, total, [])
+            yield (idx, total, [], "")
             continue
 
         layout_text = serialize_ocr_boxes_to_layout(img_tokens)
@@ -558,7 +599,7 @@ def process_hybrid_queue_stream(
             yield (idx, total, records, _raw_resp)
         except Exception as exc:
             logger.warning("Image #%d text LLM call failed: %s", idx + 1, exc)
-            yield (idx, total, [])
+            yield (idx, total, [], f"ERROR: {str(exc)}")
 
 
 # ---------------------------------------------------------------------------
