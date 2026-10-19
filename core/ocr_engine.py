@@ -214,6 +214,7 @@ class LocalOCREngine:
         avg_conf = (sum(all_confidences) / len(all_confidences)) if all_confidences else 0.0
         full_text = "\n".join(detected_lines).strip()
         image_height = int(processed_bgr.shape[0])
+        image_width = int(processed_bgr.shape[1])
 
         return {
             "text": full_text,
@@ -222,6 +223,7 @@ class LocalOCREngine:
             "lines": detected_lines,
             "raw_tokens": all_raw_tokens,
             "image_height": image_height,
+            "image_width": image_width,
         }
 
     def assess_quality(self, ocr_result: Dict[str, Any], force_pass: bool = False) -> Tuple[bool, str]:
@@ -254,6 +256,7 @@ def run_local_ocr_pipeline(image_files: List[Any], force_pass: bool = False) -> 
     passed_count: int = 0
     errors: List[str] = []
     image_heights: List[int] = []
+    image_widths: List[int] = []
 
     for idx, img_file in enumerate(image_files):
         try:
@@ -271,6 +274,7 @@ def run_local_ocr_pipeline(image_files: List[Any], force_pass: bool = False) -> 
                     all_raw_tokens.extend(res["raw_tokens"])
                 total_conf += res["average_confidence"]
                 image_heights.append(res.get("image_height", 0))
+                image_widths.append(res.get("image_width", 0))
         except Exception as exc:
             errors.append(f"Image #{idx + 1} processing error: {str(exc)}")
             image_heights.append(0)
@@ -287,4 +291,5 @@ def run_local_ocr_pipeline(image_files: List[Any], force_pass: bool = False) -> 
         "errors": errors,
         "raw_tokens": all_raw_tokens,
         "image_heights": image_heights,
+        "image_widths": image_widths,
     }

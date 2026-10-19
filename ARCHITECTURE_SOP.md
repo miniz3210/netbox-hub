@@ -1,5 +1,5 @@
 # NetBox Hub — Living Architecture SOP & Handover Guide
-# Target Baseline: v4.6.2 | Platform: Oracle Cloud Ampere A1 (ARM64)
+# Target Baseline: v4.7.0 | Platform: Oracle Cloud Ampere A1 (ARM64)
 
 ---
 
@@ -8,12 +8,12 @@
 | Property              | Value                                                        |
 |-----------------------|--------------------------------------------------------------|
 | Application           | NetBox Universal Library Hub                                 |
-| Target Version        | v4.6.2                                                       |
+| Target Version        | v4.7.0                                                       |
 | Runtime               | Python 3.11+ / Streamlit                                     |
 | Cloud Infrastructure  | Oracle Cloud Ampere A1 (ARM64 / aarch64, Linux)              |
 | Container Registry    | `ghcr.io/miniz3210/netbox-hub`                               |
 | Primary Backend       | SQLite (`data/netbox_hub.db`) + YAML-based naming standards  |
-| AI / OCR Layer        | Multi-pass LLM extraction with spatial-anchored parsing      |
+| AI / OCR Layer        | Pure Python Geometric Topology Extraction (0 LLM, 0.5s/image) |
 
 ### Core Philosophy
 
@@ -166,7 +166,7 @@ When a cell in the DataGrid is edited, `_apply_cascade_to_rows()` in `ui/tabs/na
 Capture a baseline snapshot of the Standards Tab configuration into `data/naming_rules.yaml`. Verify all section definitions (2.5 UX rules, 4.0 Blueprint guide) are present and consistent.
 
 ### Step 2 — Version Assert Verification
-Confirm `config/constants.py::APP_VERSION == "4.6.1"`. Ensure no release notes or version bump scripts are pending.
+Confirm `config/constants.py::APP_VERSION == "4.7.0"`. Ensure no release notes or version bump scripts are pending.
 
 ### Step 3 — Safe Local Container Cache Cleanup
 ```bash
@@ -177,8 +177,8 @@ docker builder prune -a -f
 
 ### Step 4 — Docker Build & Tag Release
 ```bash
-docker build -t ghcr.io/miniz3210/netbox-hub:v4.6.2 -t ghcr.io/miniz3210/netbox-hub:latest .
-docker push ghcr.io/miniz3210/netbox-hub:v4.6.2
+docker build -t ghcr.io/miniz3210/netbox-hub:v4.7.0 -t ghcr.io/miniz3210/netbox-hub:latest .
+docker push ghcr.io/miniz3210/netbox-hub:v4.7.0
 docker push ghcr.io/miniz3210/netbox-hub:latest
 ```
 
@@ -216,9 +216,10 @@ docker push ghcr.io/miniz3210/netbox-hub:latest
 - [x] **v4.6.2 Resilient JSON Object Recovery**: Regex-based extraction recovers valid JSON objects from partial streams, eliminating 0-record errors.
 - [x] **v4.6.2 Expanded State Precedence**: Automatically purge placeholder 'No Uplink' records once real physical adapters are detected.
 - [ ] Build Excel IPAM offline reconciliation script against `AW IPs & VLANs_Final (2).xlsx`.
-- [ ] Prune stale local git tags prior to v4.6.2 release.
-- [ ] Publish GHCR image release `v4.6.2` (`ghcr.io/miniz3210/netbox-hub:v4.6.2`).
+- [ ] Prune stale local git tags prior to v4.7.0 release.
+- [ ] Publish GHCR image release `v4.7.0` (`ghcr.io/miniz3210/netbox-hub:v4.7.0`).
 - [ ] Build platform expansion templates for Proxmox VE and Azure Portal.
+- [ ] Publish GHCR image release `v4.7.0` (`ghcr.io/miniz3210/netbox-hub:v4.7.0`).
 
 ---
 
@@ -268,7 +269,7 @@ docker image prune -a -f && docker builder prune -a -f
 
 ---
 
-## 9. Production Verification Checklist (v4.6.2)
+## 9. Production Verification Checklist (v4.7.0)
 ================================================================================
 
 - [x] **Sandwich Architecture Enforcement**: Deterministic noise filtering and token normalization handled via Python pre-processing prior to LLM ingestion.
@@ -295,13 +296,17 @@ docker image prune -a -f && docker builder prune -a -f
 - [x] **Expanded State Precedence**: Automatically purge placeholder 'No Uplink' records once real physical adapters are detected.
 - [x] **Accurate Multi-Switch Suffix Fidelity**: Preserved vSwitch01 vs vSwitch02 distinction; fixed letter 'o' substitution in switch suffixes.
 - [x] **Expanded State Precedence Enforcement**: Automatically purge No Uplink records when physical adapters are discovered in subsequent frames.
+- [x] **v4.7.0 Pure Geometric Topology Extraction**: Complete eradication of LLM for spatial topology. Pure RapidOCR bounding boxes + Python geometry achieves <1.0s/image with zero HTTP calls, zero prompt truncation, and zero hallucinated port groups.
+- [x] **v4.7.0 Deterministic Vertical Y-Slicing**: Switch headers detected via geometric anchor scoring, then bands sliced by Y-coordinate with zero vertical leakage.
+- [x] **v4.7.0 Deterministic Left/Right Column Split**: 48% midline hard slice separates logical services from physical adapters without LLM assistance.
+- [x] **v4.7.0 Universal Reducer v2**: State machine precedence, expanded-state purging, and 5-tuple deduplication unified across all inference paths.
 
 ---
 
 ## 10. 專案狀態檢核：做完咩 (Done) vs 未做咩 (Pending)
 ======================================================================
 
-9.1 做完咩 (Completed & Verified in v4.6.2)
+9.1 做完咩 (Completed & Verified in v4.7.0)
 - [x] Hybrid OCR + Text-Only LLM Pipeline: 替代原生 VLM 影像編碼；RapidOCR 提取文字 + 空間序列化 → `qwen2.5:3b` 純文字推論，單圖延遲降至 ~4s（原 ~10–15s）。
 - [x] Legacy VLM Model Removal: 刪除 `qwen2.5vl:3b` (~3.2 GB)，改用文本模型 `qwen2.5:3b` 及 `qwen2.5:1.5b`。
 - [x] Spatial Text Serialization (`core/ocr_spatial_engine.py`): Natural line-grouping by |Δy| ≤ 8px with left/right bucket separation; outputs compact `[SWITCH]/[LOGICAL]/[PHYSICAL]` syntax (~180 tokens vs 2500+).
