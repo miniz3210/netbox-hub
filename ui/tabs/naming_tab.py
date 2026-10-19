@@ -82,7 +82,7 @@ def _render_topology_datagrid(records: List[Dict[str, Any]]):
         if col not in df.columns:
             df[col] = ""
         df[col] = df[col].fillna("").astype(str)
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(df, width="stretch", hide_index=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1673,7 +1673,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     keep_alive="10m",
                     num_ctx=2048,
                     num_thread=4,
-                    timeout=60,
+                    timeout=180,
                     system_prompt=_vlm_prompt,
                     preset_config=_preset_config,
                 ):
@@ -2005,7 +2005,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         with col_add_swn:
             manual_sw_name = st.text_input("New Switch Name", placeholder=f"e.g. {_dynamic_switch_pfx}0, vmbr0", key="manual_add_sw_input", label_visibility="collapsed")
         with col_add_swb:
-            if st.button("➕ Add Switch", key="manual_add_sw_btn", use_container_width=True):
+            if st.button("➕ Add Switch", key="manual_add_sw_btn", width="stretch"):
                 if manual_sw_name.strip():
                     st.session_state["discovered_switches"] = [manual_sw_name.strip()]
                     st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
@@ -2144,7 +2144,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     service_candidates = st.session_state.get("discovered_service_candidates", [])
 
                     with btn_col1:
-                        with st.popover("➕ Uplink", use_container_width=True):
+                        with st.popover("➕ Uplink", width="stretch"):
                             st.markdown("**Add Physical Uplink**")
                             _plat_teaming_cfg = ((naming_rules.get("topology_parsing_presets") or {})
                                                  .get(st.session_state.get("naming_target_platform", "VMware ESXi"), {}))
@@ -2170,7 +2170,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                             new_up_role = st.selectbox("Initial Role", options=role_options, index=0, key=f"pop_up_role_{idx}_{sw}")
                             new_up_speed = st.selectbox("Speed (optional)", options=["", "10000 Full", "1000 Full", "25000 Full"], index=0, key=f"pop_up_spd_{idx}_{sw}")
 
-                            if st.button("Add to Switch", key=f"pop_up_confirm_{idx}_{sw}", use_container_width=True):
+                            if st.button("Add to Switch", key=f"pop_up_confirm_{idx}_{sw}", width="stretch"):
                                 _is_no_uplink = (selected_up_choice == _no_uplink_display) or (not final_up_name and new_up_role.lower() == "none")
                                 if _is_no_uplink:
                                     records.append({
@@ -2202,7 +2202,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                     st.rerun()
 
                     with btn_col2:
-                        with st.popover("➕ Service", use_container_width=True):
+                        with st.popover("➕ Service", width="stretch"):
                             st.markdown("**Add Port Group / VMkernel**")
                             _disc_svc_map = {r["purpose"] or r["interface"]: r for r in st.session_state.get("topology_records", []) if r.get("purpose") or r.get("interface")}
                             if not isinstance(_disc_svc_map, dict):
@@ -2273,7 +2273,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                             else:
                                 new_svc_ip = selected_ip_choice.strip()
 
-                            if st.button("Add to Switch", key=f"pop_svc_confirm_{idx}_{sw}", use_container_width=True):
+                            if st.button("Add to Switch", key=f"pop_svc_confirm_{idx}_{sw}", width="stretch"):
                                  effective_name = final_svc_name or (selected_svc_choice if selected_svc_choice != "➕ Custom / Manual Entry" else "")
                                  if not effective_name:
                                      st.warning("Please select or enter a Service / Port Group name.")
@@ -2325,7 +2325,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         df,
         column_config=column_config,
         num_rows="dynamic",
-        use_container_width=True,
+        width="stretch",
         key=editor_key
     )
     st.session_state["topology_records"] = edited_df.to_dict(orient="records")
@@ -2584,7 +2584,7 @@ def _render_chip_card(
                     st.rerun()
 
             if category != "parent":
-                if st.button("Promote to Container", key=f"chip_prom_{chip_id}", help="Convert token into a new Switch Container", use_container_width=True):
+                if st.button("Promote to Container", key=f"chip_prom_{chip_id}", help="Convert token into a new Switch Container", width="stretch"):
                     _promote_chip_to_container(chip)
 
 
