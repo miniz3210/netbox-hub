@@ -1010,7 +1010,7 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
     mode = st.radio(
         "Operation Mode",
-        ["🛠️ Interactive Single Item Mode", "📸 Screenshot Batch Mode (Hybrid OCR+LLM)", "📸 Screenshot Batch Mode (RapidOCR Only)"],
+        ["🛠️ Interactive Single Item Mode", "📸 Screenshot Batch Mode (Topology Parsing)"],
         index=0,
         horizontal=True,
         label_visibility="collapsed"
@@ -1018,10 +1018,8 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto
 
     if mode == "🛠️ Interactive Single Item Mode":
         _render_interactive_hypervisor_mode(naming_rules, casing, active_model)
-    elif mode == "📸 Screenshot Batch Mode (RapidOCR Only)":
-        _render_screenshot_batch_mode(naming_rules, casing, active_model, vault, use_vlm=False)
     else:
-        _render_screenshot_batch_mode(naming_rules, casing, active_model, vault, use_vlm=True)
+        _render_screenshot_batch_mode(naming_rules, casing, active_model, vault)
 
 
 def _build_dynamic_teaming_clause(uplinks: list) -> str:
@@ -1335,7 +1333,7 @@ def _run_vlm_topology_analysis(image_files, naming_rules, target_platform, progr
     }
 
 
-def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model: str, vault, use_vlm: bool = False):
+def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model: str, vault, use_vlm: bool = True):
     """Render the full screenshot OCR/VLM pipeline openly (no expanders hiding the workflow)."""
     from core.ocr_engine import run_local_ocr_pipeline
     from data.standards_manager import StandardsManager
@@ -1650,95 +1648,86 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             progress_bar = st.progress(0, text="Initializing topology analysis...")
             total_imgs = len(uploaded_imgs)
 
-            if use_vlm:
-                resolved_engine = st.session_state.get("_selected_vlm_model", "qwen2.5:3b")
-                if resolved_engine == "rapidocr":
-                    use_vlm = False
-                else:
-                    from core.ocr_spatial_engine import process_hybrid_queue_stream as _hybrid_stream
-                    _target_platform = st.session_state.get("naming_target_platform", "VMware ESXi")
+            resolved_engine = st.session_state.get("_selected_vlm_model", "qwen2.5:3b")
+            if resolved_engine in ("qwen2.5:3b", "qwen2.5:1.5b"):
+                # Local Hybrid pipeline — zero external cloud API calls, zero vault token leakage
+                from core.ocr_spatial_engine import process_hybrid_queue_stream as _hybrid_stream
+                _target_platform = st.session_state.get("naming_target_platform", "VMware ESXi")
 
-                    # Dynamic prompt injection from platform preset (separation of concerns)
-                    _tpp = naming_rules.get("topology_parsing_presets") or {}
-                    _plat_preset = _tpp.get(_target_platform, {}) if isinstance(_tpp.get(_target_platform), dict) else {}
-                    _vlm_prompt = _plat_preset.get("vlm_prompt", "").strip()
+                _tpp = naming_rules.get("topology_parsing_presets") or {}
+                _plat_preset = _tpp.get(_target_platform, {}) if isinstance(_tpp.get(_target_platform), dict) else {}
+                _vlm_prompt = _plat_preset.get("vlm_prompt", "").strip()
+                _preset_config = _plat_preset
 
-                    # Progressive rendering containers — no st.rerun() inside the loop
-                    progress_bar = st.progress(0.0, text="Initializing Hybrid OCR+LLM inference...")
-                    status_box = st.empty()
-                    results_placeholder = st.empty()
+                progress_bar = st.progress(0.0, text="Initializing Hybrid OCR+LLM inference...")
+                status_box = st.empty()
+                results_placeholder = st.empty()
 
-                    _existing_sigs: Set[Tuple] = set()
-                    _vlm_records: List[Dict[str, Any]] = []
-                    _vlm_errors: List[str] = []
+                _existing_sigs: Set[Tuple] = set()
+                _vlm_records: List[Dict[str, Any]] = []
+                _vlm_errors: List[str] = []
 
-                    for idx, total, new_records in _hybrid_stream(
-                        image_files=uploaded_imgs,
-                        model=resolved_engine,
-                        keep_alive="10m",
-                        num_ctx=2048,
-                        num_thread=4,
-                        timeout=60,
-                        system_prompt=_vlm_prompt,
-                        preset_config=_plat_preset,
-                    ):
-                        # 5-tuple deduplication
-                        for r in new_records:
-                            sig = (
-                                r.get("switch", "").strip().lower(),
-                                r.get("interface", "").strip().lower(),
-                                r.get("type", "").strip().lower(),
-                                r.get("purpose", "").strip().lower(),
-                                r.get("ip", "").strip(),
-                            )
-                            if sig not in _existing_sigs:
-                                _existing_sigs.add(sig)
-                                _vlm_records.append(r)
-
-                        # Update session state (no rerun)
-                        st.session_state["topology_records"] = _vlm_records
-                        st.session_state["discovered_switches"] = sorted(
-                            list({r["switch"] for r in _vlm_records if r.get("switch")}),
-                            key=_natsort_key
+                for idx, total, new_records in _hybrid_stream(
+                    image_files=uploaded_imgs,
+                    model=resolved_engine,
+                    keep_alive="10m",
+                    num_ctx=2048,
+                    num_thread=4,
+                    timeout=60,
+                    system_prompt=_vlm_prompt,
+                    preset_config=_preset_config,
+                ):
+                    for r in new_records:
+                        sig = (
+                            r.get("switch", "").strip().lower(),
+                            r.get("interface", "").strip().lower(),
+                            r.get("type", "").strip().lower(),
+                            r.get("purpose", "").strip().lower(),
+                            r.get("ip", "").strip(),
                         )
-                        st.session_state["discovered_uplink_candidates"] = sorted(
-                            list({r["interface"] for r in _vlm_records if r.get("type") == "Uplink" and r.get("interface")}),
-                            key=_natsort_key
-                        )
-                        st.session_state["discovered_service_candidates"] = sorted(
-                            list({r["purpose"] for r in _vlm_records if r.get("type") != "Uplink" and r.get("purpose")}),
-                            key=_natsort_key
-                        )
-                        st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
+                        if sig not in _existing_sigs:
+                            _existing_sigs.add(sig)
+                            _vlm_records.append(r)
 
-                        # In-place progressive render — no page reload
-                        progress_bar.progress((idx + 1) / total,
-                            text=f"Hybrid Inference: Image {idx + 1}/{total} — {len(_vlm_records)} records so far")
-                        with results_placeholder.container():
-                            status_box.info(f"Image {idx + 1}/{total}: {len(new_records)} new records parsed")
-                            _render_topology_cards(_vlm_records)
-                            _render_topology_datagrid(_vlm_records)
+                    st.session_state["topology_records"] = _vlm_records
+                    st.session_state["discovered_switches"] = sorted(
+                        list({r["switch"] for r in _vlm_records if r.get("switch")}),
+                        key=_natsort_key
+                    )
+                    st.session_state["discovered_uplink_candidates"] = sorted(
+                        list({r["interface"] for r in _vlm_records if r.get("type") == "Uplink" and r.get("interface")}),
+                        key=_natsort_key
+                    )
+                    st.session_state["discovered_service_candidates"] = sorted(
+                        list({r["purpose"] for r in _vlm_records if r.get("type") != "Uplink" and r.get("purpose")}),
+                        key=_natsort_key
+                    )
+                    st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
 
-                    # All images processed
-                    progress_bar.empty()
-                    status_box.success(f"Analysis complete! Extracted {len(_vlm_records)} topology items across {len(set(r['switch'] for r in _vlm_records if r.get('switch')))} switches.")
-                    raw_items = _vlm_records
-                    errors = _vlm_errors
-                    session_id = None
-                    ai_error_msg = ""
-                    _vlm_mode = True
-                    st.session_state["latest_ai_raw_response"] = _json.dumps([], indent=2)[:500]
-            else:
+                    progress_bar.progress((idx + 1) / total,
+                        text=f"Hybrid Inference: Image {idx + 1}/{total} — {len(_vlm_records)} records so far")
+                    with results_placeholder.container():
+                        status_box.info(f"Image {idx + 1}/{total}: {len(new_records)} new records parsed")
+                        _render_topology_cards(_vlm_records)
+                        _render_topology_datagrid(_vlm_records)
+
+                progress_bar.empty()
+                status_box.success(f"Analysis complete! Extracted {len(_vlm_records)} topology items across {len(set(r['switch'] for r in _vlm_records if r.get('switch')))} switches.")
+                raw_items = _vlm_records
+                errors = _vlm_errors
+                session_id = None
+                ai_error_msg = ""
+                _vlm_mode = True
+                st.session_state["latest_ai_raw_response"] = _json.dumps([], indent=2)[:500]
+            elif resolved_engine == "rapidocr":
+                # Pure local heuristic extraction only — no call_ai, no vault.sanitize
                 _vlm_mode = False
                 combined_raw_lines = []
-                all_raw_tokens = []
-                cumulative_y = 0
 
                 for idx, img in enumerate(uploaded_imgs):
                     step_label = f"Analyzing screenshot [{idx + 1}/{total_imgs}]: {getattr(img, 'name', f'Image #{idx+1}')}"
                     progress_bar.progress(idx / total_imgs, text=step_label)
 
-                    # Safe rewind before read
                     if hasattr(img, "seek"):
                         img.seek(0)
                     raw_bytes = img.getvalue() if hasattr(img, "getvalue") else img.read()
@@ -1754,17 +1743,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     if extracted_txt:
                         combined_raw_lines.append(f"--- Screenshot {idx+1}: {getattr(img, 'name', '')} ---\n{extracted_txt}")
 
-                    toks = ocr_res.get("raw_tokens", [])
-                    img_heights = ocr_res.get("image_heights", [])
-                    img_h = img_heights[0] if img_heights else 0
-                    for t in toks:
-                        t["_src"] = idx
-                        box = t.get("box")
-                        if box and len(box) >= 2 and cumulative_y > 0:
-                            t["box"] = [box[0], box[1] + cumulative_y, box[2], box[3]]
-                    all_raw_tokens.extend(toks)
-                    cumulative_y += img_h
-
                 combined_raw_text = "\n\n".join(combined_raw_lines).strip()
                 st.session_state["latest_ocr_raw_text"] = combined_raw_text
 
@@ -1773,8 +1751,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 if not true_ocr_content:
                     st.error("No valid text detected by OCR. Verify screenshot clarity and labels.")
                 else:
-                    progress_bar.progress(0.8, text="Sanitizing data locally and invoking AI parser...")
-
+                    progress_bar.progress(0.8, text="Running RapidOCR heuristic parsing...")
                     try:
                         from utils.formatters import apply_auto_corrections
                         cleaned_ocr = apply_auto_corrections(combined_raw_text, "ocr_cleaning")
@@ -1782,7 +1759,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     except Exception:
                         cleaned_ocr = combined_raw_text
 
-                    # 1. Pre-clean OCR typo where dots are dropped in IP addresses
+                    _OCR_IP_REPAIR = re.compile(r"\b(\d{1,3})\.(\d{4,5})\.(\d{1,3})\b")
                     def _repair_merged_octet(m):
                         first, middle, last = m.group(1), m.group(2), m.group(3)
                         for i in range(1, len(middle)):
@@ -1792,12 +1769,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                     return f"{first}.{a}.{b}.{last}"
                         mid = len(middle) // 2
                         return f"{first}.{middle[:mid]}.{middle[mid:]}.{last}"
-                    _OCR_IP_REPAIR = re.compile(r"\b(\d{1,3})\.(\d{4,5})\.(\d{1,3})\b")
                     cleaned_ocr = _OCR_IP_REPAIR.sub(_repair_merged_octet, cleaned_ocr or combined_raw_text)
-
-                    # 2. Local Vault sanitization (IPs, MACs, Serials, Domains, Hostnames only)
-                    sanitized_combined, session_id = vault.sanitize(cleaned_ocr or combined_raw_text)
-                    st.session_state["latest_vault_session"] = session_id
 
                     target_platform = st.session_state.get("naming_target_platform", "VMware ESXi")
                     tpp = naming_rules.get("topology_parsing_presets") or {}
@@ -1808,7 +1780,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         st.error(f"Missing AI Parsing Rules for platform '{target_platform}' in Standards Tab. Please configure instructions first.")
                         return
 
-                    user_prompt = f"Parse this sanitized topology text into JSON entities array:\n\n{sanitized_combined}"
+                    user_prompt = f"Parse this sanitized topology text into JSON entities array:\n\n{cleaned_ocr}"
                     response = ""
                     ai_error_msg = ""
                     try:
@@ -1818,30 +1790,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         logger.error("call_ai failed: %s", ai_error_msg)
 
                     st.session_state["latest_ai_raw_response"] = response or (f"ERROR: {ai_error_msg}" if ai_error_msg else "")
-
                     raw_items = _safe_parse_json_array(response) if response else []
-
-                    if session_id and raw_items:
-                        try:
-                            restored_items = []
-                            for item in raw_items:
-                                if not isinstance(item, dict):
-                                    continue
-                                restored_item = {}
-                                for k, v in item.items():
-                                    val_str = str(v)
-                                    if hasattr(vault, "_session_store") or hasattr(vault, "restore"):
-                                        restored_val = vault.restore(val_str, session_id=session_id)
-                                        if "{{" in restored_val:
-                                            m_alt = re.sub(r"\{\{IP_(\d+)\}\}", r"<SAFE_IP_\1>", restored_val)
-                                            restored_val = vault.restore(m_alt, session_id=session_id)
-                                        restored_item[k] = restored_val
-                                    else:
-                                        restored_item[k] = val_str
-                                restored_items.append(restored_item)
-                            raw_items = restored_items
-                        except Exception as e:
-                            logger.warning("Vault restore failed: %s", e)
 
                 # Dynamically load platform preset dictionaries
                 plat_cfg = tpp.get(target_platform, {}) if isinstance(tpp.get(target_platform), dict) else {}
@@ -2019,8 +1968,8 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                             st.error(f"AI Call Exception: {ai_error_msg}")
                         st.subheader("Raw AI Response Received:")
                         st.text_area("Model Output", value=response or "(Empty response)", height=220, key="diag_ai_raw_out")
-                        st.subheader("Sanitized OCR Input Sent to Model:")
-                        st.text_area("Sanitized Payload", value=sanitized_combined, height=220, key="diag_sanitized_payload")
+                        st.subheader("OCR Input Sent to Model:")
+                        st.text_area("OCR Payload", value=cleaned_ocr or combined_raw_text, height=220, key="diag_ocr_payload")
 
         except Exception as e:
             import traceback
@@ -2429,7 +2378,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             )
             st.stop()
 
-        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.5.2.\n"]
+        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.5.15.\n"]
         for _gparent in sorted(_groups.keys(), key=_natsort_key):
             _out_lines.append(f"=== {_gparent} ===")
             _sw_uplinks = [r for r in _groups[_gparent] if r.get("type") == "Uplink" and r.get("interface")]
