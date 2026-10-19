@@ -1,9 +1,16 @@
 """
-Topology State Reducer — Single Authoritative State Reducer (v4.6.0)
+Topology State Reducer — Single Authoritative State Reducer (v4.6.1)
 
 Implements reduce_topology_pipeline() as the unified deduplication,
 prefix normalization, and expanded-state precedence engine for all
 inference paths (hybrid stream and legacy heuristic).
+
+v4.6.1 changes:
+  - Switch name typo normalization: vSwitcho -> vSwitch0, vSwitcho1 -> vSwitch01, etc.
+  - Ghost header rejection: collapsed headers, UI control strings, site names
+  - Expanded state precedence: auto-purge dummy "No Uplink" records when real adapters exist
+  - Strict 5-tuple deduplication
+  - VMkernel/Port Group disambiguation: no redundant Port Group when VMkernel with same purpose exists
 """
 
 from __future__ import annotations
@@ -19,21 +26,11 @@ def reduce_topology_pipeline(
 ) -> List[Dict[str, Any]]:
     """Reduce raw parsed topology records through a single authoritative pipeline.
 
-    Parameters
-    ----------
-    raw_records : list
-        Raw records from any inference path (LLM JSON, heuristic parser, etc.).
-    plat_config : dict
-        Platform-specific preset configuration (e.g. from
-        ``topology_parsing_presets[platform]``).
-    platform_tokens : dict
-        Dynamic platform token prefix mappings (e.g. from
-        ``platform_tokens[platform]``).
-
-    Returns
-    -------
-    list
-        Deduplicated, type-normalized topology records.
+    v4.6.1 strict normalization & precedence rules:
+      1. Switch Name Typo & Prefix Normalization
+      2. Ghost Header Rejection
+      3. Expanded State Precedence
+      4. Deduplication & VMkernel/Port Group Disambiguation
     """
     if not raw_records:
         return []
@@ -52,6 +49,20 @@ def reduce_topology_pipeline(
 
     cleaned: List[Dict[str, Any]] = []
 
+    # Ghost header / UI control patterns to reject
+    _ghost_re = re.compile(
+        r"^(?:Standard\s*Switch|Distributed\s*Switch|Switch):\s*.+$",
+        re.IGNORECASE,
+    )
+    _collapsed_re = re.compile(
+        r"^(?:>|▶|\+)?\s*(?:Standard\s*Switch|Distributed\s*Switch|Switch):\s+.+$",
+        re.IGNORECASE,
+    )
+    _ui_control_re = re.compile(
+        r"^(?:ADD\s*NETWORKING|EDIT|MANAGE\s*PHYSICAL\s*ADAPTERS?|MANAGE\s*ADAPTERS?|REFRESH|ACTIONS?|\.\.\.|Ver\s*\.+\||Ref|No physical network adapters|No Uplink)$",
+        re.IGNORECASE,
+    )
+
     for r in raw_records:
         if not isinstance(r, dict):
             continue
@@ -61,7 +72,11 @@ def reduce_topology_pipeline(
         raw_sw = str(item.get("switch") or item.get("parent") or item.get("switch_name") or "").strip()
         sw_clean = re.sub(r"^(Standard\s*Switch|Distributed\s*Switch|Switch|Bridge):\s*", "", raw_sw, flags=re.I).strip()
         sw_clean = re.sub(r"\s+", " ", sw_clean).strip()
-        sw_clean = re.sub(r"(?i)(switch)o(\d*)", r"\g<1>0\2", sw_clean)
+        # v4.6.1: normalize OCR letter 'o'/'O' → digit '0' in switch suffixes
+        # Pattern: vSwitch + 'o'/'O' + digits -> vSwitch0 + digits
+        # Also handle: vSwitch + 'o'/'O' alone -> vSwitch0
+        sw_clean = re.sub(r"(?i)(vswitch)o(\d*)", r"\g<1>0\2", sw_clean)
+        sw_clean = re.sub(r"(?i)(vswitch)o$", r"\g<1>0", sw_clean)
         if not sw_clean:
             continue
 
@@ -90,6 +105,12 @@ def reduce_topology_pipeline(
         raw_purpose = str(item.get("purpose") or item.get("service") or item.get("name") or "").strip()
         raw_role = str(item.get("role") or item.get("uplink_role") or "").strip()
         speed_val = str(item.get("speed") or "").strip()
+
+        # v4.6.1: Ghost header / UI control string rejection on switch, interface, purpose
+        if _ghost_re.match(raw_sw) or _collapsed_re.match(raw_sw):
+            continue
+        if _ui_control_re.match(raw_sw) or _ui_control_re.match(raw_iface) or _ui_control_re.match(raw_purpose):
+            continue
 
         speed_match = re.search(r"(\d+\s*(?:Gbit/s|Mbit/s|Kbit/s|Full|Half))", clean_iface, re.I)
         if speed_match:

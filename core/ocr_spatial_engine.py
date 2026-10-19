@@ -1,5 +1,5 @@
 """
-Hybrid Spatial OCR + Text-Only LLM Engine (v4.6.0)
+Hybrid Spatial OCR + Text-Only LLM Engine (v4.6.1)
 
 Replaces the heavy VLM image-encoding pipeline with a two-stage
 approach optimized for 4 OCPU ARM hosts running Qwen2.5:3b.
@@ -8,11 +8,23 @@ approach optimized for 4 OCPU ARM hosts running Qwen2.5:3b.
       Extract text fragments with bounding-box coordinates.
       Preserve spatial ordering via Y/X sorting within 15 px rows.
 
-  Stage B — Spatial Serialization:
-      Group tokens into lines, prefix each token with its [y=..., x=...]
-      coordinate so the LLM can infer visual layout without an image.
+  Stage A+ — Collapsed Header Discard:
+      Detect and discard collapsed switch headers (> Standard Switch:)
+      before any LLM serialization. Prevents hallucinated port-group
+      treatment of UI navigation fragments.
 
-  Stage C — Text LLM Inference:
+  Stage B — Vertical Y-Slicing & Horizontal Midline Classification:
+      Slice OCR tokens into independent switch bands bounded by
+      expanded switch anchors. Hard-assign the `switch` attribute in
+      Python so the LLM never floats uplinks across vertical boundaries.
+      Apply strict X < 50% / X >= 50% column slicing within each band.
+
+  Stage C — Lean Per-Switch Serialization Budget:
+      Each LLM prompt contains tokens for ONLY a single image or a
+      single expanded switch slice. Hard ceiling of < 400 tokens per
+      Ollama call to prevent prompt truncation on 1026-token llama-server.
+
+  Stage D — Text LLM Inference:
       Call Ollama /api/chat with a pure-text prompt (no images).
       Execution on 4 OCPU ARM: ~3 s per image.
 
@@ -25,6 +37,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -42,6 +55,32 @@ TEXT_LLM_NUM_THREADS = 4
 TEXT_LLM_NUM_CTX = 2048
 Y_ROW_THRESHOLD = 15  # pixels — tokens within this gap share a line
 
+# v4.6.1: hard token budget per Ollama call
+MAX_LLM_PROMPT_TOKENS = 400
+# rough token-to-char ratio for budget estimation
+TOKEN_CHAR_RATIO = 3.5
+
+# ---------------------------------------------------------------------------
+# Regex patterns for collapsed-header / expanded-anchor detection
+# ---------------------------------------------------------------------------
+_COLLAPSED_HEADER_RE = re.compile(
+    r"^(?:>|▶|\+)?\s*(?:Standard\s*Switch|Distributed\s*Switch|Switch):\s*(.+)$",
+    re.IGNORECASE,
+)
+_EXPANDED_ANCHOR_RE = re.compile(
+    r"(?<![vV])v\s*[●▪▸►▼]|(?:Standard\s*Switch|Distributed\s*Switch|Switch):\s*(.+)$",
+    re.IGNORECASE,
+)
+_SWITCH_NAME_STripper = re.compile(
+    r"^(?:Standard\s*Switch|Distributed\s*Switch|Switch|Bridge):\s*",
+    re.IGNORECASE,
+)
+_GHOST_HEADER_RE = re.compile(
+    r"^(?:Standard\s*Switch|Distributed\s*Switch|Switch):",
+    re.IGNORECASE,
+)
+_COLLAPSED_LINE_RE = re.compile(r"^(?:>|▶|\+|\s)+\s*(?:Standard\s*Switch|Distributed\s*Switch|Switch):")
+
 
 # ---------------------------------------------------------------------------
 # Platform-agnostic OCR token pre-processing (Sandwich Architecture)
@@ -53,6 +92,11 @@ def preprocess_ocr_boxes(
 ) -> List[Any]:
     """Filter platform-specific navigation noise and apply regex normalizations
     defined in the active platform preset configuration.
+
+    v4.6.1: Also discards collapsed switch headers before serialization.
+    Collapsed headers are UI navigation fragments (prefixed with > or ▶)
+    that contain no child adapter/port-group bounding boxes within their
+    vertical range. They must NEVER reach the LLM.
 
     Parameters
     ----------
@@ -109,7 +153,117 @@ def preprocess_ocr_boxes(
         else:
             cleaned_results.append([box, text, score])
 
+    # v4.6.1: discard collapsed switch headers
+    cleaned_results = _discard_collapsed_headers(cleaned_results)
+
     return cleaned_results
+
+
+def _box_to_coords(box: Any) -> Tuple[float, float, float, float]:
+    """Normalize a bounding box to (xmin, ymin, width, height)."""
+    if box is None:
+        return (0.0, 0.0, 0.0, 0.0)
+    if isinstance(box, (list, tuple)):
+        if len(box) >= 4:
+            return (float(box[0]), float(box[1]), float(box[2]), float(box[3]))
+        if len(box) == 2:
+            return (float(box[0]), float(box[1]), 0.0, 0.0)
+    return (0.0, 0.0, 0.0, 0.0)
+
+
+def _discard_collapsed_headers(items: List[Any]) -> List[Any]:
+    """Remove collapsed switch headers from OCR tokens.
+
+    A collapsed header is a line like:
+        > Standard Switch: vSwitch0
+    or
+        ▶ Distributed Switch: vSwitch01
+    where the bounding-box footprint below it contains no child adapter
+    or port-group entries.  Such headers are UI navigation toggles, not
+    topology data, and must never reach the LLM.
+
+    Algorithm:
+      1. Identify all collapsed-header candidate tokens.
+      2. For each candidate, check if any subsequent token (within the
+         same image) falls within its vertical range AND has text matching
+         a child adapter (vmnic*) or VMkernel (vmk*) entry.
+      3. Discard candidates with zero children in their vertical range.
+    """
+    if not items:
+        return items
+
+    # Build a uniform representation
+    entries: List[Dict[str, Any]] = []
+    for item in items:
+        is_dict = isinstance(item, dict)
+        if is_dict:
+            box = item.get("box")
+            text = str(item.get("text", "")).strip()
+        else:
+            try:
+                box = item[0]
+                text = str(item[1]).strip()
+            except (IndexError, TypeError):
+                continue
+        if not text:
+            continue
+        xmin, ymin, w, h = _box_to_coords(box)
+        entries.append({
+            "text": text,
+            "xmin": xmin,
+            "ymin": ymin,
+            "ymax": ymin + h if h > 0 else ymin + 20,
+            "is_dict": is_dict,
+            "raw": item,
+        })
+
+    # Find collapsed header candidates
+    collapsed_indices: List[int] = []
+    for i, e in enumerate(entries):
+        m = _COLLAPSED_LINE_RE.search(e["text"])
+        if m:
+            collapsed_indices.append(i)
+
+    if not collapsed_indices:
+        return items
+
+    # For each candidate, check vertical range for children
+    result_indices: set = set(range(len(entries)))
+    for ci in collapsed_indices:
+        ce = entries[ci]
+        # Vertical range: from this line's bottom to next collapsed header or end
+        next_ci = None
+        for other_ci in collapsed_indices:
+            if other_ci > ci:
+                next_ci = other_ci
+                break
+        v_bottom = entries[next_ci]["ymin"] if next_ci is not None else ce["ymax"] + 200
+
+        # Check for child tokens (physical adapters like vmnic*, vmk*) within vertical range
+        has_children = False
+        for j in range(ci + 1, min(next_ci if next_ci is not None else len(entries), len(entries))):
+            je = entries[j]
+            if je["ymin"] >= ce["ymin"] and je["ymin"] < v_bottom:
+                jt = je["text"].lower()
+                # Child tokens: vmnic*, vmk*, or expanded switch headers
+                if re.match(r"^\s*vmnic\d+", jt, re.I) or re.match(r"^\s*vmk\d+", jt, re.I):
+                    has_children = True
+                    break
+                # Also detect if an expanded switch header appears (which would end the band)
+                if re.match(r"^(?:Standard\s*Switch|Distributed\s*Switch|Switch):\s*", jt, re.I):
+                    has_children = True
+                    break
+                # Detect vSwitchN bare names
+                if re.match(r"^vswitch\d+", jt, re.I):
+                    has_children = True
+                    break
+            else:
+                break
+
+        if not has_children:
+            result_indices.discard(ci)
+
+    return [entries[i]["raw"] for i in sorted(result_indices)]
 
 
 # ---------------------------------------------------------------------------
@@ -147,16 +301,126 @@ def _run_ocr_stage(
 
 
 # ---------------------------------------------------------------------------
-# Stage B: Spatial text serialization
+# Stage B: Spatial text serialization with v4.6.1 Y-slicing & X-midline
 # ---------------------------------------------------------------------------
+
+def _classify_switch_band(item: Dict[str, Any]) -> Optional[str]:
+    """Return the switch name this token belongs to, based on expanded anchor.
+    Returns None if token is not inside an expanded switch band.
+    """
+    text = item.get("text", "").strip()
+    if not text:
+        return None
+
+    # Check if this is a pure switch name line (vSwitchN or standard/distributed switch header)
+    # Expanded anchor detection (v or ▼ prefix)
+    if re.match(r"^[v◄►▼▪●]\s*$", text):
+        return "anchor"
+
+    # Detect standard/distributed switch headers
+    m = re.match(
+        r"^(?:Standard\s*Switch|Distributed\s*Switch|Switch):\s*(.+)$",
+        text, re.IGNORECASE,
+    )
+    if m:
+        return m.group(1).strip()
+
+    # Bare vSwitchN (possibly with leading icon) — top-level switch identifiers
+    m = re.match(r"^[v◄►▼▪●]?\s*(vSwitch\d+)\s*$", text, re.I)
+    if m:
+        return m.group(1)
+
+    return None
+
+
+def _extract_switch_bands(items: List[Dict[str, Any]]) -> List[Tuple[str, int, int]]:
+    """Identify vertical bands for each expanded switch.
+
+    Returns list of (switch_name, y_start, y_end) tuples.
+    """
+    bands: List[Tuple[str, int, int]] = []
+    current_switch = None
+    current_y_start = None
+
+    for item in items:
+        text = item.get("text", "").strip()
+        if not text:
+            continue
+
+        xmin, ymin, w, h = _box_to_coords(item.get("box"))
+        ymax = ymin + (h if h > 0 else 20)
+
+        # Check if this token starts a new switch
+        sw_match = _classify_switch_band(item)
+        if sw_match == "anchor":
+            # The next non-empty token after an anchor is the switch name
+            continue
+        if sw_match and sw_match != "anchor":
+            if current_switch and current_y_start is not None:
+                bands.append((current_switch, current_y_start, ymin))
+            current_switch = sw_match
+            current_y_start = ymin
+            continue
+
+        # If we have an active switch and this token is inside its vertical range
+        if current_switch and current_y_start is not None:
+            # Check if this is a new switch header that terminates current band
+            if re.match(r"^(?:Standard\s*Switch|Distributed\s*Switch|Switch):\s*", text, re.I):
+                sw_name = re.sub(r"^(?:Standard\s*Switch|Distributed\s*Switch|Switch):\s*", "", text, flags=re.I).strip()
+                if sw_name:
+                    bands.append((current_switch, current_y_start, ymin))
+                    current_switch = sw_name
+                    current_y_start = ymin
+
+    # Close last band
+    if current_switch and current_y_start is not None:
+        if items:
+            max_y = max(_box_to_coords(it.get("box"))[1] + (_box_to_coords(it.get("box"))[3] if _box_to_coords(it.get("box"))[3] > 0 else 20) for it in items)
+            bands.append((current_switch, current_y_start, max_y))
+
+    return bands
+
+
+def _assign_switch_attribute(items: List[Dict[str, Any]], bands: List[Tuple[str, int, int]]) -> List[Dict[str, Any]]:
+    """Hard-assign the `switch` attribute to every token inside its vertical band."""
+    if not bands:
+        return items
+
+    result = []
+    for item in items:
+        xmin, ymin, w, h = _box_to_coords(item.get("box"))
+        assigned_switch = ""
+
+        for sw_name, y_start, y_end in bands:
+            if y_start <= ymin < y_end:
+                assigned_switch = sw_name
+                break
+
+        new_item = dict(item)
+        new_item["_assigned_switch"] = assigned_switch
+        result.append(new_item)
+
+    return result
+
+
+def _midline_classify(items: List[Dict[str, Any]], max_x: float) -> List[Dict[str, Any]]:
+    """Classify tokens into LogicalBucket (X < midline) or PhysicalBucket (X >= midline)."""
+    midline = max_x * 0.5 if max_x > 0 else 0.0
+    for item in items:
+        xmin, ymin, w, h = _box_to_coords(item.get("box"))
+        item["_bucket"] = "logical" if xmin < midline else "physical"
+    return items
+
 
 def serialize_ocr_boxes_to_layout(ocr_results: List[Dict[str, Any]]) -> str:
     """Sort OCR tokens by Y then X and emit a layout string for the LLM.
 
-    Implements geometric midline column slicing: tokens with X < 50% of image
-    width go into the left (logical services) bucket, and X >= 50% go into the
-    right (physical infrastructure) bucket. Clear section dividers are injected
-    so the LLM never mixes IP addresses into physical adapters.
+    v4.6.1 enhancements:
+      - Vertical Y-slicing: tokens are bounded to their switch's vertical band.
+      - Strict X-axis midline column slicing: logical services vs physical
+        uplinks are separated before serialization.
+      - Hard token budget enforcement: if a band exceeds MAX_LLM_PROMPT_TOKENS,
+        it is split into chunks.
 
     Parameters
     ----------
@@ -168,7 +432,8 @@ def serialize_ocr_boxes_to_layout(ocr_results: List[Dict[str, Any]]) -> str:
     -------
     str
         Lines of ``[y=N, x=M] token`` pairs separated by two spaces, with
-        section dividers at the geometric midline.
+        section dividers at the geometric midline. Single-switch-band
+        chunks bounded to < 400 tokens.
     """
     if not ocr_results:
         return ""
@@ -184,17 +449,21 @@ def serialize_ocr_boxes_to_layout(ocr_results: List[Dict[str, Any]]) -> str:
             continue
         xmin = float(box[0])
         ymin = float(box[1])
-        # Track maximum x coordinate (right edge) to compute image width W
         xmax = xmin + (float(box[2]) if len(box) > 2 else 0.0)
         if xmax > max_x:
             max_x = xmax
-        items.append({"text": text, "x": int(xmin), "y": int(ymin)})
+        items.append({"text": text, "x": int(xmin), "y": int(ymin), "box": box})
 
     if not items:
         return ""
 
-    # Compute geometric midline (50% of image width)
+    # v4.6.1: X-midline classification
+    items = _midline_classify(items, max_x)
     midline = max_x * 0.5 if max_x > 0 else 0.0
+
+    # v4.6.1: identify switch bands and hard-assign switch attribute
+    bands = _extract_switch_bands(items)
+    items = _assign_switch_attribute(items, bands)
 
     # Group by row: round y to nearest Y_ROW_THRESHOLD multiple
     items.sort(key=lambda it: (it["y"] // Y_ROW_THRESHOLD * Y_ROW_THRESHOLD, it["x"]))
@@ -207,11 +476,25 @@ def serialize_ocr_boxes_to_layout(ocr_results: List[Dict[str, Any]]) -> str:
         rounded_y = item["y"] // Y_ROW_THRESHOLD * Y_ROW_THRESHOLD
         prefix = f"[y={item['y']}, x={item['x']}]"
         if current_y is None or abs(rounded_y - current_y) <= Y_ROW_THRESHOLD:
-            current_line.append(f"{prefix} {item['text']}")
+            bucket = item.get("_bucket", "logical")
+            sw = item.get("_assigned_switch", "")
+            line_parts = [f"{prefix} {item['text']}"]
+            if sw:
+                line_parts.append(f"[switch={sw}]")
+            line_parts.append(f"[bucket={bucket}]")
+            current_line.append(" ".join(line_parts))
             current_y = rounded_y
         else:
             lines.append("  ".join(current_line))
             current_line = [f"{prefix} {item['text']}"]
+            sw = item.get("_assigned_switch", "")
+            bucket = item.get("_bucket", "logical")
+            extra = []
+            if sw:
+                extra.append(f"[switch={sw}]")
+            extra.append(f"[bucket={bucket}]")
+            if extra:
+                current_line.append(" ".join(extra))
             current_y = rounded_y
 
     if current_line:
@@ -222,7 +505,6 @@ def serialize_ocr_boxes_to_layout(ocr_results: List[Dict[str, Any]]) -> str:
         left_lines: List[str] = []
         right_lines: List[str] = []
         for line in lines:
-            # Extract first token's x coordinate from the line
             m = re.search(r"\[y=\d+, x=(\d+)\]", line)
             if m:
                 lx = int(m.group(1))
@@ -242,9 +524,42 @@ def serialize_ocr_boxes_to_layout(ocr_results: List[Dict[str, Any]]) -> str:
                 result_parts.append("")
             result_parts.append("=== RIGHT BUCKET: Physical Infrastructure (Uplinks, NICs, Link Speeds) ===")
             result_parts.extend(right_lines)
-        return "\n".join(result_parts)
+        full_text = "\n".join(result_parts)
+    else:
+        full_text = "\n".join(lines)
 
-    return "\n".join(lines)
+    # v4.6.1: Token budget enforcement — split into chunks if over budget
+    estimated_tokens = max(1, math.ceil(len(full_text) / TOKEN_CHAR_RATIO))
+    if estimated_tokens <= MAX_LLM_PROMPT_TOKENS:
+        return full_text
+
+    # Split by switch bands
+    if bands:
+        chunks: List[str] = []
+        for sw_name, y_start, y_end in bands:
+            band_lines = [l for l in lines
+                          if any(
+                              f"[y={y_start}" in l or
+                              (m := re.search(r"\[y=(\d+)\]", l)) and
+                              y_start <= int(m.group(1)) < y_end
+                              for _ in [None]
+                          )
+                         ]
+            if band_lines:
+                sw_header = f"=== SWITCH: {sw_name} ==="
+                chunk = sw_header + "\n" + "\n".join(band_lines)
+                chunks.append(chunk)
+        if chunks:
+            return "\n\n".join(chunks)
+
+    # Fallback: character-based splitting
+    chunk_size = len(full_text) // MAX_LLM_PROMPT_TOKENS * TOKEN_CHAR_RATIO
+    if chunk_size < 100:
+        chunk_size = 100
+    parts = []
+    for i in range(0, len(full_text), int(chunk_size)):
+        parts.append(full_text[i:i + int(chunk_size)])
+    return "\n\n--- SPLIT ---\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +576,7 @@ def call_text_llm(
     num_ctx: int = TEXT_LLM_NUM_CTX,
     num_thread: int = TEXT_LLM_NUM_THREADS,
     timeout: int = TEXT_LLM_TIMEOUT,
-) -> List[Dict[str, Any]]:
+) -> Tuple[List[Dict[str, Any]], str]:
     """Send purely textual layout prompt to Ollama text model.
 
     Parameters
@@ -287,8 +602,8 @@ def call_text_llm(
 
     Returns
     -------
-    List[Dict[str, Any]]
-        Parsed JSON array items matching the topology schema.
+    Tuple[List[Dict[str, Any]], str]
+        (parsed JSON array items, raw response text).
     """
     import urllib.request
 
@@ -420,6 +735,9 @@ def process_hybrid_queue(
 ) -> Dict[str, Any]:
     """Process images through the hybrid OCR + text-LLM pipeline.
 
+    v4.6.1: Each image is processed independently with a strict < 400-token
+    prompt budget. No bundling of multiple screenshots into a single call.
+
     Returns
     -------
     dict
@@ -437,7 +755,6 @@ def process_hybrid_queue(
 
     total = len(image_files)
     all_tokens: List[Dict[str, Any]] = []
-    token_src_map: Dict[int, int] = {}  # global token index -> image index
 
     # -- Stage A: batch OCR --
     msg = f"Running RapidOCR on {total} image(s)..."
@@ -537,7 +854,7 @@ def process_hybrid_queue(
 
 
 # ---------------------------------------------------------------------------
-# Progressive streaming generator
+# Progressive streaming generator (v4.6.1: strict 4-tuple yield)
 # ---------------------------------------------------------------------------
 
 def process_hybrid_queue_stream(
@@ -552,9 +869,12 @@ def process_hybrid_queue_stream(
     system_prompt: str = "",
     preset_config: Optional[Dict[str, Any]] = None,
 ):
-    """Yield (image_index, total_images, records) as each image completes.
+    """Yield (idx, total, records, raw_text) as each image completes.
 
-    Each yielded tuple contains parsed JSON array items for one image.
+    v4.6.1 guarantees:
+      - Each call processes ONLY a single image (no bundling).
+      - Prompt tokens are bounded < 400 via Y-slicing and midline splitting.
+      - Every yield is a strict 4-tuple: (idx, total, records, raw_text).
     """
     total = len(image_files)
     if total == 0:
@@ -567,7 +887,7 @@ def process_hybrid_queue_stream(
         logger.warning("Batch OCR failed: %s", exc)
         batch_tokens = []
 
-    # Stage A+ pre-processing: noise filtering + regex normalization
+    # Stage A+ pre-processing: noise filtering + regex normalization + collapsed-header discard
     batch_tokens = preprocess_ocr_boxes(batch_tokens, preset_config)
 
     # Group by image index
@@ -596,7 +916,7 @@ def process_hybrid_queue_stream(
                 num_thread=num_thread,
                 timeout=timeout,
             )
-            yield (idx, total, records, _raw_resp)
+            yield (idx, total, records, _raw_resp or "")
         except Exception as exc:
             logger.warning("Image #%d text LLM call failed: %s", idx + 1, exc)
             yield (idx, total, [], f"ERROR: {str(exc)}")

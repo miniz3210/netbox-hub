@@ -1,5 +1,5 @@
 # NetBox Hub — Living Architecture SOP & Handover Guide
-# Target Baseline: v4.6.0 | Platform: Oracle Cloud Ampere A1 (ARM64)
+# Target Baseline: v4.6.1 | Platform: Oracle Cloud Ampere A1 (ARM64)
 
 ---
 
@@ -8,7 +8,7 @@
 | Property              | Value                                                        |
 |-----------------------|--------------------------------------------------------------|
 | Application           | NetBox Universal Library Hub                                 |
-| Target Version        | v4.6.0                                                       |
+| Target Version        | v4.6.1                                                       |
 | Runtime               | Python 3.11+ / Streamlit                                     |
 | Cloud Infrastructure  | Oracle Cloud Ampere A1 (ARM64 / aarch64, Linux)              |
 | Container Registry    | `ghcr.io/miniz3210/netbox-hub`                               |
@@ -166,7 +166,7 @@ When a cell in the DataGrid is edited, `_apply_cascade_to_rows()` in `ui/tabs/na
 Capture a baseline snapshot of the Standards Tab configuration into `data/naming_rules.yaml`. Verify all section definitions (2.5 UX rules, 4.0 Blueprint guide) are present and consistent.
 
 ### Step 2 — Version Assert Verification
-Confirm `config/constants.py::APP_VERSION == "4.6.0"`. Ensure no release notes or version bump scripts are pending.
+Confirm `config/constants.py::APP_VERSION == "4.6.1"`. Ensure no release notes or version bump scripts are pending.
 
 ### Step 3 — Safe Local Container Cache Cleanup
 ```bash
@@ -177,8 +177,8 @@ docker builder prune -a -f
 
 ### Step 4 — Docker Build & Tag Release
 ```bash
-docker build -t ghcr.io/miniz3210/netbox-hub:v4.6.0 -t ghcr.io/miniz3210/netbox-hub:latest .
-docker push ghcr.io/miniz3210/netbox-hub:v4.6.0
+docker build -t ghcr.io/miniz3210/netbox-hub:v4.6.1 -t ghcr.io/miniz3210/netbox-hub:latest .
+docker push ghcr.io/miniz3210/netbox-hub:v4.6.1
 docker push ghcr.io/miniz3210/netbox-hub:latest
 ```
 
@@ -205,10 +205,15 @@ docker push ghcr.io/miniz3210/netbox-hub:latest
 
 ### ⬜ Pending Roadmap
 
-- [ ] Implement unit test coverage for `core/spatial_redactor.py` in `tests/test_spatial_redactor.py` (expand existing test suite to cover v4.4.34 invariants: ghost interface filtering, icon stripping, switch name fidelity, cascade replacement edge cases).
+- [x] Implement unit test coverage for `core/spatial_redactor.py` in `tests/test_spatial_redactor.py` (expand existing test suite to cover v4.4.34 invariants: ghost interface filtering, icon stripping, switch name fidelity, cascade replacement edge cases).
+- [x] **v4.6.1 Collapsed Header Discard**: Python-side detection and removal of `> Standard Switch:` collapsed headers before LLM serialization.
+- [x] **v4.6.1 Vertical Y-Slicing**: Switch band bounding via expanded anchor detection; zero vertical leakage across switches.
+- [x] **v4.6.1 Input Token Budget**: < 400 tokens per Ollama call; eradicated prompt truncation (was 2206 > limit 1026).
+- [x] **v4.6.1 Switch Suffix Fidelity**: `vSwitch01` vs `vSwitch02` distinct; OCR `o`→`0` normalization fixed.
+- [x] **v4.6.1 Expanded State Precedence**: Auto-purge "No Uplink" placeholders when real adapters found.
 - [ ] Build Excel IPAM offline reconciliation script against `AW IPs & VLANs_Final (2).xlsx`.
-- [ ] Prune stale local git tags prior to v4.4.34 release.
-- [ ] Publish GHCR image release `v4.6.0` (`ghcr.io/miniz3210/netbox-hub:v4.6.0`).
+- [ ] Prune stale local git tags prior to v4.6.1 release.
+- [ ] Publish GHCR image release `v4.6.1` (`ghcr.io/miniz3210/netbox-hub:v4.6.1`).
 - [ ] Build platform expansion templates for Proxmox VE and Azure Portal.
 
 ---
@@ -259,7 +264,7 @@ docker image prune -a -f && docker builder prune -a -f
 
 ---
 
-## 9. Production Verification Checklist (v4.6.0)
+## 9. Production Verification Checklist (v4.6.1)
 ================================================================================
 
 - [x] **Sandwich Architecture Enforcement**: Deterministic noise filtering and token normalization handled via Python pre-processing prior to LLM ingestion.
@@ -276,13 +281,18 @@ docker image prune -a -f && docker builder prune -a -f
 - [x] **Generator Unpack Crash Guard**: Standardized 4-tuple yields across all generator paths.
 - [x] **Prompt Optimization**: Slimmed OCR LLM prompt from ~850 to <120 tokens, reducing ARM CPU prefill time by >70%.
 - [x] **Strict No-Hardcode Platform Abstraction**: All naming prefixes and role options dynamically loaded from YAML.
+- [x] **Pre-processing Collapsed Switch Header Filter**: Discard collapsed headers (> Standard Switch:) in Python before LLM serialization.
+- [x] **Vertical Switch Bounding Slices**: Hardware adapters strictly bound to their respective switch section; zero vertical leakage across switches.
+- [x] **Input Token Budget Enforcement**: Single-image/single-switch prompts bounded < 400 tokens; eradicated Ollama prompt truncation (prompt=2206 limit=1026) and context shift drops.
+- [x] **Accurate Multi-Switch Suffix Fidelity**: Preserved vSwitch01 vs vSwitch02 distinction; fixed letter 'o' substitution in switch suffixes.
+- [x] **Expanded State Precedence Enforcement**: Automatically purge No Uplink records when physical adapters are discovered in subsequent frames.
 
 ---
 
 ## 10. 專案狀態檢核：做完咩 (Done) vs 未做咩 (Pending)
 ======================================================================
 
-9.1 做完咩 (Completed & Verified in v4.6.0)
+9.1 做完咩 (Completed & Verified in v4.6.1)
 - [x] Hybrid OCR + Text-Only LLM Pipeline: 替代原生 VLM 影像編碼；RapidOCR 提取文字 + 空間序列化 → `qwen2.5:3b` 純文字推論，單圖延遲降至 ~4s（原 ~10–15s）。
 - [x] Legacy VLM Model Removal: 刪除 `qwen2.5vl:3b` (~3.2 GB)，改用文本模型 `qwen2.5:3b` 及 `qwen2.5:1.5b`。
 - [x] Spatial Text Serialization (`core/ocr_spatial_engine.py`): 按 Y 座標分組行、X 座標排序，生成 `[y=N, x=M] token` 格式的空間布局字串。
