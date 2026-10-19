@@ -44,6 +44,75 @@ Y_ROW_THRESHOLD = 15  # pixels — tokens within this gap share a line
 
 
 # ---------------------------------------------------------------------------
+# Platform-agnostic OCR token pre-processing (Sandwich Architecture)
+# ---------------------------------------------------------------------------
+
+def preprocess_ocr_boxes(
+    ocr_results: List[Any],
+    preset_config: Optional[Dict[str, Any]] = None,
+) -> List[Any]:
+    """Filter platform-specific navigation noise and apply regex normalizations
+    defined in the active platform preset configuration.
+
+    Parameters
+    ----------
+    ocr_results : list
+        Raw OCR output. Each item is either the RapidOCR format
+        ``[box_coordinates, text, confidence]`` or a dict with ``text``
+        and ``box`` keys (as produced by ``core.ocr_engine::raw_tokens``).
+    preset_config : dict, optional
+        The active platform preset dictionary (e.g.
+        ``topology_parsing_presets["VMware ESXi"]``) containing
+        ``noise_filters`` and ``token_normalizations`` keys.
+
+    Returns
+    -------
+    list
+        Filtered and normalized OCR result items in the same shape as input.
+    """
+    if not preset_config:
+        return ocr_results
+
+    noise_filters = preset_config.get("noise_filters", [])
+    normalizations = preset_config.get("token_normalizations", [])
+
+    cleaned_results: List[Any] = []
+    for item in ocr_results:
+        is_dict = isinstance(item, dict)
+        if is_dict:
+            box = item.get("box")
+            text = str(item.get("text", "")).strip()
+            score = item.get("confidence", 0.0) or 0.0
+        else:
+            try:
+                box = item[0]
+                text = str(item[1]).strip()
+                score = item[2] if len(item) > 2 else 0.0
+            except (IndexError, TypeError, ValueError):
+                continue
+
+        if any(kw.lower() in text.lower() for kw in noise_filters):
+            continue
+
+        for rule in normalizations:
+            pattern = rule.get("pattern")
+            replacement = rule.get("replace")
+            if pattern and replacement is not None:
+                text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+
+        if is_dict:
+            cleaned_results.append({
+                "text": text,
+                "box": box,
+                **{k: v for k, v in item.items() if k not in ("text", "box")},
+            })
+        else:
+            cleaned_results.append([box, text, score])
+
+    return cleaned_results
+
+
+# ---------------------------------------------------------------------------
 # Stage A: RapidOCR (delegates to existing core.ocr_engine)
 # ---------------------------------------------------------------------------
 
@@ -272,6 +341,7 @@ def process_hybrid_queue(
     num_thread: int = TEXT_LLM_NUM_THREADS,
     timeout: int = TEXT_LLM_TIMEOUT,
     system_prompt: str = "",
+    preset_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Process images through the hybrid OCR + text-LLM pipeline.
 
@@ -313,6 +383,9 @@ def process_hybrid_queue(
             "total_time_s": round(time.time() - start, 2),
             "errors": errors,
         }
+
+    # Stage A+ pre-processing: noise filtering + regex normalization
+    batch_tokens = preprocess_ocr_boxes(batch_tokens, preset_config)
 
     # Assign global indices so we can attribute records back to images
     for i, t in enumerate(batch_tokens):
@@ -402,6 +475,7 @@ def process_hybrid_queue_stream(
     num_thread: int = TEXT_LLM_NUM_THREADS,
     timeout: int = TEXT_LLM_TIMEOUT,
     system_prompt: str = "",
+    preset_config: Optional[Dict[str, Any]] = None,
 ):
     """Yield (image_index, total_images, records) as each image completes.
 
@@ -417,6 +491,9 @@ def process_hybrid_queue_stream(
     except Exception as exc:
         logger.warning("Batch OCR failed: %s", exc)
         batch_tokens = []
+
+    # Stage A+ pre-processing: noise filtering + regex normalization
+    batch_tokens = preprocess_ocr_boxes(batch_tokens, preset_config)
 
     # Group by image index
     tokens_by_image: Dict[int, List[Dict[str, Any]]] = {}
@@ -492,6 +569,7 @@ def run_hybrid_topology_analysis(
         num_thread=TEXT_LLM_NUM_THREADS,
         timeout=TEXT_LLM_TIMEOUT,
         system_prompt=system_prompt_text,
+        preset_config=plat_cfg,
     )
 
     raw_items = results.get("records", [])

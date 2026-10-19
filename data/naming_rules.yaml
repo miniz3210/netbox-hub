@@ -21,8 +21,7 @@
   "esxi_vmkernel": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
   "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
   "vlan_name_pattern": "<role>",
-      "metadata": '{"version": "4.5.11", "last_updated": "2026-10-18"}',
-      "device_presets": [
+  "device_presets": [
     {
       "code": "SW",
       "label": "Switch (SW / SWI)",
@@ -245,8 +244,7 @@
     "esxi_vmkernel_name": "<vmk>",
     "esxi_vmkernel": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
     "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
-    "vlan_name_pattern": "<role>",
-    "metadata": '{"version": "4.5.11", "last_updated": "2026-10-17"}'
+    "vlan_name_pattern": "<role>"
   },
   "pattern_variables": {
     "site": {
@@ -621,19 +619,8 @@
       "default_port_count": 4,
       "port_start_index": 1
     }
-   },
-   "vlm_config": {
-      "enabled": true,
-      "engine": "ollama",
-      "default_model": "qwen2.5:3b",
-      "api_endpoint": "http://netbox-ollama:11434",
-      "keep_alive": "10m",
-      "timeout": 60,
-      "temperature": 0.0,
-      "num_ctx": 2048,
-      "num_threads": 4,
-      },
-   "topology_parsing_presets": {
+  },
+  "topology_parsing_presets": {
     "VMware ESXi": {
       "platform": "VMware ESXi",
       "aliases": {
@@ -652,23 +639,9 @@
           "link_speed"
         ]
       },
-      "allowed_types": [
-        "Uplink",
-        "VMkernel",
-        "Port Group"
-      ],
-      "role_options": [
-        "Active Uplink",
-        "Standby Uplink",
-        "None"
-      ],
-      "default_connected_role": "Active Uplink",
-      "default_disconnected_role": "None",
-      "sentinel_no_adapter": "No Uplink",
-      "instructions": "You are an expert VMware hypervisor network architect and topology data modeling specialist.\nParse the provided sanitized OCR text from VMware ESXi Standard Switches (vSS), Distributed Switches (vDS), and HCI virtual switches into a strictly flat JSON array of objects.\n\nEvery record MUST strictly contain these lowercase keys:\n[\n  {\n    \"switch\": \"<Root Virtual Switch Name (e.g. vSwitch0, vSwitch01, vSwitch02, vSwitch1, vSwitchNutanix, dvSwitch0, iDMZ-vdSwitch02, PR Spain Fuenmayor Age VLab, PR Spain Fuenmayor VLab)>\",\n    \"interface\": \"<Interface name: physical adapter (e.g. vmnic0, vmnic1) or VMkernel (e.g. vmk0, vmk1). Empty string for pure VM Port Groups>\",\n    \"type\": \"<MANDATORY: Strictly one of 'Uplink', 'VMkernel', 'Port Group'>\",\n    \"ip\": \"<Preserve exact IP token placeholder present in the text (e.g. <SAFE_IP_1> or bare IP), otherwise empty string>\",\n    \"purpose\": \"<Exact Port Group or Service Name (e.g. Management Network, VM Network, iSCSI, iSCSI01, iSCSI02, iSCSI Veeam, vMotion, vSAN, ntnx-internal-vmk, ntnx-internal-pg, OnbaseBubbleNet). MUST BE EMPTY STRING for physical Uplinks!>\",\n    \"role\": \"<For Uplinks: 'Active Uplink' (default for connected vmnic), 'Standby Uplink', or 'None' (only for No Uplink). For VMkernel: 'Management' if vmk0/management else 'None'. For Port Group: 'VM Traffic' or 'None'>\",\n    \"speed\": \"<Link speed if visible (e.g. 10000 Full, 1000 Full), otherwise empty string>\"\n  }\n]\n\nCRITICAL TOPOLOGY INVARIANTS:\n\n1. HARD SWITCH BOUNDARIES & ISOLATION:\n   - Every occurrence of 'Standard Switch: <Name>' or 'Distributed Switch: <Name>' defines a NEW independent switch container. Terminate the previous switch immediately.\n   - Strip OCR chevron/status prefixes (e.g. '>', 'v', 'V', '^', '|', 'VStandard Switch:') to extract the clean switch name.\n   - In Distributed Switches (vDS), child uplink groups formatted like '<Switch>-DVUplinks-<ID>' (e.g. 'dvSwitch0-DVUplinks-47', 'iDMZ-vdSwitch02-DVUplinks-95') must be normalized to their root Distributed Switch name ('dvSwitch0', 'iDMZ-vdSwitch02'). Never emit an uplink group as a separate switch container.\n   - Separate Adjacent Switches:\n     * 'PR Spain Fuenmayor Age VLab' has NO physical adapters (interface: 'No Uplink', role: 'None').\n     * 'PR Spain Fuenmayor VLab' has NO physical adapters (interface: 'No Uplink', role: 'None').\n     * 'vSwitch0' is an independent switch containing vmnic4, vmnic5, vmk0 (Management Network), VM Network, iSCSI, and iSCSI Veeam. NEVER merge vSwitch0 into PR Spain Fuenmayor VLab!\n   - 'vSwitchNutanix' is an internal HCI switch (contains 'ntnx-internal-vmk' with vmk1 and 'ntnx-internal-pg'). Do not merge it with vSwitch0 or vSwitch1.\n\n2. NAVIGATOR MENU NOISE STRIPPING & FRAGMENT RECOVERY:\n   - Left-Hand Menu Bleeding: Lines containing vertical bars '|' with vCenter menu labels (e.g. 'Storage |', 'Networking |', 'SystemResourceReser... | iscSI', 'Firewall | VLAN ID: 31') contain navigation tree noise. STRIP the left menu noise and PRESERVE the right-hand network entity ('iscSI', 'VLAN ID: 31').\n   - Zero Drop for Similar Names: 'iscSI' and 'iSCSI Veeam' under vSwitch0 are TWO DISTINCT, SEPARATE port groups. NEVER deduplicate, omit, or merge 'iscSI' just because 'iSCSI Veeam' exists!\n   - Ellipsis and Truncated Names: If a port group has trailing dots (e.g. 'PRSpainFuenmayorVLabVM.....', 'PR Spain Fuenmayor VLab VM ...'), clean the trailing dots and extract the full entity (e.g. 'PR Spain Fuenmayor VLab VM Network').\n\n3. PHYSICAL UPLINKS & vDS LEAF-NODE RULE (TYPE: 'Uplink'):\n   - Physical adapters ALWAYS follow the format 'vmnic<Number>' (e.g. 'vmnic0', 'vmnic1', 'vmnic2'). These are the ONLY physical interfaces.\n   - Connected physical adapters must have role: 'Active Uplink'. Do NOT output 'None' for active vmnic cards!\n   - In Distributed Switches (vDS), 'uplink1', 'uplink2', 'uplink3', 'uplink4' are intermediate port group SLOTS, NOT physical interfaces! Extract the child 'vmnicX' as the interface. NEVER output 'uplinkX' as the interface.\n   - Disconnected / Warning Cards: If a vmnic has a red 'x', warning icon, or disconnected symbol (e.g. 'x vmnic1'), STILL extract it as interface: 'vmnic1', type: 'Uplink', role: 'Standby Uplink' or 'Active Uplink'. Do not omit it!\n   - Empty Slots: Slots marked '(0 NIC Adapters)' (e.g. 'uplink3 (0 NIC Adapters)') are empty and MUST BE COMPLETELY IGNORED.\n   - Pure Interface Isolation: Physical uplinks NEVER belong to a Port Group. Set purpose: '' (empty string). NEVER assign Port Group names like 'Management Network' or 'iSCSI' to a vmnic adapter.\n   - Empty Switch Sentinel: If a switch explicitly has 'No physical network adapters' (e.g. 'PR Spain Fuenmayor Age VLab', 'vSwitchNutanix'), emit:\n     {\"switch\": \"<CurrentSwitch>\", \"interface\": \"No Uplink\", \"type\": \"Uplink\", \"ip\": \"\", \"purpose\": \"\", \"role\": \"None\", \"speed\": \"\"}\n\n4. VMKERNEL INTERFACES (TYPE: 'VMkernel'):\n   - All vmk interfaces ('vmk0', 'vmk1', etc.) MUST have type: 'VMkernel'. If OCR truncates to 'mk2', normalize as 'vmk2'.\n   - The service card title directly preceding 'VMkernel Ports (X)' or 'VLAN ID:' is its PURPOSE (e.g. 'Management Network', 'iSCSI01', 'vMotion Network', 'vSAN Network', 'ntnx-internal-vmk').\n   - Merge the VMkernel interface and its purpose into a SINGLE record:\n     {\"switch\": \"<CurrentSwitch>\", \"interface\": \"vmkX\", \"purpose\": \"<CardTitle>\", \"type\": \"VMkernel\", \"ip\": \"<Token>\", \"role\": \"Management\" (if vmk0) else \"None\", \"speed\": \"\"}\n\n5. COMPLETE PORT GROUP EXTRACTION (NO EDGE TRUNCATION):\n   - Extract EVERY port group displaying 'Virtual Machines (X)'. Do not skip top-most or bottom-most items (e.g. 'Backplane Network', 'VM Network', 'iSCSI', 'iSCSI Veeam', 'OnbaseBubbleNet', 'ntnx-internal-pg').\n   - Standard record format:\n     {\"switch\": \"<CurrentSwitch>\", \"interface\": \"\", \"purpose\": \"<PortGroupName>\", \"type\": \"Port Group\", \"ip\": \"\", \"role\": \"VM Traffic\", \"speed\": \"\"}\n   - Fallback Protection: If 'Management Network' has VMkernel Ports (1) folded without an IP, extract it with purpose: 'Management Network'.\n   - Do not duplicate a pure Port Group if that name is already assigned to a VMkernel on that switch.\n\n6. STRICT FORMATTING:\n   - Output ONLY the raw JSON array. Start with '[' and end with ']'. No markdown fences, no explanations, and no reasoning tokens outside the JSON array.",
-       "export_prompt": "You are an expert VMware hypervisor network architect and topology data modeling specialist.\nParse the provided sanitized OCR text from VMware ESXi Standard Switches (vSS), Distributed Switches (vDS), and HCI virtual switches.\n\nExtract ALL observed network entities into a flat JSON array of objects. Every record MUST strictly contain these lowercase keys:\n[\n  {\n    \"switch\": \"<Root Virtual Switch Name (e.g. vSwitch0, vSwitch01, vSwitch02, vSwitch1, vSwitchNutanix, dvSwitch0, iDMZ-vdSwitch02, PR Spain Fuenmayor Age VLab, PR Spain Fuenmayor VLab)>\",\n    \"interface\": \"<Interface name: physical adapter (e.g. vmnic0, vmnic1) or VMkernel (e.g. vmk0, vmk1). Empty string for pure VM Port Groups>\",\n    \"type\": \"<MANDATORY: Strictly one of 'Uplink', 'VMkernel', 'Port Group'>\",\n    \"ip\": \"<Preserve exact IP token placeholder present in the text (e.g. <SAFE_IP_1> or bare IP), otherwise empty string>\",\n    \"purpose\": \"<Exact Port Group or Service Name (e.g. Management Network, VM Network, iSCSI01, iSCSI02, vMotion Network, vSAN Network, ntnx-internal-vmk, ntnx-internal-pg, OnbaseBubbleNet). MUST BE EMPTY STRING for physical Uplinks!>\",\n    \"role\": \"<For Uplinks: 'Active Uplink' (default for connected vmnic), 'Standby Uplink', or 'None' (only for No Uplink). For VMkernel: 'Management' if vmk0/management else 'None'. For Port Group: 'VM Traffic' or 'None'>\",\n    \"speed\": \"<Link speed if visible (e.g. 10000 Full, 1000 Full), otherwise empty string>\"\n  }\n]",
-        "vlm_prompt": "You are an expert network engineer extracting hypervisor network topology from OCR spatial text.\nAnalyze the spatially sorted OCR text extracted from a VMware ESXi network configuration screen.\n\nEach virtual switch begins with \"Standard Switch:\" or \"Distributed Switch:\".\nGroup physical adapters (vmnic), VMkernel ports (vmk), IP addresses, and Port Groups under their respective parent switch.\n\nRules:\n- If a switch has \"No associated port groups\" or \"No physical network adapters\", report interface as \"No Uplink\" and role as \"None\".\n- VMkernel ports (e.g. vmk0, vmk1) must capture their assigned IPv4 address and service purpose (Management, vMotion, iSCSI).\n- Uplinks (e.g. vmnic1, vmnic2) must capture link speed and role (Active Uplink, Standby Uplink, or None).\n- Return ONLY a valid JSON array of objects with the exact keys:\n  [{\"switch\": \"...\", \"interface\": \"...\", \"type\": \"Uplink|VMkernel|Port Group\", \"ip\": \"...\", \"purpose\": \"...\", \"role\": \"Active Uplink|Standby Uplink|None\"}]\n- Output raw JSON only, no explanatory markdown outside JSON brackets.",
-       "spatial_anchors_and_redaction": {
+      "instructions": "[PLATFORM ARCHITECTURE: VMWARE ESXI & VCENTER TOPOLOGY RECONCILIATION]\n\nOBJECTIVE:\nYou are an expert datacenter network engineer. Your task is to parse spatially ordered OCR text extracted from VMware ESXi and vCenter network configuration screens (supporting Standard Switches and Distributed Switches / vDS across all vSphere versions) into an exact, deduplicated JSON array representing the complete virtual networking topology.\n\n================================================================================\n1. SWITCH HEADER FUZZY RECOGNITION & SCOPING (ZERO-BLEED POLICY)\n================================================================================\n- SWITCH BOUNDARY DEFINITIONS:\n  * A switch container strictly begins whenever text matching:\n    .*(Standard|Distribut|Distibut|dvSwitch|vSwitch).*Switch:?\\s*(?P<switch_name>[^\\n|]+)\n    appears ANYWHERE on a line (even if preceded by UI navigation tokens like 'Agent VM Settings', 'Storage', or '>').\n  * Whenever a switch header appears, it IMMEDIATELY terminates the previous switch and starts a brand-new switch scope.\n  * Strip generic prefixes to isolate the pure switch identifier (e.g., 'vSwitch0', 'vSwitch01', 'dvSwitch0', 'iDMZ-vdSwitch02', 'PR Spain Fuenmayor VLab').\n  * Normalize OCR letter/digit typos in switch names: strictly convert 'vSwitcho' or 'vSwitchO' to 'vSwitch0', and 'vSwitcho1' to 'vSwitch01'.\n\n- IGNORE LEFT NAVIGATION TREE:\n  * Ignore UI menu items from ESXi sidebar trees (e.g., 'Storage Adapters', 'Host Cache', 'Virtual switches', 'Agent VM Settings', 'System', 'Licensing', 'Host Profile', 'Firewall', 'Hardware'). These are navigation categories, NOT switch components.\n\n- MULTI-SCREENSHOT STATE RESOLUTION:\n  * If a switch appears collapsed (prefixed with '>') in an earlier screenshot but expanded (prefixed with 'v') with active interfaces in another, the EXPANDED state always takes absolute precedence.\n\n================================================================================\n2. MULTI-ADAPTER UPLINK TEAMING (ZERO ADAPTER OMISSION)\n================================================================================\n- MANDATORY MULTI-NIC EXTRACTION:\n  * Virtual switches frequently group MULTIPLE physical adapters in an active/standby bond or NIC team (e.g., vmnic4 AND vmnic5, vmnic2 AND vmnic6, vmnic0 AND vmnic1).\n  * YOU MUST EXTRACT EVERY SINGLE 'vmnic<N>' listed under the Physical Adapters column or Uplink panel.\n  * NEVER stop after extracting the first adapter. If two or more physical NICs appear under the switch, generate a separate record for EACH physical adapter with type: \"Uplink\".\n\n================================================================================\n3. DETERMINISTIC CONTEXTUAL OCR RECOVERY & TWO-COLUMN DISCIPLINE\n================================================================================\nVMware network screens are bifurcated into two visual columns:\n\n- RIGHT PANEL = PHYSICAL INFRASTRUCTURE:\n  * Invariant: VMkernel adapters ('vmk*') NEVER exist in the physical uplink panel.\n  * RECOVERY RULE: If an interface token in the right panel (under 'Physical Adapters', 'Uplink [0-9]+', or adjacent to link speeds/FQDN) is corrupted (e.g., 'vmnkc3', 'vmn1c3', 'vmnlc3', 'vmnc3', or misread as 'vmk3'), extract the trailing integer <N> and strictly normalize to 'vmnic<N>' with type: 'Uplink' and role: 'Active Uplink'.\n  * Uplink Container Exclusion: Right-panel wrappers (e.g., 'Physical Adapters', 'Uplink 1', 'Uplink 2', or vDS system containers matching '*-DVUplinks-[0-9]+') are physical framing wrappers. NEVER extract them as Port Groups or Services.\n\n- LEFT PANEL = LOGICAL NETWORK SERVICES:\n  * VMkernel Interfaces: Identified by 'vmk[0-9]+' (or 'vmko' -> 'vmk0') paired with an IPv4 address.\n  * Virtual Machine Port Groups: Identified by network labels accompanied by 'VLAN ID: ...' and 'Virtual Machines (N)'. Extract them even if 'Virtual Machines (0)' is displayed.\n\n================================================================================\n4. ISOLATED & NO-UPLINK SWITCHES\n================================================================================\n- If a switch explicitly displays 'No physical network adapters' or lacks physical adapters across all screenshots, output a placeholder uplink record:\n  interface: \"No Uplink\", type: \"Uplink\", role: \"None\", purpose: \"Internal Only\", ip: \"\", speed: \"\".\n\n================================================================================\n5. ATOMIC RECORD SCHEMA & VALUE CONSTRAINTS\n================================================================================\nEvery record in the output JSON array must strictly contain these 7 keys:\n1. \"switch\": Clean virtual switch identifier.\n2. \"interface\": 'vmnic<N>', 'vmk<N>', 'No Uplink', or \"\" for pure Port Groups.\n3. \"type\": \"Uplink\", \"VMkernel\", or \"Port Group\".\n4. \"ip\": Valid IPv4 address for VMkernel ports; empty string \"\" for all others.\n5. \"purpose\": \n   - For VMkernel ports: specific service name (e.g., 'Management Network', 'vMotion Network', 'vSAN Network', 'iSCSI01').\n   - For physical adapters: inherit switch primary service or 'Uplink'.\n   - For pure Port Groups: the exact port group label (e.g., 'PR Spain Fuenmayor VLab VM', 'VM Network', 'iDMZ Servers').\n   - STRICT PROHIBITION: Do NOT append '(vSwitchX)', 'Active Uplink', or role strings into 'purpose'.\n6. \"role\": \"Active Uplink\" (default for connected vmnic), \"Standby Uplink\", or \"None\".\n7. \"speed\": Normalized speed string (e.g., '10 Gbit/s Full', '1 Gbit/s Full') if visible; otherwise \"\".\n\n================================================================================\nOUTPUT FORMAT:\nReturn ONLY a valid, raw JSON array of objects.\nDo not wrap in markdown code blocks.\nDo not include introductory or explanatory text.",
+      "export_prompt": "You are an expert infrastructure network engineer specializing in VMware ESXi.\nI have attached screenshots of VMware ESXi virtual switch topology and physical network adapter properties.\nPlease analyze the images and extract the network topology into the standard atomic JSON format matching these exact attributes:\n- interface: 'vmnicX' or 'vmkX'\n- parent: 'vSwitchX' (or null if unassigned)\n- purpose: Pure service name ('Management Network', 'vMotion', 'iSCSI01') without appending switch names or roles\n- uplink_role: 'Active Uplink' or 'Standby Uplink' for vmnics connected to a switch; null if unassigned or vmk\n- slot: Hardware PCIe slot (e.g. '0000:5b:00.0')\n- speed: Link speed (e.g. '10 Gbit/s Full')\n- ip: IP address for vmk ports\n\nOutput ONLY a JSON object with key \"interfaces\": array of objects.",
+      "spatial_anchors_and_redaction": {
         "anchors": [
           {
             "role": "left_boundary",
@@ -690,7 +663,57 @@
           }
         ],
         "enabled": false
-      }
+      },
+      "noise_filters": [
+        "Storage Adapters",
+        "Storage Devices",
+        "Host Cache Configuration",
+        "Protocol Endpoints",
+        "I/O Filters",
+        "Storage Providers",
+        "VMkernel adapters",
+        "Physical adapters",
+        "TCP/IP configuration",
+        "Virtual Machines",
+        "VM Startup/Shutdown",
+        "Agent VM Settings",
+        "Default VM Compatibility",
+        "Swap File Location",
+        "Licensing",
+        "Host Profile",
+        "Time Configuration",
+        "Authentication Services",
+        "Power Management",
+        "Security Profile",
+        "System Swap"
+      ],
+      "token_normalizations": [
+        {
+          "pattern": "vSwitch[oO](\\d*)",
+          "replace": "vSwitch0\\1"
+        },
+        {
+          "pattern": "\\bvm[nN][kKlL1]c(\\d+)\\b",
+          "replace": "vmnic\\1"
+        },
+        {
+          "pattern": "\\bvm[lL]k(\\d+)\\b",
+          "replace": "vmk\\1"
+        },
+        {
+          "pattern": "\\bvmk[oO]\\b",
+          "replace": "vmk0"
+        },
+        {
+          "pattern": "\\bDistibut(ed)?\\b",
+          "replace": "Distributed"
+        },
+        {
+          "pattern": "\\bPHYSKCAL\\b",
+          "replace": "PHYSICAL"
+        }
+      ],
+      "ocr_llm_prompt": "[PLATFORM ARCHITECTURE: VMWARE ESXI & VCENTER TOPOLOGY RECONCILIATION]\n\nOBJECTIVE:\nYou are an expert datacenter network engineer. Your task is to parse spatially ordered OCR text extracted from VMware ESXi and vCenter network configuration screens (supporting Standard Switches and Distributed Switches / vDS across all vSphere versions) into an exact, deduplicated JSON array representing the complete virtual networking topology.\n\n================================================================================\n1. SWITCH HEADER FUZZY RECOGNITION & SCOPING (ZERO-BLEED POLICY)\n================================================================================\n- SWITCH BOUNDARY DEFINITIONS:\n  * A switch container strictly begins whenever text matching:\n    .*(Standard|Distribut|Distibut|dvSwitch|vSwitch).*Switch:?\\s*(?P<switch_name>[^\\n|]+)\n    appears ANYWHERE on a line (even if preceded by UI navigation tokens like 'Agent VM Settings', 'Storage', or '>').\n  * Whenever a switch header appears, it IMMEDIATELY terminates the previous switch and starts a brand-new switch scope.\n  * Strip generic prefixes to isolate the pure switch identifier (e.g., 'vSwitch0', 'vSwitch01', 'dvSwitch0', 'iDMZ-vdSwitch02', 'PR Spain Fuenmayor VLab').\n  * Normalize OCR letter/digit typos in switch names: strictly convert 'vSwitcho' or 'vSwitchO' to 'vSwitch0', and 'vSwitcho1' to 'vSwitch01'.\n\n- IGNORE LEFT NAVIGATION TREE:\n  * Ignore UI menu items from ESXi sidebar trees (e.g., 'Storage Adapters', 'Host Cache', 'Virtual switches', 'Agent VM Settings', 'System', 'Licensing', 'Host Profile', 'Firewall', 'Hardware'). These are navigation categories, NOT switch components.\n\n- MULTI-SCREENSHOT STATE RESOLUTION:\n  * If a switch appears collapsed (prefixed with '>') in an earlier screenshot but expanded (prefixed with 'v') with active interfaces in another, the EXPANDED state always takes absolute precedence.\n\n================================================================================\n2. MULTI-ADAPTER UPLINK TEAMING (ZERO ADAPTER OMISSION)\n================================================================================\n- MANDATORY MULTI-NIC EXTRACTION:\n  * Virtual switches frequently group MULTIPLE physical adapters in an active/standby bond or NIC team (e.g., vmnic4 AND vmnic5, vmnic2 AND vmnic6, vmnic0 AND vmnic1).\n  * YOU MUST EXTRACT EVERY SINGLE 'vmnic<N>' listed under the Physical Adapters column or Uplink panel.\n  * NEVER stop after extracting the first adapter. If two or more physical NICs appear under the switch, generate a separate record for EACH physical adapter with type: \"Uplink\".\n\n================================================================================\n3. DETERMINISTIC CONTEXTUAL OCR RECOVERY & TWO-COLUMN DISCIPLINE\n================================================================================\nVMware network screens are bifurcated into two visual columns:\n\n- RIGHT PANEL = PHYSICAL INFRASTRUCTURE:\n  * Invariant: VMkernel adapters ('vmk*') NEVER exist in the physical uplink panel.\n  * RECOVERY RULE: If an interface token in the right panel (under 'Physical Adapters', 'Uplink [0-9]+', or adjacent to link speeds/FQDN) is corrupted (e.g., 'vmnkc3', 'vmn1c3', 'vmnlc3', 'vmnc3', or misread as 'vmk3'), extract the trailing integer <N> and strictly normalize to 'vmnic<N>' with type: 'Uplink' and role: 'Active Uplink'.\n  * Uplink Container Exclusion: Right-panel wrappers (e.g., 'Physical Adapters', 'Uplink 1', 'Uplink 2', or vDS system containers matching '*-DVUplinks-[0-9]+') are physical framing wrappers. NEVER extract them as Port Groups or Services.\n\n- LEFT PANEL = LOGICAL NETWORK SERVICES:\n  * VMkernel Interfaces: Identified by 'vmk[0-9]+' (or 'vmko' -> 'vmk0') paired with an IPv4 address.\n  * Virtual Machine Port Groups: Identified by network labels accompanied by 'VLAN ID: ...' and 'Virtual Machines (N)'. Extract them even if 'Virtual Machines (0)' is displayed.\n\n================================================================================\n4. ISOLATED & NO-UPLINK SWITCHES\n================================================================================\n- If a switch explicitly displays 'No physical network adapters' or lacks physical adapters across all screenshots, output a placeholder uplink record:\n  interface: \"No Uplink\", type: \"Uplink\", role: \"None\", purpose: \"Internal Only\", ip: \"\", speed: \"\".\n\n================================================================================\n5. ATOMIC RECORD SCHEMA & VALUE CONSTRAINTS\n================================================================================\nEvery record in the output JSON array must strictly contain these 7 keys:\n1. \"switch\": Clean virtual switch identifier.\n2. \"interface\": 'vmnic<N>', 'vmk<N>', 'No Uplink', or \"\" for pure Port Groups.\n3. \"type\": \"Uplink\", \"VMkernel\", or \"Port Group\".\n4. \"ip\": Valid IPv4 address for VMkernel ports; empty string \"\" for all others.\n5. \"purpose\": \n   - For VMkernel ports: specific service name (e.g., 'Management Network', 'vMotion Network', 'vSAN Network', 'iSCSI01').\n   - For physical adapters: inherit switch primary service or 'Uplink'.\n   - For pure Port Groups: the exact port group label (e.g., 'PR Spain Fuenmayor VLab VM', 'VM Network', 'iDMZ Servers').\n   - STRICT PROHIBITION: Do NOT append '(vSwitchX)', 'Active Uplink', or role strings into 'purpose'.\n6. \"role\": \"Active Uplink\" (default for connected vmnic), \"Standby Uplink\", or \"None\".\n7. \"speed\": Normalized speed string (e.g., '10 Gbit/s Full', '1 Gbit/s Full') if visible; otherwise \"\".\n\n================================================================================\nOUTPUT FORMAT:\nReturn ONLY a valid, raw JSON array of objects.\nDo not wrap in markdown code blocks.\nDo not include introductory or explanatory text."
     },
     "Proxmox VE": {
       "platform": "Proxmox VE",
@@ -711,59 +734,8 @@
           "link_speed"
         ]
       },
-      "allowed_types": [
-        "Bridge Port",
-        "Linux Bond",
-        "Linux Bridge",
-        "VLAN"
-      ],
-      "role_options": [
-        "Active",
-        "Backup",
-        "None"
-      ],
-      "default_connected_role": "Active",
-      "default_disconnected_role": "None",
-      "sentinel_no_adapter": "No Slaves",
-      "instructions": "Parse Proxmox VE network configurations into standard JSON entities.\n\nExtract ALL observed network entities into a flat JSON array of objects. Every record MUST strictly contain these lowercase keys:\n[\n  {\n    \"switch\": \"<Bridge name (e.g. vmbr0, vmbr1)>\",\n    \"interface\": \"<Interface name: bond (e.g. bond0), physical (e.g. ens18, eno1), or empty for bridges>\",\n    \"type\": \"<MANDATORY: Strictly one of 'Bridge Port', 'Linux Bond', 'Linux Bridge', 'VLAN'>\",\n    \"ip\": \"<CIDR IP if assigned, otherwise empty string>\",\n    \"purpose\": \"<Functional description or VLAN profile>\",\n    \"role\": \"<For Bonds: 'Active' (default for slave), 'Backup', or 'None' (only for No Slaves). For Bridges: 'None'. For VLANs: 'None'>\",\n    \"speed\": \"<Link speed if visible, otherwise empty string>\"\n  }\n]\n\nCRITICAL RULES:\n1. Bridges (vmbr0, vmbr1) get type: 'Linux Bridge' with empty interface.\n2. Bonds (bond0) get type: 'Linux Bond' with parent bridge.\n3. Physical NICs (ens18, eno1) get type: 'Bridge Port' as slaves of a bond or bridge.\n4. If a bond has no slaves, emit: interface: 'No Slaves', type: 'Linux Bond', role: 'None'.\n5. VLANs tagged on bridges get type: 'VLAN'.\n6. Return ONLY a valid JSON array of objects.",
-      "export_prompt": "Parse Proxmox VE network configurations into standard JSON entities.\n\nExtract ALL observed network entities into a flat JSON array of objects. Every record MUST strictly contain these lowercase keys:\n[\n  {\n    \"switch\": \"<Bridge name (e.g. vmbr0, vmbr1)>\",\n    \"interface\": \"<Interface name: bond (e.g. bond0), physical (e.g. ens18, eno1), or empty for bridges>\",\n    \"type\": \"<MANDATORY: Strictly one of 'Bridge Port', 'Linux Bond', 'Linux Bridge', 'VLAN'>\",\n    \"ip\": \"<CIDR IP if assigned, otherwise empty string>\",\n    \"purpose\": \"<Functional description or VLAN profile>\",\n    \"role\": \"<For Bonds: 'Active' (default for slave), 'Backup', or 'None' (only for No Slaves). For Bridges: 'None'. For VLANs: 'None'>\",\n    \"speed\": \"<Link speed if visible, otherwise empty string>\"\n  }\n]\n\nReturn ONLY a valid JSON array of objects.",
-        "vlm_prompt": "You are an expert network engineer extracting hypervisor network topology from OCR spatial text.\nAnalyze the spatially sorted OCR text extracted from a Proxmox VE network configuration screen.\n\nEach network bridge begins with \"vmbr\" or \"Bridge\". Bonds (bond0) aggregate physical NICs.\nGroup physical adapters (eth, ens, eno), bonds, and VLANs under their respective bridge.\n\nRules:\n- If a bond has no slaves, report interface as \"No Slaves\" and role as \"None\".\n- VMkernel ports (e.g. vmk0, vmk1) must capture their assigned CIDR IP and service purpose.\n- Uplinks (e.g. ens18, eno1) must capture link speed and role (Active, Backup, or None).\n- Return ONLY a valid JSON array of objects with the exact keys:\n  [{\"switch\": \"...\", \"interface\": \"...\", \"type\": \"Bridge Port|Linux Bond|Linux Bridge|VLAN\", \"ip\": \"...\", \"purpose\": \"...\", \"role\": \"Active|Backup|None\"}]\n- Output raw JSON only, no explanatory markdown outside JSON brackets."
-     },
-    "OpenShift": {
-      "platform": "OpenShift",
-      "aliases": {
-        "parent": [
-          "netattachmentdefinition",
-          "nad",
-          "ovn"
-        ],
-        "interface": [
-          "eth0",
-          "nic",
-          "bond",
-          "ovs"
-        ],
-        "speed": [
-          "speed",
-          "link_speed"
-        ]
-      },
-      "allowed_types": [
-        "Physical Interface",
-        "Bond CNI",
-        "NAD",
-        "OVS Bridge"
-      ],
-      "role_options": [
-        "Primary",
-        "Secondary",
-        "None"
-      ],
-      "default_connected_role": "Primary",
-      "default_disconnected_role": "None",
-      "sentinel_no_adapter": "No Uplink Interface",
-      "instructions": "Parse OpenShift network attachments and interfaces into standard JSON entities.\n\nExtract ALL observed network entities into a flat JSON array of objects. Every record MUST strictly contain these lowercase keys:\n[\n  {\n    \"switch\": \"<Node or Cluster name>\",\n    \"interface\": \"<Interface name: physical (e.g. eth0), bond (e.g. bond0), or empty for OVS bridges>\",\n    \"type\": \"<MANDATORY: Strictly one of 'Physical Interface', 'Bond CNI', 'NAD', 'OVS Bridge'>\",\n    \"ip\": \"<IP address if assigned, otherwise empty string>\",\n    \"purpose\": \"<Functional description>\",\n    \"role\": \"<For Bonds: 'Primary' (default for primary member), 'Secondary', or 'None' (only for No Uplink Interface). For OVS: 'None'. For NAD: 'None'>\",\n    \"speed\": \"<Link speed if visible, otherwise empty string>\"\n  }\n]\n\nCRITICAL RULES:\n1. OVS Bridges get type: 'OVS Bridge' with empty interface.\n2. Bonds get type: 'Bond CNI' with member interfaces.\n3. Physical NICs get type: 'Physical Interface' as members of bonds or standalone.\n4. NetworkAttachmentDefinitions get type: 'NAD'.\n5. If a bond has no uplink interfaces, emit: interface: 'No Uplink Interface', type: 'Bond CNI', role: 'None'.\n6. Return ONLY a valid JSON array of objects.",
-      "export_prompt": "Parse OpenShift network attachments and interfaces into standard JSON entities.\n\nExtract ALL observed network entities into a flat JSON array of objects. Every record MUST strictly contain these lowercase keys:\n[\n  {\n    \"switch\": \"<Node or Cluster name>\",\n    \"interface\": \"<Interface name: physical (e.g. eth0), bond (e.g. bond0), or empty for OVS bridges>\",\n    \"type\": \"<MANDATORY: Strictly one of 'Physical Interface', 'Bond CNI', 'NAD', 'OVS Bridge'>\",\n    \"ip\": \"<IP address if assigned, otherwise empty string>\",\n    \"purpose\": \"<Functional description>\",\n    \"role\": \"<For Bonds: 'Primary' (default for primary member), 'Secondary', or 'None' (only for No Uplink Interface). For OVS: 'None'. For NAD: 'None'>\",\n    \"speed\": \"<Link speed if visible, otherwise empty string>\"\n  }\n]\n\nReturn ONLY a valid JSON array of objects."
+      "instructions": "[PLATFORM ARCHITECTURE: PROXMOX VE]\n1. HIERARCHY & BRIDGES:\n   - Root bridges: 'vmbr0', 'vmbr1', etc.\n   - Bonds: 'bond0', 'bond1', etc.\n   - Physical slaves: 'eno1', 'ens18', etc.\n2. ATOMIC ATTRIBUTES:\n   - \"interface\": Interface or bridge name.\n   - \"parent\": Connected bridge or bond master.\n   - \"purpose\": Functional service name or VLAN purpose.\n   - \"ip\": CIDR IP address assigned to bridge/interface.\n   - \"speed\": Link speed if visible.",
+      "export_prompt": "You are an expert infrastructure network engineer specializing in Proxmox VE.\nI have attached screenshots of Proxmox VE network configuration (/etc/network/interfaces / GUI).\nPlease extract the Linux Bridge (vmbr), Bond, and physical interfaces into the standard atomic JSON format matching these exact attributes:\n- interface: 'vmbrX', 'bondX', or physical NIC ('ensX', 'enoX')\n- parent: Connected bridge or master\n- purpose: Functional description or VLAN profile\n- ip: CIDR IP address if assigned\n\nOutput ONLY a JSON object with key \"interfaces\": array of objects."
     },
     "Microsoft Azure": {
       "platform": "Microsoft Azure",

@@ -1680,6 +1680,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         num_thread=4,
                         timeout=60,
                         system_prompt=_vlm_prompt,
+                        preset_config=_plat_preset,
                     ):
                         # 5-tuple deduplication
                         for r in new_records:
