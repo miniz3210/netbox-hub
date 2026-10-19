@@ -1,5 +1,5 @@
 # NetBox Hub — Living Architecture SOP & Handover Guide
-# Target Baseline: v4.5.12 | Platform: Oracle Cloud Ampere A1 (ARM64)
+# Target Baseline: v4.5.18 | Platform: Oracle Cloud Ampere A1 (ARM64)
 
 ---
 
@@ -8,7 +8,7 @@
 | Property              | Value                                                        |
 |-----------------------|--------------------------------------------------------------|
 | Application           | NetBox Universal Library Hub                                 |
-| Target Version        | v4.5.12                                                      |
+| Target Version        | v4.5.18                                                      |
 | Runtime               | Python 3.11+ / Streamlit                                     |
 | Cloud Infrastructure  | Oracle Cloud Ampere A1 (ARM64 / aarch64, Linux)              |
 | Container Registry    | `ghcr.io/miniz3210/netbox-hub`                               |
@@ -259,10 +259,24 @@ docker image prune -a -f && docker builder prune -a -f
 
 ---
 
-## 9. 專案狀態檢核：做完咩 (Done) vs 未做咩 (Pending)
+## 9. Production Verification Checklist (v4.5.18)
+================================================================================
+
+- [x] **Sandwich Architecture Enforcement**: Deterministic noise filtering and token normalization handled via Python pre-processing prior to LLM ingestion.
+- [x] **Multi-NIC Teaming Support**: Complete extraction of all active physical uplinks without truncation on NIC teams (e.g. vmnic4 + vmnic5, vmnic2 + vmnic6).
+- [x] **Zero-Bleed Switch Scoping**: Boundary containment ensuring isolated switches without uplinks (e.g. PRSpainFuenmayorAgeVLab) do not absorb subsequent switch components.
+- [x] **Generation Safety Boundaries**: Ollama chat requests bounded with `num_predict: 1024`, `repeat_penalty: 1.1`, and `temperature: 0.0` to eliminate infinite repetition loops while allowing sufficient headroom for dense topologies.
+- [x] **Prompt Fallback Chain**: Robust multi-key lookup (`vlm_prompt` -> `instructions` -> `ocr_llm_prompt` -> standards default) preventing blank system prompt dispatches.
+- [x] **Resilient JSON Parser**: Automatic stripping of markdown fences and regex array extraction avoiding JSONDecodeError drops.
+- [x] **Observability & Diagnostics**: Unfiltered preservation of raw Ollama text in AI Raw Response Inspector for real-time validation.
+- [x] **Framework Deprecation Compliance**: Complete transition from Streamlit `use_container_width` to `width='stretch'`.
+
+---
+
+## 10. 專案狀態檢核：做完咩 (Done) vs 未做咩 (Pending)
 ======================================================================
 
-9.1 做完咩 (Completed & Verified in v4.5.12)
+9.1 做完咩 (Completed & Verified in v4.5.18)
 - [x] Hybrid OCR + Text-Only LLM Pipeline: 替代原生 VLM 影像編碼；RapidOCR 提取文字 + 空間序列化 → `qwen2.5:3b` 純文字推論，單圖延遲降至 ~4s（原 ~10–15s）。
 - [x] Legacy VLM Model Removal: 刪除 `qwen2.5vl:3b` (~3.2 GB)，改用文本模型 `qwen2.5:3b` 及 `qwen2.5:1.5b`。
 - [x] Spatial Text Serialization (`core/ocr_spatial_engine.py`): 按 Y 座標分組行、X 座標排序，生成 `[y=N, x=M] token` 格式的空間布局字串。
@@ -296,5 +310,5 @@ docker image prune -a -f && docker builder prune -a -f
   * 撰寫本地獨立比對腳本，直連 SQLite 比對 Excel IPAM 紀錄與 NetBox 現存資料，產出差異報告與正規化 CSV。
 - [ ] 多平台視覺卡片渲染預設 (Proxmox VE / Nutanix Prism 適配)。
 - [ ] 單元測試套件全面補齊:
-    * 更新 tests/ 中對 APP_VERSION 的斷言為 4.5.12。
+    * 更新 tests/ 中對 APP_VERSION 的斷言為 4.5.18。
    * 補齊多平台 Presets 動態載入與 _safe_parse_json_array 截斷修復單元測試。

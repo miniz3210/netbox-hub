@@ -1652,7 +1652,13 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
 
                 _tpp = naming_rules.get("topology_parsing_presets") or {}
                 _plat_preset = _tpp.get(_target_platform, {}) if isinstance(_tpp.get(_target_platform), dict) else {}
-                _vlm_prompt = _plat_preset.get("vlm_prompt", "").strip()
+                _vlm_prompt = (
+                    _plat_preset.get("vlm_prompt")
+                    or _plat_preset.get("instructions")
+                    or _plat_preset.get("ocr_llm_prompt")
+                    or (naming_rules.get("standards", {}).get("esxi", {}).get("ocr_llm_prompt"))
+                    or ""
+                ).strip()
                 _preset_config = _plat_preset
 
                 progress_bar = st.progress(0.0, text="Initializing Hybrid OCR+LLM inference...")
@@ -1663,7 +1669,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 _vlm_records: List[Dict[str, Any]] = []
                 _vlm_errors: List[str] = []
 
-                for idx, total, new_records in _hybrid_stream(
+                for idx, total, new_records, raw_text in _hybrid_stream(
                     image_files=uploaded_imgs,
                     model=resolved_engine,
                     keep_alive="10m",
@@ -1673,6 +1679,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     system_prompt=_vlm_prompt,
                     preset_config=_preset_config,
                 ):
+                    st.session_state["latest_ai_raw_response"] = raw_text or ""
                     for r in new_records:
                         sig = (
                             r.get("switch", "").strip().lower(),
@@ -1709,12 +1716,11 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
 
                 progress_bar.empty()
                 status_box.success(f"Analysis complete! Extracted {len(_vlm_records)} topology items across {len(set(r['switch'] for r in _vlm_records if r.get('switch')))} switches.")
-                raw_items = _vlm_records
                 errors = _vlm_errors
                 session_id = None
                 ai_error_msg = ""
                 _vlm_mode = True
-                st.session_state["latest_ai_raw_response"] = _json.dumps([], indent=2)[:500]
+                st.session_state["latest_ai_raw_response"] = raw_text or ""
             elif resolved_engine == "rapidocr":
                 # Pure local heuristic extraction only — no call_ai, no vault.sanitize
                 _vlm_mode = False
@@ -2374,7 +2380,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             )
             st.stop()
 
-        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.5.15.\n"]
+        _out_lines = ["# NOTE:\n# Generated from Hybrid Topology Architecture v4.5.18.\n"]
         for _gparent in sorted(_groups.keys(), key=_natsort_key):
             _out_lines.append(f"=== {_gparent} ===")
             _sw_uplinks = [r for r in _groups[_gparent] if r.get("type") == "Uplink" and r.get("interface")]

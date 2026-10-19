@@ -1,5 +1,5 @@
 """
-Hybrid Spatial OCR + Text-Only LLM Engine (v4.6.0)
+Hybrid Spatial OCR + Text-Only LLM Engine (v4.5.18)
 
 Replaces the heavy VLM image-encoding pipeline with a two-stage
 approach optimized for 4 OCPU ARM hosts running Qwen2.5:3b.
@@ -265,7 +265,7 @@ def call_text_llm(
         "keep_alive": keep_alive,
         "options": {
             "num_ctx": num_ctx,
-            "num_predict": 512,
+            "num_predict": 1024,
             "repeat_penalty": 1.1,
             "temperature": temperature,
             "num_thread": num_thread,
@@ -290,7 +290,39 @@ def call_text_llm(
 
     message = raw.get("message", {})
     response_text = message.get("content", "") or ""
-    return _parse_llm_response(response_text)
+    records = _safe_extract_json_records(response_text)
+    return records, response_text
+
+
+def _safe_extract_json_records(raw_content: str) -> list:
+    """Extract JSON array/dict records from raw Ollama response text.
+
+    Handles markdown code fences, embedded objects, and regex fallback
+    to avoid JSONDecodeError drops on truncated or malformed output.
+    """
+    if not raw_content:
+        return []
+    text = re.sub(r"^```(?:json)?\s*|```$", "", raw_content.strip(), flags=re.IGNORECASE).strip()
+    try:
+        val = json.loads(text)
+        if isinstance(val, list):
+            return [x for x in val if isinstance(x, dict)]
+        if isinstance(val, dict):
+            for k in ("records", "topology", "data", "items", "entities", "switches"):
+                if isinstance(val.get(k), list):
+                    return [x for x in val[k] if isinstance(x, dict)]
+            return [val]
+    except Exception:
+        pass
+    m = re.search(r"\[[\s\S]*\]", text)
+    if m:
+        try:
+            val = json.loads(m.group(0))
+            if isinstance(val, list):
+                return [x for x in val if isinstance(x, dict)]
+        except Exception:
+            pass
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -420,7 +452,7 @@ def process_hybrid_queue(
             progress_callback(idx, total, msg)
 
         try:
-            records = call_text_llm(
+            records, _raw_resp = call_text_llm(
                 layout_text=layout_text,
                 prompt=system_prompt,
                 model=model,
@@ -512,7 +544,7 @@ def process_hybrid_queue_stream(
         layout_text = serialize_ocr_boxes_to_layout(img_tokens)
 
         try:
-            records = call_text_llm(
+            records, _raw_resp = call_text_llm(
                 layout_text=layout_text,
                 prompt=system_prompt,
                 model=model,
@@ -523,7 +555,7 @@ def process_hybrid_queue_stream(
                 num_thread=num_thread,
                 timeout=timeout,
             )
-            yield (idx, total, records)
+            yield (idx, total, records, _raw_resp)
         except Exception as exc:
             logger.warning("Image #%d text LLM call failed: %s", idx + 1, exc)
             yield (idx, total, [])
