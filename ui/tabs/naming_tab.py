@@ -1552,20 +1552,16 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             )
             vlm_engine_options = [
                 f"{default_vlm_model} (Hybrid RapidOCR + LLM - Recommended: ~4s)",
-                "qwen2.5:1.5b (Ultra-fast LLM: ~2s)",
                 "RapidOCR (Legacy Pure Heuristics)",
             ]
             vlm_engine_label_map = {
                 "qwen2.5:3b (Hybrid RapidOCR + LLM - Recommended: ~4s)": "qwen2.5:3b",
-                "qwen2.5:1.5b (Ultra-fast LLM: ~2s)": "qwen2.5:1.5b",
                 "RapidOCR (Legacy Pure Heuristics)": "rapidocr",
             }
             reverse_label_map = {v: k for k, v in vlm_engine_label_map.items()}
             default_idx_eng = 0
-            if default_vlm_model == "qwen2.5:1.5b":
+            if default_vlm_model == "rapidocr":
                 default_idx_eng = 1
-            elif default_vlm_model == "rapidocr":
-                default_idx_eng = 2
             sel_vlm = st.selectbox(
                 "Vision / OCR Engine",
                 options=vlm_engine_options,
@@ -1649,7 +1645,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             total_imgs = len(uploaded_imgs)
 
             resolved_engine = st.session_state.get("_selected_vlm_model", "qwen2.5:3b")
-            if resolved_engine in ("qwen2.5:3b", "qwen2.5:1.5b"):
+            if resolved_engine == "qwen2.5:3b":
                 # Local Hybrid pipeline — zero external cloud API calls, zero vault token leakage
                 from core.ocr_spatial_engine import process_hybrid_queue_stream as _hybrid_stream
                 _target_platform = st.session_state.get("naming_target_platform", "VMware ESXi")

@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 TEXT_LLM_MODEL = "qwen2.5:3b"
 TEXT_LLM_ENDPOINT = "http://netbox-ollama:11434"
 TEXT_LLM_KEEP_ALIVE = "10m"
-TEXT_LLM_TIMEOUT = 60
+TEXT_LLM_TIMEOUT = 180
 TEXT_LLM_NUM_THREADS = 4
 TEXT_LLM_NUM_CTX = 2048
 Y_ROW_THRESHOLD = 15  # pixels — tokens within this gap share a line
@@ -264,8 +264,10 @@ def call_text_llm(
         "messages": messages,
         "keep_alive": keep_alive,
         "options": {
-            "temperature": temperature,
             "num_ctx": num_ctx,
+            "num_predict": 512,
+            "repeat_penalty": 1.1,
+            "temperature": temperature,
             "num_thread": num_thread,
         },
         "stream": False,
