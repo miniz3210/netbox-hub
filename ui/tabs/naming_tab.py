@@ -1641,7 +1641,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     _dynamic_switch_pfx = str(_plat_tok.get("switch_prefix", "vSwitch")).strip()
 
     if start_analyze:
-        from core.topology_extractor import extract_topology_from_ocr_boxes
+        from core.extractors import get_topology_extractor
         from core.topology_reducer import reduce_topology_pipeline
         from core.ocr_engine import run_local_ocr_pipeline
 
@@ -1650,7 +1650,9 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             plat_cfg = (naming_rules.get("standards") or {}).get("esxi", {})
         platform_tokens = (naming_rules.get("platform_tokens") or {}).get(target_platform, {})
 
-        progress_bar = st.progress(0.0, text="Starting pure geometric topology extraction...")
+        extractor = get_topology_extractor(target_platform)
+
+        progress_bar = st.progress(0.0, text=f"Analyzing screenshots with {target_platform} extractor...")
         all_extracted_records = []
         total_imgs = len(uploaded_imgs)
 
@@ -1663,14 +1665,14 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             if hasattr(img, "seek"):
                 img.seek(0)
 
-            # 1. RapidOCR local extraction (0.3s)
+            # RapidOCR local extraction
             ocr_res = run_local_ocr_pipeline([raw_bytes])
             raw_boxes = ocr_res.get("raw_tokens", [])
             img_w = ocr_res.get("image_width", 1920)
             img_h = ocr_res.get("image_height", 1080)
 
-            # 2. Pure Python Geometric Extraction (0.01s - Zero LLM)
-            records = extract_topology_from_ocr_boxes(
+            # Platform adapter extraction (Zero LLM, sub-second)
+            records = extractor.extract(
                 raw_boxes,
                 image_width=img_w,
                 image_height=img_h,
@@ -1678,7 +1680,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             )
             all_extracted_records.extend(records)
 
-        # 3. Universal State Reducer & Deduplication
+        # Universal Reducer & Deduplication
         reduced = reduce_topology_pipeline(all_extracted_records, plat_cfg, platform_tokens)
 
         st.session_state["topology_records"] = reduced

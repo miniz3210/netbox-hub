@@ -1,5 +1,5 @@
 # NetBox Hub — Living Architecture SOP & Handover Guide
-# Target Baseline: v4.7.3 | Platform: Oracle Cloud Ampere A1 (ARM64)
+# Target Baseline: v4.8.0 | Platform: Oracle Cloud Ampere A1 (ARM64)
 
 ---
 
@@ -8,12 +8,12 @@
 | Property              | Value                                                        |
 |-----------------------|--------------------------------------------------------------|
 | Application           | NetBox Universal Library Hub                                 |
-| Target Version        | v4.7.3                                                       |
+| Target Version        | v4.8.0                                                       |
 | Runtime               | Python 3.11+ / Streamlit                                     |
 | Cloud Infrastructure  | Oracle Cloud Ampere A1 (ARM64 / aarch64, Linux)              |
 | Container Registry    | `ghcr.io/miniz3210/netbox-hub`                               |
 | Primary Backend       | SQLite (`data/netbox_hub.db`) + YAML-based naming standards  |
-| AI / OCR Layer        | Pure Python Geometric Topology Extraction (0 LLM, 0.5s/image) |
+| AI / OCR Layer        | Strategy/Adapter Extractor Pattern — Pure Python, sub-second, Zero LLM spatial dependency |
 
 ### Core Philosophy
 
@@ -166,7 +166,7 @@ When a cell in the DataGrid is edited, `_apply_cascade_to_rows()` in `ui/tabs/na
 Capture a baseline snapshot of the Standards Tab configuration into `data/naming_rules.yaml`. Verify all section definitions (2.5 UX rules, 4.0 Blueprint guide) are present and consistent.
 
 ### Step 2 — Version Assert Verification
-Confirm `config/constants.py::APP_VERSION == "4.7.3"`. Ensure no release notes or version bump scripts are pending.
+Confirm `config/constants.py::APP_VERSION == "4.8.0"`. Ensure no release notes or version bump scripts are pending.
 
 ### Step 3 — Safe Local Container Cache Cleanup
 ```bash
@@ -177,8 +177,8 @@ docker builder prune -a -f
 
 ### Step 4 — Docker Build & Tag Release
 ```bash
-docker build -t ghcr.io/miniz3210/netbox-hub:v4.7.3 -t ghcr.io/miniz3210/netbox-hub:latest .
-docker push ghcr.io/miniz3210/netbox-hub:v4.7.3
+docker build -t ghcr.io/miniz3210/netbox-hub:v4.8.0 -t ghcr.io/miniz3210/netbox-hub:latest .
+docker push ghcr.io/miniz3210/netbox-hub:v4.8.0
 docker push ghcr.io/miniz3210/netbox-hub:latest
 ```
 
@@ -269,7 +269,7 @@ docker image prune -a -f && docker builder prune -a -f
 
 ---
 
-## 9. Production Verification Checklist (v4.7.3)
+## 9. Production Verification Checklist (v4.8.0)
 ================================================================================
 
 - [x] **Sandwich Architecture Enforcement**: Deterministic noise filtering and token normalization handled via Python pre-processing prior to LLM ingestion.
@@ -296,6 +296,7 @@ docker image prune -a -f && docker builder prune -a -f
 - [x] **Expanded State Precedence**: Automatically purge placeholder 'No Uplink' records once real physical adapters are detected.
 - [x] **Accurate Multi-Switch Suffix Fidelity**: Preserved vSwitch01 vs vSwitch02 distinction; fixed letter 'o' substitution in switch suffixes.
 - [x] **Expanded State Precedence Enforcement**: Automatically purge No Uplink records when physical adapters are discovered in subsequent frames.
+- [x] **v4.8.0 Strategy/Adapter Extractor Pattern**: Platform-specific topology extraction isolated into `core/extractors/` — `EsxiTopologyExtractor` for VMware ESXi, `ProxmoxTopologyExtractor` for Proxmox VE. Zero LLM spatial dependency, sub-second execution, 100% configuration-driven rules via `data/naming_rules.yaml`.
 - [x] **v4.7.3 Dynamic Sidebar X-Cutoff**: Switch-header text ("StandardSwitch:...") no longer leaks into Port Group services. Sidebar boundary computed dynamically from leftmost switch header minus 15px — works on both full-screen and cropped screenshots without hardcoding.
 - [x] **v4.7.0 Deterministic Vertical Y-Slicing**: Switch headers detected via geometric anchor scoring, then bands sliced by Y-coordinate with zero vertical leakage.
 - [x] **v4.7.0 Deterministic Left/Right Column Split**: 48% midline hard slice separates logical services from physical adapters without LLM assistance.
@@ -306,7 +307,7 @@ docker image prune -a -f && docker builder prune -a -f
 ## 10. 專案狀態檢核：做完咩 (Done) vs 未做咩 (Pending)
 ======================================================================
 
-9.1 做完咩 (Completed & Verified in v4.7.0)
+9.1 做完咩 (Completed & Verified in v4.8.0)
 - [x] Hybrid OCR + Text-Only LLM Pipeline: 替代原生 VLM 影像編碼；RapidOCR 提取文字 + 空間序列化 → `qwen2.5:3b` 純文字推論，單圖延遲降至 ~4s（原 ~10–15s）。
 - [x] Legacy VLM Model Removal: 刪除 `qwen2.5vl:3b` (~3.2 GB)，改用文本模型 `qwen2.5:3b` 及 `qwen2.5:1.5b`。
 - [x] Spatial Text Serialization (`core/ocr_spatial_engine.py`): Natural line-grouping by |Δy| ≤ 8px with left/right bucket separation; outputs compact `[SWITCH]/[LOGICAL]/[PHYSICAL]` syntax (~180 tokens vs 2500+).
@@ -345,7 +346,5 @@ docker image prune -a -f && docker builder prune -a -f
   * 規劃於 Python 端先按 Standard Switch: / Distributed Switch: 進行純文字區間切片，再分段交由 AI 處理，徹底隔絕跨 Switch 污染。
 - [ ] 長列表首尾邊緣截斷保護 (Edge-Truncation Guard):
   * 在極長端口組截圖中，加強首項 (如 Backplane Network) 與尾項 (如 iSCSI Veeam) 的清點校驗。
-- [ ] 空間幾何分欄聚類 (Spatial Bounding-Box Clustering - 終極免 LLM 方案):
-  * 直接利用 RapidOCR 輸出的 raw_tokens 幾何座標 [x1, y1, x2, y2]，在 Python 端用 X 軸 (<45% 為 Service，>65% 為 Uplink) 與 Y 軸 (Switch 區間) 直接完成幾何歸屬組裝，將 LLM 角色退居為純文字校對器。
 - [ ] Excel IPAM 資料庫比對與差異補齊 (IPAM Database Diff).
 - [ ] Multi-Platform presets full layout test for Nutanix Prism & Proxmox VE 8.x.

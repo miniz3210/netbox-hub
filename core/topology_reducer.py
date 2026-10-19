@@ -1,14 +1,14 @@
 """
-Universal Topology Reducer (v4.7.3)
+Universal Topology Reducer (v4.8.0)
 100% Platform-Agnostic: Merges multi-screenshot records, enforces expanded-state
-precedence (expanded cards purge collapsed placeholders), and deduplicates 5-tuples.
+precedence, and deduplicates 5-tuples.
 """
 
 import re
 from typing import List, Dict, Any, Set, Tuple
 
 
-def _apply_token_normalizations(text: str, normalizations: List[Dict[str, str]]) -> str:
+def apply_normalizations(text: str, normalizations: List[Dict[str, str]]) -> str:
     s = text
     for rule in normalizations:
         pat = rule.get("pattern")
@@ -19,7 +19,7 @@ def _apply_token_normalizations(text: str, normalizations: List[Dict[str, str]])
 
 
 def reduce_topology_pipeline(
-    raw_records: List[Dict[str, Any]], 
+    raw_records: List[Dict[str, Any]],
     plat_config: Dict[str, Any],
     platform_tokens: Dict[str, Any]
 ) -> List[Dict[str, Any]]:
@@ -34,13 +34,12 @@ def reduce_topology_pipeline(
     else:
         noise_re = None
 
-    # 1. Clean switch names using YAML normalizations
+    # Step 1: Normalize switch names
     for r in raw_records:
         raw_sw = str(r.get("switch", "")).strip()
-        r["switch"] = _apply_token_normalizations(raw_sw, normalizations)
+        r["switch"] = apply_normalizations(raw_sw, normalizations)
 
-    # 2. Expanded State Precedence:
-    # Identify switches that have REAL content in subsequent frames (either physical NICs or real port groups)
+    # Step 2: Expanded State Precedence
     switches_with_real_content: Set[str] = set()
     for r in raw_records:
         sw = str(r.get("switch", "")).strip()
@@ -53,7 +52,7 @@ def reduce_topology_pipeline(
         elif rtype != "Uplink" and purpose:
             switches_with_real_content.add(sw)
 
-    # 3. Filter & Deduplicate
+    # Step 3: Filter & Deduplicate
     seen_sigs: Set[Tuple[str, str, str, str, str]] = set()
     cleaned: List[Dict[str, Any]] = []
 
@@ -66,17 +65,16 @@ def reduce_topology_pipeline(
         role = str(r.get("role", "None")).strip()
         speed = str(r.get("speed", "")).strip()
 
-        # If switch has real content in an expanded frame, drop empty collapsed placeholder records
         if iface == "No Uplink" and purpose == "" and sw in switches_with_real_content:
             continue
 
-        # Drop any leaked switch headers or collapsed glyphs
         if re.search(r"(?:Standard|Distributed)\s*Switch:", purpose, re.I) or purpose.startswith(">"):
             continue
         if re.search(r"(?:Standard|Distributed)\s*Switch:", iface, re.I):
             continue
+        if re.match(r"^(?:[vV✓✔\-\s]*(?:VMkernel\s*Ports|Virtual\s*Machines|VLAN\s*ID))", purpose, re.I):
+            continue
 
-        # Drop dynamic noise
         if noise_re and (noise_re.search(purpose) or noise_re.search(iface)):
             continue
 
@@ -95,13 +93,13 @@ def reduce_topology_pipeline(
             "speed": speed
         })
 
-    # 4. Disambiguate VMkernel vs Port Group with identical purpose
+    # Step 4: Disambiguate VMkernel vs Port Group with identical purpose
     vmk_purposes = {
-        (r["switch"].lower(), r["purpose"].lower()) 
+        (r["switch"].lower(), r["purpose"].lower())
         for r in cleaned if r["type"] == "VMkernel" and r["purpose"]
     }
     final_records = [
-        r for r in cleaned 
+        r for r in cleaned
         if not (r["type"] == "Port Group" and (r["switch"].lower(), r["purpose"].lower()) in vmk_purposes)
     ]
 
