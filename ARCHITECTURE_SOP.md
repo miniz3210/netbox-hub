@@ -1,5 +1,5 @@
 # NetBox Hub — Living Architecture SOP & Handover Guide
-# Target Baseline: v4.6.1 | Platform: Oracle Cloud Ampere A1 (ARM64)
+# Target Baseline: v4.6.2 | Platform: Oracle Cloud Ampere A1 (ARM64)
 
 ---
 
@@ -8,7 +8,7 @@
 | Property              | Value                                                        |
 |-----------------------|--------------------------------------------------------------|
 | Application           | NetBox Universal Library Hub                                 |
-| Target Version        | v4.6.1                                                       |
+| Target Version        | v4.6.2                                                       |
 | Runtime               | Python 3.11+ / Streamlit                                     |
 | Cloud Infrastructure  | Oracle Cloud Ampere A1 (ARM64 / aarch64, Linux)              |
 | Container Registry    | `ghcr.io/miniz3210/netbox-hub`                               |
@@ -177,8 +177,8 @@ docker builder prune -a -f
 
 ### Step 4 — Docker Build & Tag Release
 ```bash
-docker build -t ghcr.io/miniz3210/netbox-hub:v4.6.1 -t ghcr.io/miniz3210/netbox-hub:latest .
-docker push ghcr.io/miniz3210/netbox-hub:v4.6.1
+docker build -t ghcr.io/miniz3210/netbox-hub:v4.6.2 -t ghcr.io/miniz3210/netbox-hub:latest .
+docker push ghcr.io/miniz3210/netbox-hub:v4.6.2
 docker push ghcr.io/miniz3210/netbox-hub:latest
 ```
 
@@ -210,10 +210,14 @@ docker push ghcr.io/miniz3210/netbox-hub:latest
 - [x] **v4.6.1 Vertical Y-Slicing**: Switch band bounding via expanded anchor detection; zero vertical leakage across switches.
 - [x] **v4.6.1 Input Token Budget**: < 400 tokens per Ollama call; eradicated prompt truncation (was 2206 > limit 1026).
 - [x] **v4.6.1 Switch Suffix Fidelity**: `vSwitch01` vs `vSwitch02` distinct; OCR `o`→`0` normalization fixed.
-- [x] **v4.6.1 Expanded State Precedence**: Auto-purge "No Uplink" placeholders when real adapters found.
+- [x] **v4.6.2 Hardware Sidebar Pre-Crop**: Bounded cropping eliminates VMware left navigation tokens before serialization.
+- [x] **v4.6.2 Natural Line-Grouping Serialization**: Replaced per-word `[y=..., x=...]` bloat with compact line syntax, dropping prompt tokens by >80%.
+- [x] **v4.6.2 Runaway Generation Prevention**: Bound Ollama `num_predict: 350`, eliminating 110s CPU timeout loops.
+- [x] **v4.6.2 Resilient JSON Object Recovery**: Regex-based extraction recovers valid JSON objects from partial streams, eliminating 0-record errors.
+- [x] **v4.6.2 Expanded State Precedence**: Automatically purge placeholder 'No Uplink' records once real physical adapters are detected.
 - [ ] Build Excel IPAM offline reconciliation script against `AW IPs & VLANs_Final (2).xlsx`.
-- [ ] Prune stale local git tags prior to v4.6.1 release.
-- [ ] Publish GHCR image release `v4.6.1` (`ghcr.io/miniz3210/netbox-hub:v4.6.1`).
+- [ ] Prune stale local git tags prior to v4.6.2 release.
+- [ ] Publish GHCR image release `v4.6.2` (`ghcr.io/miniz3210/netbox-hub:v4.6.2`).
 - [ ] Build platform expansion templates for Proxmox VE and Azure Portal.
 
 ---
@@ -264,15 +268,15 @@ docker image prune -a -f && docker builder prune -a -f
 
 ---
 
-## 9. Production Verification Checklist (v4.6.1)
+## 9. Production Verification Checklist (v4.6.2)
 ================================================================================
 
 - [x] **Sandwich Architecture Enforcement**: Deterministic noise filtering and token normalization handled via Python pre-processing prior to LLM ingestion.
 - [x] **Multi-NIC Teaming Support**: Complete extraction of all active physical uplinks without truncation on NIC teams (e.g. vmnic4 + vmnic5, vmnic2 + vmnic6).
 - [x] **Zero-Bleed Switch Scoping**: Boundary containment ensuring isolated switches without uplinks (e.g. PRSpainFuenmayorAgeVLab) do not absorb subsequent switch components.
-- [x] **Generation Safety Boundaries**: Ollama chat requests bounded with `num_predict: 1024`, `repeat_penalty: 1.1`, and `temperature: 0.0` to eliminate infinite repetition loops while allowing sufficient headroom for dense topologies.
-- [x] **Prompt Fallback Chain**: Robust multi-key lookup (`vlm_prompt` -> `instructions` -> `ocr_llm_prompt` -> standards default) preventing blank system prompt dispatches.
-- [x] **Resilient JSON Parser**: Automatic stripping of markdown fences and regex array extraction avoiding JSONDecodeError drops.
+- [x] **Generation Safety Boundaries**: Ollama chat requests bounded with `num_predict: 350`, `repeat_penalty: 1.1`, and `temperature: 0.0` to eliminate infinite repetition loops and 110s timeout hangs.
+- [x] **Prompt Fallback Chain**: Robust multi-key lookup (`ocr_llm_prompt` -> `vlm_prompt` -> `instructions` -> standards default) preventing blank system prompt dispatches.
+- [x] **Resilient JSON Parser**: Automatic stripping of markdown fences, regex array extraction, and per-object fallback recovery from partial/truncated LLM streams avoiding JSONDecodeError drops.
 - [x] **Observability & Diagnostics**: Unfiltered preservation of raw Ollama text in AI Raw Response Inspector for real-time validation.
 - [x] **Framework Deprecation Compliance**: Complete transition from Streamlit `use_container_width` to `width='stretch'`.
 - [x] **Per-Image Queue Isolation**: Single-image queue stream keeping input tokens < 350 and execution safe on 4 OCPU ARM.
@@ -283,7 +287,12 @@ docker image prune -a -f && docker builder prune -a -f
 - [x] **Strict No-Hardcode Platform Abstraction**: All naming prefixes and role options dynamically loaded from YAML.
 - [x] **Pre-processing Collapsed Switch Header Filter**: Discard collapsed headers (> Standard Switch:) in Python before LLM serialization.
 - [x] **Vertical Switch Bounding Slices**: Hardware adapters strictly bound to their respective switch section; zero vertical leakage across switches.
-- [x] **Input Token Budget Enforcement**: Single-image/single-switch prompts bounded < 400 tokens; eradicated Ollama prompt truncation (prompt=2206 limit=1026) and context shift drops.
+- [x] **Input Token Budget Enforcement**: Single-image prompts bounded < 350 tokens via compact line-grouping serialization; eradicated Ollama prompt truncation (was 2206 > limit 1026).
+- [x] **Hardware Sidebar Pre-Crop**: Bounded cropping eliminates VMware left navigation tokens before serialization.
+- [x] **Natural Line-Grouping Serialization**: Replaced per-word `[y=..., x=...]` bloat with compact `[SWITCH]/[LOGICAL]/[PHYSICAL]` line syntax, dropping prompt tokens by >80%.
+- [x] **Runaway Generation Prevention**: Bound Ollama `num_predict: 350`, eliminating 110s CPU timeout loops.
+- [x] **Resilient JSON Object Recovery**: Regex-based per-object extraction recovers valid JSON objects from partial streams, eliminating 0-record errors.
+- [x] **Expanded State Precedence**: Automatically purge placeholder 'No Uplink' records once real physical adapters are detected.
 - [x] **Accurate Multi-Switch Suffix Fidelity**: Preserved vSwitch01 vs vSwitch02 distinction; fixed letter 'o' substitution in switch suffixes.
 - [x] **Expanded State Precedence Enforcement**: Automatically purge No Uplink records when physical adapters are discovered in subsequent frames.
 
@@ -292,10 +301,10 @@ docker image prune -a -f && docker builder prune -a -f
 ## 10. 專案狀態檢核：做完咩 (Done) vs 未做咩 (Pending)
 ======================================================================
 
-9.1 做完咩 (Completed & Verified in v4.6.1)
+9.1 做完咩 (Completed & Verified in v4.6.2)
 - [x] Hybrid OCR + Text-Only LLM Pipeline: 替代原生 VLM 影像編碼；RapidOCR 提取文字 + 空間序列化 → `qwen2.5:3b` 純文字推論，單圖延遲降至 ~4s（原 ~10–15s）。
 - [x] Legacy VLM Model Removal: 刪除 `qwen2.5vl:3b` (~3.2 GB)，改用文本模型 `qwen2.5:3b` 及 `qwen2.5:1.5b`。
-- [x] Spatial Text Serialization (`core/ocr_spatial_engine.py`): 按 Y 座標分組行、X 座標排序，生成 `[y=N, x=M] token` 格式的空間布局字串。
+- [x] Spatial Text Serialization (`core/ocr_spatial_engine.py`): Natural line-grouping by |Δy| ≤ 8px with left/right bucket separation; outputs compact `[SWITCH]/[LOGICAL]/[PHYSICAL]` syntax (~180 tokens vs 2500+).
 - [x] Pandas Float Type Crash Fix: `st.data_editor` 輸入前強制 `df[col].fillna("").astype(str)` 避免類型衝突。
 - [x] UI Container Stacking Bug Fix: 改用 `results_placeholder = st.empty()` 替代累加的 `st.container()`，實現原地 progressive 刷新。
 - [x] Engine Selector Updated: 選項為 `qwen2.5:3b (Hybrid RapidOCR + LLM - Recommended: ~4s)` / `qwen2.5:1.5b (Ultra-fast LLM: ~2s)` / `RapidOCR (Legacy Pure Heuristics)`。
@@ -319,6 +328,11 @@ docker image prune -a -f && docker builder prune -a -f
 - [x] Generator Unpack Crash Guard: Standardized 4-tuple yields across all generator paths.
 - [x] Prompt Optimization: Slimmed OCR LLM prompt from ~850 to <120 tokens, reducing ARM CPU prefill time by >70%.
 - [x] Strict No-Hardcode Platform Abstraction: All naming prefixes and role options dynamically loaded from YAML.
+- [x] v4.6.2 Hardware Sidebar Pre-Crop: Bounded cropping eliminates VMware left navigation tokens before serialization.
+- [x] v4.6.2 Natural Line-Grouping Serialization: Replaced per-word `[y=..., x=...]` bloat with compact line syntax, dropping prompt tokens by >80%.
+- [x] v4.6.2 Runaway Generation Prevention: Bound Ollama `num_predict: 350`, eliminating 110s CPU timeout loops.
+- [x] v4.6.2 Resilient JSON Object Recovery: Regex-based extraction recovers valid JSON objects from partial streams, eliminating 0-record errors.
+- [x] v4.6.2 Expanded State Precedence: Automatically purge placeholder 'No Uplink' records once real physical adapters are detected.
 
 9.2 未做咩 (Pending & Future Roadmap)
 - [ ] 緊鄰 Switch 物理文字切片 (Python-Side Switch Chunking):

@@ -635,20 +635,21 @@ topology_parsing_presets:
       replace: Distributed
     - pattern: \bPHYSKCAL\b
       replace: PHYSICAL
-     ocr_llm_prompt: |
-       [TASK: EXTRACT VIRTUAL SWITCH TOPOLOGY]
-       Parse virtual switches, physical adapters, and logical network services into a JSON array.
+    ocr_llm_prompt: |
+        [TASK: EXTRACT VMWARE TOPOLOGY JSON]
+        Extract virtual switches, physical adapters, and logical network services into a clean JSON array.
 
-       KEYS:
-       - switch: Switch name (e.g. vSwitch0, vSwitch01, vSwitch1). Strip "Standard Switch:".
-       - interface: Adapter identifier (vmnic0, vmk0). Empty string for pure port groups.
-       - type: 'Uplink', 'VMkernel', or 'Port Group'.
-       - ip: IPv4 address for VMkernel, else "".
-       - purpose: Service label (e.g. iSCSI01, vMotion, Management Network).
-       - role: 'Active Uplink', 'Standby Uplink', or 'None'.
-       - speed: Link speed (e.g. 10000 Full) if shown, else "".
+        RULES:
+        1. switch: Switch container name (e.g. vSwitch0, vSwitch01, vSwitch1). Strip "Standard Switch:" prefix.
+        2. interface: Physical NIC (vmnic4, vmnic5) or VMkernel (vmk0). Empty string for port groups.
+        3. type: Exactly 'Uplink', 'VMkernel', or 'Port Group'.
+        4. ip: IPv4 address for VMkernel interfaces, else "".
+        5. purpose: Service label (e.g. Management Network, VM Network, iSCSI01, vMotion).
+        6. role: 'Active Uplink' (default for vmnic), 'Standby Uplink', or 'None'.
+        7. speed: Link speed (e.g. 10000 Full) if shown, else "".
 
-       SCHEMA: JSON array of objects with keys ["switch", "interface", "type", "ip", "purpose", "role", "speed"]. Raw JSON only.
+        SCHEMA: JSON array of objects with keys: ["switch", "interface", "type", "ip", "purpose", "role", "speed"].
+        Output raw JSON array only.
   Proxmox VE:
     platform: Proxmox VE
     aliases:

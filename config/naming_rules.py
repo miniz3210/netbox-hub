@@ -684,36 +684,21 @@ DEFAULT_UNIFIED_PLATFORM_PRESETS = {
             "interface": ["vmnic", "vmk", "port_group"],
             "speed": ["speed", "link_speed"],
         },
-        "instructions": """[PLATFORM ARCHITECTURE: VMWARE ESXI - PRODUCTION RECONCILIATION]
+        "ocr_llm_prompt": """[TASK: EXTRACT VMWARE TOPOLOGY JSON]
+Extract virtual switches, physical adapters, and logical network services into a clean JSON array.
 
-1. OCR TEXT, TYPO & TOKEN DE-CONCATENATION:
-   - Normalize switch names: convert 'vSwitcho' or 'vSwitcho1' into 'vSwitch0' / 'vSwitch01' (letter 'o'/'O' to digit '0').
-   - Strip generic prefixes: 'StandardSwitch:vSwitch0' -> 'vSwitch0', 'Standard Switch: vSwitch02' -> 'vSwitch02'.
-   - SMART TOKEN SEPARATION: OCR frequently fuses adapter names and link speeds without spaces (e.g., 'vmnic110000Full' -> 'vmnic1' + '10 Gbit/s Full', 'vmnic51000Full' -> 'vmnic5' + '1 Gbit/s Full'). You MUST split them cleanly into discrete 'interface' and 'speed' keys.
+RULES:
+1. switch: Switch container name (e.g. vSwitch0, vSwitch01, vSwitch1). Strip "Standard Switch:" prefix.
+2. interface: Physical NIC (vmnic4, vmnic5) or VMkernel (vmk0). Empty string for port groups.
+3. type: Exactly 'Uplink', 'VMkernel', or 'Port Group'.
+4. ip: IPv4 address for VMkernel interfaces, else "".
+5. purpose: Service label (e.g. Management Network, VM Network, iSCSI01, vMotion).
+6. role: 'Active Uplink' (default for vmnic), 'Standby Uplink', or 'None'.
+7. speed: Link speed (e.g. 10000 Full) if shown, else "".
 
-2. VISUAL TOPOLOGY INHERITANCE & ZERO ORPHAN POLICY:
-   - TOPOLOGICAL PRIORITY: All physical adapters ('vmnic*') listed within a virtual switch's 'Physical Adapters' column strictly belong to that switch as their 'parent'.
-   - ABSOLUTE PROHIBITION: NEVER leave 'parent' empty, null, or unassigned for secondary, grouped, or fallback adapters (e.g., vmnic5 and vmnic6). If multiple adapters appear under vSwitch0, EVERY adapter (vmnic1 AND vmnic5) MUST output parent: 'vSwitch0'.
-   - Reconcile PCI slot, driver, speed, and CDP neighbor info from 'Physical adapters' screenshots into the respective vmnic records.
-
-3. MANDATORY ATOMIC JSON ATTRIBUTES (EVERY RECORD MUST HAVE THESE):
-   - "interface": Clean interface identifier ONLY (e.g., 'vmnic1', 'vmnic5', 'vmk0').
-   - "parent": Connected vSwitch name (e.g., 'vSwitch0', 'vSwitch01', 'vSwitch02', 'vSwitch1'). Only leave empty if an adapter is proven completely standalone on a bare-metal table with no switch link.
-   - "purpose": Pure functional/service name:
-       * For VMkernels (vmk): The exact service name (e.g., 'Management Network', 'iSCSI01', 'iSCSI02', 'vMotion').
-       * For Physical Adapters (vmnic):
-         - If the vSwitch has a dedicated service (e.g., iSCSI, vMotion), inherit that service name.
-         - If the vSwitch hosts multiple services or management (e.g., vSwitch0), EVERY member adapter (primary and secondary like vmnic5) strictly inherits the primary service: 'Management Network'.
-         - STRICT PROHIBITION: NEVER append '(vSwitchX)', 'Active Uplink', or 'Standby Uplink' into 'purpose'.
-   - "uplink_role": REQUIRED for physical adapters connected to a vSwitch:
-       * Set to "Active Uplink" by default for all connected vmnic adapters (unless explicitly marked standby in failover text).
-       * Leave strictly empty ("") for VMkernels ('vmk*') and Port Groups.
-   - "slot": Hardware PCIe slot (e.g., '0000:5b:00.0', '0000:5c:00.0').
-   - "speed": Link speed (e.g., '10 Gbit/s Full', '1 Gbit/s Full').
-   - "ip": IPv4 address for vmk interfaces (e.g., '10.27.177.222').
-
-4. ZERO CONCATENATION:
-   Keep 'interface', 'parent', 'purpose', and 'uplink_role' strictly isolated into their atomic keys. Downstream templates handle all prefix/suffix formatting.""",
+SCHEMA: JSON array of objects with keys: ["switch", "interface", "type", "ip", "purpose", "role", "speed"].
+Output raw JSON array only.""",
+        "instructions": "",
         "export_prompt": """You are an expert infrastructure network engineer specializing in VMware ESXi.
 I have attached screenshots of VMware ESXi virtual switch topology and physical network adapter properties.
 Please analyze the images and extract the network topology into the standard atomic JSON format matching these exact attributes:

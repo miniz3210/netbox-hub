@@ -1654,20 +1654,15 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 _tpp = naming_rules.get("topology_parsing_presets") or {}
                 _plat_preset = _tpp.get(_target_platform, {}) if isinstance(_tpp.get(_target_platform), dict) else {}
                 _vlm_prompt = (
-                    _plat_preset.get("vlm_prompt")
+                    _plat_preset.get("ocr_llm_prompt")
+                    or _plat_preset.get("vlm_prompt")
                     or _plat_preset.get("instructions")
-                    or _plat_preset.get("ocr_llm_prompt")
-                    or (naming_rules.get("standards", {}).get("esxi", {}).get("ocr_llm_prompt"))
                     or ""
                 ).strip()
                 _preset_config = _plat_preset
 
                 progress_bar = st.progress(0.0, text="Initializing Hybrid OCR+LLM inference...")
-                status_box = st.empty()
                 results_placeholder = st.empty()
-
-                accumulated_raw: List[Dict[str, Any]] = []
-                _vlm_errors: List[str] = []
 
                 for idx, total, new_records, raw_text in _hybrid_stream(
                     image_files=uploaded_imgs,
@@ -1680,9 +1675,9 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     preset_config=_preset_config,
                 ):
                     st.session_state["latest_ai_raw_response"] = raw_text or ""
-                    if isinstance(new_records, list):
-                        accumulated_raw.extend(new_records)
-                    reduced = reduce_topology_pipeline(accumulated_raw, _plat_preset, _plat_tok)
+                    all_raw_records = []
+                    all_raw_records.extend(new_records if isinstance(new_records, list) else [])
+                    reduced = reduce_topology_pipeline(all_raw_records, _plat_preset, _plat_tok)
                     st.session_state["topology_records"] = reduced
                     st.session_state["discovered_switches"] = sorted(
                         list({r["switch"] for r in reduced if r.get("switch")}),
@@ -1698,21 +1693,14 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     )
                     st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
 
-                    progress_bar.progress((idx + 1) / total,
-                        text=f"Hybrid Inference: Image {idx + 1}/{total} — {len(reduced)} records so far")
+                    progress_bar.progress((idx + 1) / total, text=f"Analyzing screenshot {idx + 1}/{total}...")
                     with results_placeholder.container():
-                        status_box.info(f"Image {idx + 1}/{total}: {len(new_records) if isinstance(new_records, list) else 0} new records parsed")
                         _render_topology_cards(reduced)
                         _render_topology_datagrid(reduced)
 
-                progress_bar.empty()
-                reduced_final = st.session_state.get("topology_records", [])
-                status_box.success(f"Analysis complete! Extracted {len(reduced_final)} topology items across {len(set(r['switch'] for r in reduced_final if r.get('switch')))} switches.")
-                errors = _vlm_errors
-                session_id = None
-                ai_error_msg = ""
-                _vlm_mode = True
-                st.session_state["latest_ai_raw_response"] = raw_text or ""
+                if len(st.session_state.get("topology_records", [])) > 0:
+                    st.toast("Analysis complete! Topology populated.", icon="🚀")
+                    st.rerun()
             elif resolved_engine == "rapidocr":
                 # Pure local heuristic extraction only — no call_ai, no vault.sanitize
                 _vlm_mode = False

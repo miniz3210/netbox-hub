@@ -1,12 +1,14 @@
 """
-Topology State Reducer — Single Authoritative State Reducer (v4.6.1)
+Topology State Reducer — Single Authoritative State Reducer (v4.6.2)
 
 Implements reduce_topology_pipeline() as the unified deduplication,
 prefix normalization, and expanded-state precedence engine for all
 inference paths (hybrid stream and legacy heuristic).
 
-v4.6.1 changes:
-  - Switch name typo normalization: vSwitcho -> vSwitch0, vSwitcho1 -> vSwitch01, etc.
+v4.6.2 changes:
+  - Sidebar artifact rejection: drop records matching Storage Adapters,
+    Agent VM Settings, PR Spain Fuenmayor Age VLab, PR Spain Fuenmayor VLab.
+  - Switch name typo normalization: vSwitcho -> vSwitch0, vSwitcho1 -> vSwitch01
   - Ghost header rejection: collapsed headers, UI control strings, site names
   - Expanded state precedence: auto-purge dummy "No Uplink" records when real adapters exist
   - Strict 5-tuple deduplication
@@ -26,9 +28,9 @@ def reduce_topology_pipeline(
 ) -> List[Dict[str, Any]]:
     """Reduce raw parsed topology records through a single authoritative pipeline.
 
-    v4.6.1 strict normalization & precedence rules:
+    v4.6.2 strict normalization & precedence rules:
       1. Switch Name Typo & Prefix Normalization
-      2. Ghost Header Rejection
+      2. Sidebar & UI Artifact Rejection
       3. Expanded State Precedence
       4. Deduplication & VMkernel/Port Group Disambiguation
     """
@@ -49,7 +51,11 @@ def reduce_topology_pipeline(
 
     cleaned: List[Dict[str, Any]] = []
 
-    # Ghost header / UI control patterns to reject
+    # v4.6.2: Sidebar and collapsed-artifact rejection patterns
+    _sidebar_artifacts = {
+        "storage adapters", "agent vm settings",
+        "pr spain fuenmayor age vlab", "pr spain fuenmayor vlab",
+    }
     _ghost_re = re.compile(
         r"^(?:Standard\s*Switch|Distributed\s*Switch|Switch):\s*.+$",
         re.IGNORECASE,
@@ -106,7 +112,10 @@ def reduce_topology_pipeline(
         raw_role = str(item.get("role") or item.get("uplink_role") or "").strip()
         speed_val = str(item.get("speed") or "").strip()
 
-        # v4.6.1: Ghost header / UI control string rejection on switch, interface, purpose
+        # v4.6.2: Reject sidebar/collapsed artifacts
+        low_sw = raw_sw.lower().strip()
+        if low_sw in _sidebar_artifacts:
+            continue
         if _ghost_re.match(raw_sw) or _collapsed_re.match(raw_sw):
             continue
         if _ui_control_re.match(raw_sw) or _ui_control_re.match(raw_iface) or _ui_control_re.match(raw_purpose):
