@@ -1,11 +1,44 @@
 """
-Pure Python Deterministic Geometric Topology Extractor (v4.7.0)
+Pure Python Deterministic Geometric Topology Extractor (v4.7.1)
 Extracts virtual switches, physical adapters, and logical network services
 directly from RapidOCR bounding box coordinates without calling any LLM.
 """
 
 import re
 from typing import List, Dict, Any, Tuple
+
+
+def _get_box(token_or_box: Any) -> Tuple[float, float, float, float]:
+    """
+    Safely extract (x_min, y_min, x_max, y_max) as floats.
+    Tolerates:
+    - Dict with "box" key: {"text": "...", "box": ...}
+    - Flat list of 4 numbers: [xmin, ymin, width, height] (standard from core.ocr_engine)
+    - Polygon points: [[x1, y1], [x2, y2], [x3, y3], [x4, y4]] (from raw RapidOCR)
+    """
+    if isinstance(token_or_box, dict):
+        b = token_or_box.get("box")
+    else:
+        b = token_or_box
+
+    if not b:
+        return 0.0, 0.0, 0.0, 0.0
+
+    # Polygon format [[x, y], ...]
+    if isinstance(b[0], (list, tuple)):
+        xs = [float(p[0]) for p in b]
+        ys = [float(p[1]) for p in b]
+        return min(xs), min(ys), max(xs), max(ys)
+
+    # Flat [xmin, ymin, width, height] format
+    if len(b) >= 4:
+        x0 = float(b[0])
+        y0 = float(b[1])
+        w = float(b[2])
+        h = float(b[3])
+        return x0, y0, x0 + w, y0 + h
+
+    return 0.0, 0.0, 0.0, 0.0
 
 
 def extract_topology_from_ocr_boxes(
@@ -28,11 +61,7 @@ def extract_topology_from_ocr_boxes(
             text,
             re.I,
         ):
-            box = t.get(
-                "box", [[0, 0], [0, 0], [0, 0], [0, 0]]
-            )
-            bx = min(p[0] for p in box)
-            by = min(p[1] for p in box)
+            bx, by, _, _ = _get_box(t)
             if anchor_x is None or bx < anchor_x:
                 anchor_x = bx
             if anchor_y is None or by < anchor_y:
@@ -45,9 +74,7 @@ def extract_topology_from_ocr_boxes(
 
     filtered_tokens = []
     for t in raw_tokens:
-        box = t.get("box", [[0, 0], [0, 0], [0, 0], [0, 0]])
-        x_min = min(p[0] for p in box)
-        y_min = min(p[1] for p in box)
+        x_min, y_min, _, _ = _get_box(t)
         text = str(t.get("text", "")).strip()
 
         if x_min < (anchor_x - 15.0):
@@ -74,8 +101,7 @@ def extract_topology_from_ocr_boxes(
             re.I,
         )
         if m:
-            box = t.get("box", [[0, 0], [0, 0], [0, 0], [0, 0]])
-            y_top = min(p[1] for p in box)
+            _, y_top, _, _ = _get_box(t)
             sw_name = m.group(1).strip()
             sw_name = re.sub(r"\s+", " ", sw_name)
             sw_name = re.sub(r"(?i)(switch)o(\d*)", r"\g<1>0\2", sw_name)
@@ -112,15 +138,12 @@ def extract_topology_from_ocr_boxes(
     for sh in switch_headers:
         sw_name = sh["name"]
         band_tokens = [
-            t
-            for t in filtered_tokens
-            if sh["y_start"] <= min(p[1] for p in t["box"]) < sh["y_end"]
+            t for t in filtered_tokens
+            if sh["y_start"] <= _get_box(t)[1] < sh["y_end"]
         ]
 
         inner_tokens = [
-            t
-            for t in band_tokens
-            if min(p[1] for p in t["box"]) > (sh["y_start"] + 30.0)
+            t for t in band_tokens if _get_box(t)[1] > (sh["y_start"] + 30.0)
         ]
         if not inner_tokens:
             extracted_records.append({
@@ -134,22 +157,18 @@ def extract_topology_from_ocr_boxes(
             })
             continue
 
-        x_min_band = min(min(p[0] for p in t["box"]) for t in inner_tokens)
-        x_max_band = max(max(p[0] for p in t["box"]) for t in inner_tokens)
+        x_min_band = min(_get_box(t)[0] for t in inner_tokens)
+        x_max_band = max(_get_box(t)[2] for t in inner_tokens)
         x_mid_band = x_min_band + (x_max_band - x_min_band) * 0.48
 
-        logical_tokens = [
-            t for t in inner_tokens if min(p[0] for p in t["box"]) < x_mid_band
-        ]
-        physical_tokens = [
-            t for t in inner_tokens if min(p[0] for p in t["box"]) >= x_mid_band
-        ]
+        logical_tokens = [t for t in inner_tokens if _get_box(t)[0] < x_mid_band]
+        physical_tokens = [t for t in inner_tokens if _get_box(t)[0] >= x_mid_band]
 
         # ---------------------------------------------------------
         # Physical Column Extraction (Right Column)
         # ---------------------------------------------------------
         physical_records = []
-        phys_text_blob = " ".join(t["text"] for t in physical_tokens)
+        phys_text_blob = " ".join(t.get("text", "") for t in physical_tokens)
 
         has_no_adapters = bool(
             re.search(r"No\s*physical\s*network\s*adapters", phys_text_blob, re.I)
@@ -157,7 +176,7 @@ def extract_topology_from_ocr_boxes(
 
         vmnic_matches = []
         for pt in physical_tokens:
-            txt = pt["text"].strip()
+            txt = pt.get("text", "").strip()
             # Ignore 0 NIC Adapters placeholder slots in vDS
             if re.search(r"\(0\s*NIC\s*Adapters\)", txt, re.I):
                 continue
@@ -175,7 +194,7 @@ def extract_topology_from_ocr_boxes(
                     "nic": nic_id,
                     "speed": speed_str,
                     "standby": is_standby,
-                    "y": min(p[1] for p in pt["box"]),
+                    "y": _get_box(pt)[1],
                 })
 
         seen_nics = set()
@@ -187,12 +206,10 @@ def extract_topology_from_ocr_boxes(
             nic_speed = vm["speed"]
             if not nic_speed:
                 for pt in physical_tokens:
-                    if (
-                        abs(min(p[1] for p in pt["box"]) - vm["y"]) < 15.0
-                    ):
+                    if abs(_get_box(pt)[1] - vm["y"]) < 15.0:
                         sm = re.search(
                             r"(\d+\s*(?:Gbit/s|Mbit/s|Full|Half)|10000|1000)",
-                            pt["text"],
+                            pt.get("text", ""),
                             re.I,
                         )
                         if sm:
@@ -227,7 +244,7 @@ def extract_topology_from_ocr_boxes(
         # ---------------------------------------------------------
         vmk_entries = []
         for lt in logical_tokens:
-            txt = lt["text"].strip()
+            txt = lt.get("text", "").strip()
             m_vmk = re.search(
                 r"\b(vmk\d+)\s*[:\s]\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b",
                 txt,
@@ -237,7 +254,7 @@ def extract_topology_from_ocr_boxes(
                 vmk_entries.append({
                     "vmk": m_vmk.group(1).lower(),
                     "ip": m_vmk.group(2).strip(),
-                    "y": min(p[1] for p in lt["box"]),
+                    "y": _get_box(lt)[1],
                 })
             else:
                 m_ip = re.search(
@@ -245,13 +262,11 @@ def extract_topology_from_ocr_boxes(
                 )
                 if m_ip:
                     ip_val = m_ip.group(1).strip()
-                    y_ip = min(p[1] for p in lt["box"])
+                    y_ip = _get_box(lt)[1]
                     found_vmk = None
                     for lt2 in logical_tokens:
-                        if (
-                            abs(min(p[1] for p in lt2["box"]) - y_ip) < 15.0
-                        ):
-                            m_v = re.search(r"\b(vmk\d+)\b", lt2["text"], re.I)
+                        if abs(_get_box(lt2)[1] - y_ip) < 15.0:
+                            m_v = re.search(r"\b(vmk\d+)\b", lt2.get("text", ""), re.I)
                             if m_v:
                                 found_vmk = m_v.group(1).lower()
                                 break
@@ -264,7 +279,7 @@ def extract_topology_from_ocr_boxes(
 
         service_titles = []
         for lt in logical_tokens:
-            txt = lt["text"].strip()
+            txt = lt.get("text", "").strip()
             if re.match(
                 r"^(?:VLAN\s*ID|VMkernel\s*Ports|Virtual\s*Machines|vmk\d+|No\s*associated)",
                 txt,
@@ -276,8 +291,7 @@ def extract_topology_from_ocr_boxes(
             if len(txt) <= 2:
                 continue
 
-            box = lt.get("box", [[0, 0], [0, 0], [0, 0], [0, 0]])
-            y_box = min(p[1] for p in box)
+            y_box = _get_box(lt)[1]
             service_titles.append({
                 "title": txt,
                 "y": y_box,
