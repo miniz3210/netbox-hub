@@ -1,5 +1,5 @@
 # NetBox Hub — Living Architecture SOP & Handover Guide
-# Target Baseline: v4.7.1 | Platform: Oracle Cloud Ampere A1 (ARM64)
+# Target Baseline: v4.7.2 | Platform: Oracle Cloud Ampere A1 (ARM64)
 
 ---
 
@@ -8,7 +8,7 @@
 | Property              | Value                                                        |
 |-----------------------|--------------------------------------------------------------|
 | Application           | NetBox Universal Library Hub                                 |
-| Target Version        | v4.7.1                                                       |
+| Target Version        | v4.7.2                                                       |
 | Runtime               | Python 3.11+ / Streamlit                                     |
 | Cloud Infrastructure  | Oracle Cloud Ampere A1 (ARM64 / aarch64, Linux)              |
 | Container Registry    | `ghcr.io/miniz3210/netbox-hub`                               |
@@ -166,7 +166,7 @@ When a cell in the DataGrid is edited, `_apply_cascade_to_rows()` in `ui/tabs/na
 Capture a baseline snapshot of the Standards Tab configuration into `data/naming_rules.yaml`. Verify all section definitions (2.5 UX rules, 4.0 Blueprint guide) are present and consistent.
 
 ### Step 2 — Version Assert Verification
-Confirm `config/constants.py::APP_VERSION == "4.7.1"`. Ensure no release notes or version bump scripts are pending.
+Confirm `config/constants.py::APP_VERSION == "4.7.2"`. Ensure no release notes or version bump scripts are pending.
 
 ### Step 3 — Safe Local Container Cache Cleanup
 ```bash
@@ -177,8 +177,8 @@ docker builder prune -a -f
 
 ### Step 4 — Docker Build & Tag Release
 ```bash
-docker build -t ghcr.io/miniz3210/netbox-hub:v4.7.1 -t ghcr.io/miniz3210/netbox-hub:latest .
-docker push ghcr.io/miniz3210/netbox-hub:v4.7.1
+docker build -t ghcr.io/miniz3210/netbox-hub:v4.7.2 -t ghcr.io/miniz3210/netbox-hub:latest .
+docker push ghcr.io/miniz3210/netbox-hub:v4.7.2
 docker push ghcr.io/miniz3210/netbox-hub:latest
 ```
 
@@ -269,7 +269,7 @@ docker image prune -a -f && docker builder prune -a -f
 
 ---
 
-## 9. Production Verification Checklist (v4.7.1)
+## 9. Production Verification Checklist (v4.7.2)
 ================================================================================
 
 - [x] **Sandwich Architecture Enforcement**: Deterministic noise filtering and token normalization handled via Python pre-processing prior to LLM ingestion.
@@ -296,7 +296,7 @@ docker image prune -a -f && docker builder prune -a -f
 - [x] **Expanded State Precedence**: Automatically purge placeholder 'No Uplink' records once real physical adapters are detected.
 - [x] **Accurate Multi-Switch Suffix Fidelity**: Preserved vSwitch01 vs vSwitch02 distinction; fixed letter 'o' substitution in switch suffixes.
 - [x] **Expanded State Precedence Enforcement**: Automatically purge No Uplink records when physical adapters are discovered in subsequent frames.
-- [x] **v4.7.0 Pure Geometric Topology Extraction**: Complete eradication of LLM for spatial topology. Pure RapidOCR bounding boxes + Python geometry achieves <1.0s/image with zero HTTP calls, zero prompt truncation, and zero hallucinated port groups.
+- [x] **v4.7.2 Config-Driven Topology Extraction**: All geometry thresholds, noise filters, and token normalizations now loaded from YAML preset — zero hardcoded vendor/site strings in Python. Pure RapidOCR bounding boxes + Python geometry achieves <1.0s/image with zero HTTP calls, zero prompt truncation, and zero hallucinated port groups.
 - [x] **v4.7.0 Deterministic Vertical Y-Slicing**: Switch headers detected via geometric anchor scoring, then bands sliced by Y-coordinate with zero vertical leakage.
 - [x] **v4.7.0 Deterministic Left/Right Column Split**: 48% midline hard slice separates logical services from physical adapters without LLM assistance.
 - [x] **v4.7.0 Universal Reducer v2**: State machine precedence, expanded-state purging, and 5-tuple deduplication unified across all inference paths.

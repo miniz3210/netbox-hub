@@ -1665,7 +1665,17 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             img_h = ocr_res.get("image_height", 1080)
 
             # 2. Pure Python Geometric Extraction (0.01s - No LLM, No Truncation, No Deadlocks!)
-            records = extract_topology_from_ocr_boxes(raw_boxes, image_width=img_w, image_height=img_h)
+            plat_cfg = (naming_rules.get("topology_parsing_presets") or {}).get(target_platform, {})
+            if not plat_cfg:
+                plat_cfg = (naming_rules.get("standards") or {}).get("esxi", {})
+            platform_tokens = (naming_rules.get("platform_tokens") or {}).get(target_platform, {})
+
+            records = extract_topology_from_ocr_boxes(
+                raw_boxes, 
+                image_width=img_w, 
+                image_height=img_h,
+                plat_cfg=plat_cfg
+            )
             all_extracted_records.extend(records)
 
         # 3. Universal State Reducer & Deduplication

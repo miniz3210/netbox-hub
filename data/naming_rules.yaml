@@ -600,6 +600,11 @@ topology_parsing_presets:
         patterns:
         - Physical Adapters
       enabled: false
+    layout_geometry:
+      sidebar_x_cutoff: 280.0
+      midline_ratio: 0.48
+      header_proximity_threshold: 85.0
+      nic_speed_y_proximity: 18.0
     noise_filters:
     - Storage Adapters
     - Storage Devices
@@ -610,11 +615,13 @@ topology_parsing_presets:
     - VMkernel adapters
     - Physical adapters
     - TCP/IP configuration
+    - Virtual switches
     - Virtual Machines
     - VM Startup/Shutdown
     - Agent VM Settings
     - Default VM Compatibility
     - Swap File Location
+    - SwapFile Location
     - Licensing
     - Host Profile
     - Time Configuration
@@ -622,6 +629,22 @@ topology_parsing_presets:
     - Power Management
     - Security Profile
     - System Swap
+    - Certificate
+    - Advanced System
+    - System Resource
+    - Firewall
+    - Services
+    - Summary
+    - Monitor
+    - Configure
+    - Permissions
+    - VMs
+    - Datastores
+    - Updates
+    - Actions
+    - Networking
+    - System
+    - Hardware
     token_normalizations:
     - pattern: vSwitch[oO](\d*)
       replace: vSwitch0\1
@@ -629,6 +652,18 @@ topology_parsing_presets:
       replace: vmnic\1
     - pattern: \bvm[lL]k(\d+)\b
       replace: vmk\1
+    - pattern: (?i)PR\s*Spain\s*Fuenmayor
+      replace: PR Spain Fuenmayor
+    - pattern: (?i)PR\s*SpainFuenmayor
+      replace: PR Spain Fuenmayor
+    - pattern: (?i)FuenmayorAge
+      replace: Fuenmayor Age
+    - pattern: (?i)Age\s*VLab
+      replace: Age VLab
+    - pattern: (?i)AgeVLab
+      replace: Age VLab
+    - pattern: \s+
+      replace: ' '
     - pattern: \bvmk[oO]\b
       replace: vmk0
     - pattern: \bDistibut(ed)?\b
