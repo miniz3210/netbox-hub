@@ -555,8 +555,10 @@ topology_parsing_presets:
       replace: vSwitch0\1
     - pattern: \bvm[nN][kKlL1]c(\d+)\b
       replace: vmnic\1
-    - pattern: \bvm[lL]k(\d+)\b
-      replace: vmk\1
+    - pattern: \bvmk[oO0](\d*)\b
+      replace: vmk0\1
+    - pattern: \s+
+      replace: ' '
     - pattern: (?i)PR\s*Spain\s*Fuenmayor
       replace: PR Spain Fuenmayor
     - pattern: (?i)PR\s*SpainFuenmayor
@@ -567,8 +569,8 @@ topology_parsing_presets:
       replace: Age VLab
     - pattern: (?i)AgeVLab
       replace: Age VLab
-    - pattern: \s+
-      replace: ' '
+    - pattern: (?i)PR\s*Spain\s*Fuenmayor\s*VLab\s*VM.*
+      replace: 'PR Spain Fuenmayor VLab VM ...'
     - pattern: \bvmk[oO]\b
       replace: vmk0
     - pattern: \bDistibut(ed)?\b
