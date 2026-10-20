@@ -149,8 +149,8 @@ vlan_presets:
     prefix_pattern: ''
     items: []
 naming_patterns:
-# Generated from NetBox Hub v4.8.7 (Deterministic Engine)
-branch_switch: SW<country><state><site><zone><seq>-<stack_id>
+  # Generated from NetBox Hub v4.8.7 (Deterministic Engine)
+  branch_switch: SW<country><state><site><zone><seq>-<stack_id>
   branch_stack: VS<country><state><site><seq>-<stack_id>
   branch_ap: WAP<country><state><site><seq>
   branch_firewall: FW<country><state><site><vendor><seq>
@@ -575,6 +575,8 @@ topology_parsing_presets:
       replace: 'PR Spain Fuenmayor VLab VM ...'
     - pattern: \bvmk[oO]\b
       replace: vmk0
+    - pattern: (?i)Netwrork
+      replace: Network
     - pattern: \bDistibut(ed)?\b
       replace: Distributed
     - pattern: \bPHYSKCAL\b
