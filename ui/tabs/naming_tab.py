@@ -705,23 +705,6 @@ def _safe_parse_json_array(text: str) -> List[Dict[str, Any]]:
     return []
 
 
-def _is_vision_model(model_name: str) -> bool:
-    """Return True if model name indicates multimodal vision support."""
-    if not model_name:
-        return False
-    m = model_name.lower()
-    vision_keywords = ["vision", "-vl", "4o", "gpt-5", "claude", "gemini", "pixtral", "qwen2.5-vl"]
-    return any(k in m for k in vision_keywords)
-
-
-def _render_esxi_pattern(pat: str, vals: dict, variables: dict) -> str:
-    """Interpolate an ESXi description pattern through the unified rendering pipeline,
-    which strips empty optional clauses before substitution. All fixed words (Active,
-    Standby, Network, etc.) come from the editable template - none are hardcoded
-    here."""
-    return render_dynamic_pattern(pat, vals, variables)
-
-
 def render_naming_tab(active_model):
     st.subheader("🏷️ Standardized Infrastructure Naming Generator", help="Generate and validate standardized hostnames and interface descriptions. All preset-driven patterns are configured in the Standards Tab.")
     st.caption("Generate and validate standardized hostnames for network devices, servers, VMs, and ESXi configurations using AI-powered naming conventions aligned with your NetBox inventory data.")
@@ -1274,72 +1257,10 @@ def _render_interactive_hypervisor_mode(naming_rules: dict, casing: str, active_
         st.code(cleaned_output, language="text")
 
 
-def _run_vlm_topology_analysis(image_files, naming_rules, target_platform, progress_callback=None, model_override=None, endpoint_override=None):
-    """Run VLM-based topology analysis and return results compatible with downstream processing."""
-    from core.vlm_engine import run_vlm_topology_analysis as _vlm_analyze
-    from core.vault import SanitizerVault
-
-    vault = SanitizerVault()
-    extra_kwargs = {}
-    if model_override:
-        extra_kwargs["model"] = model_override
-    if endpoint_override:
-        extra_kwargs["endpoint"] = endpoint_override
-    vlm_cfg = naming_rules.get("vlm_config") or {}
-    extra_kwargs["keep_alive"] = vlm_cfg.get("keep_alive", "10m")
-    extra_kwargs["num_ctx"] = vlm_cfg.get("num_ctx", 2048)
-    extra_kwargs["num_thread"] = vlm_cfg.get("num_threads", 4)
-    extra_kwargs["timeout"] = vlm_cfg.get("timeout", 300)
-    results = _vlm_analyze(
-        image_files=image_files,
-        naming_rules=naming_rules,
-        target_platform=target_platform,
-        progress_callback=progress_callback,
-        **extra_kwargs,
-    )
-    raw_items = results.get("records", [])
-    errors = results.get("errors", [])
-
-    # Apply vault restore if any session was tracked
-    session_id = results.get("vault_session")
-    if session_id and raw_items:
-        try:
-            restored_items = []
-            for item in raw_items:
-                if not isinstance(item, dict):
-                    continue
-                restored_item = {}
-                for k, v in item.items():
-                    val_str = str(v)
-                    if hasattr(vault, "_session_store") or hasattr(vault, "restore"):
-                        restored_val = vault.restore(val_str, session_id=session_id)
-                        if "{{" in restored_val:
-                            m_alt = re.sub(r"\{\{IP_(\d+)\}\}", r"<SAFE_IP_\1>", restored_val)
-                            restored_val = vault.restore(m_alt, session_id=session_id)
-                        restored_item[k] = restored_val
-                    else:
-                        restored_item[k] = val_str
-                restored_items.append(restored_item)
-            raw_items = restored_items
-        except Exception as e:
-            logger.warning("VLM vault restore failed: %s", e)
-
-    return {
-        "records": raw_items,
-        "errors": errors,
-        "raw_responses": results.get("raw_responses", []),
-        "timing": results.get("timing", {}),
-        "vault_session": session_id,
-        "sanitized_text": results.get("sanitized_text", ""),
-    }
-
-
-def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model: str, vault, use_vlm: bool = True):
+def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model: str, vault):
     """Render the full screenshot OCR/VLM pipeline openly (no expanders hiding the workflow)."""
     from core.ocr_engine import run_local_ocr_pipeline
     from data.standards_manager import StandardsManager
-    import json as _json
-    from core.ai_client import call_ai
 
     if "hypervisor_editor_version" not in st.session_state:
         st.session_state["hypervisor_editor_version"] = 0
@@ -1541,38 +1462,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             )
             st.session_state["ocr_target_platform"] = target_platform
         with col_eng:
-            vlm_cfg = naming_rules.get("vlm_config") or {}
-            yaml_endpoint = str(vlm_cfg.get("api_endpoint", "http://netbox-ollama:11434")).strip()
-            env_endpoint = os.getenv("OLLAMA_API_ENDPOINT", "").strip() or yaml_endpoint
-            env_model = os.getenv("DEFAULT_LLM_MODEL", os.getenv("DEFAULT_VLM_MODEL", "qwen2.5:3b")).strip()
-            yaml_model = str(vlm_cfg.get("default_model", "qwen2.5:3b")).strip()
-            default_vlm_model = (
-                st.session_state.get("_selected_vlm_model")
-                or env_model
-                or yaml_model
-            )
-            vlm_engine_options = [
-                f"{default_vlm_model} (Hybrid RapidOCR + LLM - Recommended: ~4s)",
-                "RapidOCR (Legacy Pure Heuristics)",
-            ]
-            vlm_engine_label_map = {
-                "qwen2.5:3b (Hybrid RapidOCR + LLM - Recommended: ~4s)": "qwen2.5:3b",
-                "RapidOCR (Legacy Pure Heuristics)": "rapidocr",
-            }
-            reverse_label_map = {v: k for k, v in vlm_engine_label_map.items()}
-            default_idx_eng = 0
-            if default_vlm_model == "rapidocr":
-                default_idx_eng = 1
-            sel_vlm = st.selectbox(
-                "Vision / OCR Engine",
-                options=vlm_engine_options,
-                index=default_idx_eng,
-                key="naming_vlm_engine_sel",
-                label_visibility="collapsed",
-                help="Select the vision or OCR engine for topology analysis.",
-            )
-            resolved_model = vlm_engine_label_map[sel_vlm]
-            st.session_state["_selected_vlm_model"] = resolved_model
+            st.markdown("**⚡ Instant Local OCR (Deterministic Python Engine)**")
         with col_btn_an:
             btn_analyze = st.button("🚀 Analyze & Auto-Populate", type="primary", width="stretch")
         with col_btn_clr:
@@ -1605,14 +1495,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         img_count = len(staged_imgs)
         st.caption(f"ℹ️ Extracted {char_count:,} characters across {img_count} screenshot(s)")
         st.text_area("Extracted OCR Tokens", value=raw_ocr_text, height=420, disabled=True)
-
-    # AI Raw Response Inspector (collapsible)
-    ai_raw_resp = st.session_state.get("latest_ai_raw_response", "")
-    with st.expander("🤖 AI Raw Response Inspector (Click to expand)", expanded=False):
-        if ai_raw_resp:
-            st.text_area("AI Response", value=ai_raw_resp, height=250, key="inspect_ai_raw_resp")
-        else:
-            st.info("No AI response generated yet. Run 'Analyze & Auto-Populate' to view raw model output.")
 
     # Execute analyze when button clicked
     start_analyze = btn_analyze

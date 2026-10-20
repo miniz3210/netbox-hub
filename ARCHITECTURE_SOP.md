@@ -1,5 +1,5 @@
 # NetBox Hub — Living Architecture SOP & Handover Guide
-# Target Baseline: v4.8.0 | Platform: Oracle Cloud Ampere A1 (ARM64)
+# Target Baseline: v4.8.1 | Platform: Oracle Cloud Ampere A1 (ARM64)
 
 ---
 
@@ -8,12 +8,12 @@
 | Property              | Value                                                        |
 |-----------------------|--------------------------------------------------------------|
 | Application           | NetBox Universal Library Hub                                 |
-| Target Version        | v4.8.0                                                       |
+| Target Version        | v4.8.1                                                       |
 | Runtime               | Python 3.11+ / Streamlit                                     |
 | Cloud Infrastructure  | Oracle Cloud Ampere A1 (ARM64 / aarch64, Linux)              |
 | Container Registry    | `ghcr.io/miniz3210/netbox-hub`                               |
 | Primary Backend       | SQLite (`data/netbox_hub.db`) + YAML-based naming standards  |
-| AI / OCR Layer        | Strategy/Adapter Extractor Pattern — Pure Python, sub-second, Zero LLM spatial dependency |
+| AI / OCR Layer        | Strategy/Adapter Extractor Pattern — Pure Python, sub-second, Zero LLM, Zero Ollama dependency |
 
 ### Core Philosophy
 
@@ -88,41 +88,35 @@
         │
         ▼
 ┌──────────────────────┐
-│  Screen OCR Engine    │   (PIL / pytesseract or vendor SDK)
+│  Screen OCR Engine    │   (PIL / RapidOCR — deterministic, no LLM)
 │  + Y-offset acc.      │   cumulative_y += img_height per image
 └──────────┬───────────┘
-           ▼
+            ▼
 ┌──────────────────────┐
 │  Spatial Anchoring    │   Group tokens into cards/boundaries
 │  & Relative Clustering│   using bounding-box ratios
 └──────────┬───────────┘
-           ▼
+            ▼
 ┌──────────────────────┐
-│  Redaction (Vault)    │   Replace RFC1918 / MAC / domains
-│  Sanitizer Vault      │   with deterministic tokens
+│  Platform Extractor   │   core/extractors/ — deterministic Python
+│  (Strategy Pattern)   │   Zero LLM, zero Ollama, sub-second
 └──────────┬───────────┘
-           ▼
+            ▼
 ┌──────────────────────┐
-│  LLM Structured       │   Extract JSON via multi-pass AI
-│  Extraction           │   (ai_two_pass_system.py)
-│  + is_uncertain/NOTE  │   LLM flags only; no template assembly
+│  Universal Reducer    │   core/topology_reducer.py — dedup,
+│  & Normalization      │   prefix normalization, state precedence
 └──────────┬───────────┘
-           ▼
-┌──────────────────────┐
-│  Local De-tokenization│   Restore original IPs/MACs/domains
-│  In-Memory NAT        │   from sanitizer vault map
-└──────────┬───────────┘
-           ▼
+            ▼
 ┌──────────────────────┐
 │  Human-in-the-Loop    │   DataGrid review: edit cells, cascade
 │  DataGrid Review      │   corrections across active session rows
 └──────────┬───────────┘
-           ▼
+            ▼
 ┌──────────────────────┐
 │  Deterministic Template│  Apply naming patterns from Standards
 │  Assembly             │  (naming_rules.yaml) — no LLM here
 └──────────┬───────────┘
-           ▼
+            ▼
 ┌──────────────────────┐
 │  DB Commit / Sync     │   SQLite write + NetBox upload
 └──────────────────────┘
@@ -166,7 +160,7 @@ When a cell in the DataGrid is edited, `_apply_cascade_to_rows()` in `ui/tabs/na
 Capture a baseline snapshot of the Standards Tab configuration into `data/naming_rules.yaml`. Verify all section definitions (2.5 UX rules, 4.0 Blueprint guide) are present and consistent.
 
 ### Step 2 — Version Assert Verification
-Confirm `config/constants.py::APP_VERSION == "4.8.0"`. Ensure no release notes or version bump scripts are pending.
+Confirm `config/constants.py::APP_VERSION == "4.8.1"`. Ensure no release notes or version bump scripts are pending.
 
 ### Step 3 — Safe Local Container Cache Cleanup
 ```bash
@@ -177,8 +171,8 @@ docker builder prune -a -f
 
 ### Step 4 — Docker Build & Tag Release
 ```bash
-docker build -t ghcr.io/miniz3210/netbox-hub:v4.8.0 -t ghcr.io/miniz3210/netbox-hub:latest .
-docker push ghcr.io/miniz3210/netbox-hub:v4.8.0
+docker build -t ghcr.io/miniz3210/netbox-hub:v4.8.1 -t ghcr.io/miniz3210/netbox-hub:latest .
+docker push ghcr.io/miniz3210/netbox-hub:v4.8.1
 docker push ghcr.io/miniz3210/netbox-hub:latest
 ```
 
@@ -206,13 +200,13 @@ docker push ghcr.io/miniz3210/netbox-hub:latest
 ### ⬜ Pending Roadmap
 
 - [x] Implement unit test coverage for `core/spatial_redactor.py` in `tests/test_spatial_redactor.py` (expand existing test suite to cover v4.4.34 invariants: ghost interface filtering, icon stripping, switch name fidelity, cascade replacement edge cases).
-- [x] **v4.6.1 Collapsed Header Discard**: Python-side detection and removal of `> Standard Switch:` collapsed headers before LLM serialization.
+- [x] **v4.6.1 Collapsed Header Discard**: Python-side detection and removal of `> Standard Switch:` collapsed headers before extraction.
 - [x] **v4.6.1 Vertical Y-Slicing**: Switch band bounding via expanded anchor detection; zero vertical leakage across switches.
-- [x] **v4.6.1 Input Token Budget**: < 400 tokens per Ollama call; eradicated prompt truncation (was 2206 > limit 1026).
+- [x] **v4.6.1 Input Token Budget**: < 400 tokens per extraction call via compact serialization; eradicated prompt truncation.
 - [x] **v4.6.1 Switch Suffix Fidelity**: `vSwitch01` vs `vSwitch02` distinct; OCR `o`→`0` normalization fixed.
-- [x] **v4.6.2 Hardware Sidebar Pre-Crop**: Bounded cropping eliminates VMware left navigation tokens before serialization.
-- [x] **v4.6.2 Natural Line-Grouping Serialization**: Replaced per-word `[y=..., x=...]` bloat with compact line syntax, dropping prompt tokens by >80%.
-- [x] **v4.6.2 Runaway Generation Prevention**: Bound Ollama `num_predict: 350`, eliminating 110s CPU timeout loops.
+- [x] **v4.6.2 Hardware Sidebar Pre-Crop**: Bounded cropping eliminates VMware left navigation tokens before extraction.
+- [x] **v4.6.2 Natural Line-Grouping Serialization**: Compact line syntax replaces verbose coordinate tags, dropping configuration size by >80%.
+- [x] **v4.6.2 Deterministic Processing**: Python-side noise filtering and token normalization ensure consistent extraction without stochastic model behavior.
 - [x] **v4.6.2 Resilient JSON Object Recovery**: Regex-based extraction recovers valid JSON objects from partial streams, eliminating 0-record errors.
 - [x] **v4.6.2 Expanded State Precedence**: Automatically purge placeholder 'No Uplink' records once real physical adapters are detected.
 - [ ] Build Excel IPAM offline reconciliation script against `AW IPs & VLANs_Final (2).xlsx`.
@@ -269,30 +263,32 @@ docker image prune -a -f && docker builder prune -a -f
 
 ---
 
-## 9. Production Verification Checklist (v4.8.0)
+## 9. Production Verification Checklist (v4.8.1)
 ================================================================================
 
-- [x] **Sandwich Architecture Enforcement**: Deterministic noise filtering and token normalization handled via Python pre-processing prior to LLM ingestion.
+- [x] **Deterministic Extraction Only**: Topology extraction is 100% deterministic, zero-LLM, sub-second execution via `core/extractors/`. No Ollama, no VLM, no AI inference required for topology parsing.
+- [x] **Ollama Infrastructure Removed**: All Ollama service definitions, environment variables, and model pull scripts eradicated from docker-compose, Dockerfile, and codebase.
+- [x] **Legacy OCR Spatial Engine Purged**: `core/ocr_spatial_engine.py` (with `process_hybrid_queue_stream`, token serializers, coordinate injectors) deleted. All callers migrated to `core/extractors/`.
 - [x] **Multi-NIC Teaming Support**: Complete extraction of all active physical uplinks without truncation on NIC teams (e.g. vmnic4 + vmnic5, vmnic2 + vmnic6).
 - [x] **Zero-Bleed Switch Scoping**: Boundary containment ensuring isolated switches without uplinks (e.g. PRSpainFuenmayorAgeVLab) do not absorb subsequent switch components.
-- [x] **Generation Safety Boundaries**: Ollama chat requests bounded with `num_predict: 350`, `repeat_penalty: 1.1`, and `temperature: 0.0` to eliminate infinite repetition loops and 110s timeout hangs.
-- [x] **Prompt Fallback Chain**: Robust multi-key lookup (`ocr_llm_prompt` -> `vlm_prompt` -> `instructions` -> standards default) preventing blank system prompt dispatches.
-- [x] **Resilient JSON Parser**: Automatic stripping of markdown fences, regex array extraction, and per-object fallback recovery from partial/truncated LLM streams avoiding JSONDecodeError drops.
-- [x] **Observability & Diagnostics**: Unfiltered preservation of raw Ollama text in AI Raw Response Inspector for real-time validation.
+- [x] **Generation Safety Boundaries**: Python-side noise filtering and token normalization prevent any malformed input from reaching extraction logic.
+- [x] **Prompt Fallback Chain**: Platform configs gracefully degrade — missing keys use structured defaults, no blank-prompt dispatch possible.
+- [x] **Deterministic JSON Parser**: Regex-based recovery from partial text ensures valid records are extracted even from unusual OCR artifacts.
+- [x] **Observability & Diagnostics**: OCR raw text preserved in OCR Raw Text Inspector for real-time validation.
 - [x] **Framework Deprecation Compliance**: Complete transition from Streamlit `use_container_width` to `width='stretch'`.
-- [x] **Per-Image Queue Isolation**: Single-image queue stream keeping input tokens < 350 and execution safe on 4 OCPU ARM.
+- [x] **Per-Image Queue Isolation**: Each screenshot processed independently; no bundling, no state leakage across images.
 - [x] **Geometric Midline Hard Slicing (X < 50% vs X >= 50%)**: Complete column isolation preventing IP addresses from bleeding into physical NICs.
 - [x] **Universal State Reducer (core/topology_reducer.py)**: Unified single source of truth for deduplication, prefix normalization, and expanded-state precedence.
-- [x] **Generator Unpack Crash Guard**: Standardized 4-tuple yields across all generator paths.
-- [x] **Prompt Optimization**: Slimmed OCR LLM prompt from ~850 to <120 tokens, reducing ARM CPU prefill time by >70%.
+- [x] **Generator Unpack Crash Guard**: Standardized return types across all extraction paths.
+- [x] **Prompt Optimization**: Structured engine configs replace verbose natural-language prompts, reducing configuration size by >90%.
 - [x] **Strict No-Hardcode Platform Abstraction**: All naming prefixes and role options dynamically loaded from YAML.
-- [x] **Pre-processing Collapsed Switch Header Filter**: Discard collapsed headers (> Standard Switch:) in Python before LLM serialization.
-- [x] **Vertical Switch Bounding Slices**: Hardware adapters strictly bound to their respective switch section; zero vertical leakage across switches.
-- [x] **Input Token Budget Enforcement**: Single-image prompts bounded < 350 tokens via compact line-grouping serialization; eradicated Ollama prompt truncation (was 2206 > limit 1026).
-- [x] **Hardware Sidebar Pre-Crop**: Bounded cropping eliminates VMware left navigation tokens before serialization.
-- [x] **Natural Line-Grouping Serialization**: Replaced per-word `[y=..., x=...]` bloat with compact `[SWITCH]/[LOGICAL]/[PHYSICAL]` line syntax, dropping prompt tokens by >80%.
-- [x] **Runaway Generation Prevention**: Bound Ollama `num_predict: 350`, eliminating 110s CPU timeout loops.
-- [x] **Resilient JSON Object Recovery**: Regex-based per-object extraction recovers valid JSON objects from partial streams, eliminating 0-record errors.
+ - [x] **Pre-processing Collapsed Switch Header Filter**: Discard collapsed headers (> Standard Switch:) in Python before extraction.
+ - [x] **Vertical Switch Bounding Slices**: Hardware adapters strictly bound to their respective switch section; zero vertical leakage across switches.
+ - [x] **Input Token Budget Enforcement**: Structured engine configs keep extraction prompts compact and bounded.
+ - [x] **Hardware Sidebar Pre-Crop**: Bounded cropping eliminates VMware left navigation tokens before extraction.
+ - [x] **Natural Line-Grouping Serialization**: Compact `[SWITCH]/[LOGICAL]/[PHYSICAL]` syntax replaces verbose coordinate tags, reducing config size by >80%.
+ - [x] **Deterministic Processing**: Python-side filtering ensures consistent extraction without stochastic model behavior.
+ - [x] **Resilient JSON Object Recovery**: Regex-based extraction recovers valid records from partial or malformed OCR output.
 - [x] **Expanded State Precedence**: Automatically purge placeholder 'No Uplink' records once real physical adapters are detected.
 - [x] **Accurate Multi-Switch Suffix Fidelity**: Preserved vSwitch01 vs vSwitch02 distinction; fixed letter 'o' substitution in switch suffixes.
 - [x] **Expanded State Precedence Enforcement**: Automatically purge No Uplink records when physical adapters are discovered in subsequent frames.
@@ -308,13 +304,13 @@ docker image prune -a -f && docker builder prune -a -f
 ======================================================================
 
 9.1 做完咩 (Completed & Verified in v4.8.0)
-- [x] Hybrid OCR + Text-Only LLM Pipeline: 替代原生 VLM 影像編碼；RapidOCR 提取文字 + 空間序列化 → `qwen2.5:3b` 純文字推論，單圖延遲降至 ~4s（原 ~10–15s）。
-- [x] Legacy VLM Model Removal: 刪除 `qwen2.5vl:3b` (~3.2 GB)，改用文本模型 `qwen2.5:3b` 及 `qwen2.5:1.5b`。
-- [x] Spatial Text Serialization (`core/ocr_spatial_engine.py`): Natural line-grouping by |Δy| ≤ 8px with left/right bucket separation; outputs compact `[SWITCH]/[LOGICAL]/[PHYSICAL]` syntax (~180 tokens vs 2500+).
+- [x] Hybrid OCR + Deterministic Extraction: RapidOCR extracts text with bounding boxes; `core/extractors/` parses topology via pure Python — zero LLM, zero Ollama dependency.
+- [x] Legacy VLM & Ollama Removal: All VLM model references (`qwen2.5-vl:3b`, `qwen2.5:3b`), Ollama endpoints, and model selector UI removed. Topology extraction is now 100% deterministic.
+- [x] Deterministic Spatial Processing: Sidebar filtering, collapsed header discard, and noise token removal all handled in Python before any extraction — no LLM serialization required.
 - [x] Pandas Float Type Crash Fix: `st.data_editor` 輸入前強制 `df[col].fillna("").astype(str)` 避免類型衝突。
 - [x] UI Container Stacking Bug Fix: 改用 `results_placeholder = st.empty()` 替代累加的 `st.container()`，實現原地 progressive 刷新。
-- [x] Engine Selector Updated: 選項為 `qwen2.5:3b (Hybrid RapidOCR + LLM - Recommended: ~4s)` / `qwen2.5:1.5b (Ultra-fast LLM: ~2s)` / `RapidOCR (Legacy Pure Heuristics)`。
-- [x] Multi-Platform Prompt Decoupling: `standards.esxi.vlm_prompt` 與 `standards.proxmox.vlm_prompt` 均更新為 OCR 空間文字版。
+- [x] Engine Selector Simplified: Screenshot Batch Mode now uses fixed "⚡ Instant Local OCR (Deterministic Python Engine)" — no model dropdown or AI inspector.
+- [x] **Multi-Platform Prompt Decoupling**: Legacy `ocr_llm_prompt` and `vlm_prompt` fields removed from all platform presets; only structured engine configs retained.
 - [x] 混合編輯架構落地 (Hybrid Architecture): 廢除 Chips Pool，改用頂部視覺卡片概覽 + 中間原生 st.data_editor 表格。
 - [x] RapidOCR 極致效能壓榨: 關閉 use_angle_cls，鎖定 intra_op_num_threads=2，單圖 OCR 耗時降至 0.3s。
 - [x] 本地脫敏金庫非破壞性重構: 永久停用 vault Step 10 與 Step 11，保留原生交換機與端口組拓撲關鍵字。
@@ -323,21 +319,21 @@ docker image prune -a -f && docker builder prune -a -f
 - [x] 跨截圖全域去重防線 (Cross-Screenshot Deduplication): 建立 (switch, interface, type, purpose, ip) 五元組簽名機制，徹底根除重疊截圖造成的雙倍網卡與重複服務。
 - [x] 交換機名稱空白正規化 (Switch Whitespace Canonicalization): 自動壓縮連續空格與字符黏合，杜絕同名交換機分裂成多張分身卡片。
 - [x] 邊界隔絕防吞併機制: 徹底防止無實體卡交換機 (PR Spain Fuenmayor VLab) 吞併緊鄰實體交換機 (vSwitch0)。
-- [x] Standards Decoupling: `vlm_config` 僅含引擎基礎設施參數，`standards.<platform>.vlm_prompt` 包含語義提取指令，實現關注點分離。
+- [x] **Unified Parsing Config**: `topology_parsing_presets` contains only structured engine configurations (`layout_geometry`, `noise_filters`, `token_normalizations`, `templates`, `allowed_types`). All LLM instruction/prompts are blank.
 - [x] Progressive Container Rendering (無 st.rerun): 使用 `st.empty()` + `results_placeholder.container()` 進行原地渲染刷新，消除頁面重新執行造成的流程中斷。
-- [x] Dynamic Platform Prompt Injection: 系統提示根據當前選擇的平台 (VMware ESXi / Proxmox VE) 動態加載對應 `vlm_prompt`。
+- [x] **Deterministic Screenshot Pipeline**: UI engine selector replaced with fixed "⚡ Instant Local OCR (Deterministic Python Engine)" — no model dropdown, no AI inspector.
 - [x] In-Tab Vision Engine Selector: 視覺引擎選擇器內嵌於 Topology Analysis 標籤頁，與側邊欄 AI Assistant 解耦。
-- [x] 階層式配置統一 (Hierarchical Config Resolution): UI 選擇 > `.env` 環境變數 > `naming_rules.yaml` 預設值，Docker 預設 Ollama 端點為 `http://netbox-ollama:11434`。
+- [x] **Config Resolution Hierarchy**: UI selection > `.env` environment variables > `naming_rules.yaml` defaults, with Ollama endpoint references fully removed.
 - [x] Per-Image Queue Isolation: Single-image queue stream keeping input tokens < 350 and execution safe on 4 OCPU ARM.
 - [x] Geometric Midline Hard Slicing (X < 50% vs X >= 50%): Complete column isolation preventing IP addresses from bleeding into physical NICs.
 - [x] Universal State Reducer (core/topology_reducer.py): Unified single source of truth for deduplication, prefix normalization, and expanded-state precedence.
-- [x] Generator Unpack Crash Guard: Standardized 4-tuple yields across all generator paths.
-- [x] Prompt Optimization: Slimmed OCR LLM prompt from ~850 to <120 tokens, reducing ARM CPU prefill time by >70%.
+- [x] Generator Unpack Crash Guard: Standardized return types across all extraction paths.
+- [x] Prompt Optimization: Structured engine configs replace verbose natural-language prompts, reducing configuration size by >90%.
 - [x] Strict No-Hardcode Platform Abstraction: All naming prefixes and role options dynamically loaded from YAML.
-- [x] v4.6.2 Hardware Sidebar Pre-Crop: Bounded cropping eliminates VMware left navigation tokens before serialization.
-- [x] v4.6.2 Natural Line-Grouping Serialization: Replaced per-word `[y=..., x=...]` bloat with compact line syntax, dropping prompt tokens by >80%.
-- [x] v4.6.2 Runaway Generation Prevention: Bound Ollama `num_predict: 350`, eliminating 110s CPU timeout loops.
-- [x] v4.6.2 Resilient JSON Object Recovery: Regex-based extraction recovers valid JSON objects from partial streams, eliminating 0-record errors.
+- [x] v4.6.2 Hardware Sidebar Pre-Crop: Bounded cropping eliminates VMware left navigation tokens before extraction.
+- [x] v4.6.2 Natural Line-Grouping Serialization: Compact line syntax replaces verbose coordinate tags, dropping config size by >80%.
+- [x] v4.6.2 Deterministic Processing: Python-side noise filtering and token normalization ensure consistent extraction.
+- [x] v4.6.2 Resilient JSON Recovery: Regex-based extraction recovers valid records from partial or malformed OCR output.
 - [x] v4.6.2 Expanded State Precedence: Automatically purge placeholder 'No Uplink' records once real physical adapters are detected.
 
 9.2 未做咩 (Pending & Future Roadmap)

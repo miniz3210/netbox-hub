@@ -742,33 +742,9 @@ DEFAULT_UNIFIED_PLATFORM_PRESETS = {
             {"pattern": r"(?i)Age\s*VLab", "replace": "Age VLab"},
             {"pattern": r"(?i)AgeVLab", "replace": "Age VLab"},
         ],
-        "ocr_llm_prompt": """[TASK: EXTRACT VMWARE TOPOLOGY JSON]
-Extract virtual switches, physical adapters, and logical network services into a clean JSON array.
-
-RULES:
-1. switch: Switch container name (e.g. vSwitch0, vSwitch01, vSwitch1). Strip "Standard Switch:" prefix.
-2. interface: Physical NIC (vmnic4, vmnic5) or VMkernel (vmk0). Empty string for port groups.
-3. type: Exactly 'Uplink', 'VMkernel', or 'Port Group'.
-4. ip: IPv4 address for VMkernel interfaces, else "".
-5. purpose: Service label (e.g. Management Network, VM Network, iSCSI01, vMotion).
-6. role: 'Active Uplink' (default for vmnic), 'Standby Uplink', or 'None'.
-7. speed: Link speed (e.g. 10000 Full) if shown, else "".
-
-SCHEMA: JSON array of objects with keys: ["switch", "interface", "type", "ip", "purpose", "role", "speed"].
-Output raw JSON array only.""",
+        "ocr_llm_prompt": "",
         "instructions": "",
-        "export_prompt": """You are an expert infrastructure network engineer specializing in VMware ESXi.
-I have attached screenshots of VMware ESXi virtual switch topology and physical network adapter properties.
-Please analyze the images and extract the network topology into the standard atomic JSON format matching these exact attributes:
-- interface: 'vmnicX' or 'vmkX'
-- parent: 'vSwitchX' (or null if unassigned)
-- purpose: Pure service name ('Management Network', 'vMotion', 'iSCSI01') without appending switch names or roles
-- uplink_role: 'Active Uplink' or 'Standby Uplink' for vmnics connected to a switch; null if unassigned or vmk
-- slot: Hardware PCIe slot (e.g. '0000:5b:00.0')
-- speed: Link speed (e.g. '10 Gbit/s Full')
-- ip: IP address for vmk ports
-
-Output ONLY a JSON object with key "interfaces": array of objects.""",
+        "export_prompt": "",
     },
     "Proxmox VE": {
         "platform": "Proxmox VE",
@@ -777,26 +753,8 @@ Output ONLY a JSON object with key "interfaces": array of objects.""",
             "interface": ["bond", "eth", "eno", "ens", "vmbr"],
             "speed": ["speed", "link_speed"],
         },
-        "instructions": """[PLATFORM ARCHITECTURE: PROXMOX VE]
-1. HIERARCHY & BRIDGES:
-   - Root bridges: 'vmbr0', 'vmbr1', etc.
-   - Bonds: 'bond0', 'bond1', etc.
-   - Physical slaves: 'eno1', 'ens18', etc.
-2. ATOMIC ATTRIBUTES:
-   - "interface": Interface or bridge name.
-   - "parent": Connected bridge or bond master.
-   - "purpose": Functional service name or VLAN purpose.
-   - "ip": CIDR IP address assigned to bridge/interface.
-   - "speed": Link speed if visible.""",
-        "export_prompt": """You are an expert infrastructure network engineer specializing in Proxmox VE.
-I have attached screenshots of Proxmox VE network configuration (/etc/network/interfaces / GUI).
-Please extract the Linux Bridge (vmbr), Bond, and physical interfaces into the standard atomic JSON format matching these exact attributes:
-- interface: 'vmbrX', 'bondX', or physical NIC ('ensX', 'enoX')
-- parent: Connected bridge or master
-- purpose: Functional description or VLAN profile
-- ip: CIDR IP address if assigned
-
-Output ONLY a JSON object with key "interfaces": array of objects.""",
+        "instructions": "",
+        "export_prompt": "",
     },
     "Microsoft Azure": {
         "platform": "Microsoft Azure",
@@ -805,24 +763,8 @@ Output ONLY a JSON object with key "interfaces": array of objects.""",
             "interface": ["eth0", "vNIC", "nic"],
             "speed": ["speed", "link_speed"],
         },
-        "instructions": """[PLATFORM ARCHITECTURE: MICROSOFT AZURE]
-1. HIERARCHY:
-   - Virtual Networks (vnet) contain subnets.
-   - Network Interfaces (NIC/vNIC) belong to a subnet within a vnet.
-2. ATOMIC ATTRIBUTES:
-   - "interface": NIC or vNIC name.
-   - "parent": The virtual network (vnet) or subnet name.
-   - "purpose": Functional role (e.g. Management, Production, Database).
-   - "ip": Private IP address assigned to the NIC.""",
-        "export_prompt": """You are an expert infrastructure network engineer specializing in Microsoft Azure.
-I have attached screenshots of Azure Virtual Network and Network Interface configurations.
-Please extract the network topology into the standard atomic JSON format matching these exact attributes:
-- interface: NIC or vNIC name
-- parent: Virtual network (vnet) or subnet name
-- purpose: Functional role or service designation
-- ip: Private IP address
-
-Output ONLY a JSON object with key "interfaces": array of objects.""",
+        "instructions": "",
+        "export_prompt": "",
     },
 }
 
