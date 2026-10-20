@@ -1,7 +1,8 @@
 """
-Universal Topology Reducer (v4.8.0)
-100% Platform-Agnostic: Merges multi-screenshot records, enforces expanded-state
-precedence, and deduplicates 5-tuples.
+Universal Topology Reducer (v4.8.3)
+100% Platform-Agnostic.
+Implements Spaceless Key Canonicalization to merge switch names that differ
+only by OCR whitespace jitter (e.g. "PR Spain Fuenmayor Age VLab" vs "PR Spain FuenmayorAge VLab").
 """
 
 import re
@@ -19,7 +20,7 @@ def apply_normalizations(text: str, normalizations: List[Dict[str, str]]) -> str
 
 
 def reduce_topology_pipeline(
-    raw_records: List[Dict[str, Any]],
+    raw_records: List[Dict[str, Any]], 
     plat_config: Dict[str, Any],
     platform_tokens: Dict[str, Any]
 ) -> List[Dict[str, Any]]:
@@ -30,16 +31,36 @@ def reduce_topology_pipeline(
     noise_filters = plat_config.get("noise_filters", [])
     if noise_filters:
         escaped = [re.escape(n.strip()) for n in noise_filters if n and n.strip()]
-        noise_re = re.compile(r"^(?:" + r"|".join(escaped) + r")$|(?:" + r"|".join(escaped) + r")", re.I)
+        noise_re = re.compile(r"^(?:" + r"|".join(escaped) + r")$", re.I)
     else:
         noise_re = None
 
-    # Step 1: Normalize switch names
+    # Step 1: Initial string clean
     for r in raw_records:
         raw_sw = str(r.get("switch", "")).strip()
         r["switch"] = apply_normalizations(raw_sw, normalizations)
 
-    # Step 2: Expanded State Precedence
+    # Step 2: Spaceless Key Switch Canonicalization (Zero Hardcoding!)
+    # Maps spaceless lower key -> best canonical name (chooses the one with the most spaces)
+    spaceless_map: Dict[str, str] = {}
+    for r in raw_records:
+        sw = str(r.get("switch", "")).strip()
+        if not sw:
+            continue
+        key = re.sub(r"\s+", "", sw).lower()
+        if key not in spaceless_map:
+            spaceless_map[key] = sw
+        else:
+            if sw.count(" ") > spaceless_map[key].count(" "):
+                spaceless_map[key] = sw
+
+    for r in raw_records:
+        sw = str(r.get("switch", "")).strip()
+        key = re.sub(r"\s+", "", sw).lower()
+        if key in spaceless_map:
+            r["switch"] = spaceless_map[key]
+
+    # Step 3: Expanded State Precedence
     switches_with_real_content: Set[str] = set()
     for r in raw_records:
         sw = str(r.get("switch", "")).strip()
@@ -52,7 +73,7 @@ def reduce_topology_pipeline(
         elif rtype != "Uplink" and purpose:
             switches_with_real_content.add(sw)
 
-    # Step 3: Filter & Deduplicate
+    # Step 4: Filter & Deduplicate
     seen_sigs: Set[Tuple[str, str, str, str, str]] = set()
     cleaned: List[Dict[str, Any]] = []
 
@@ -93,13 +114,13 @@ def reduce_topology_pipeline(
             "speed": speed
         })
 
-    # Step 4: Disambiguate VMkernel vs Port Group with identical purpose
+    # Step 5: Disambiguate VMkernel vs Port Group with identical purpose
     vmk_purposes = {
-        (r["switch"].lower(), r["purpose"].lower())
+        (r["switch"].lower(), r["purpose"].lower()) 
         for r in cleaned if r["type"] == "VMkernel" and r["purpose"]
     }
     final_records = [
-        r for r in cleaned
+        r for r in cleaned 
         if not (r["type"] == "Port Group" and (r["switch"].lower(), r["purpose"].lower()) in vmk_purposes)
     ]
 

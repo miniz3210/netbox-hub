@@ -1,5 +1,5 @@
 # NetBox Hub — Living Architecture SOP & Handover Guide
-# Target Baseline: v4.8.2 | Platform: Oracle Cloud Ampere A1 (ARM64)
+# Target Baseline: v4.8.3 | Platform: Oracle Cloud Ampere A1 (ARM64)
 
 ---
 
@@ -8,7 +8,7 @@
 | Property              | Value                                                        |
 |-----------------------|--------------------------------------------------------------|
 | Application           | NetBox Universal Library Hub                                 |
-| Target Version        | v4.8.2                                                       |
+| Target Version        | v4.8.3                                                       |
 | Runtime               | Python 3.11+ / Streamlit                                     |
 | Cloud Infrastructure  | Oracle Cloud Ampere A1 (ARM64 / aarch64, Linux)              |
 | Container Registry    | `ghcr.io/miniz3210/netbox-hub`                               |
@@ -160,7 +160,7 @@ When a cell in the DataGrid is edited, `_apply_cascade_to_rows()` in `ui/tabs/na
 Capture a baseline snapshot of the Standards Tab configuration into `data/naming_rules.yaml`. Verify all section definitions (2.5 UX rules, 4.0 Blueprint guide) are present and consistent.
 
 ### Step 2 — Version Assert Verification
-Confirm `config/constants.py::APP_VERSION == "4.8.2"`. Ensure no release notes or version bump scripts are pending.
+Confirm `config/constants.py::APP_VERSION == "4.8.3"`. Ensure no release notes or version bump scripts are pending.
 
 ### Step 3 — Safe Local Container Cache Cleanup
 ```bash
@@ -171,8 +171,8 @@ docker builder prune -a -f
 
 ### Step 4 — Docker Build & Tag Release
 ```bash
-docker build -t ghcr.io/miniz3210/netbox-hub:v4.8.2 -t ghcr.io/miniz3210/netbox-hub:latest .
-docker push ghcr.io/miniz3210/netbox-hub:v4.8.2
+docker build -t ghcr.io/miniz3210/netbox-hub:v4.8.3 -t ghcr.io/miniz3210/netbox-hub:latest .
+docker push ghcr.io/miniz3210/netbox-hub:v4.8.3
 docker push ghcr.io/miniz3210/netbox-hub:latest
 ```
 
@@ -263,7 +263,7 @@ docker image prune -a -f && docker builder prune -a -f
 
 ---
 
-## 9. Production Verification Checklist (v4.8.2)
+## 9. Production Verification Checklist (v4.8.3)
 ================================================================================
 
 - [x] **Deterministic Extraction Only**: Topology extraction is 100% deterministic, zero-LLM, sub-second execution via `core/extractors/`. No Ollama, no VLM, no AI inference required for topology parsing.
@@ -293,6 +293,8 @@ docker image prune -a -f && docker builder prune -a -f
 - [x] **Accurate Multi-Switch Suffix Fidelity**: Preserved vSwitch01 vs vSwitch02 distinction; fixed letter 'o' substitution in switch suffixes.
 - [x] **Expanded State Precedence Enforcement**: Automatically purge No Uplink records when physical adapters are discovered in subsequent frames.
 - [x] **v4.8.0 Strategy/Adapter Extractor Pattern**: Platform-specific topology extraction isolated into `core/extractors/` — `EsxiTopologyExtractor` for VMware ESXi, `ProxmoxTopologyExtractor` for Proxmox VE. Zero LLM spatial dependency, sub-second execution, 100% configuration-driven rules via `data/naming_rules.yaml`.
+- [x] **v4.8.3 Spaceless Key Canonicalization**: Zero-hardcode switch name deduplication via spaceless key clustering in `topology_reducer.py` — merges OCR whitespace variants (e.g. "Fuenmayor Age" vs "FuenmayorAge") without hardcoded rules.
+- [x] **v4.8.3 Horizontal Line Clustering**: Multi-word port groups (e.g. "iSCSI Veeam") preserved via geometric token line-clustering in `esxi.py` — tokens on the same horizontal band are concatenated before filtering.
 - [x] **v4.7.3 Dynamic Sidebar X-Cutoff**: Switch-header text ("StandardSwitch:...") no longer leaks into Port Group services. Sidebar boundary computed dynamically from leftmost switch header minus 15px — works on both full-screen and cropped screenshots without hardcoding.
 - [x] **v4.7.0 Deterministic Vertical Y-Slicing**: Switch headers detected via geometric anchor scoring, then bands sliced by Y-coordinate with zero vertical leakage.
 - [x] **v4.7.0 Deterministic Left/Right Column Split**: 48% midline hard slice separates logical services from physical adapters without LLM assistance.
