@@ -1,8 +1,11 @@
 """
-VMware ESXi & vDS Pure Python Geometric Topology Extractor (v4.8.8)
+VMware ESXi & vDS Pure Python Geometric Topology Extractor (v4.8.13)
 Universal, Deterministic, 100% Configuration-Driven.
-Enhanced noise filtering for OCR typos (VMkermel, Virt ual), non-ASCII icon junk,
-and tolerant token matching for spaced identifiers (vmnic 3, vmk 2).
+Enhanced:
+- Robust vDS DVUplink container detection (matches any variation of DVUplink).
+- Resilient NIC matching: handles OCR character jitter (vmnic, vmnkc, vmn1c),
+  space separation (vmnic 2), and glyph prefixes (e.g., icons, standby markers).
+- Preserves leading 'v' in vMotion and vSAN service names.
 """
 
 import re
@@ -75,6 +78,10 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
         cfg = plat_cfg or {}
         normalizations = cfg.get("token_normalizations", [])
         noise_filters = cfg.get("noise_filters", [])
+        geom_cfg = cfg.get("geometry", {})
+        y_thresh = float(geom_cfg.get("line_cluster_y_thresh", 8.0))
+        max_vmk_dist = float(geom_cfg.get("vmk_to_title_max_dist", 160.0))
+
         if noise_filters:
             escaped = [re.escape(n.strip()) for n in noise_filters if n and n.strip()]
             noise_re = re.compile(r"(?:" + r"|".join(escaped) + r")", re.I)
@@ -82,9 +89,9 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
             noise_re = None
 
         # -------------------------------------------------------------
-        # Step 1: Detect Switch Headers (Line-Clustering First)
+        # Step 1: Detect Switch Headers
         # -------------------------------------------------------------
-        all_lines = cluster_tokens_into_lines(raw_tokens, y_thresh=8.0)
+        all_lines = cluster_tokens_into_lines(raw_tokens, y_thresh=y_thresh)
         switch_headers = []
 
         for line_item in all_lines:
@@ -93,7 +100,7 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
             switch_tok_idx = None
             for idx, tok in enumerate(tokens_in_line):
                 txt = str(tok.get("text", "")).strip()
-                if re.search(r"(?:Standard|Distributed|Bridge|\bSwitch\b)", txt, re.I):
+                if re.search(r"(?:Standard\s*Switch|Distributed\s*Switch|Bridge)", txt, re.I):
                     switch_tok_idx = idx
                     break
 
@@ -112,7 +119,7 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
             header_tokens = tokens_in_line[start_idx:]
             joined_header = " ".join(str(t.get("text", "")).strip() for t in header_tokens)
 
-            m = re.search(r"(?:Standard\s*Switch|Distributed\s*Switch|\bSwitch)\s*[:;\s]\s*([A-Za-z0-9_\-\.\s]+?)(?:\s+(?:ADD|EDIT|MANAGE|\.\.\.)|$)", joined_header, re.I)
+            m = re.search(r"(?:Standard|Distributed)\s*Switch\s*[:;\s]\s*([A-Za-z0-9_\-\.\s]+?)(?:\s+(?:ADD|EDIT|MANAGE|\.\.\.)|$)", joined_header, re.I)
             if m:
                 raw_sw_name = m.group(1).strip()
                 raw_sw_name = re.split(r"\s+(?:ADD|EDIT|MANAGE|\.\.\.)", raw_sw_name, flags=re.I)[0].strip()
@@ -183,11 +190,14 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                 })
                 continue
 
+            # ---------------------------------------------------------
             # Dynamic Physical Column Anchor Detection
+            # ---------------------------------------------------------
             phys_anchor_x = None
             for t in inner_tokens:
                 txt = t.get("text", "").strip()
-                if re.search(r"(?:Physical\s*Adapters|.*-DVUplinks-.*|\bvmnic\s*\d+|No\s*physical\s*network\s*adapters)", txt, re.I):
+                # Matches VSS 'Physical Adapters', vDS 'DVUplink', or raw interface identifiers
+                if re.search(r"(?:Physical\s*Adapters|DVUplink|\bvm[nN][kKiI1lL]c\s*\d+|No\s*physical\s*network\s*adapters)", txt, re.I):
                     x0, _, _, _ = get_bounding_box(t)
                     if phys_anchor_x is None or x0 < phys_anchor_x:
                         phys_anchor_x = x0
@@ -203,24 +213,30 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                 physical_tokens = [t for t in inner_tokens if get_bounding_box(t)[0] >= x_mid_band]
 
             # ---------------------------------------------------------
-            # Physical Column Extraction (Allows spaces in vmnic 3)
+            # Physical Column Extraction (Robust Adapter Matching)
             # ---------------------------------------------------------
             physical_records = []
             vmnic_matches = []
+
             for pt in physical_tokens:
                 txt = pt.get("text", "").strip()
+                # Discard empty slots
                 if re.search(r"\(0\s*NIC\s*Adapters\)", txt, re.I):
                     continue
 
-                # Tolerant to "vmnic3" and "vmnic 3"
-                m = re.search(r"(?:^|[\s\b])([xX!\*\-\+]\s*)?\b(vm[nN][kKlL1]c\s*\d+|eno\s*\d+|ens\s*\d+|eth\s*\d+|bond\s*\d+)\b(?:\s*(\d+\s*(?:Gbit/s|Mbit/s|Full|Half)|10000|1000))?", txt, re.I)
+                # Tolerant regex: handles glyphs/icons, typos (vmnkc, vmn1c), and spaced digits (vmnic 2)
+                m = re.search(r"([xX!\*\-\+]\s*)?(?:.*?[^a-zA-Z0-9])?\b(vm[nN][kKiI1lL]c\s*\d+|eno\s*\d+|ens\s*\d+|eth\s*\d+|bond\s*\d+)\b(?:\s*(\d+\s*(?:Gbit/s|Mbit/s|Full|Half)|10000|1000))?", txt, re.I)
                 if m:
                     status_prefix = m.group(1) or ""
                     raw_nic = re.sub(r"\s+", "", m.group(2)).lower()
+                    # Standardize typo variations (e.g., vmnkc3 -> vmnic3, vmn1c2 -> vmnic2)
+                    clean_nic = re.sub(r"^vm[nN][kKiI1lL]c", "vmnic", raw_nic)
+                    clean_nic = apply_normalizations(clean_nic, normalizations)
                     speed_str = m.group(3) or ""
                     is_standby = bool(re.search(r"[xX!]", status_prefix)) or bool(re.search(r"\bStandby\b", txt, re.I))
+
                     vmnic_matches.append({
-                        "nic": raw_nic,
+                        "nic": clean_nic,
                         "speed": speed_str,
                         "standby": is_standby,
                         "y": get_bounding_box(pt)[1]
@@ -266,14 +282,11 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
             # ---------------------------------------------------------
             # Logical Column Extraction (Line-Clustered)
             # ---------------------------------------------------------
-            geom_cfg = cfg.get("geometry", {})
-            y_thresh = float(geom_cfg.get("line_cluster_y_thresh", 8.0))
             logical_lines = cluster_tokens_into_lines(logical_tokens, y_thresh=y_thresh)
 
             vmk_entries = []
             for line_item in logical_lines:
                 txt = line_item["text"].strip()
-                # Tolerant regex for "vmk0", "vmk 0", "vmkO", "vmk 2" followed by IPv4
                 m_vmk = re.search(r"\b(vmk\s*[oO0-9]+)\s*[:\s]\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b", txt, re.I)
                 if m_vmk:
                     clean_vmk = re.sub(r"\s+", "", m_vmk.group(1))
@@ -307,7 +320,6 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
             for line_item in logical_lines:
                 txt = line_item["text"].strip()
 
-                # Filter sub-labels (with full tolerance for OCR typos)
                 if re.search(r"(?:vmk[eao]rn[eao]l|vmk[eao]rm[eao]l)\s*ports?", txt, re.I):
                     continue
                 if re.search(r"virt\s*ual\s*machines?|machines?\s*\(\d+\)", txt, re.I):
@@ -323,7 +335,6 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                 if re.search(r"No\s*associated\s*port\s*groups", txt, re.I):
                     continue
 
-                # Filter non-ASCII icon garbage (e.g. sauqsey enμA)
                 if re.search(r"[^\x00-\x7F]", txt):
                     continue
                 if re.search(r"(?i)sauqsey", txt):
@@ -332,8 +343,8 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                 if noise_re and noise_re.search(txt):
                     continue
 
-                # Strip leading and trailing brackets/arrows/punctuation
-                cleaned_title = re.sub(r"^[>\s\(\)\[\]\{\}\<\>vV▼▶✓✔\-\—\.\:\;]+", "", txt).strip()
+                # Strip leading non-alphanumeric punctuation (never strip leading 'v' / 'V')
+                cleaned_title = re.sub(r"^[>\s\(\)\[\]\{\}\<\>▼▶✓✔\-\—\.\:\;]+", "", txt).strip()
                 cleaned_title = re.sub(r"[\s\.\…\×\<\>\(\)\[\]\{\}]+$", "", cleaned_title).strip()
                 cleaned_title = apply_normalizations(cleaned_title, normalizations)
 
@@ -349,7 +360,6 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
 
             assigned_titles = set()
             for v in vmk_entries:
-                max_vmk_dist = float(geom_cfg.get("vmk_to_title_max_dist", 160.0))
                 candidates = [st for st in service_titles if 0 <= (v["y"] - st["y"]) <= max_vmk_dist]
                 if candidates:
                     candidates.sort(key=lambda c: v["y"] - c["y"])

@@ -554,6 +554,8 @@ topology_parsing_presets:
       replace: Distributed
     - pattern: \bPHYSKCAL\b
       replace: PHYSICAL
+    - pattern: (?i)\bvm[nN][kKiI1lL]c(\d+)\b
+      replace: vmnic\1
     geometry:
       line_cluster_y_thresh: 8.0
       vmk_to_title_max_dist: 160.0
