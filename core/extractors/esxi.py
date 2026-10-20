@@ -20,10 +20,6 @@ def apply_normalizations(text: str, normalizations: List[Dict[str, str]]) -> str
 
 
 def cluster_tokens_into_lines(tokens: List[Dict[str, Any]], y_thresh: float = 8.0) -> List[Dict[str, Any]]:
-    """
-    Groups visual word tokens that lie on the same horizontal text line (within y_thresh),
-    sorting from left to right, and concatenates them into coherent line strings.
-    """
     if not tokens:
         return []
 
@@ -65,10 +61,10 @@ def cluster_tokens_into_lines(tokens: List[Dict[str, Any]], y_thresh: float = 8.
 
 class EsxiTopologyExtractor(BaseTopologyExtractor):
     def extract(
-        self,
-        raw_tokens: List[Dict[str, Any]],
-        image_width: int = 1920,
-        image_height: int = 1080,
+        self, 
+        raw_tokens: List[Dict[str, Any]], 
+        image_width: int = 1920, 
+        image_height: int = 1080, 
         plat_cfg: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         if not raw_tokens:
@@ -79,34 +75,49 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
         noise_filters = cfg.get("noise_filters", [])
         if noise_filters:
             escaped = [re.escape(n.strip()) for n in noise_filters if n and n.strip()]
-            noise_re = re.compile(r"^(?:" + r"|".join(escaped) + r")$", re.I)
+            noise_re = re.compile(r"(?:" + r"|".join(escaped) + r")", re.I)
         else:
             noise_re = None
 
         # -------------------------------------------------------------
-        # Step 1: Detect Switch Headers via Horizontal Line Reunification
+        # Step 1: Detect Switch Headers & Strict Left Boundary
         # -------------------------------------------------------------
-        candidate_header_tokens = []
-        for t in raw_tokens:
-            txt = str(t.get("text", "")).strip()
-            if re.search(r"(?:Standard|Distributed)\s*Switch|Bridge", txt, re.I):
-                candidate_header_tokens.append(t)
-
         switch_headers = []
         seen_header_ys = set()
 
-        for cht in candidate_header_tokens:
-            _, chy, _, _ = get_bounding_box(cht)
-            if any(abs(chy - prev_y) <= 8.0 for prev_y in seen_header_ys):
+        for t in raw_tokens:
+            txt = str(t.get("text", "")).strip()
+            if not re.search(r"(?:Standard|Distributed)\s*Switch|Bridge", txt, re.I):
                 continue
-            seen_header_ys.add(chy)
 
+            bx0, by0, bx1, by1 = get_bounding_box(t)
+            if any(abs(by0 - prev_y) <= 8.0 for prev_y in seen_header_ys):
+                continue
+            seen_header_ys.add(by0)
+
+            # Check for chevron/arrow immediately preceding the header (within 35px)
+            header_x = bx0
+            is_collapsed = False
+            for other in raw_tokens:
+                obx0, oby0, obx1, oby1 = get_bounding_box(other)
+                if abs(oby0 - by0) <= 8.0 and (0.0 <= (bx0 - obx1) <= 35.0):
+                    otxt = str(other.get("text", "")).strip()
+                    if re.search(r"^[>▶\+]$", otxt):
+                        is_collapsed = True
+                        header_x = obx0
+                        break
+                    elif re.search(r"^[v▼\-]$", otxt):
+                        header_x = obx0
+                        break
+
+            # Join header line strictly from header_x onwards (NEVER look left into sidebar)
             line_tokens = [
-                t for t in raw_tokens
-                if abs(get_bounding_box(t)[1] - chy) <= 10.0
+                tok for tok in raw_tokens 
+                if abs(get_bounding_box(tok)[1] - by0) <= 8.0 
+                and get_bounding_box(tok)[0] >= (header_x - 5.0)
             ]
-            line_tokens.sort(key=lambda x: get_bounding_box(x)[0])
-            joined_line = " ".join(str(x.get("text", "")).strip() for x in line_tokens)
+            line_tokens.sort(key=lambda tok: get_bounding_box(tok)[0])
+            joined_line = " ".join(str(tok.get("text", "")).strip() for tok in line_tokens)
 
             m = re.search(r"(?:Standard|Distributed)\s*Switch(?:\s*[:;]|\s+)\s*([A-Za-z0-9_\-\.\s]+?)(?:\s+(?:ADD|EDIT|MANAGE|\.\.\.)|$)", joined_line, re.I)
             if m:
@@ -114,11 +125,13 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                 raw_sw_name = re.split(r"\s+(?:ADD|EDIT|MANAGE|\.\.\.)", raw_sw_name, flags=re.I)[0].strip()
                 sw_name = apply_normalizations(raw_sw_name, normalizations)
 
-                is_collapsed = bool(re.search(r"(?:^|\s)(?:>|▶|\+)", joined_line))
+                if not is_collapsed:
+                    is_collapsed = bool(re.search(r"(?:^|\s)[>▶\+]", joined_line))
+
                 switch_headers.append({
                     "name": sw_name,
-                    "y_top": chy,
-                    "x_left": min(get_bounding_box(x)[0] for x in line_tokens),
+                    "y_top": by0,
+                    "x_left": header_x,
                     "collapsed": is_collapsed
                 })
 
@@ -126,6 +139,9 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
         if not switch_headers:
             return []
 
+        # Dynamic Sidebar Boundary:
+        # Full UI: headers start at X ~ 190px -> cutoff is ~175px (sidebar totally dropped)
+        # Cropped: headers start at X ~ 15px -> cutoff is 0px (content preserved)
         min_switch_x = min(sh["x_left"] for sh in switch_headers)
         sidebar_cutoff_x = max(0.0, min_switch_x - 15.0)
 
