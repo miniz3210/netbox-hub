@@ -480,18 +480,6 @@ hardware_baseline_standards:
 topology_parsing_presets:
   VMware ESXi:
     platform: VMware ESXi
-    aliases:
-      parent:
-      - v_switch
-      - vswitch
-      - dvswitch
-      interface:
-      - vmnic
-      - vmk
-      - port_group
-      speed:
-      - speed
-      - link_speed
     layout_geometry:
       sidebar_x_cutoff: 280.0
       midline_ratio: 0.48
@@ -571,32 +559,8 @@ topology_parsing_presets:
       vmk_to_title_max_dist: 160.0
   Proxmox VE:
     platform: Proxmox VE
-    aliases:
-      parent:
-      - bridge
-      - vmbr
-      interface:
-      - bond
-      - eth
-      - eno
-      - ens
-      - vmbr
-      speed:
-      - speed
-      - link_speed
   Microsoft Azure:
     platform: Microsoft Azure
-    aliases:
-      parent:
-      - vnet
-      - virtual_network
-      interface:
-      - eth0
-      - vNIC
-      - nic
-      speed:
-      - speed
-      - link_speed
 hypervisor_presets:
   VMware ESXi:
   - code: Switch_Teaming
