@@ -1,11 +1,11 @@
 """
-VMware ESXi & vDS Pure Python Geometric Topology Extractor (v4.8.13)
+VMware ESXi & vDS Pure Python Geometric Topology Extractor (v4.8.14)
 Universal, Deterministic, 100% Configuration-Driven.
-Enhanced:
-- Robust vDS DVUplink container detection (matches any variation of DVUplink).
-- Resilient NIC matching: handles OCR character jitter (vmnic, vmnkc, vmn1c),
-  space separation (vmnic 2), and glyph prefixes (e.g., icons, standby markers).
-- Preserves leading 'v' in vMotion and vSAN service names.
+Resolves:
+- Multi-token switch header detection (evaluates full concatenated line text first).
+- Uplink icon-prefix tolerance (removes boundary constraint blocking tokens like 'ovmnic2').
+- Standby uplink glyph adjacency detection (associates standalone 'x' icons with adjacent NICs).
+- Preserves leading 'v' in service titles (vMotion, vSAN).
 """
 
 import re
@@ -89,23 +89,31 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
             noise_re = None
 
         # -------------------------------------------------------------
-        # Step 1: Detect Switch Headers
+        # Step 1: Detect Switch Headers (Full Line First)
         # -------------------------------------------------------------
         all_lines = cluster_tokens_into_lines(raw_tokens, y_thresh=y_thresh)
         switch_headers = []
 
         for line_item in all_lines:
+            line_text = line_item["text"]
+
+            # Match switch pattern across the full concatenated line
+            m = re.search(r"(?:Standard|Distributed)\s*Switch\s*[:;\s]\s*([A-Za-z0-9_\-\.\s]+?)(?:\s+(?:ADD|EDIT|MANAGE|\.\.\.)|$)", line_text, re.I)
+            if not m:
+                m = re.search(r"\bBridge\s*[:;\s]\s*([A-Za-z0-9_\-\.\s]+?)(?:\s+(?:ADD|EDIT|MANAGE|\.\.\.)|$)", line_text, re.I)
+
+            if not m:
+                continue
+
             tokens_in_line = line_item["tokens"]
 
-            switch_tok_idx = None
+            # Identify the start token of the switch header
+            switch_tok_idx = 0
             for idx, tok in enumerate(tokens_in_line):
                 txt = str(tok.get("text", "")).strip()
-                if re.search(r"(?:Standard\s*Switch|Distributed\s*Switch|Bridge)", txt, re.I):
+                if re.search(r"^(?:Standard|Distributed|Bridge)$", txt, re.I) or re.search(r"(?:Standard|Distributed)\s*Switch", txt, re.I):
                     switch_tok_idx = idx
                     break
-
-            if switch_tok_idx is None:
-                continue
 
             start_idx = switch_tok_idx
             if switch_tok_idx > 0:
@@ -119,21 +127,19 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
             header_tokens = tokens_in_line[start_idx:]
             joined_header = " ".join(str(t.get("text", "")).strip() for t in header_tokens)
 
-            m = re.search(r"(?:Standard|Distributed)\s*Switch\s*[:;\s]\s*([A-Za-z0-9_\-\.\s]+?)(?:\s+(?:ADD|EDIT|MANAGE|\.\.\.)|$)", joined_header, re.I)
-            if m:
-                raw_sw_name = m.group(1).strip()
-                raw_sw_name = re.split(r"\s+(?:ADD|EDIT|MANAGE|\.\.\.)", raw_sw_name, flags=re.I)[0].strip()
-                sw_name = apply_normalizations(raw_sw_name, normalizations)
+            raw_sw_name = m.group(1).strip()
+            raw_sw_name = re.split(r"\s+(?:ADD|EDIT|MANAGE|\.\.\.)", raw_sw_name, flags=re.I)[0].strip()
+            sw_name = apply_normalizations(raw_sw_name, normalizations)
 
-                is_collapsed = bool(re.search(r"^[>▶\+]", joined_header))
-                header_x0 = get_bounding_box(header_tokens[0])[0]
+            is_collapsed = bool(re.search(r"^[>▶\+]", joined_header))
+            header_x0 = get_bounding_box(header_tokens[0])[0]
 
-                switch_headers.append({
-                    "name": sw_name,
-                    "y_top": line_item["y"],
-                    "x_left": header_x0,
-                    "collapsed": is_collapsed
-                })
+            switch_headers.append({
+                "name": sw_name,
+                "y_top": line_item["y"],
+                "x_left": header_x0,
+                "collapsed": is_collapsed
+            })
 
         switch_headers.sort(key=lambda s: s["y_top"])
         if not switch_headers:
@@ -190,14 +196,11 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                 })
                 continue
 
-            # ---------------------------------------------------------
             # Dynamic Physical Column Anchor Detection
-            # ---------------------------------------------------------
             phys_anchor_x = None
             for t in inner_tokens:
                 txt = t.get("text", "").strip()
-                # Matches VSS 'Physical Adapters', vDS 'DVUplink', or raw interface identifiers
-                if re.search(r"(?:Physical\s*Adapters|DVUplink|\bvm[nN][kKiI1lL]c\s*\d+|No\s*physical\s*network\s*adapters)", txt, re.I):
+                if re.search(r"(?:Physical\s*Adapters|DVUplink|vm[nN][kKiI1lL]c\s*\d+|No\s*physical\s*network\s*adapters)", txt, re.I):
                     x0, _, _, _ = get_bounding_box(t)
                     if phys_anchor_x is None or x0 < phys_anchor_x:
                         phys_anchor_x = x0
@@ -213,31 +216,39 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                 physical_tokens = [t for t in inner_tokens if get_bounding_box(t)[0] >= x_mid_band]
 
             # ---------------------------------------------------------
-            # Physical Column Extraction (Robust Adapter Matching)
+            # Physical Column Extraction (Tolerant & Adjacency-Aware)
             # ---------------------------------------------------------
             physical_records = []
             vmnic_matches = []
 
             for pt in physical_tokens:
                 txt = pt.get("text", "").strip()
-                # Discard empty slots
                 if re.search(r"\(0\s*NIC\s*Adapters\)", txt, re.I):
                     continue
 
-                # Tolerant regex: handles glyphs/icons, typos (vmnkc, vmn1c), and spaced digits (vmnic 2)
-                m = re.search(r"([xX!\*\-\+]\s*)?(?:.*?[^a-zA-Z0-9])?\b(vm[nN][kKiI1lL]c\s*\d+|eno\s*\d+|ens\s*\d+|eth\s*\d+|bond\s*\d+)\b(?:\s*(\d+\s*(?:Gbit/s|Mbit/s|Full|Half)|10000|1000))?", txt, re.I)
+                # Tolerant regex: searches for vm[nic/nkc/n1c] anywhere in token without strict word boundary
+                m = re.search(r"([xX!\*\-\+]\s*)?.*?(vm[nN][kKiI1lL]c\s*\d+|eno\s*\d+|ens\s*\d+|eth\s*\d+|bond\s*\d+)", txt, re.I)
                 if m:
                     status_prefix = m.group(1) or ""
                     raw_nic = re.sub(r"\s+", "", m.group(2)).lower()
-                    # Standardize typo variations (e.g., vmnkc3 -> vmnic3, vmn1c2 -> vmnic2)
                     clean_nic = re.sub(r"^vm[nN][kKiI1lL]c", "vmnic", raw_nic)
                     clean_nic = apply_normalizations(clean_nic, normalizations)
-                    speed_str = m.group(3) or ""
+
                     is_standby = bool(re.search(r"[xX!]", status_prefix)) or bool(re.search(r"\bStandby\b", txt, re.I))
+
+                    # If not explicitly marked standby, check for adjacent glyph token on same Y level
+                    if not is_standby:
+                        for other_pt in physical_tokens:
+                            otxt = other_pt.get("text", "").strip()
+                            if re.match(r"^[xX!]$", otxt):
+                                if abs(get_bounding_box(other_pt)[1] - get_bounding_box(pt)[1]) <= 10.0:
+                                    if 0.0 <= (get_bounding_box(pt)[0] - get_bounding_box(other_pt)[2]) <= 35.0:
+                                        is_standby = True
+                                        break
 
                     vmnic_matches.append({
                         "nic": clean_nic,
-                        "speed": speed_str,
+                        "speed": "",
                         "standby": is_standby,
                         "y": get_bounding_box(pt)[1]
                     })
@@ -248,14 +259,13 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                     continue
                 seen_nics.add(vm["nic"])
 
-                nic_speed = vm["speed"]
-                if not nic_speed:
-                    for pt in physical_tokens:
-                        if abs(get_bounding_box(pt)[1] - vm["y"]) < 20.0:
-                            sm = re.search(r"(\d+\s*(?:Gbit/s|Mbit/s|Full|Half)|10000|1000)", pt.get("text", ""), re.I)
-                            if sm:
-                                nic_speed = sm.group(1).strip()
-                                break
+                nic_speed = ""
+                for pt in physical_tokens:
+                    if abs(get_bounding_box(pt)[1] - vm["y"]) < 20.0:
+                        sm = re.search(r"(\d+\s*(?:Gbit/s|Mbit/s|Full|Half)|10000|1000)", pt.get("text", ""), re.I)
+                        if sm:
+                            nic_speed = sm.group(1).strip()
+                            break
 
                 physical_records.append({
                     "switch": sw_name,
@@ -343,7 +353,7 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                 if noise_re and noise_re.search(txt):
                     continue
 
-                # Strip leading non-alphanumeric punctuation (never strip leading 'v' / 'V')
+                # Strip leading non-alphanumeric punctuation (preserves leading 'v' in vMotion/vSAN)
                 cleaned_title = re.sub(r"^[>\s\(\)\[\]\{\}\<\>▼▶✓✔\-\—\.\:\;]+", "", txt).strip()
                 cleaned_title = re.sub(r"[\s\.\…\×\<\>\(\)\[\]\{\}]+$", "", cleaned_title).strip()
                 cleaned_title = apply_normalizations(cleaned_title, normalizations)
