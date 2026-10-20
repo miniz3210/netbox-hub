@@ -1,6 +1,9 @@
 """
-VMware ESXi & vDS Pure Python Geometric Topology Extractor (v4.8.18)
+VMware ESXi & vDS Pure Python Geometric Topology Extractor (v4.8.21)
 Universal, Deterministic, 100% Configuration-Driven.
+Resolves:
+- Zero-space tolerance for OCR artifacts (e.g. 'Switch:iDMZ' missing space).
+- Unified exclusion filtering to prevent misclassified switch headers.
 """
 
 import re
@@ -90,9 +93,8 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
         for line_item in header_lines:
             line_text = line_item["text"]
 
-            # Bulletproof: Matches standalone 'Switch' or 'Bridge', optional colon, followed by name.
-            # \b prevents matching inside 'dvSwitch0-DVUplinks'. OCR typos on 'Distributed' are ignored.
-            m = re.search(r"\b(?:Switch|Bridge)\b\s*[:;]?\s+([A-Za-z0-9_\-\.]{3,})(?:\s+(?:ADD|EDIT|MANAGE|ACTIONS|\.\.\.)|$)", line_text, re.I)
+            # v4.8.21 Fix: \s* allows matches even if OCR completely eats the space after the colon
+            m = re.search(r"\b(?:Switch|Bridge)\b\s*[:;]?\s*([A-Za-z0-9_\-\.]{3,})(?:\s*(?:ADD|EDIT|MANAGE|ACTIONS|\.\.\.)|$)", line_text, re.I)
             if not m:
                 continue
 
@@ -101,31 +103,21 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
 
             tokens_in_line = line_item["tokens"]
             
-            # Locate the exact token containing 'Switch'
             header_tok_idx = 0
             for idx, tok in enumerate(tokens_in_line):
                 if re.search(r"\b(?:Switch|Bridge)\b", str(tok.get("text", "")).strip(), re.I):
                     header_tok_idx = idx
                     break
 
-            # Smart backwards walking to find the true X coordinate of the container
             start_idx = header_tok_idx
             for i in range(header_tok_idx - 1, -1, -1):
                 txt = str(tokens_in_line[i].get("text", "")).strip()
                 dist = get_bounding_box(tokens_in_line[i+1])[0] - get_bounding_box(tokens_in_line[i])[2]
                 
-                # Stop if we hit a massive gap (likely crossed into the sidebar)
-                if dist > 80.0:
-                    break
-                # Stop immediately if we hit a known sidebar keyword
-                if re.search(r"(?:Virtual|Networking|Storage|System|Hardware)", txt, re.I):
-                    break
-                
+                if dist > 80.0: break
+                if re.search(r"(?:Virtual|Networking|Storage|System|Hardware)", txt, re.I): break
                 start_idx = i
-                
-                # If we included a chevron, this is the definitive start of the header
-                if re.search(r"^[>▶\+v▼\-]", txt):
-                    break
+                if re.search(r"^[>▶\+v▼\-]", txt): break
 
             header_tokens = tokens_in_line[start_idx:]
             joined_header = " ".join(str(t.get("text", "")).strip() for t in header_tokens)
@@ -172,7 +164,8 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                     continue
                 if re.match(r"^(?:ADD\s*NETWORKING|REFRESH|EDIT|MANAGE\s*PHYSICAL|ACTIONS|\.\.\.)$", text, re.I):
                     continue
-                if re.search(r"\b(?:Standard|Distributed)\s*Switch\b", text, re.I):
+                # Same fix applied to filtering: bulletproof exclusion
+                if re.search(r"\b(?:Switch|Bridge)\b\s*[:;]?\s*([A-Za-z0-9_\-\.]{3,})", text, re.I):
                     continue
                 if text.startswith(">") or text.startswith("▶"):
                     continue
@@ -327,7 +320,7 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                     continue
                 if re.search(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b", txt):
                     continue
-                if re.search(r"\b(?:Standard|Distributed)\s*Switch:", txt, re.I):
+                if re.search(r"\b(?:Switch|Bridge)\b\s*[:;]?\s*([A-Za-z0-9_\-\.]{3,})", txt, re.I):
                     continue
                 if re.search(r"No\s*associated\s*port\s*groups", txt, re.I):
                     continue
