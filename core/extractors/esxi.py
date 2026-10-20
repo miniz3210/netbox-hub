@@ -1,6 +1,11 @@
 """
-VMware ESXi & vDS Pure Python Geometric Topology Extractor (v4.8.16)
+VMware ESXi & vDS Pure Python Geometric Topology Extractor (v4.8.17)
 Universal, Deterministic, 100% Configuration-Driven.
+Resolves:
+- High-tolerance header clustering to bridge vertical OCR jitter for vDS headers.
+- Bulletproof regex prefix splitting for switch names (immune to missing colons).
+- Standby uplink glyph adjacency detection.
+- Preserves leading 'v' in service titles (vMotion, vSAN).
 """
 
 import re
@@ -84,27 +89,32 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
             noise_re = None
 
         # -------------------------------------------------------------
-        # Step 1: Detect Switch Headers (Full Line Matching)
+        # Step 1: Detect Switch Headers (High-Tolerance Line Clustering)
         # -------------------------------------------------------------
-        all_lines = cluster_tokens_into_lines(raw_tokens, y_thresh=y_thresh)
+        header_y_thresh = max(18.0, y_thresh * 2)
+        header_lines = cluster_tokens_into_lines(raw_tokens, y_thresh=header_y_thresh)
         switch_headers = []
 
-        for line_item in all_lines:
+        for line_item in header_lines:
             line_text = line_item["text"]
 
-            m = re.search(r"(?:Standard|Distributed)\s*Switch\s*[:;\s]\s*([A-Za-z0-9_\-\.\s]+?)(?:\s+(?:ADD|EDIT|MANAGE|\.\.\.)|$)", line_text, re.I)
-            if not m:
-                m = re.search(r"\bBridge\s*[:;\s]\s*([A-Za-z0-9_\-\.\s]+?)(?:\s+(?:ADD|EDIT|MANAGE|\.\.\.)|$)", line_text, re.I)
+            prefix_m = re.search(r"(?:Standard|Distributed|Bridge)[_\-\s]*Switch[_\-\s]*[:;]*[_\-\s]*", line_text, re.I)
+            if not prefix_m:
+                continue
 
-            if not m:
+            raw_name_part = line_text[prefix_m.end():]
+            raw_sw_name = re.split(r"\s+(?:ADD|EDIT|MANAGE|ACTIONS|\.\.\.)", raw_name_part, flags=re.I)[0].strip()
+            raw_sw_name = re.sub(r"[^A-Za-z0-9_\-\.\s]+$", "", raw_sw_name).strip()
+            sw_name = apply_normalizations(raw_sw_name, normalizations)
+
+            if not sw_name:
                 continue
 
             tokens_in_line = line_item["tokens"]
-
             header_tok_idx = 0
             for idx, tok in enumerate(tokens_in_line):
                 txt = str(tok.get("text", "")).strip()
-                if re.search(r"\b(?:Standard|Distributed|Bridge)\b", txt, re.I):
+                if re.search(r"(?:Standard|Distributed|Bridge)", txt, re.I):
                     header_tok_idx = idx
                     break
 
@@ -117,15 +127,13 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                 if 0.0 <= dist <= 35.0 and re.search(r"^[>▶\+v▼\-]$", prev_txt):
                     start_idx = header_tok_idx - 1
 
-            header_tokens = tokens_in_line[start_idx:]
-            joined_header = " ".join(str(t.get("text", "")).strip() for t in header_tokens)
+            is_collapsed = False
+            for t in tokens_in_line[start_idx:header_tok_idx+1]:
+                if re.search(r"^[>▶\+]", str(t.get("text", "")).strip()):
+                    is_collapsed = True
+                    break
 
-            raw_sw_name = m.group(1).strip()
-            raw_sw_name = re.split(r"\s+(?:ADD|EDIT|MANAGE|\.\.\.)", raw_sw_name, flags=re.I)[0].strip()
-            sw_name = apply_normalizations(raw_sw_name, normalizations)
-
-            is_collapsed = bool(re.search(r"^[>▶\+]", joined_header.strip()))
-            header_x0 = get_bounding_box(header_tokens[0])[0]
+            header_x0 = get_bounding_box(tokens_in_line[start_idx])[0]
 
             switch_headers.append({
                 "name": sw_name,
@@ -189,7 +197,6 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                 })
                 continue
 
-            # Dynamic Physical Column Anchor Detection
             phys_anchor_x = None
             for t in inner_tokens:
                 txt = t.get("text", "").strip()
@@ -208,7 +215,6 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                 logical_tokens = [t for t in inner_tokens if get_bounding_box(t)[0] < x_mid_band]
                 physical_tokens = [t for t in inner_tokens if get_bounding_box(t)[0] >= x_mid_band]
 
-            # Physical Column Extraction
             physical_records = []
             vmnic_matches = []
 
@@ -279,7 +285,6 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                 })
             extracted_records.extend(physical_records)
 
-            # Logical Column Extraction
             logical_lines = cluster_tokens_into_lines(logical_tokens, y_thresh=y_thresh)
 
             vmk_entries = []
@@ -332,16 +337,13 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                     continue
                 if re.search(r"No\s*associated\s*port\s*groups", txt, re.I):
                     continue
-
                 if re.search(r"[^\x00-\x7F]", txt):
                     continue
                 if re.search(r"(?i)sauqsey", txt):
                     continue
-
                 if noise_re and noise_re.search(txt):
                     continue
 
-                # Strip punctuation/chevrons while preserving initial 'v' in vMotion/vSAN
                 cleaned_title = re.sub(r"^[>\s\(\)\[\]\{\}\<\>▼▶✓✔\-\—\.\:\;]+", "", txt).strip()
                 cleaned_title = re.sub(r"[\s\.\…\×\<\>\(\)\[\]\{\}]+$", "", cleaned_title).strip()
                 cleaned_title = apply_normalizations(cleaned_title, normalizations)
