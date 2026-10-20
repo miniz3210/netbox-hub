@@ -1,9 +1,9 @@
 """
-VMware ESXi & vDS Pure Python Geometric Topology Extractor (v4.8.21)
+VMware ESXi & vDS Pure Python Geometric Topology Extractor (v4.8.22)
 Universal, Deterministic, 100% Configuration-Driven.
 Resolves:
-- Zero-space tolerance for OCR artifacts (e.g. 'Switch:iDMZ' missing space).
-- Unified exclusion filtering to prevent misclassified switch headers.
+- Removed strict trailing anchors from Switch header detection, fixing
+  dropouts caused by horizontal text clustering (e.g. 'vSwitch1' merging with 'iDMZ Servers').
 """
 
 import re
@@ -93,8 +93,10 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
         for line_item in header_lines:
             line_text = line_item["text"]
 
-            # v4.8.21 Fix: \s* allows matches even if OCR completely eats the space after the colon
-            m = re.search(r"\b(?:Switch|Bridge)\b\s*[:;]?\s*([A-Za-z0-9_\-\.]{3,})(?:\s*(?:ADD|EDIT|MANAGE|ACTIONS|\.\.\.)|$)", line_text, re.I)
+            # v4.8.22 Fix: Removed the trailing anchor (?:\s*(?:ADD|...)|$).
+            # If the switch header clusters horizontally with "iDMZ Servers", the anchor fails. 
+            # Now we just extract the first 3+ character token right after "Switch:"
+            m = re.search(r"\b(?:Switch|Bridge)\b\s*[:;]?\s*([A-Za-z0-9_\-\.]{3,})", line_text, re.I)
             if not m:
                 continue
 
@@ -164,7 +166,7 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                     continue
                 if re.match(r"^(?:ADD\s*NETWORKING|REFRESH|EDIT|MANAGE\s*PHYSICAL|ACTIONS|\.\.\.)$", text, re.I):
                     continue
-                # Same fix applied to filtering: bulletproof exclusion
+                # Exact same fix for the exclusion filter
                 if re.search(r"\b(?:Switch|Bridge)\b\s*[:;]?\s*([A-Za-z0-9_\-\.]{3,})", text, re.I):
                     continue
                 if text.startswith(">") or text.startswith("▶"):
