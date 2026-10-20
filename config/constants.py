@@ -1,11 +1,11 @@
 """
-Application constants for NetBox Hub (v4.8.18)
+Application constants for NetBox Hub (v4.8.19)
 """
 import os
 from pathlib import Path
 
 APP_NAME = "NetBox Hub"
-APP_VERSION = "4.8.18"
+APP_VERSION = "4.8.19"
 PAGE_TITLE = "NetBox Hub"
 PAGE_ICON = "📦"
 DEFAULT_PLATFORM = "VMware ESXi"
@@ -19,8 +19,12 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 CACHE_DIR = Path("data/cache")
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
+# Fixed: Added RULES_HISTORY_FILE and MAX_HISTORY_ENTRIES to satisfy naming_rules.py
 RULES_FILE = os.getenv("RULES_FILE", "data/naming_rules.yaml")
-HISTORY_FILE = os.getenv("HISTORY_FILE", "data/history.json")
+RULES_HISTORY_FILE = os.getenv("RULES_HISTORY_FILE", "data/history.json")
+HISTORY_FILE = RULES_HISTORY_FILE  # Alias for backward compatibility
+MAX_HISTORY_ENTRIES = int(os.getenv("MAX_HISTORY_ENTRIES", 50))
+
 BASELINE_FILE = os.getenv("BASELINE_FILE", "data/baseline_rules.yaml")
 AUTOCORRECT_RULES_FILE = os.getenv("AUTOCORRECT_RULES_FILE", "data/autocorrect_rules.json")
 VAULT_DB_FILE = os.getenv("VAULT_DB_FILE", "data/vault.db")
