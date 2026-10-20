@@ -1,7 +1,8 @@
 """
 VMware ESXi & vDS Pure Python Geometric Topology Extractor (v4.8.4)
 Universal, Deterministic, 100% Configuration-Driven.
-Supports Standard Switches (VSS), Distributed Switches (vDS), and Nutanix HCI topologies.
+Clusters horizontal lines first to guarantee tokens split by OCR
+(e.g. ['Distributed', 'Switch:', 'dvSwitch0']) are seamlessly united.
 """
 
 import re
@@ -20,6 +21,10 @@ def apply_normalizations(text: str, normalizations: List[Dict[str, str]]) -> str
 
 
 def cluster_tokens_into_lines(tokens: List[Dict[str, Any]], y_thresh: float = 8.0) -> List[Dict[str, Any]]:
+    """
+    Groups visual word tokens that lie on the same horizontal line (within y_thresh),
+    sorting from left to right, retaining individual tokens and full concatenated text.
+    """
     if not tokens:
         return []
 
@@ -50,6 +55,7 @@ def cluster_tokens_into_lines(tokens: List[Dict[str, Any]], y_thresh: float = 8.
         max_y = max(get_bounding_box(x)[3] for x in line)
         clustered.append({
             "text": combined_text,
+            "tokens": line,
             "box": [min_x, min_y, max_x - min_x, max_y - min_y],
             "y": min_y,
             "x": min_x
@@ -80,58 +86,53 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
             noise_re = None
 
         # -------------------------------------------------------------
-        # Step 1: Detect Switch Headers & Strict Left Boundary
+        # Step 1: Detect Switch Headers (Line-Clustering First!)
         # -------------------------------------------------------------
+        all_lines = cluster_tokens_into_lines(raw_tokens, y_thresh=8.0)
         switch_headers = []
-        seen_header_ys = set()
 
-        for t in raw_tokens:
-            txt = str(t.get("text", "")).strip()
-            if not re.search(r"(?:Standard|Distributed)\s*Switch|Bridge", txt, re.I):
+        for line_item in all_lines:
+            tokens_in_line = line_item["tokens"]
+
+            # Locate the token matching Switch or Bridge
+            switch_tok_idx = None
+            for idx, tok in enumerate(tokens_in_line):
+                txt = str(tok.get("text", "")).strip()
+                if re.search(r"(?:Standard|Distributed|Bridge|\bSwitch\b)", txt, re.I):
+                    switch_tok_idx = idx
+                    break
+
+            if switch_tok_idx is None:
                 continue
 
-            bx0, by0, bx1, by1 = get_bounding_box(t)
-            if any(abs(by0 - prev_y) <= 8.0 for prev_y in seen_header_ys):
-                continue
-            seen_header_ys.add(by0)
+            # Identify start token (include preceding chevron/arrow if within 35px)
+            start_idx = switch_tok_idx
+            if switch_tok_idx > 0:
+                prev_tok = tokens_in_line[switch_tok_idx - 1]
+                curr_tok = tokens_in_line[switch_tok_idx]
+                dist = get_bounding_box(curr_tok)[0] - get_bounding_box(prev_tok)[2]
+                prev_txt = str(prev_tok.get("text", "")).strip()
+                if 0.0 <= dist <= 35.0 and re.search(r"^[>▶\+v▼\-]$", prev_txt):
+                    start_idx = switch_tok_idx - 1
 
-            # Check for chevron/arrow immediately preceding the header (within 35px)
-            header_x = bx0
-            is_collapsed = False
-            for other in raw_tokens:
-                obx0, oby0, obx1, oby1 = get_bounding_box(other)
-                if abs(oby0 - by0) <= 8.0 and (0.0 <= (bx0 - obx1) <= 35.0):
-                    otxt = str(other.get("text", "")).strip()
-                    if re.search(r"^[>▶\+]$", otxt):
-                        is_collapsed = True
-                        header_x = obx0
-                        break
-                    elif re.search(r"^[v▼\-]$", otxt):
-                        header_x = obx0
-                        break
+            # Build joined header string strictly from start_idx onwards (sidebar completely excluded)
+            header_tokens = tokens_in_line[start_idx:]
+            joined_header = " ".join(str(t.get("text", "")).strip() for t in header_tokens)
 
-            # Join header line strictly from header_x onwards (NEVER look left into sidebar)
-            line_tokens = [
-                tok for tok in raw_tokens 
-                if abs(get_bounding_box(tok)[1] - by0) <= 8.0 
-                and get_bounding_box(tok)[0] >= (header_x - 5.0)
-            ]
-            line_tokens.sort(key=lambda tok: get_bounding_box(tok)[0])
-            joined_line = " ".join(str(tok.get("text", "")).strip() for tok in line_tokens)
-
-            m = re.search(r"(?:Standard|Distributed)\s*Switch(?:\s*[:;]|\s+)\s*([A-Za-z0-9_\-\.\s]+?)(?:\s+(?:ADD|EDIT|MANAGE|\.\.\.)|$)", joined_line, re.I)
+            # Match: "Standard Switch: name", "Distributed Switch: name", or "Switch: name"
+            m = re.search(r"(?:Standard\s*Switch|Distributed\s*Switch|\bSwitch)\s*[:;\s]\s*([A-Za-z0-9_\-\.\s]+?)(?:\s+(?:ADD|EDIT|MANAGE|\.\.\.)|$)", joined_header, re.I)
             if m:
                 raw_sw_name = m.group(1).strip()
                 raw_sw_name = re.split(r"\s+(?:ADD|EDIT|MANAGE|\.\.\.)", raw_sw_name, flags=re.I)[0].strip()
                 sw_name = apply_normalizations(raw_sw_name, normalizations)
 
-                if not is_collapsed:
-                    is_collapsed = bool(re.search(r"(?:^|\s)[>▶\+]", joined_line))
+                is_collapsed = bool(re.search(r"^[>▶\+]", joined_header))
+                header_x0 = get_bounding_box(header_tokens[0])[0]
 
                 switch_headers.append({
                     "name": sw_name,
-                    "y_top": by0,
-                    "x_left": header_x,
+                    "y_top": line_item["y"],
+                    "x_left": header_x0,
                     "collapsed": is_collapsed
                 })
 
@@ -139,9 +140,7 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
         if not switch_headers:
             return []
 
-        # Dynamic Sidebar Boundary:
-        # Full UI: headers start at X ~ 190px -> cutoff is ~175px (sidebar totally dropped)
-        # Cropped: headers start at X ~ 15px -> cutoff is 0px (content preserved)
+        # Dynamic Sidebar Boundary (0px for cropped screenshots, ~175px for full screen)
         min_switch_x = min(sh["x_left"] for sh in switch_headers)
         sidebar_cutoff_x = max(0.0, min_switch_x - 15.0)
 
@@ -269,7 +268,7 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                 })
             extracted_records.extend(physical_records)
 
-            # Logical Column Extraction (Line Clustered)
+            # Logical Column Extraction (Line-Clustered)
             logical_lines = cluster_tokens_into_lines(logical_tokens, y_thresh=8.0)
 
             vmk_entries = []
