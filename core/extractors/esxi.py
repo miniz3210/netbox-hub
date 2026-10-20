@@ -1,9 +1,11 @@
 """
-VMware ESXi & vDS Pure Python Geometric Topology Extractor (v4.8.22)
-Universal, Deterministic, 100% Configuration-Driven.
-Resolves:
-- Removed strict trailing anchors from Switch header detection, fixing
-  dropouts caused by horizontal text clustering (e.g. 'vSwitch1' merging with 'iDMZ Servers').
+VMware ESXi & vDS Structural Anchor Topology Extractor (v4.8.22)
+Architecture:
+1. X-Gap Aware Line Clustering: Prevents left-column and right-column tokens from merging.
+2. Token-Split Switch Header Detection: Extracts the identifier immediately following 'Switch:' 
+   without brittle full-line regexes or word-boundary traps.
+3. Positive VLAN-ID Card Anchoring: Identifies Port Groups by locating 'VLAN ID' anchors 
+   and grabbing the card title directly above them, eliminating noise-filter whack-a-mole.
 """
 
 import re
@@ -21,30 +23,50 @@ def apply_normalizations(text: str, normalizations: List[Dict[str, str]]) -> str
     return s.strip()
 
 
-def cluster_tokens_into_lines(tokens: List[Dict[str, Any]], y_thresh: float = 8.0) -> List[Dict[str, Any]]:
+def cluster_tokens_into_lines(
+    tokens: List[Dict[str, Any]], 
+    y_thresh: float = 10.0, 
+    max_x_gap: Optional[float] = None
+) -> List[Dict[str, Any]]:
     if not tokens:
         return []
 
     sorted_tokens = sorted(tokens, key=lambda t: (get_bounding_box(t)[1], get_bounding_box(t)[0]))
-    lines: List[List[Dict[str, Any]]] = []
+    raw_rows: List[List[Dict[str, Any]]] = []
 
     for t in sorted_tokens:
         _, y0, _, y1 = get_bounding_box(t)
         mid_y = (y0 + y1) / 2.0
 
         placed = False
-        for line in lines:
-            line_mid_y = sum((get_bounding_box(x)[1] + get_bounding_box(x)[3]) / 2.0 for x in line) / len(line)
-            if abs(mid_y - line_mid_y) <= y_thresh:
-                line.append(t)
+        for row in raw_rows:
+            row_mid_y = sum((get_bounding_box(x)[1] + get_bounding_box(x)[3]) / 2.0 for x in row) / len(row)
+            if abs(mid_y - row_mid_y) <= y_thresh:
+                row.append(t)
                 placed = True
                 break
         if not placed:
-            lines.append([t])
+            raw_rows.append([t])
+
+    final_lines: List[List[Dict[str, Any]]] = []
+    for row in raw_rows:
+        row.sort(key=lambda x: get_bounding_box(x)[0])
+        if max_x_gap is None:
+            final_lines.append(row)
+        else:
+            curr_segment = [row[0]]
+            for tok in row[1:]:
+                prev_x1 = get_bounding_box(curr_segment[-1])[2]
+                curr_x0 = get_bounding_box(tok)[0]
+                if (curr_x0 - prev_x1) > max_x_gap:
+                    final_lines.append(curr_segment)
+                    curr_segment = [tok]
+                else:
+                    curr_segment.append(tok)
+            final_lines.append(curr_segment)
 
     clustered = []
-    for line in lines:
-        line.sort(key=lambda x: get_bounding_box(x)[0])
+    for line in final_lines:
         combined_text = " ".join(str(x.get("text", "")).strip() for x in line if str(x.get("text", "")).strip())
         min_x = min(get_bounding_box(x)[0] for x in line)
         min_y = min(get_bounding_box(x)[1] for x in line)
@@ -58,7 +80,7 @@ def cluster_tokens_into_lines(tokens: List[Dict[str, Any]], y_thresh: float = 8.
             "x": min_x
         })
 
-    clustered.sort(key=lambda x: x["y"])
+    clustered.sort(key=lambda x: (x["y"], x["x"]))
     return clustered
 
 
@@ -77,8 +99,7 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
         normalizations = cfg.get("token_normalizations", [])
         noise_filters = cfg.get("noise_filters", [])
         geom_cfg = cfg.get("geometry", {})
-        y_thresh = float(geom_cfg.get("line_cluster_y_thresh", 8.0))
-        max_vmk_dist = float(geom_cfg.get("vmk_to_title_max_dist", 160.0))
+        y_thresh = float(geom_cfg.get("line_cluster_y_thresh", 10.0))
 
         if noise_filters:
             escaped = [re.escape(n.strip()) for n in noise_filters if n and n.strip()]
@@ -86,51 +107,53 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
         else:
             noise_re = None
 
-        header_y_thresh = max(18.0, y_thresh * 2)
-        header_lines = cluster_tokens_into_lines(raw_tokens, y_thresh=header_y_thresh)
+        # -------------------------------------------------------------
+        # Step 1: Structural Switch Header Detection (Two-Stage Split)
+        # -------------------------------------------------------------
+        header_rows = cluster_tokens_into_lines(raw_tokens, y_thresh=16.0, max_x_gap=None)
         switch_headers = []
 
-        for line_item in header_lines:
-            line_text = line_item["text"]
+        for row_item in header_rows:
+            line_text = row_item["text"]
 
-            # v4.8.22 Fix: Removed the trailing anchor (?:\s*(?:ADD|...)|$).
-            # If the switch header clusters horizontally with "iDMZ Servers", the anchor fails. 
-            # Now we just extract the first 3+ character token right after "Switch:"
-            m = re.search(r"\b(?:Switch|Bridge)\b\s*[:;]?\s*([A-Za-z0-9_\-\.]{3,})", line_text, re.I)
-            if not m:
+            # Ignore DVUplink container titles or Port Group lines
+            if re.search(r"DVUplink", line_text, re.I):
                 continue
 
-            raw_sw_name = m.group(1).strip()
+            # Check if row contains 'Switch' (or 'Bridge') followed by ':' or accompanied by action buttons
+            has_switch_kw = bool(re.search(r"(?:Switch|Swtich|Swltch|Bridge)\s*[:;]", line_text, re.I))
+            has_action_bar = bool(re.search(r"(?:MANAGE\s*PHYS|ADD\s*NETWORK)", line_text, re.I)) and bool(re.search(r"(?:Switch|Swtich|Swltch|Bridge)", line_text, re.I))
+
+            if not (has_switch_kw or has_action_bar):
+                continue
+
+            # Split right after 'Switch:' (immune to typos in 'Distributed'/'Standard' and missing spaces)
+            parts = re.split(r"(?:Switch|Swtich|Swltch|Bridge)\s*[:;]?\s*", line_text, maxsplit=1, flags=re.I)
+            if len(parts) < 2:
+                continue
+
+            after_switch = parts[1].strip()
+            # Cut off at any action button, pipe separator '|', or ellipsis
+            sw_candidate = re.split(r"(?:\s+\||\s+ADD\b|\s+EDIT\b|\s+MANAGE\b|\s+ACTIONS\b|\||\.{2,})", after_switch, maxsplit=1, flags=re.I)[0].strip()
+
+            # Extract clean switch identifier
+            id_match = re.match(r"^([A-Za-z0-9_\-\.]+)", sw_candidate)
+            if not id_match:
+                continue
+
+            raw_sw_name = id_match.group(1).strip()
+            if len(raw_sw_name) < 2:
+                continue
+
             sw_name = apply_normalizations(raw_sw_name, normalizations)
 
-            tokens_in_line = line_item["tokens"]
-            
-            header_tok_idx = 0
-            for idx, tok in enumerate(tokens_in_line):
-                if re.search(r"\b(?:Switch|Bridge)\b", str(tok.get("text", "")).strip(), re.I):
-                    header_tok_idx = idx
-                    break
-
-            start_idx = header_tok_idx
-            for i in range(header_tok_idx - 1, -1, -1):
-                txt = str(tokens_in_line[i].get("text", "")).strip()
-                dist = get_bounding_box(tokens_in_line[i+1])[0] - get_bounding_box(tokens_in_line[i])[2]
-                
-                if dist > 80.0: break
-                if re.search(r"(?:Virtual|Networking|Storage|System|Hardware)", txt, re.I): break
-                start_idx = i
-                if re.search(r"^[>▶\+v▼\-]", txt): break
-
-            header_tokens = tokens_in_line[start_idx:]
-            joined_header = " ".join(str(t.get("text", "")).strip() for t in header_tokens)
-            is_collapsed = bool(re.search(r"^[>▶\+]", joined_header.strip()))
-            header_x0 = get_bounding_box(tokens_in_line[start_idx])[0]
+            tokens_in_line = row_item["tokens"]
+            header_x0 = get_bounding_box(tokens_in_line[0])[0]
 
             switch_headers.append({
                 "name": sw_name,
-                "y_top": line_item["y"],
-                "x_left": header_x0,
-                "collapsed": is_collapsed
+                "y_top": row_item["y"],
+                "x_left": header_x0
             })
 
         switch_headers.sort(key=lambda s: s["y_top"])
@@ -145,8 +168,11 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
             if idx + 1 < len(switch_headers):
                 sh["y_end"] = switch_headers[idx + 1]["y_top"]
             else:
-                sh["y_end"] = float('inf')
+                sh["y_end"] = float("inf")
 
+        # -------------------------------------------------------------
+        # Step 2: Positive Structural Extraction per Switch Band
+        # -------------------------------------------------------------
         extracted_records: List[Dict[str, Any]] = []
 
         for sh in switch_headers:
@@ -159,15 +185,7 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
 
                 if bx0 < sidebar_cutoff_x:
                     continue
-                if not (sh["y_start"] + 15.0 <= by0 < sh["y_end"]):
-                    continue
-
-                if noise_re and noise_re.search(text):
-                    continue
-                if re.match(r"^(?:ADD\s*NETWORKING|REFRESH|EDIT|MANAGE\s*PHYSICAL|ACTIONS|\.\.\.)$", text, re.I):
-                    continue
-                # Exact same fix for the exclusion filter
-                if re.search(r"\b(?:Switch|Bridge)\b\s*[:;]?\s*([A-Za-z0-9_\-\.]{3,})", text, re.I):
+                if not (sh["y_start"] + 14.0 <= by0 < sh["y_end"] - 5.0):
                     continue
                 if text.startswith(">") or text.startswith("▶"):
                     continue
@@ -186,29 +204,34 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                 })
                 continue
 
+            # Column Split: Find Physical Adapter Box Anchor on Right Side
             phys_anchor_x = None
             for t in inner_tokens:
-                txt = t.get("text", "").strip()
+                txt = str(t.get("text", "")).strip()
                 if re.search(r"(?:Physical\s*Adapters|DVUplink|vm[nN][kKiI1lL]c\s*\d+|No\s*physical\s*network\s*adapters)", txt, re.I):
                     x0, _, _, _ = get_bounding_box(t)
-                    if phys_anchor_x is None or x0 < phys_anchor_x:
-                        phys_anchor_x = x0
+                    if x0 > (sidebar_cutoff_x + 120.0):
+                        if phys_anchor_x is None or x0 < phys_anchor_x:
+                            phys_anchor_x = x0
 
-            if phys_anchor_x is not None and phys_anchor_x > (sidebar_cutoff_x + 80.0):
+            if phys_anchor_x is not None:
                 logical_tokens = [t for t in inner_tokens if get_bounding_box(t)[0] < (phys_anchor_x - 10.0)]
                 physical_tokens = [t for t in inner_tokens if get_bounding_box(t)[0] >= (phys_anchor_x - 15.0)]
             else:
                 x_min_band = min(get_bounding_box(t)[0] for t in inner_tokens)
                 x_max_band = max(get_bounding_box(t)[2] for t in inner_tokens)
-                x_mid_band = x_min_band + (x_max_band - x_min_band) * 0.48
+                x_mid_band = x_min_band + (x_max_band - x_min_band) * 0.5
                 logical_tokens = [t for t in inner_tokens if get_bounding_box(t)[0] < x_mid_band]
                 physical_tokens = [t for t in inner_tokens if get_bounding_box(t)[0] >= x_mid_band]
 
+            # ---------------------------------------------------------
+            # A. Physical Uplinks Extraction
+            # ---------------------------------------------------------
             physical_records = []
             vmnic_matches = []
 
             for pt in physical_tokens:
-                txt = pt.get("text", "").strip()
+                txt = str(pt.get("text", "")).strip()
                 if re.search(r"\(0\s*NIC\s*Adapters\)", txt, re.I):
                     continue
 
@@ -225,7 +248,7 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                         pt_y = get_bounding_box(pt)[1]
                         pt_x = get_bounding_box(pt)[0]
                         for other_pt in physical_tokens:
-                            otxt = other_pt.get("text", "").strip()
+                            otxt = str(other_pt.get("text", "")).strip()
                             if re.match(r"^[xX!]$", otxt):
                                 if abs(get_bounding_box(other_pt)[1] - pt_y) <= 12.0:
                                     if 0.0 <= (pt_x - get_bounding_box(other_pt)[2]) <= 40.0:
@@ -247,7 +270,7 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                 nic_speed = ""
                 for pt in physical_tokens:
                     if abs(get_bounding_box(pt)[1] - vm["y"]) < 20.0:
-                        sm = re.search(r"(\d+\s*(?:Gbit/s|Mbit/s|Full|Half)|10000|1000)", pt.get("text", ""), re.I)
+                        sm = re.search(r"(\d+\s*(?:Gbit/s|Mbit/s|Full|Half)|10000|1000)", str(pt.get("text", "")), re.I)
                         if sm:
                             nic_speed = sm.group(1).strip()
                             break
@@ -274,11 +297,22 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                 })
             extracted_records.extend(physical_records)
 
-            logical_lines = cluster_tokens_into_lines(logical_tokens, y_thresh=y_thresh)
+            # ---------------------------------------------------------
+            # B. Positive Card-Anchor Logical Extraction (VLAN ID Anchors)
+            # ---------------------------------------------------------
+            # Segment logical tokens with max_x_gap=80 so separate columns never merge
+            logical_lines = cluster_tokens_into_lines(logical_tokens, y_thresh=y_thresh, max_x_gap=80.0)
 
+            # 1. Locate all VLAN ID anchors inside cards
+            vlan_anchors = []
+            for idx, l_item in enumerate(logical_lines):
+                if re.search(r"\bVLAN\b", l_item["text"], re.I):
+                    vlan_anchors.append(l_item)
+
+            # 2. Extract VMkernel ports
             vmk_entries = []
-            for line_item in logical_lines:
-                txt = line_item["text"].strip()
+            for l_item in logical_lines:
+                txt = l_item["text"].strip()
                 m_vmk = re.search(r"\b(vmk\s*[oO0-9]+)\s*[:\s]\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b", txt, re.I)
                 if m_vmk:
                     clean_vmk = re.sub(r"\s+", "", m_vmk.group(1))
@@ -286,73 +320,59 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                     vmk_entries.append({
                         "vmk": clean_vmk,
                         "ip": m_vmk.group(2).strip(),
-                        "y": line_item["y"]
+                        "y": l_item["y"]
                     })
-                else:
-                    m_ip = re.search(r"\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b", txt)
-                    if m_ip:
-                        ip_val = m_ip.group(1).strip()
-                        y_ip = line_item["y"]
-                        found_vmk = None
-                        for line_item2 in logical_lines:
-                            if abs(line_item2["y"] - y_ip) < 20.0:
-                                m_v = re.search(r"\b(vmk\s*[oO0-9]+)\b", line_item2["text"], re.I)
-                                if m_v:
-                                    raw_v = re.sub(r"\s+", "", m_v.group(1))
-                                    found_vmk = re.sub(r"(?i)vmk[oO]", "vmk0", raw_v).lower()
-                                    break
-                        if found_vmk:
-                            vmk_entries.append({
-                                "vmk": found_vmk,
-                                "ip": ip_val,
-                                "y": y_ip
-                            })
 
-            service_titles = []
-            for line_item in logical_lines:
-                txt = line_item["text"].strip()
+            # 3. For each VLAN anchor, look strictly upwards (5px to 45px) for the Card Title
+            card_titles = []
+            for v_idx, v_anchor in enumerate(vlan_anchors):
+                vy = v_anchor["y"]
+                vx = v_anchor["x"]
+                prev_vy = vlan_anchors[v_idx - 1]["y"] if v_idx > 0 else sh["y_start"]
 
-                if re.search(r"(?:vmk[eao]rn[eao]l|vmk[eao]rm[eao]l)\s*ports?", txt, re.I):
-                    continue
-                if re.search(r"virt\s*ual\s*machines?|machines?\s*\(\d+\)", txt, re.I):
-                    continue
-                if re.search(r"\bVLAN\s*ID\b", txt, re.I):
-                    continue
-                if re.search(r"\bvmk\s*[oO0-9]+\b", txt, re.I):
-                    continue
-                if re.search(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b", txt):
-                    continue
-                if re.search(r"\b(?:Switch|Bridge)\b\s*[:;]?\s*([A-Za-z0-9_\-\.]{3,})", txt, re.I):
-                    continue
-                if re.search(r"No\s*associated\s*port\s*groups", txt, re.I):
-                    continue
-                if re.search(r"[^\x00-\x7F]", txt):
-                    continue
-                if re.search(r"(?i)sauqsey", txt):
-                    continue
-                if noise_re and noise_re.search(txt):
-                    continue
+                candidates = []
+                for l_item in logical_lines:
+                    ly = l_item["y"]
+                    lx = l_item["x"]
+                    txt = l_item["text"].strip()
 
-                cleaned_title = re.sub(r"^[>\s\(\)\[\]\{\}\<\>▼▶✓✔\-\—\.\:\;]+", "", txt).strip()
-                cleaned_title = re.sub(r"[\s\.\…\×\<\>\(\)\[\]\{\}]+$", "", cleaned_title).strip()
-                cleaned_title = apply_normalizations(cleaned_title, normalizations)
+                    if not (prev_vy < ly < vy and (vy - ly) <= 48.0):
+                        continue
+                    if abs(lx - vx) > 120.0:
+                        continue
+                    if re.search(r"\b(?:VLAN|Virtual\s*Machines|VMkernel)\b", txt, re.I):
+                        continue
 
-                if len(cleaned_title) <= 2:
-                    continue
+                    cleaned = re.sub(r"^[>\s\(\)\[\]\{\}\<\>▼▶✓✔\-\—\.\:\;]+", "", txt).strip()
+                    cleaned = re.sub(r"[\s\.\…\×\<\>\(\)\[\]\{\}]+$", "", cleaned).strip()
+                    cleaned = apply_normalizations(cleaned, normalizations)
 
-                service_titles.append({
-                    "title": cleaned_title,
-                    "y": line_item["y"]
-                })
+                    if len(cleaned) > 2 and not (noise_re and noise_re.search(cleaned)):
+                        candidates.append((vy - ly, cleaned, ly))
 
-            service_titles.sort(key=lambda s: s["y"])
+                if candidates:
+                    # Closest valid line directly above VLAN ID is the Port Group Title
+                    candidates.sort(key=lambda c: c[0])
+                    _, best_title, title_y = candidates[0]
+                    next_vy = vlan_anchors[v_idx + 1]["y"] if (v_idx + 1) < len(vlan_anchors) else float("inf")
+                    card_titles.append({
+                        "title": best_title,
+                        "y": title_y,
+                        "vlan_y": vy,
+                        "next_vlan_y": next_vy
+                    })
 
+            # 4. Bind VMkernel Ports to their enclosing Card (between vlan_y and next_vlan_y)
             assigned_titles = set()
             for v in vmk_entries:
-                candidates = [st for st in service_titles if 0 <= (v["y"] - st["y"]) <= max_vmk_dist]
-                if candidates:
-                    candidates.sort(key=lambda c: v["y"] - c["y"])
-                    purpose_name = candidates[0]["title"]
+                matched_card = None
+                for card in card_titles:
+                    if card["y"] <= v["y"] < card["next_vlan_y"] and (v["y"] - card["vlan_y"]) <= 90.0:
+                        matched_card = card
+                        break
+
+                if matched_card:
+                    purpose_name = matched_card["title"]
                     assigned_titles.add(purpose_name)
                 else:
                     purpose_name = "Management Network" if v["vmk"] == "vmk0" else v["vmk"]
@@ -367,8 +387,8 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                     "speed": ""
                 })
 
-            for st_item in service_titles:
-                title = st_item["title"]
+            for card in card_titles:
+                title = card["title"]
                 if title in assigned_titles:
                     continue
                 assigned_titles.add(title)
