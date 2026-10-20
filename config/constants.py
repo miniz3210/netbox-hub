@@ -1,11 +1,11 @@
 """
-Application constants for NetBox Hub (v4.8.17)
+Application constants for NetBox Hub (v4.8.18)
 """
 import os
 from pathlib import Path
 
 APP_NAME = "NetBox Hub"
-APP_VERSION = "4.8.17"
+APP_VERSION = "4.8.18"
 PAGE_TITLE = "NetBox Hub"
 PAGE_ICON = "📦"
 DEFAULT_PLATFORM = "VMware ESXi"
@@ -20,13 +20,10 @@ CACHE_DIR = Path("data/cache")
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 RULES_FILE = os.getenv("RULES_FILE", "data/naming_rules.yaml")
-RULES_HISTORY_FILE = os.getenv("RULES_HISTORY_FILE", "data/naming_rules_history.json")
-MAX_HISTORY_ENTRIES = 50
 HISTORY_FILE = os.getenv("HISTORY_FILE", "data/history.json")
 BASELINE_FILE = os.getenv("BASELINE_FILE", "data/baseline_rules.yaml")
 AUTOCORRECT_RULES_FILE = os.getenv("AUTOCORRECT_RULES_FILE", "data/autocorrect_rules.json")
 VAULT_DB_FILE = os.getenv("VAULT_DB_FILE", "data/vault.db")
-DATABASE_PATH = os.getenv("DATABASE_PATH", "data/netbox_hub.db")
 
 DEFAULT_VLAN_NAME_PATTERN = "<role>"
 DEFAULT_PREFIX_PATTERN = "<site> <role> -- VLAN <vid>"

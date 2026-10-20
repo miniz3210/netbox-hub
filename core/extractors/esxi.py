@@ -1,11 +1,6 @@
 """
-VMware ESXi & vDS Pure Python Geometric Topology Extractor (v4.8.17)
+VMware ESXi & vDS Pure Python Geometric Topology Extractor (v4.8.18)
 Universal, Deterministic, 100% Configuration-Driven.
-Resolves:
-- High-tolerance header clustering to bridge vertical OCR jitter for vDS headers.
-- Bulletproof regex prefix splitting for switch names (immune to missing colons).
-- Standby uplink glyph adjacency detection.
-- Preserves leading 'v' in service titles (vMotion, vSAN).
 """
 
 import re
@@ -88,9 +83,6 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
         else:
             noise_re = None
 
-        # -------------------------------------------------------------
-        # Step 1: Detect Switch Headers (High-Tolerance Line Clustering)
-        # -------------------------------------------------------------
         header_y_thresh = max(18.0, y_thresh * 2)
         header_lines = cluster_tokens_into_lines(raw_tokens, y_thresh=header_y_thresh)
         switch_headers = []
@@ -98,41 +90,46 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
         for line_item in header_lines:
             line_text = line_item["text"]
 
-            prefix_m = re.search(r"(?:Standard|Distributed|Bridge)[_\-\s]*Switch[_\-\s]*[:;]*[_\-\s]*", line_text, re.I)
-            if not prefix_m:
+            # Bulletproof: Matches standalone 'Switch' or 'Bridge', optional colon, followed by name.
+            # \b prevents matching inside 'dvSwitch0-DVUplinks'. OCR typos on 'Distributed' are ignored.
+            m = re.search(r"\b(?:Switch|Bridge)\b\s*[:;]?\s+([A-Za-z0-9_\-\.]{3,})(?:\s+(?:ADD|EDIT|MANAGE|ACTIONS|\.\.\.)|$)", line_text, re.I)
+            if not m:
                 continue
 
-            raw_name_part = line_text[prefix_m.end():]
-            raw_sw_name = re.split(r"\s+(?:ADD|EDIT|MANAGE|ACTIONS|\.\.\.)", raw_name_part, flags=re.I)[0].strip()
-            raw_sw_name = re.sub(r"[^A-Za-z0-9_\-\.\s]+$", "", raw_sw_name).strip()
+            raw_sw_name = m.group(1).strip()
             sw_name = apply_normalizations(raw_sw_name, normalizations)
 
-            if not sw_name:
-                continue
-
             tokens_in_line = line_item["tokens"]
+            
+            # Locate the exact token containing 'Switch'
             header_tok_idx = 0
             for idx, tok in enumerate(tokens_in_line):
-                txt = str(tok.get("text", "")).strip()
-                if re.search(r"(?:Standard|Distributed|Bridge)", txt, re.I):
+                if re.search(r"\b(?:Switch|Bridge)\b", str(tok.get("text", "")).strip(), re.I):
                     header_tok_idx = idx
                     break
 
+            # Smart backwards walking to find the true X coordinate of the container
             start_idx = header_tok_idx
-            if header_tok_idx > 0:
-                prev_tok = tokens_in_line[header_tok_idx - 1]
-                curr_tok = tokens_in_line[header_tok_idx]
-                dist = get_bounding_box(curr_tok)[0] - get_bounding_box(prev_tok)[2]
-                prev_txt = str(prev_tok.get("text", "")).strip()
-                if 0.0 <= dist <= 35.0 and re.search(r"^[>▶\+v▼\-]$", prev_txt):
-                    start_idx = header_tok_idx - 1
-
-            is_collapsed = False
-            for t in tokens_in_line[start_idx:header_tok_idx+1]:
-                if re.search(r"^[>▶\+]", str(t.get("text", "")).strip()):
-                    is_collapsed = True
+            for i in range(header_tok_idx - 1, -1, -1):
+                txt = str(tokens_in_line[i].get("text", "")).strip()
+                dist = get_bounding_box(tokens_in_line[i+1])[0] - get_bounding_box(tokens_in_line[i])[2]
+                
+                # Stop if we hit a massive gap (likely crossed into the sidebar)
+                if dist > 80.0:
+                    break
+                # Stop immediately if we hit a known sidebar keyword
+                if re.search(r"(?:Virtual|Networking|Storage|System|Hardware)", txt, re.I):
+                    break
+                
+                start_idx = i
+                
+                # If we included a chevron, this is the definitive start of the header
+                if re.search(r"^[>▶\+v▼\-]", txt):
                     break
 
+            header_tokens = tokens_in_line[start_idx:]
+            joined_header = " ".join(str(t.get("text", "")).strip() for t in header_tokens)
+            is_collapsed = bool(re.search(r"^[>▶\+]", joined_header.strip()))
             header_x0 = get_bounding_box(tokens_in_line[start_idx])[0]
 
             switch_headers.append({
@@ -156,9 +153,6 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
             else:
                 sh["y_end"] = float('inf')
 
-        # -------------------------------------------------------------
-        # Step 2: Extract Records per Switch Band
-        # -------------------------------------------------------------
         extracted_records: List[Dict[str, Any]] = []
 
         for sh in switch_headers:
@@ -178,7 +172,7 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                     continue
                 if re.match(r"^(?:ADD\s*NETWORKING|REFRESH|EDIT|MANAGE\s*PHYSICAL|ACTIONS|\.\.\.)$", text, re.I):
                     continue
-                if re.search(r"(?:Standard|Distributed)\s*Switch:", text, re.I):
+                if re.search(r"\b(?:Standard|Distributed)\s*Switch\b", text, re.I):
                     continue
                 if text.startswith(">") or text.startswith("▶"):
                     continue
@@ -333,7 +327,7 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                     continue
                 if re.search(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b", txt):
                     continue
-                if re.search(r"(?:Standard|Distributed)\s*Switch:", txt, re.I):
+                if re.search(r"\b(?:Standard|Distributed)\s*Switch:", txt, re.I):
                     continue
                 if re.search(r"No\s*associated\s*port\s*groups", txt, re.I):
                     continue
