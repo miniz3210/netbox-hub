@@ -1,8 +1,7 @@
 """
-VMware ESXi & vDS Pure Python Geometric Topology Extractor (v4.8.3)
-100% Configuration-Driven & Zero Hardcoding.
-Implements horizontal token line-clustering to ensure multi-word port groups
-(e.g. "iSCSI Veeam") are never split or dropped.
+VMware ESXi & vDS Pure Python Geometric Topology Extractor (v4.8.4)
+Universal, Deterministic, 100% Configuration-Driven.
+Supports Standard Switches (VSS), Distributed Switches (vDS), and Nutanix HCI topologies.
 """
 
 import re
@@ -20,10 +19,10 @@ def apply_normalizations(text: str, normalizations: List[Dict[str, str]]) -> str
     return s.strip()
 
 
-def cluster_tokens_into_lines(tokens: List[Dict[str, Any]], y_thresh: float = 6.0) -> List[Dict[str, Any]]:
+def cluster_tokens_into_lines(tokens: List[Dict[str, Any]], y_thresh: float = 8.0) -> List[Dict[str, Any]]:
     """
     Groups visual word tokens that lie on the same horizontal text line (within y_thresh),
-    sorting from left to right, and concatenates them into full phrases.
+    sorting from left to right, and concatenates them into coherent line strings.
     """
     if not tokens:
         return []
@@ -56,7 +55,8 @@ def cluster_tokens_into_lines(tokens: List[Dict[str, Any]], y_thresh: float = 6.
         clustered.append({
             "text": combined_text,
             "box": [min_x, min_y, max_x - min_x, max_y - min_y],
-            "y": min_y
+            "y": min_y,
+            "x": min_x
         })
 
     clustered.sort(key=lambda x: x["y"])
@@ -65,10 +65,10 @@ def cluster_tokens_into_lines(tokens: List[Dict[str, Any]], y_thresh: float = 6.
 
 class EsxiTopologyExtractor(BaseTopologyExtractor):
     def extract(
-        self, 
-        raw_tokens: List[Dict[str, Any]], 
-        image_width: int = 1920, 
-        image_height: int = 1080, 
+        self,
+        raw_tokens: List[Dict[str, Any]],
+        image_width: int = 1920,
+        image_height: int = 1080,
         plat_cfg: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         if not raw_tokens:
@@ -84,23 +84,41 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
             noise_re = None
 
         # -------------------------------------------------------------
-        # Step 1: Detect Switch Headers (Standard & Distributed)
+        # Step 1: Detect Switch Headers via Horizontal Line Reunification
         # -------------------------------------------------------------
-        switch_headers = []
+        candidate_header_tokens = []
         for t in raw_tokens:
-            text = str(t.get("text", "")).strip()
-            m = re.search(r"^(?:>|▶|v|▼|\+|-)?\s*(?:Standard\s*Switch|Distributed\s*Switch|Bridge):\s*([^\n\r]+)", text, re.I)
+            txt = str(t.get("text", "")).strip()
+            if re.search(r"(?:Standard|Distributed)\s*Switch|Bridge", txt, re.I):
+                candidate_header_tokens.append(t)
+
+        switch_headers = []
+        seen_header_ys = set()
+
+        for cht in candidate_header_tokens:
+            _, chy, _, _ = get_bounding_box(cht)
+            if any(abs(chy - prev_y) <= 8.0 for prev_y in seen_header_ys):
+                continue
+            seen_header_ys.add(chy)
+
+            line_tokens = [
+                t for t in raw_tokens
+                if abs(get_bounding_box(t)[1] - chy) <= 10.0
+            ]
+            line_tokens.sort(key=lambda x: get_bounding_box(x)[0])
+            joined_line = " ".join(str(x.get("text", "")).strip() for x in line_tokens)
+
+            m = re.search(r"(?:Standard|Distributed)\s*Switch(?:\s*[:;]|\s+)\s*([A-Za-z0-9_\-\.\s]+?)(?:\s+(?:ADD|EDIT|MANAGE|\.\.\.)|$)", joined_line, re.I)
             if m:
-                bx, by, _, _ = get_bounding_box(t)
                 raw_sw_name = m.group(1).strip()
                 raw_sw_name = re.split(r"\s+(?:ADD|EDIT|MANAGE|\.\.\.)", raw_sw_name, flags=re.I)[0].strip()
                 sw_name = apply_normalizations(raw_sw_name, normalizations)
 
-                is_collapsed = bool(re.match(r"^(?:>|▶|\+)", text.strip()))
+                is_collapsed = bool(re.search(r"(?:^|\s)(?:>|▶|\+)", joined_line))
                 switch_headers.append({
                     "name": sw_name,
-                    "y_top": by,
-                    "x_left": bx,
+                    "y_top": chy,
+                    "x_left": min(get_bounding_box(x)[0] for x in line_tokens),
                     "collapsed": is_collapsed
                 })
 
@@ -108,7 +126,6 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
         if not switch_headers:
             return []
 
-        # Dynamic Sidebar Boundary (0px for cropped screenshots, ~185px for full screen)
         min_switch_x = min(sh["x_left"] for sh in switch_headers)
         sidebar_cutoff_x = max(0.0, min_switch_x - 15.0)
 
@@ -179,9 +196,7 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                 logical_tokens = [t for t in inner_tokens if get_bounding_box(t)[0] < x_mid_band]
                 physical_tokens = [t for t in inner_tokens if get_bounding_box(t)[0] >= x_mid_band]
 
-            # ---------------------------------------------------------
-            # Physical Column Extraction (Right Column)
-            # ---------------------------------------------------------
+            # Physical Column Extraction
             physical_records = []
             vmnic_matches = []
             for pt in physical_tokens:
@@ -238,11 +253,8 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                 })
             extracted_records.extend(physical_records)
 
-            # ---------------------------------------------------------
-            # Logical Column Extraction (Left Column with Line Clustering)
-            # ---------------------------------------------------------
-            # Cluster tokens into lines to preserve multi-word titles like "iSCSI Veeam"
-            logical_lines = cluster_tokens_into_lines(logical_tokens, y_thresh=6.0)
+            # Logical Column Extraction (Line Clustered)
+            logical_lines = cluster_tokens_into_lines(logical_tokens, y_thresh=8.0)
 
             vmk_entries = []
             for line_item in logical_lines:
@@ -285,10 +297,13 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                     continue
                 if noise_re and noise_re.search(txt):
                     continue
-                if len(txt) <= 2:
+
+                cleaned_title = re.sub(r"[\s\.\…\×\<\>\(\)]+$", "", txt).strip()
+                cleaned_title = apply_normalizations(cleaned_title, normalizations)
+
+                if len(cleaned_title) <= 2:
                     continue
 
-                cleaned_title = apply_normalizations(txt, normalizations)
                 service_titles.append({
                     "title": cleaned_title,
                     "y": line_item["y"]
