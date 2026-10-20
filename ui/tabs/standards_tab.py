@@ -1478,292 +1478,173 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 st.toast(f"✅ Section 2 reset to defaults for '{active_plat}'!", icon="🔄")
                 st.rerun()
 
+
     # ──────────────────────────────────────────────────────────────────────
-    # Section 2.5: Relative Spatial Anchors & Local Privacy Redaction
+    # Section 2: Token Normalizations (OCR Typo Corrections)
     # ──────────────────────────────────────────────────────────────────────
-    with st.expander("📐 2.5. Relative Spatial Anchors & Local Privacy Redaction", expanded=False):
-        _render_spatial_anchors_redaction_editor(plat_parsing, active_plat)
+    norm_rules = plat_parsing.get("token_normalizations", [])
+    if not isinstance(norm_rules, list):
+        norm_rules = []
+
+    with st.expander(f"🔤 2. Token Normalizations & OCR Typo Corrections ({len(norm_rules)})", expanded=False):
+        st.caption("Auto-correct OCR character jitter, split spaces, and platform typos before topology clustering (Regex Pattern -> Replacement).")
+
+        col_p, col_r, col_del = st.columns([4.4, 4.4, 1.2], vertical_alignment="center")
+        with col_p:
+            st.markdown("**Original Pattern (Regex)**")
+        with col_r:
+            st.markdown("**Replacement**")
+        with col_del:
+            pass
+
+        updated_norms = []
+        for idx, rule in enumerate(norm_rules):
+            pat = rule.get("pattern", "")
+            rep = rule.get("replace", "")
+
+            cp, cr, cd = st.columns([4.4, 4.4, 1.2], vertical_alignment="center")
+            with cp:
+                n_pat = st.text_input("Pattern", value=pat, key=f"norm_pat_{active_plat}_{idx}", label_visibility="collapsed").strip()
+            with cr:
+                n_rep = st.text_input("Replace", value=rep, key=f"norm_rep_{active_plat}_{idx}", label_visibility="collapsed").strip()
+            with cd:
+                if _render_centered_del_btn(f"norm_del_{active_plat}_{idx}", "Delete normalization rule"):
+                    continue
+
+            if n_pat:
+                updated_norms.append({"pattern": n_pat, "replace": n_rep})
+
+        with st.form(key=f"norm_add_form_{active_plat}", clear_on_submit=True):
+            ca1, ca2, ca3 = st.columns([4.4, 4.4, 1.2], vertical_alignment="center")
+            with ca1:
+                new_pat = st.text_input("New Pattern", value="", key=f"norm_new_p_{active_plat}", placeholder="e.g. (?i)Netwrork", label_visibility="collapsed")
+            with ca2:
+                new_rep = st.text_input("New Replace", value="", key=f"norm_new_r_{active_plat}", placeholder="e.g. Network", label_visibility="collapsed")
+            with ca3:
+                add_norm = st.form_submit_button("➕ Add", width="stretch")
+
+            if add_norm and new_pat.strip():
+                updated_norms.append({"pattern": new_pat.strip(), "replace": new_rep.strip()})
+                plat_parsing["token_normalizations"] = updated_norms
+                parsing_presets[active_plat] = plat_parsing
+                rules["topology_parsing_presets"] = parsing_presets
+                save_naming_rules(rules, source=f"Add normalization to {active_plat}")
+                SSM.set_naming_rules(rules.copy())
+                st.toast("✅ Normalization rule added!", icon="💾")
+                st.rerun()
+
         st.divider()
-        col_save_s25, col_reset_s25 = st.columns(2, vertical_alignment="center")
-        with col_save_s25:
-            if st.button("💾 Save & Apply Changes", key=f"btn_save_s25_{active_plat}", type="primary", width="stretch"):
+        col_s2, col_r2 = st.columns(2)
+        with col_s2:
+            if st.button("💾 Save & Apply Normalizations", key=f"btn_save_norms_{active_plat}", type="primary", width="stretch"):
+                plat_parsing["token_normalizations"] = updated_norms
                 parsing_presets[active_plat] = plat_parsing
                 rules["topology_parsing_presets"] = parsing_presets
-                save_naming_rules(rules, source=f"Save Section 2.5 for {active_plat}")
-                fresh = SSM.get_cached_naming_rules() or load_naming_rules()
-                rules.clear()
-                rules.update(fresh)
-                SSM.set_naming_rules(fresh.copy())
+                save_naming_rules(rules, source=f"Save Normalizations for {active_plat}")
                 SSM.refresh_naming_rules()
-                st.session_state.pop(f"_plat_parsing_seeded_{active_plat}", None)
-                st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
-                st.toast(f"✅ Section 2.5 (Spatial Anchors) for '{active_plat}' saved & applied!", icon="💾")
+                st.toast(f"✅ Normalizations for {active_plat} saved!", icon="💾")
                 st.rerun()
-        with col_reset_s25:
-            if st.button("🔄 Reset to Defaults", key=f"btn_reset_s25_{active_plat}", width="stretch"):
-                default_pars = DEFAULT_PARSING_PRESETS.get(active_plat, {})
-                if isinstance(default_pars, dict):
-                    default_sp = default_pars.get("spatial_anchors_and_redaction", {})
-                    if default_sp:
-                        plat_parsing["spatial_anchors_and_redaction"] = dict(default_sp)
+        with col_r2:
+            if st.button("🔄 Reset to Default Normalizations", key=f"btn_reset_norms_{active_plat}", width="stretch"):
+                plat_parsing["token_normalizations"] = DEFAULT_PARSING_PRESETS.get(active_plat, {}).get("token_normalizations", [])
                 parsing_presets[active_plat] = plat_parsing
                 rules["topology_parsing_presets"] = parsing_presets
-                save_naming_rules(rules, source=f"Reset Section 2.5 for {active_plat}")
-                SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
-                _clear_session_state_prefixes(f"spat_")
-                st.toast(f"✅ Section 2.5 reset to defaults for '{active_plat}'!", icon="🔄")
-                st.rerun()
-
-    # ──────────────────────────────────────────────────────────────────────
-    # Section 2.6: UI Noise Blacklist (Dynamic Chip Filtering)
-    # ──────────────────────────────────────────────────────────────────────
-    with st.expander("🔇 2.6. UI Noise Blacklist", expanded=False):
-        current_blacklist = plat_parsing.get("ui_noise_blacklist", [])
-        if not isinstance(current_blacklist, list):
-            current_blacklist = []
-        blacklist_text = "\n".join(str(t).strip() for t in current_blacklist if t.strip())
-        edited_blacklist = st.text_area(
-            "Noise Tokens (one per line or comma-separated)",
-            value=blacklist_text,
-            height=220,
-            key=f"plat_noise_bl_{active_plat}",
-            help="Tokens listed here are treated as noise during chip harvesting. One token per line, or comma-separated. These supplement the global UI_NAV_NOISE.",
-        )
-        parsed_bl: list[str] = []
-        for raw in edited_blacklist.split("\n"):
-            for token in raw.split(","):
-                t = token.strip()
-                if t:
-                    parsed_bl.append(t)
-
-        st.caption(f"**{len(parsed_bl)}** tokens configured for this platform.")
-
-        col_save_s26, col_reset_s26 = st.columns(2, vertical_alignment="center")
-        with col_save_s26:
-            if st.button("💾 Save & Apply Changes", key=f"btn_save_s26_{active_plat}", type="primary", width="stretch"):
-                plat_parsing["ui_noise_blacklist"] = parsed_bl
-                parsing_presets[active_plat] = plat_parsing
-                rules["topology_parsing_presets"] = parsing_presets
-                save_naming_rules(rules, source=f"Save Section 2.6 for {active_plat}")
-                fresh = SSM.get_cached_naming_rules() or load_naming_rules()
-                rules.clear()
-                rules.update(fresh)
-                SSM.set_naming_rules(fresh.copy())
+                save_naming_rules(rules, source=f"Reset Normalizations for {active_plat}")
                 SSM.refresh_naming_rules()
-                st.session_state.pop(f"_plat_parsing_seeded_{active_plat}", None)
-                st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
-                st.toast(f"✅ Section 2.6 (Noise Blacklist) for '{active_plat}' saved & applied!", icon="💾")
-                st.rerun()
-        with col_reset_s26:
-            if st.button("🔄 Reset to Defaults", key=f"btn_reset_s26_{active_plat}", width="stretch"):
-                plat_parsing.pop("ui_noise_blacklist", None)
-                parsing_presets[active_plat] = plat_parsing
-                rules["topology_parsing_presets"] = parsing_presets
-                save_naming_rules(rules, source=f"Reset Section 2.6 for {active_plat}")
-                SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
-                _clear_session_state_prefixes(f"plat_noise_bl_{active_plat}")
-                st.toast(f"✅ Section 2.6 reset to defaults for '{active_plat}'!", icon="🔄")
+                st.toast(f"✅ Normalizations reset for {active_plat}!", icon="🔄")
                 st.rerun()
 
     # ──────────────────────────────────────────────────────────────────────
-    # Section 3: AI Parsing Rules & Invariants
+    # Section 3: Topology Noise Filters (True noise_filters Binding)
     # ──────────────────────────────────────────────────────────────────────
-    with st.expander("🧠 3. AI Parsing Rules & Invariants", expanded=False):
-        st.caption("Complete system instructions injected into the LLM prompt during OCR topology parsing. Covers OCR normalization, token de-concatenation, topology inheritance, and mandatory atomic JSON attributes.")
+    noise_filters = plat_parsing.get("noise_filters", [])
+    if not isinstance(noise_filters, list):
+        noise_filters = []
 
-        inst_val = plat_parsing.get("instructions", "")
-        instructions_input = st.text_area(
-            "Parsing Instructions (English System Prompt Rules)",
-            value=inst_val,
-            height=340,
-            key=f"txt_instructions_{active_plat}",
-            help="Platform-specific extraction and reconciliation rules injected during OCR topology parsing."
+    with st.expander(f"🔇 3. Topology Noise Filters ({len(noise_filters)})", expanded=False):
+        st.caption("Tokens or regex patterns matching unwanted UI chrome, button labels, and icon artifacts to silently discard.")
+        noise_text = "\n".join(str(t).strip() for t in noise_filters if str(t).strip())
+        edited_noise = st.text_area(
+            "Noise Tokens / Patterns (one per line)",
+            value=noise_text,
+            height=200,
+            key=f"txt_noise_filters_{active_plat}",
+            help="One token or regex per line. Directly used by core/extractors during spatial reduction."
         )
 
-        # ── AI Assistant: Generate Platform Rules ────────────────────────
-        with st.expander("✨ AI Assistant: Generate Platform Rules", expanded=False):
-            st.caption("Automatically generate parsing instructions and description patterns for new hypervisors.")
-            c_ai_in, c_ai_btn = st.columns([4, 1.5], vertical_alignment="center")
-            ai_plat_input = c_ai_in.text_input("Hypervisor / Platform", placeholder="e.g. Cisco NX-OS, OpenStack", label_visibility="collapsed", key="txt_ai_plat_gen")
-            if c_ai_btn.button("Generate Platform Rules", key="btn_gen_ai_plat_rules", width="stretch"):
-                target_p = ai_plat_input.strip()
-                if not target_p:
-                    st.warning("Please enter a platform name.")
-                else:
-                    with st.spinner(f"Generating rules for {target_p}..."):
-                        try:
-                            ai_prompt = (
-                                f"Generate network topology parsing instructions and NetBox description patterns for hypervisor/platform: '{target_p}'.\n"
-                                "Respond strictly with a JSON object with two keys:\n"
-                                "1. 'instructions': A well-structured, multi-line English specification for OCR topology diagrams. "
-                                "Must use clear headings, double newlines between sections, and clean bullet points. Follow this structure strictly:\n\n"
-                                f"[PLATFORM ARCHITECTURE: {target_p.upper()}]\n\n"
-                                "1. OCR TEXT & NORMALIZATION:\n"
-                                "- Normalize adapter names and port labels...\n"
-                                "- Strip vendor-specific generic prefixes...\n\n"
-                                "2. TOPOLOGY INHERITANCE & ZERO ORPHAN POLICY:\n"
-                                "- Topological parent-child mapping rules...\n"
-                                "- Rules for active vs standby uplinks...\n\n"
-                                "3. MANDATORY ATOMIC JSON ATTRIBUTES:\n"
-                                "- interface: Clean interface identifier only...\n"
-                                "- parent: Connected switch/bridge name...\n\n"
-                                "2. 'export_prompt': A well-formatted, multi-line prompt template for external AI (ChatGPT/Claude), "
-                                "using blank lines between bullet points and paragraphs.\n"
-                                "Do not include markdown fences outside the JSON."
-                            )
-                            res_raw = call_ai(ai_prompt, active_model)
-                            clean_json = re.sub(r"^```json\s*|^```\s*|```$", "", res_raw.strip(), flags=re.MULTILINE)
-                            data = json.loads(clean_json)
+        parsed_noise = [t.strip() for t in edited_noise.split("\n") if t.strip()]
 
-                            gen_instructions = data.get("instructions", f"[PLATFORM ARCHITECTURE: {target_p.upper()}]")
-                            gen_export_prompt = data.get("export_prompt", f"You are an expert engineer for {target_p}...")
-
-                            if target_p not in hyp_presets:
-                                hyp_presets[target_p] = [
-                                    {"code": "Uplink", "label": "Physical Uplink", "pattern": "<interface> - <parent> <purpose>"},
-                                    {"code": "Default", "label": "Default Interface", "pattern": "<interface> (<purpose>)"}
-                                ]
-                            parsing_presets[target_p] = {
-                                "platform": target_p,
-                                "instructions": gen_instructions,
-                                "export_prompt": gen_export_prompt
-                            }
-                            rules["hypervisor_presets"] = hyp_presets
-                            rules["topology_parsing_presets"] = parsing_presets
-
-                            save_naming_rules(rules, source=f"AI Generated {target_p}")
-                            fresh_rules = SSM.get_cached_naming_rules() or load_naming_rules()
-                            rules.clear()
-                            rules.update(fresh_rules)
-                            SSM.set_naming_rules(fresh_rules.copy())
-                            SSM.refresh_naming_rules()
-
-                            st.session_state.pop(f"txt_instructions_{target_p}", None)
-                            st.session_state.pop(f"txt_export_prompt_{target_p}", None)
-
-                            st.session_state["pending_hypervisor_platform"] = target_p
-                            st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
-                            st.toast(f"✅ Generated and loaded rules for '{target_p}'!", icon="💾")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Failed to generate platform rules: {e}")
-
-        st.divider()
-        col_save_s3, col_reset_s3 = st.columns(2, vertical_alignment="center")
-        with col_save_s3:
-            if st.button("💾 Save & Apply Changes", key=f"btn_save_s3_{active_plat}", type="primary", width="stretch"):
-                plat_parsing["instructions"] = instructions_input
+        col_s3, col_r3 = st.columns(2)
+        with col_s3:
+            if st.button("💾 Save & Apply Noise Filters", key=f"btn_save_noise_{active_plat}", type="primary", width="stretch"):
+                plat_parsing["noise_filters"] = parsed_noise
                 parsing_presets[active_plat] = plat_parsing
                 rules["topology_parsing_presets"] = parsing_presets
-                save_naming_rules(rules, source=f"Save Section 3 for {active_plat}")
-                fresh = SSM.get_cached_naming_rules() or load_naming_rules()
-                rules.clear()
-                rules.update(fresh)
-                SSM.set_naming_rules(fresh.copy())
+                save_naming_rules(rules, source=f"Save Noise Filters for {active_plat}")
                 SSM.refresh_naming_rules()
-                st.session_state.pop(f"_plat_parsing_seeded_{active_plat}", None)
-                st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
-                st.toast(f"✅ Section 3 (AI Parsing Rules) for '{active_plat}' saved & applied!", icon="💾")
+                st.toast(f"✅ Noise filters for {active_plat} saved!", icon="💾")
                 st.rerun()
-        with col_reset_s3:
-            if st.button("🔄 Reset to Defaults", key=f"btn_reset_s3_{active_plat}", width="stretch"):
-                default_pars = DEFAULT_PARSING_PRESETS.get(active_plat, {})
-                if isinstance(default_pars, dict):
-                    plat_parsing["instructions"] = default_pars.get("instructions", "")
-                else:
-                    plat_parsing["instructions"] = ""
+        with col_r3:
+            if st.button("🔄 Reset Noise Filters", key=f"btn_reset_noise_{active_plat}", width="stretch"):
+                plat_parsing["noise_filters"] = DEFAULT_PARSING_PRESETS.get(active_plat, {}).get("noise_filters", [])
                 parsing_presets[active_plat] = plat_parsing
                 rules["topology_parsing_presets"] = parsing_presets
-                save_naming_rules(rules, source=f"Reset Section 3 for {active_plat}")
-                SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
-                _clear_session_state_prefixes(f"txt_instructions_{active_plat}")
-                st.toast(f"✅ Section 3 reset to defaults for '{active_plat}'!", icon="🔄")
+                save_naming_rules(rules, source=f"Reset Noise Filters for {active_plat}")
+                SSM.refresh_naming_rules()
+                st.toast(f"✅ Noise filters reset for {active_plat}!", icon="🔄")
                 st.rerun()
 
     # ──────────────────────────────────────────────────────────────────────
-    # Section 4: AI Onboarding Blueprint (Read-Only Guide)
+    # Section 4: Geometric Extraction Tolerances
     # ──────────────────────────────────────────────────────────────────────
-    with st.expander("📘 4. AI Onboarding Blueprint Guide", expanded=False):
-        st.caption("A complete reference for onboarding any hypervisor platform into NetBox Hub. Use the blueprint prompt below to generate all 4 configuration sections for a new platform.")
-        st.markdown("""
-**The AI Onboarding Blueprint has 4 components:**
+    geom_cfg = plat_parsing.get("geometry", {})
+    if not isinstance(geom_cfg, dict):
+        geom_cfg = {}
 
-### 🏷️ 1. Description Templates
-Interface naming patterns for NetBox objects. Each template maps a generic pattern to a specific network element type:
-- **Uplink**: Physical uplink naming (e.g. `<vmnic> - <v_switch> <purpose>`)
-- **Bridge**: Linux/virtual switch bridges (e.g. `<bridge> - <purpose>`)
-- **PortGroup**: Port group or VLAN interface names (e.g. `PG-<port_group>`)
-- **Default**: Fallback pattern for unclassified interfaces
+    with st.expander("📐 4. Geometric Tolerances & Layout Settings", expanded=False):
+        st.caption("Fine-tune coordinate tolerances for line-clustering, column anchoring, and VMkernel proximity binding.")
 
-### 🔗 2. Platform Token Aliases
-Vendor-specific terminology mapped to canonical JSON keys so the parser normalizes diverse labels:
-- `parent` → [switch, bridge, v_switch, bond]
-- `interface` → [eth, nic, vmnic, port, bond]
-- `speed` → [speed, link_speed, throughput]
+        c_g1, c_g2 = st.columns(2)
+        with c_g1:
+            g_y_thresh = st.number_input(
+                "Horizontal Line Clustering Y-Tolerance (px)",
+                min_value=2.0, max_value=25.0,
+                value=float(geom_cfg.get("line_cluster_y_thresh", 8.0)),
+                step=0.5,
+                key=f"geom_y_thresh_{active_plat}",
+                help="Maximum vertical difference between word bounding boxes to be considered on the same horizontal line."
+            )
+        with c_g2:
+            g_vmk_dist = st.number_input(
+                "VMkernel-to-Title Max Vertical Distance (px)",
+                min_value=50.0, max_value=300.0,
+                value=float(geom_cfg.get("vmk_to_title_max_dist", 160.0)),
+                step=10.0,
+                key=f"geom_vmk_dist_{active_plat}",
+                help="Maximum distance upwards to search for the parent Port Group title when pairing a VMkernel interface."
+            )
 
-### 📐 2.5. Spatial Anchors & Redaction
-Screenshot container headers and local privacy masking for OCR-driven topology extraction:
-- **Container headers** (`container_header`): Text that begins a logical network group (e.g. "Virtual Switch", "Network Bridge")
-- **Adapter columns** (`adapter_column`): Column headers identifying physical adapter lists (e.g. "Physical Adapters", "Interfaces")
-- **Redaction rules**: Deterministic masking of IPv4, MAC addresses, and internal domain names before data leaves the device
-
-### 🧠 3. AI Parsing Rules & Invariants
-LLM system instructions and atomic attribute requirements for topology parsing:
-- OCR text cleaning and vendor prefix normalization
-- Topology parent-child inheritance rules
-- Mandatory JSON attributes: `interface`, `parent`, `purpose`, `uplink_role`, `slot`, `speed`
-""", unsafe_allow_html=True)
-
-        st.divider()
-
-        col_blueprint, col_reset_s4 = st.columns([3, 1], vertical_alignment="center")
-        with col_blueprint:
-            if st.button(
-                "📋 Copy AI Blueprint Prompt",
-                key=f"btn_blueprint_{active_plat}",
-                type="primary",
-                width="stretch",
-                help="Generate a complete prompt to paste into ChatGPT/Claude for onboarding a new platform.",
-            ):
-                blueprint_prompt = (
-                    "You are an enterprise network virtualization architect. "
-                    f"I need to onboard a new hypervisor/virtualization platform into NetBox Hub: \"{active_plat}\".\n\n"
-                    "Please generate the complete configuration specification for this platform "
-                    "strictly following the schema below.\n\n"
-                    "Respond with a JSON object containing:\n\n"
-                    "1. \"templates\": List of NetBox description patterns, e.g.:\n"
-                    "  [\n"
-                    '    {\"code\": \"Uplink\", \"label\": \"Physical Uplink\", '
-                    '\"pattern\": \"<interface> - <parent> <purpose>\"},\n'
-                    '    {\"code\": \"Default\", \"label\": \"Default Interface\", '
-                    '\"pattern\": \"<interface> (<purpose>)\"}\n'
-                    "  ]\n\n"
-                    "2. \"aliases\": Dictionary mapping canonical keys "
-                    "('parent', 'interface', 'speed') to vendor terms:\n"
-                    "  {\n"
-                    '    \"parent\": [\"switch\", \"bridge\"],\n'
-                    '    \"interface\": [\"eth\", \"nic\"],\n'
-                    '    \"speed\": [\"speed\", \"link_speed\"]\n'
-                    "  }\n\n"
-                    "3. \"spatial_anchors\": List of anchor definitions for UI screenshot grouping:\n"
-                    "  [\n"
-                    '    {\"role\": \"container_header\", '
-                    '"patterns\": [\"Virtual Switch\", \"Network Bridge\"]},\n'
-                    '    {\"role\": \"adapter_column\", '
-                    '"patterns\": [\"Physical Adapters\", \"Interfaces\"]}\n'
-                    "  ]\n\n"
-                    "4. \"instructions\": Comprehensive English parsing invariants covering:\n"
-                    "  - OCR text cleaning and vendor prefix normalization\n"
-                    "  - Topology parent-child inheritance\n"
-                    "  - Mandatory JSON attributes: interface, parent, purpose, "
-                    "uplink_role, slot, speed\n"
-                )
-                st.code(blueprint_prompt, language="text")
-                st.caption("*Copy the prompt above and paste it into ChatGPT, Claude, or any LLM to generate the full onboarding spec for* `" + active_plat + "`*.*")
-
-        with col_reset_s4:
-            if st.button("🔄 Reset to Defaults", key=f"btn_reset_s4_{active_plat}", width="stretch"):
-                st.session_state[f"exp_s4_{active_plat}"] = False
+        col_sg, col_rg = st.columns(2)
+        with col_sg:
+            if st.button("💾 Save & Apply Geometry", key=f"btn_save_geom_{active_plat}", type="primary", width="stretch"):
+                plat_parsing["geometry"] = {
+                    "line_cluster_y_thresh": g_y_thresh,
+                    "vmk_to_title_max_dist": g_vmk_dist,
+                }
+                parsing_presets[active_plat] = plat_parsing
+                rules["topology_parsing_presets"] = parsing_presets
+                save_naming_rules(rules, source=f"Save Geometry for {active_plat}")
+                SSM.refresh_naming_rules()
+                st.toast(f"✅ Geometric tolerances for {active_plat} saved!", icon="💾")
+                st.rerun()
+        with col_rg:
+            if st.button("🔄 Reset Geometry", key=f"btn_reset_geom_{active_plat}", width="stretch"):
+                plat_parsing["geometry"] = {"line_cluster_y_thresh": 8.0, "vmk_to_title_max_dist": 160.0}
+                parsing_presets[active_plat] = plat_parsing
+                rules["topology_parsing_presets"] = parsing_presets
+                save_naming_rules(rules, source=f"Reset Geometry for {active_plat}")
+                SSM.refresh_naming_rules()
+                st.toast(f"✅ Geometry reset for {active_plat}!", icon="🔄")
                 st.rerun()
 
 

@@ -266,7 +266,9 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
             # ---------------------------------------------------------
             # Logical Column Extraction (Line-Clustered)
             # ---------------------------------------------------------
-            logical_lines = cluster_tokens_into_lines(logical_tokens, y_thresh=8.0)
+            geom_cfg = cfg.get("geometry", {})
+            y_thresh = float(geom_cfg.get("line_cluster_y_thresh", 8.0))
+            logical_lines = cluster_tokens_into_lines(logical_tokens, y_thresh=y_thresh)
 
             vmk_entries = []
             for line_item in logical_lines:
@@ -347,7 +349,8 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
 
             assigned_titles = set()
             for v in vmk_entries:
-                candidates = [st for st in service_titles if 0 <= (v["y"] - st["y"]) <= 160.0]
+                max_vmk_dist = float(geom_cfg.get("vmk_to_title_max_dist", 160.0))
+                candidates = [st for st in service_titles if 0 <= (v["y"] - st["y"]) <= max_vmk_dist]
                 if candidates:
                     candidates.sort(key=lambda c: v["y"] - c["y"])
                     purpose_name = candidates[0]["title"]

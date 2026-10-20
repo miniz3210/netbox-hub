@@ -1,4 +1,3 @@
-# Generated from NetBox Hub v4.8.7 (Deterministic Engine)
 branch_switch: SW<country><state><site><zone><seq>-<stack_id>
 branch_stack: VS<country><state><site><seq>-<stack_id>
 branch_ap: WAP<country><state><site><seq>
@@ -149,7 +148,6 @@ vlan_presets:
     prefix_pattern: ''
     items: []
 naming_patterns:
-  # Generated from NetBox Hub v4.8.7 (Deterministic Engine)
   branch_switch: SW<country><state><site><zone><seq>-<stack_id>
   branch_stack: VS<country><state><site><seq>-<stack_id>
   branch_ap: WAP<country><state><site><seq>
@@ -494,19 +492,6 @@ topology_parsing_presets:
       speed:
       - speed
       - link_speed
-    export_prompt: ""
-    spatial_anchors_and_redaction:
-      anchors:
-      - role: left_boundary
-        patterns:
-        - Virtual switches
-      - role: container_header
-        patterns:
-        - 'Standard Switch:'
-      - role: adapter_column
-        patterns:
-        - Physical Adapters
-      enabled: false
     layout_geometry:
       sidebar_x_cutoff: 280.0
       midline_ratio: 0.48
@@ -572,7 +557,7 @@ topology_parsing_presets:
     - pattern: (?i)AgeVLab
       replace: Age VLab
     - pattern: (?i)PR\s*Spain\s*Fuenmayor\s*VLab\s*VM.*
-      replace: 'PR Spain Fuenmayor VLab VM ...'
+      replace: PR Spain Fuenmayor VLab VM ...
     - pattern: \bvmk[oO]\b
       replace: vmk0
     - pattern: (?i)Netwrork
@@ -581,7 +566,9 @@ topology_parsing_presets:
       replace: Distributed
     - pattern: \bPHYSKCAL\b
       replace: PHYSICAL
-    ocr_llm_prompt: ""
+    geometry:
+      line_cluster_y_thresh: 8.0
+      vmk_to_title_max_dist: 160.0
   Proxmox VE:
     platform: Proxmox VE
     aliases:
@@ -597,8 +584,6 @@ topology_parsing_presets:
       speed:
       - speed
       - link_speed
-    instructions: ""
-    export_prompt: ""
   Microsoft Azure:
     platform: Microsoft Azure
     aliases:
@@ -612,8 +597,6 @@ topology_parsing_presets:
       speed:
       - speed
       - link_speed
-    instructions: ""
-    export_prompt: ""
 hypervisor_presets:
   VMware ESXi:
   - code: Switch_Teaming
