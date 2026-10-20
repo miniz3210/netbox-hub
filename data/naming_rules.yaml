@@ -148,7 +148,8 @@ vlan_presets:
     prefix_pattern: ''
     items: []
 naming_patterns:
-  branch_switch: SW<country><state><site><zone><seq>-<stack_id>
+# Generated from NetBox Hub v4.8.16 (Deterministic Engine)
+branch_switch: SW<country><state><site><zone><seq>-<stack_id>
   branch_stack: VS<country><state><site><seq>-<stack_id>
   branch_ap: WAP<country><state><site><seq>
   branch_firewall: FW<country><state><site><vendor><seq>
