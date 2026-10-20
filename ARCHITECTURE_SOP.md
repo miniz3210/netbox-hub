@@ -1,5 +1,5 @@
 # NetBox Hub — Living Architecture SOP & Handover Guide
-# Target Baseline: v4.8.4 | Platform: Oracle Cloud Ampere A1 (ARM64)
+# Target Baseline: v4.8.7 | Platform: Oracle Cloud Ampere A1 (ARM64)
 
 ---
 
@@ -8,7 +8,7 @@
 | Property              | Value                                                        |
 |-----------------------|--------------------------------------------------------------|
 | Application           | NetBox Universal Library Hub                                 |
-| Target Version        | v4.8.4                                                       |
+| Target Version        | v4.8.7                                                       |
 | Runtime               | Python 3.11+ / Streamlit                                     |
 | Cloud Infrastructure  | Oracle Cloud Ampere A1 (ARM64 / aarch64, Linux)              |
 | Container Registry    | `ghcr.io/miniz3210/netbox-hub`                               |
@@ -160,7 +160,7 @@ When a cell in the DataGrid is edited, `_apply_cascade_to_rows()` in `ui/tabs/na
 Capture a baseline snapshot of the Standards Tab configuration into `data/naming_rules.yaml`. Verify all section definitions (2.5 UX rules, 4.0 Blueprint guide) are present and consistent.
 
 ### Step 2 — Version Assert Verification
-Confirm `config/constants.py::APP_VERSION == "4.8.4"`. Ensure no release notes or version bump scripts are pending.
+Confirm `config/constants.py::APP_VERSION == "4.8.7"`. Ensure no release notes or version bump scripts are pending.
 
 ### Step 3 — Safe Local Container Cache Cleanup
 ```bash
@@ -171,8 +171,8 @@ docker builder prune -a -f
 
 ### Step 4 — Docker Build & Tag Release
 ```bash
-docker build -t ghcr.io/miniz3210/netbox-hub:v4.8.4 -t ghcr.io/miniz3210/netbox-hub:latest .
-docker push ghcr.io/miniz3210/netbox-hub:v4.8.4
+docker build -t ghcr.io/miniz3210/netbox-hub:v4.8.7 -t ghcr.io/miniz3210/netbox-hub:latest .
+docker push ghcr.io/miniz3210/netbox-hub:v4.8.7
 docker push ghcr.io/miniz3210/netbox-hub:latest
 ```
 
@@ -200,20 +200,20 @@ docker push ghcr.io/miniz3210/netbox-hub:latest
 ### ⬜ Pending Roadmap
 
 - [x] Implement unit test coverage for `core/spatial_redactor.py` in `tests/test_spatial_redactor.py` (expand existing test suite to cover v4.8.44 invariants: ghost interface filtering, icon stripping, switch name fidelity, cascade replacement edge cases).
-- [x] **v4.8.4 Collapsed Header Discard**: Python-side detection and removal of `> Standard Switch:` collapsed headers before extraction.
-- [x] **v4.8.4 Vertical Y-Slicing**: Switch band bounding via expanded anchor detection; zero vertical leakage across switches.
-- [x] **v4.8.4 Input Token Budget**: < 400 tokens per extraction call via compact serialization; eradicated prompt truncation.
-- [x] **v4.8.4 Switch Suffix Fidelity**: `vSwitch01` vs `vSwitch02` distinct; OCR `o`→`0` normalization fixed.
-- [x] **v4.8.4 Hardware Sidebar Pre-Crop**: Bounded cropping eliminates VMware left navigation tokens before extraction.
-- [x] **v4.8.4 Natural Line-Grouping Serialization**: Compact line syntax replaces verbose coordinate tags, dropping configuration size by >80%.
-- [x] **v4.8.4 Deterministic Processing**: Python-side noise filtering and token normalization ensure consistent extraction without stochastic model behavior.
-- [x] **v4.8.4 Resilient JSON Object Recovery**: Regex-based extraction recovers valid JSON objects from partial streams, eliminating 0-record errors.
-- [x] **v4.8.4 Expanded State Precedence**: Automatically purge placeholder 'No Uplink' records once real physical adapters are detected.
+- [x] **v4.8.7 Collapsed Header Discard**: Python-side detection and removal of `> Standard Switch:` collapsed headers before extraction.
+- [x] **v4.8.7 Vertical Y-Slicing**: Switch band bounding via expanded anchor detection; zero vertical leakage across switches.
+- [x] **v4.8.7 Input Token Budget**: < 400 tokens per extraction call via compact serialization; eradicated prompt truncation.
+- [x] **v4.8.7 Switch Suffix Fidelity**: `vSwitch01` vs `vSwitch02` distinct; OCR `o`→`0` normalization fixed.
+- [x] **v4.8.7 Hardware Sidebar Pre-Crop**: Bounded cropping eliminates VMware left navigation tokens before extraction.
+- [x] **v4.8.7 Natural Line-Grouping Serialization**: Compact line syntax replaces verbose coordinate tags, dropping configuration size by >80%.
+- [x] **v4.8.7 Deterministic Processing**: Python-side noise filtering and token normalization ensure consistent extraction without stochastic model behavior.
+- [x] **v4.8.7 Resilient JSON Object Recovery**: Regex-based extraction recovers valid JSON objects from partial streams, eliminating 0-record errors.
+- [x] **v4.8.7 Expanded State Precedence**: Automatically purge placeholder 'No Uplink' records once real physical adapters are detected.
 - [ ] Build Excel IPAM offline reconciliation script against `AW IPs & VLANs_Final (2).xlsx`.
-- [ ] Prune stale local git tags prior to v4.8.4 release.
-- [ ] Publish GHCR image release `v4.8.4` (`ghcr.io/miniz3210/netbox-hub:v4.8.4`).
+- [ ] Prune stale local git tags prior to v4.8.7 release.
+- [ ] Publish GHCR image release `v4.8.7` (`ghcr.io/miniz3210/netbox-hub:v4.8.7`).
 - [ ] Build platform expansion templates for Proxmox VE and Azure Portal.
-- [ ] Publish GHCR image release `v4.8.4` (`ghcr.io/miniz3210/netbox-hub:v4.8.4`).
+- [ ] Publish GHCR image release `v4.8.7` (`ghcr.io/miniz3210/netbox-hub:v4.8.7`).
 
 ---
 
@@ -263,7 +263,7 @@ docker image prune -a -f && docker builder prune -a -f
 
 ---
 
-## 9. Production Verification Checklist (v4.8.4)
+## 9. Production Verification Checklist (v4.8.7)
 ================================================================================
 
 - [x] **Deterministic Extraction Only**: Topology extraction is 100% deterministic, zero-LLM, sub-second execution via `core/extractors/`. No Ollama, no VLM, no AI inference required for topology parsing.
@@ -292,20 +292,20 @@ docker image prune -a -f && docker builder prune -a -f
 - [x] **Expanded State Precedence**: Automatically purge placeholder 'No Uplink' records once real physical adapters are detected.
 - [x] **Accurate Multi-Switch Suffix Fidelity**: Preserved vSwitch01 vs vSwitch02 distinction; fixed letter 'o' substitution in switch suffixes.
 - [x] **Expanded State Precedence Enforcement**: Automatically purge No Uplink records when physical adapters are discovered in subsequent frames.
-- [x] **v4.8.4 Strategy/Adapter Extractor Pattern**: Platform-specific topology extraction isolated into `core/extractors/` — `EsxiTopologyExtractor` for VMware ESXi, `ProxmoxTopologyExtractor` for Proxmox VE. Zero LLM spatial dependency, sub-second execution, 100% configuration-driven rules via `data/naming_rules.yaml`.
-- [x] **v4.8.4 Spaceless Key Canonicalization**: Zero-hardcode switch name deduplication via spaceless key clustering in `topology_reducer.py` — merges OCR whitespace variants (e.g. "Fuenmayor Age" vs "FuenmayorAge") without hardcoded rules.
-- [x] **v4.8.4 Horizontal Line Clustering**: Multi-word port groups (e.g. "iSCSI Veeam") preserved via geometric token line-clustering in `esxi.py` — tokens on the same horizontal band are concatenated before filtering.
-- [x] **v4.8.4 Dynamic Sidebar X-Cutoff**: Switch-header text ("StandardSwitch:...") no longer leaks into Port Group services. Sidebar boundary computed dynamically from leftmost switch header minus 15px — works on both full-screen and cropped screenshots without hardcoding.
-- [x] **v4.8.4 Deterministic Vertical Y-Slicing**: Switch headers detected via geometric anchor scoring, then bands sliced by Y-coordinate with zero vertical leakage.
-- [x] **v4.8.4 Deterministic Left/Right Column Split**: 48% midline hard slice separates logical services from physical adapters without LLM assistance.
-- [x] **v4.8.4 Universal Reducer v2**: State machine precedence, expanded-state purging, and 5-tuple deduplication unified across all inference paths.
+- [x] **v4.8.7 Strategy/Adapter Extractor Pattern**: Platform-specific topology extraction isolated into `core/extractors/` — `EsxiTopologyExtractor` for VMware ESXi, `ProxmoxTopologyExtractor` for Proxmox VE. Zero LLM spatial dependency, sub-second execution, 100% configuration-driven rules via `data/naming_rules.yaml`.
+- [x] **v4.8.7 Spaceless Key Canonicalization**: Zero-hardcode switch name deduplication via spaceless key clustering in `topology_reducer.py` — merges OCR whitespace variants (e.g. "Fuenmayor Age" vs "FuenmayorAge") without hardcoded rules.
+- [x] **v4.8.7 Horizontal Line Clustering**: Multi-word port groups (e.g. "iSCSI Veeam") preserved via geometric token line-clustering in `esxi.py` — tokens on the same horizontal band are concatenated before filtering.
+- [x] **v4.8.7 Dynamic Sidebar X-Cutoff**: Switch-header text ("StandardSwitch:...") no longer leaks into Port Group services. Sidebar boundary computed dynamically from leftmost switch header minus 15px — works on both full-screen and cropped screenshots without hardcoding.
+- [x] **v4.8.7 Deterministic Vertical Y-Slicing**: Switch headers detected via geometric anchor scoring, then bands sliced by Y-coordinate with zero vertical leakage.
+- [x] **v4.8.7 Deterministic Left/Right Column Split**: 48% midline hard slice separates logical services from physical adapters without LLM assistance.
+- [x] **v4.8.7 Universal Reducer v2**: State machine precedence, expanded-state purging, and 5-tuple deduplication unified across all inference paths.
 
 ---
 
 ## 10. 專案狀態檢核：做完咩 (Done) vs 未做咩 (Pending)
 ======================================================================
 
-9.1 做完咩 (Completed & Verified in v4.8.4)
+9.1 做完咩 (Completed & Verified in v4.8.7)
 - [x] Hybrid OCR + Deterministic Extraction: RapidOCR extracts text with bounding boxes; `core/extractors/` parses topology via pure Python — zero LLM, zero Ollama dependency.
 - [x] Legacy VLM & Ollama Removal: All VLM model references (`qwen2.5-vl:3b`, `qwen2.5:3b`), Ollama endpoints, and model selector UI removed. Topology extraction is now 100% deterministic.
 - [x] Deterministic Spatial Processing: Sidebar filtering, collapsed header discard, and noise token removal all handled in Python before any extraction — no LLM serialization required.
@@ -332,11 +332,11 @@ docker image prune -a -f && docker builder prune -a -f
 - [x] Generator Unpack Crash Guard: Standardized return types across all extraction paths.
 - [x] Prompt Optimization: Structured engine configs replace verbose natural-language prompts, reducing configuration size by >90%.
 - [x] Strict No-Hardcode Platform Abstraction: All naming prefixes and role options dynamically loaded from YAML.
-- [x] v4.8.4 Hardware Sidebar Pre-Crop: Bounded cropping eliminates VMware left navigation tokens before extraction.
-- [x] v4.8.4 Natural Line-Grouping Serialization: Compact line syntax replaces verbose coordinate tags, dropping config size by >80%.
-- [x] v4.8.4 Deterministic Processing: Python-side noise filtering and token normalization ensure consistent extraction.
-- [x] v4.8.4 Resilient JSON Recovery: Regex-based extraction recovers valid records from partial or malformed OCR output.
-- [x] v4.8.4 Expanded State Precedence: Automatically purge placeholder 'No Uplink' records once real physical adapters are detected.
+- [x] v4.8.7 Hardware Sidebar Pre-Crop: Bounded cropping eliminates VMware left navigation tokens before extraction.
+- [x] v4.8.7 Natural Line-Grouping Serialization: Compact line syntax replaces verbose coordinate tags, dropping config size by >80%.
+- [x] v4.8.7 Deterministic Processing: Python-side noise filtering and token normalization ensure consistent extraction.
+- [x] v4.8.7 Resilient JSON Recovery: Regex-based extraction recovers valid records from partial or malformed OCR output.
+- [x] v4.8.7 Expanded State Precedence: Automatically purge placeholder 'No Uplink' records once real physical adapters are detected.
 
 9.2 未做咩 (Pending & Future Roadmap)
 - [ ] 緊鄰 Switch 物理文字切片 (Python-Side Switch Chunking):

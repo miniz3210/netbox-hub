@@ -1985,7 +1985,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             )
             st.stop()
 
-        _out_lines = ["# NOTE:\n# Generated from NetBox Hub v4.8.4 (Deterministic Engine).\n"]
+        _out_lines = ["# NOTE:\n# Generated from NetBox Hub v4.8.7 (Deterministic Engine).\n"]
         for _gparent in sorted(_groups.keys(), key=_natsort_key):
             _out_lines.append(f"=== {_gparent} ===")
             _sw_uplinks = [r for r in _groups[_gparent] if r.get("type") == "Uplink" and r.get("interface")]

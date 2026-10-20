@@ -1,5 +1,5 @@
 """
-VMware ESXi & vDS Pure Python Geometric Topology Extractor (v4.8.4)
+VMware ESXi & vDS Pure Python Geometric Topology Extractor (v4.8.7)
 Universal, Deterministic, 100% Configuration-Driven.
 Clusters horizontal lines first to guarantee tokens split by OCR
 (e.g. ['Distributed', 'Switch:', 'dvSwitch0']) are seamlessly united.

@@ -1,5 +1,5 @@
 """
-Universal Topology Reducer (v4.8.4)
+Universal Topology Reducer (v4.8.7)
 100% Platform-Agnostic.
 Implements Spaceless Key Canonicalization to merge switch names that differ
 only by OCR whitespace jitter, enforces expanded-state precedence, and deduplicates records.
