@@ -148,7 +148,7 @@ vlan_presets:
     prefix_pattern: ''
     items: []
 naming_patterns:
-# Generated from NetBox Hub 4.8.17 (Deterministic Engine)
+# Generated from NetBox Hub 4.8.26 (Deterministic Engine)
 branch_switch: SW<country><state><site><zone><seq>-<stack_id>
   branch_stack: VS<country><state><site><seq>-<stack_id>
   branch_ap: WAP<country><state><site><seq>
@@ -533,6 +533,12 @@ topology_parsing_presets:
       replace: vmnic\1
     - pattern: \bvmk[oO0](\d*)\b
       replace: vmk0\1
+    - pattern: '(?i)\bvm[nN][kKiI1lLc]+(\d+)\b'
+      replace: 'vmnic\1'
+    - pattern: '(?i)Netwrork'
+      replace: 'Network'
+    - pattern: '(?i)Van_(\d+)'
+      replace: 'Vlan_\1'
     - pattern: \s+
       replace: ' '
     - pattern: (?i)PR\s*Spain\s*Fuenmayor
