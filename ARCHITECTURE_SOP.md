@@ -1,5 +1,5 @@
 # NetBox Hub — Living Architecture SOP & Handover Guide
-# Target Baseline: 4.8.26 | Platform: Oracle Cloud Ampere A1 (ARM64)
+# Target Baseline: 4.8.27 | Platform: Oracle Cloud Ampere A1 (ARM64)
 
 ---
 
@@ -8,10 +8,10 @@
 | Property              | Value                                                        |
 |-----------------------|--------------------------------------------------------------|
 | Application           | NetBox Universal Library Hub                                 |
-| Target Version        | 4.8.26                                                      |
+| Target Version        | 4.8.27                                                      |
 | Runtime               | Python 3.11+ / Streamlit                                     |
 | Cloud Infrastructure  | Oracle Cloud Ampere A1 (ARM64 / aarch64, Linux)              |
-| Container Registry    | `ghcr.io/miniz3210/netbox-hub:4.8.26`                       |
+| Container Registry    | `ghcr.io/miniz3210/netbox-hub:4.8.27`                       |
 | Primary Backend       | SQLite (`data/netbox_hub.db`) + YAML-based naming standards  |
 | AI / OCR Layer        | Strategy/Adapter Extractor Pattern — Pure Python, sub-second, Zero LLM, Zero Ollama dependency |
 
@@ -160,7 +160,7 @@ When a cell in the DataGrid is edited, `_apply_cascade_to_rows()` in `ui/tabs/na
 Capture a baseline snapshot of the Standards Tab configuration into `data/naming_rules.yaml`. Verify all section definitions (2.5 UX rules, 4.0 Blueprint guide) are present and consistent.
 
 ### Step 2 — Version Assert Verification
-Confirm `config/constants.py::APP_VERSION == "4.8.26"`. Ensure no release notes or version bump scripts are pending.
+Confirm `config/constants.py::APP_VERSION == "4.8.27"`. Ensure no release notes or version bump scripts are pending.
 
 ### Step 3 — Safe Local Container Cache Cleanup
 ```bash
@@ -171,8 +171,8 @@ docker builder prune -a -f
 
 ### Step 4 — Docker Build & Tag Release
 ```bash
-docker build -t ghcr.io/miniz3210/netbox-hub:4.8.26 -t ghcr.io/miniz3210/netbox-hub:latest .
-docker push ghcr.io/miniz3210/netbox-hub:4.8.26
+docker build -t ghcr.io/miniz3210/netbox-hub:4.8.27 -t ghcr.io/miniz3210/netbox-hub:latest .
+docker push ghcr.io/miniz3210/netbox-hub:4.8.27
 docker push ghcr.io/miniz3210/netbox-hub:latest
 ```
 
@@ -180,7 +180,7 @@ docker push ghcr.io/miniz3210/netbox-hub:latest
 
 ## 6. Living Task Checklist
 
-### ✅ Completed Checklist (4.8.26 Baseline)
+### ✅ Completed Checklist (4.8.27 Baseline)
 
 - [x] Relative spatial clustering engine & resolution-agnostic geometry partitioning.
 - [x] Boundary card fix (eliminated collapsed header overlap, e.g. iSCSI Veeam).
@@ -211,9 +211,9 @@ docker push ghcr.io/miniz3210/netbox-hub:latest
 - [x] **4.8.17 Expanded State Precedence**: Automatically purge placeholder 'No Uplink' records once real physical adapters are detected.
 - [ ] Build Excel IPAM offline reconciliation script against `AW IPs & VLANs_Final (2).xlsx`.
 - [ ] Prune stale local git tags prior to 4.8.17 release.
-- [ ] Publish GHCR image release `4.8.26` (`ghcr.io/miniz3210/netbox-hub:4.8.26`).
+- [ ] Publish GHCR image release `4.8.27` (`ghcr.io/miniz3210/netbox-hub:4.8.27`).
 - [ ] Build platform expansion templates for Proxmox VE and Azure Portal.
-- [ ] Publish GHCR image release `4.8.26` (`ghcr.io/miniz3210/netbox-hub:4.8.26`).
+- [ ] Publish GHCR image release `4.8.27` (`ghcr.io/miniz3210/netbox-hub:4.8.27`).
 
 ---
 
@@ -263,7 +263,7 @@ docker image prune -a -f && docker builder prune -a -f
 
 ---
 
-## 9. Production Verification Checklist (4.8.26)
+## 9. Production Verification Checklist (4.8.27)
 ================================================================================
 
 - [x] **Deterministic Extraction Only**: Topology extraction is 100% deterministic, zero-LLM, sub-second execution via `core/extractors/`. No Ollama, no VLM, no AI inference required for topology parsing.

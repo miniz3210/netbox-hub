@@ -1,11 +1,11 @@
 """
-Application constants for NetBox Hub (v4.8.26)
+Application constants for NetBox Hub (v4.8.27)
 """
 import os
 from pathlib import Path
 
 APP_NAME = "NetBox Hub"
-APP_VERSION = "4.8.26"
+APP_VERSION = "4.8.27"
 PAGE_TITLE = "NetBox Hub"
 PAGE_ICON = "📦"
 DEFAULT_PLATFORM = "VMware ESXi"
