@@ -1,5 +1,5 @@
 # NetBox Hub — Living Architecture SOP & Handover Guide
-# Target Baseline: 4.8.27 | Platform: Oracle Cloud Ampere A1 (ARM64)
+# Target Baseline: 4.8.29 | Platform: Oracle Cloud Ampere A1 (ARM64)
 
 ---
 
@@ -8,10 +8,10 @@
 | Property              | Value                                                        |
 |-----------------------|--------------------------------------------------------------|
 | Application           | NetBox Universal Library Hub                                 |
-| Target Version        | 4.8.27                                                      |
+| Target Version        | 4.8.29                                                      |
 | Runtime               | Python 3.11+ / Streamlit                                     |
 | Cloud Infrastructure  | Oracle Cloud Ampere A1 (ARM64 / aarch64, Linux)              |
-| Container Registry    | `ghcr.io/miniz3210/netbox-hub:4.8.27`                       |
+| Container Registry    | `ghcr.io/miniz3210/netbox-hub:4.8.29`                       |
 | Primary Backend       | SQLite (`data/netbox_hub.db`) + YAML-based naming standards  |
 | AI / OCR Layer        | Strategy/Adapter Extractor Pattern — Pure Python, sub-second, Zero LLM, Zero Ollama dependency |
 

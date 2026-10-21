@@ -1,5 +1,5 @@
 """
-VMware ESXi & vDS Universal High-Recall Extractor (v4.8.28)
+VMware ESXi & vDS Universal High-Recall Extractor (v4.8.29)
 Standardized, Deterministic, Zero-Dropping Entity Pipeline.
 """
 
@@ -7,6 +7,8 @@ import re
 from typing import List, Dict, Any, Optional
 from .base import BaseTopologyExtractor, get_bounding_box
 
+
+# --- STAGE 1: TEXT HELPERS & NORMALIZATION ---
 
 def apply_token_normalizations(text: str, normalizations: List[Dict[str, str]]) -> str:
     s = text
@@ -21,7 +23,7 @@ def apply_token_normalizations(text: str, normalizations: List[Dict[str, str]]) 
 
 def heal_ipv4(raw_str: str) -> Optional[str]:
     clean = re.sub(r"(?<=[0-9\.])\s+(?=[0-9\.])", "", raw_str)
-    m = re.search(r"(\d[\d\.]{6,16}\d)", clean)
+    m = re.search(r"(\d[\d\.]{5,16}\d)", clean)
     if not m:
         return None
     cand = m.group(1)
@@ -40,7 +42,7 @@ def heal_ipv4(raw_str: str) -> Optional[str]:
     return None
 
 
-def cluster_lines(tokens: List[Dict[str, Any]], y_thresh: float = 12.0) -> List[Dict[str, Any]]:
+def cluster_lines(tokens: List[Dict[str, Any]], y_thresh: float = 12.0, max_x_gap: Optional[float] = 60.0) -> List[Dict[str, Any]]:
     if not tokens:
         return []
     sorted_tokens = sorted(tokens, key=lambda t: (get_bounding_box(t)[1], get_bounding_box(t)[0]))
@@ -58,21 +60,224 @@ def cluster_lines(tokens: List[Dict[str, Any]], y_thresh: float = 12.0) -> List[
         if not placed:
             rows.append([t])
 
-    clustered = []
+    lines: List[Dict[str, Any]] = []
     for r in rows:
         r.sort(key=lambda x: get_bounding_box(x)[0])
-        txt = " ".join(str(x.get("text", "")).strip() for x in r if str(x.get("text", "")).strip())
-        min_x = min(get_bounding_box(x)[0] for x in r)
-        min_y = min(get_bounding_box(x)[1] for x in r)
-        clustered.append({
-            "text": txt,
-            "tokens": r,
-            "x": min_x,
-            "y": min_y
-        })
-    clustered.sort(key=lambda l: l["y"])
-    return clustered
+        segments = []
+        if max_x_gap is None:
+            segments = [r]
+        else:
+            curr = [r[0]]
+            for tok in r[1:]:
+                if (get_bounding_box(tok)[0] - get_bounding_box(curr[-1])[2]) > max_x_gap:
+                    segments.append(curr)
+                    curr = [tok]
+                else:
+                    curr.append(tok)
+            segments.append(curr)
 
+        for seg in segments:
+            min_x = min(get_bounding_box(x)[0] for x in seg)
+            min_y = min(get_bounding_box(x)[1] for x in seg)
+            max_x = max(get_bounding_box(x)[2] for x in seg)
+            max_y = max(get_bounding_box(x)[3] for x in seg)
+            txt = " ".join(str(x.get("text", "")).strip() for x in seg if str(x.get("text", "")).strip())
+            lines.append({
+                "text": txt,
+                "tokens": seg,
+                "box": [min_x, min_y, max_x - min_x, max_y - min_y],
+                "x": min_x,
+                "y": min_y
+            })
+
+    lines.sort(key=lambda l: (l["y"], l["x"]))
+    return lines
+
+
+# --- STAGE 2: SWITCH HEADER DETECTION ---
+
+def detect_switches(lines: List[Dict[str, Any]], normalizations: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+    switches = []
+    for l in lines:
+        txt = l["text"].strip()
+        if re.search(r"Virtual\s*switches|DVUplink", txt, re.I):
+            continue
+
+        # Match any occurrence of Switch / Bridge followed by colon/semicolon
+        m_sw = re.search(r"Sw[i1l!t]+ch\s*[:;]\s*(.+)", txt, re.I)
+        if m_sw:
+            raw_target = m_sw.group(1).strip()
+            clean_target = re.split(r"(?:\s*\|\s*|\s+(?:ADD|EDIT|MANAGE|ACTIONS)\b|\s*\.{2,})", raw_target, maxsplit=1, flags=re.I)[0].strip()
+            clean_target = re.sub(r"^[>\(\)\[\]\{\}\<\>\-\.\:\;\|\+\*\s]+", "", clean_target).strip()
+            clean_target = re.sub(r"[\s\.\…\×\<\>\(\)\[\]\{\}\|\-\:\;]+$", "", clean_target).strip()
+            sw_name = apply_token_normalizations(clean_target, normalizations)
+
+            if len(sw_name) >= 2:
+                kw_x0 = l["x"]
+                for tok in l["tokens"]:
+                    ttxt = str(tok.get("text", "")).strip()
+                    if re.search(r"Sw[i1l!t]+ch", ttxt, re.I):
+                        kw_x0 = max(0.0, get_bounding_box(tok)[0] - 20.0)
+                        break
+
+                if not any(abs(s["y"] - l["y"]) <= 18.0 and s["name"] == sw_name for s in switches):
+                    switches.append({
+                        "name": sw_name,
+                        "y": l["y"],
+                        "x": kw_x0,
+                        "collapsed": bool(re.search(r"^[>▶\+]", txt))
+                    })
+
+    switches.sort(key=lambda s: s["y"])
+    for idx, sw in enumerate(switches):
+        sw["y_start"] = sw["y"]
+        sw["y_end"] = switches[idx + 1]["y"] if (idx + 1) < len(switches) else float("inf")
+    return switches
+
+
+# --- STAGE 3: PHYSICAL UPLINK EXTRACTION ---
+
+def extract_physical_uplinks(tokens: List[Dict[str, Any]], sw_name: str, normalizations: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+    if not tokens:
+        return [{
+            "switch": sw_name, "interface": "No Uplink", "type": "Uplink",
+            "ip": "", "purpose": "", "role": "None", "speed": ""
+        }]
+
+    phys_lines = cluster_lines(tokens, y_thresh=8.0, max_x_gap=80.0)
+    found_uplinks = []
+    seen_nics = set()
+
+    for pline in phys_lines:
+        ptxt = pline["text"].strip()
+        if re.search(r"\(0\s*NIC|No\s*physical", ptxt, re.I):
+            continue
+
+        for m in re.finditer(r"([xX!\*\+]\s*)?\b(?:v\s*[mn][a-z0-9]{1,4})\s*([0-9lI|])\b", ptxt, re.I):
+            status = m.group(1) or ""
+            digit = "1" if m.group(2) in ("l", "I", "|") else m.group(2)
+            nic_name = f"vmnic{digit}"
+
+            if nic_name not in seen_nics:
+                seen_nics.add(nic_name)
+                is_standby = bool(re.search(r"[xX!]", status)) or bool(re.search(r"^[xX!]\b|\bStandby\b", ptxt, re.I))
+                if not is_standby:
+                    for tok in pline["tokens"]:
+                        if re.match(r"^[xX!]$", str(tok.get("text", "")).strip()):
+                            is_standby = True
+                            break
+
+                sm = re.search(r"\b((?:100000|40000|25000|10000|1000|100)\s*(?:Gbit/s|Mbit/s|Full|Half)?|\d+\s*(?:Gbit/s|Mbit/s))\b", ptxt, re.I)
+                found_uplinks.append({
+                    "switch": sw_name,
+                    "interface": nic_name,
+                    "type": "Uplink",
+                    "ip": "",
+                    "purpose": "",
+                    "role": "Standby Uplink" if is_standby else "Active Uplink",
+                    "speed": sm.group(1).strip() if sm else ""
+                })
+
+    return found_uplinks if found_uplinks else [{
+        "switch": sw_name, "interface": "No Uplink", "type": "Uplink",
+        "ip": "", "purpose": "", "role": "None", "speed": ""
+    }]
+
+
+# --- STAGE 4: LOGICAL CARDS & VMKERNEL ANCHORING ---
+
+def extract_logical_cards(tokens: List[Dict[str, Any]], sw_name: str, normalizations: List[Dict[str, str]], y_start: float) -> List[Dict[str, Any]]:
+    if not tokens:
+        return []
+
+    lines = cluster_lines(tokens, y_thresh=10.0, max_x_gap=65.0)
+
+    # 1. Multi-signal VMkernel extraction (handles vmk, vmlk, vmkd, vmko and IP healing)
+    vmk_entries = []
+    for l in lines:
+        txt = re.sub(r"[^\x20-\x7E]+", " ", l["text"]).strip()
+        m_vmk = re.search(r"\b(vm[kldo0-9a-zA-Z]{1,4})\s*[:;\s]\s*([0-9\.\s]{6,})", txt, re.I)
+        if m_vmk:
+            healed = heal_ipv4(m_vmk.group(2))
+            if healed:
+                raw_v = m_vmk.group(1).lower()
+                m_dig = re.search(r"(\d+)", raw_v)
+                if m_dig:
+                    clean_v = f"vmk{m_dig.group(1)}"
+                elif re.search(r"[oO0]$", raw_v):
+                    clean_v = "vmk0"
+                elif re.search(r"[dli1]$", raw_v):
+                    clean_v = "vmk1"
+                else:
+                    clean_v = "vmk0"
+
+                vmk_entries.append({"vmk": clean_v, "ip": healed, "y": l["y"]})
+
+    # 2. Card-Top Invariant: Only the single line directly above a 'VLAN ID' row is a Port Group
+    vlan_rows = [
+        l for l in lines
+        if re.search(r"(?:V[L1I\|]?A?N\s*[I1l\|]?D|(?<!\w)ID\s*[:;]\s*(?:\d+|\-+))", l["text"], re.I)
+    ]
+
+    cards = []
+    for v_idx, v_row in enumerate(vlan_rows):
+        vy = v_row["y"]
+        prev_bound = vlan_rows[v_idx - 1]["y"] if v_idx > 0 else y_start
+
+        candidates = []
+        for l in lines:
+            ly = l["y"]
+            # Must sit strictly above the VLAN ID row within 4 to 55 vertical pixels
+            if not (prev_bound < ly < vy and 4.0 <= (vy - ly) <= 55.0):
+                continue
+            txt = re.sub(r"[^\x20-\x7E]+", " ", l["text"]).strip()
+            if re.search(r"\b(?:Sw[i1l!t]+ch|Bridge)\b\s*[:;]|ADD\s*NETWORKING|MANAGE\s*PHYS", txt, re.I):
+                continue
+            if re.search(r"(?:vmk[eao]rn|virt\s*ual\s*mach|machines?\s*\(|\bvmk\s*[a-zA-Z0-9]+\s*[:;])", txt, re.I):
+                continue
+
+            cleaned = re.sub(r"^[>\(\)\[\]\{\}\<\>\-\.\:\;\|\+\*\s]+", "", txt).strip()
+            cleaned = re.sub(r"(?:\s*\.{2,}|\s*\…|[\s\.\…\×\<\>\(\)\[\]\{\}\|\-\:\;])+$", "", cleaned).strip()
+            cleaned = apply_token_normalizations(cleaned, normalizations)
+
+            if len(cleaned) >= 2:
+                candidates.append((vy - ly, cleaned, ly))
+
+        if candidates:
+            candidates.sort(key=lambda c: c[0])
+            cards.append({"title": candidates[0][1], "y": candidates[0][2]})
+
+    records = []
+    assigned_cards = set()
+
+    # 3. Associate VMkernels with the closest Port Group above them
+    for v in vmk_entries:
+        above = [c for c in cards if 0 <= (v["y"] - c["y"]) <= 160.0]
+        if above:
+            above.sort(key=lambda c: v["y"] - c["y"])
+            purpose = above[0]["title"]
+            assigned_cards.add(purpose)
+        else:
+            purpose = "Management Network" if v["vmk"] == "vmk0" else v["vmk"]
+
+        records.append({
+            "switch": sw_name, "interface": v["vmk"], "type": "VMkernel",
+            "ip": v["ip"], "purpose": purpose, "role": "None", "speed": ""
+        })
+
+    # 4. Emit remaining Port Groups
+    for c in cards:
+        if c["title"] not in assigned_cards:
+            assigned_cards.add(c["title"])
+            records.append({
+                "switch": sw_name, "interface": "", "type": "Port Group",
+                "ip": "", "purpose": c["title"], "role": "None", "speed": ""
+            })
+
+    return records
+
+
+# --- MAIN EXTRACTOR CLASS ---
 
 class EsxiTopologyExtractor(BaseTopologyExtractor):
     def extract(
@@ -95,55 +300,20 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
             tok_copy["text"] = apply_token_normalizations(str(t.get("text", "")).strip(), normalizations)
             clean_tokens.append(tok_copy)
 
-        # Stage 2: Switch Header Extraction (Immune to merged 'StandardSwitch' without spaces)
-        lines = cluster_lines(clean_tokens, y_thresh=14.0)
-        switches = []
-        for l in lines:
-            txt = l["text"].strip()
-            if re.search(r"Virtual\s*switches|DVUplink", txt, re.I):
-                continue
-
-            # Universal match: Sw...ch followed by a colon or semicolon (no word-boundary requirement before Sw)
-            m_sw = re.search(r"Sw[i1l!t]+ch\s*[:;]\s*(.+)", txt, re.I)
-            if m_sw:
-                after_colon = m_sw.group(1).strip()
-                # Split off toolbar action buttons or pipe symbols
-                raw_name = re.split(r"(?:\s*\|\s*|\s+(?:ADD|EDIT|MANAGE|ACTIONS)\b|\s*\.{2,})", after_colon, maxsplit=1, flags=re.I)[0].strip()
-                clean_name = re.sub(r"^[>\(\)\[\]\{\}\<\>\-\.\:\;\|\+\*\s]+", "", raw_name).strip()
-                clean_name = re.sub(r"[\s\.\…\×\<\>\(\)\[\]\{\}\|\-\:\;]+$", "", clean_name).strip()
-                clean_name = apply_token_normalizations(clean_name, normalizations)
-
-                if len(clean_name) >= 2:
-                    kw_x0 = l["x"]
-                    for tok in l["tokens"]:
-                        ttxt = str(tok.get("text", "")).strip()
-                        if re.search(r"Sw[i1l!t]+ch", ttxt, re.I):
-                            kw_x0 = max(0.0, get_bounding_box(tok)[0] - 20.0)
-                            break
-
-                    if not any(abs(s["y"] - l["y"]) <= 18.0 and s["name"] == clean_name for s in switches):
-                        switches.append({
-                            "name": clean_name,
-                            "y": l["y"],
-                            "x": kw_x0,
-                            "collapsed": bool(re.search(r"^[>▶\+]", txt))
-                        })
-
+        # Stage 2: Switch Header Extraction (Full width clustering)
+        header_lines = cluster_lines(clean_tokens, y_thresh=14.0, max_x_gap=None)
+        switches = detect_switches(header_lines, normalizations)
         if not switches:
             return []
-
-        # Sort switches by Y to establish spatial boundaries
-        switches.sort(key=lambda s: s["y"])
-        for idx, sw in enumerate(switches):
-            sw["y_start"] = sw["y"]
-            sw["y_end"] = switches[idx + 1]["y"] if (idx + 1) < len(switches) else float("inf")
 
         sidebar_x = max(0.0, min(s["x"] for s in switches) - 15.0)
         records: List[Dict[str, Any]] = []
 
-        # Stage 3: Extract Records per Switch Band (Maintain fence integrity)
+        # Stage 3: Extract per Switch Band
         for sw in switches:
             sw_name = sw["name"]
+            if sw.get("collapsed", False) and (sw["y_end"] - sw["y_start"]) < 45.0:
+                continue
 
             band_tokens = [
                 t for t in clean_tokens
@@ -159,7 +329,7 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                 })
                 continue
 
-            # Determine Physical Adapter Column Anchor
+            # Identify Physical Adapters column anchor
             phys_anchor_x = None
             for t in band_tokens:
                 ttxt = str(t.get("text", "")).strip()
@@ -175,101 +345,11 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                 logical_tokens = band_tokens
                 physical_tokens = []
 
-            # Physical Uplink Extraction (vmnici1, vmnlc2, vmnkc3 tolerance)
-            found_uplinks = []
-            phys_lines = cluster_lines(physical_tokens, y_thresh=8.0)
-            seen_nics = set()
+            # Stage 3 & 4 execution
+            records.extend(extract_physical_uplinks(physical_tokens, sw_name, normalizations))
+            records.extend(extract_logical_cards(logical_tokens, sw_name, normalizations, sw["y_start"]))
 
-            for pline in phys_lines:
-                ptxt = pline["text"].strip()
-                if re.search(r"\(0\s*NIC|No\s*physical", ptxt, re.I):
-                    continue
-
-                for m in re.finditer(r"([xX!\*\+]\s*)?\b(?:v\s*[mn][a-z0-9]{1,4})\s*([0-9lI|])\b", ptxt, re.I):
-                    status = m.group(1) or ""
-                    digit = "1" if m.group(2) in ("l", "I", "|") else m.group(2)
-                    nic_name = f"vmnic{digit}"
-
-                    if nic_name not in seen_nics:
-                        seen_nics.add(nic_name)
-                        is_standby = bool(re.search(r"[xX!]", status)) or bool(re.search(r"^[xX!]\b|\bStandby\b", ptxt, re.I))
-                        if not is_standby:
-                            for tok in pline["tokens"]:
-                                if re.match(r"^[xX!]$", str(tok.get("text", "")).strip()):
-                                    is_standby = True
-                                    break
-
-                        sm = re.search(r"\b((?:100000|40000|25000|10000|1000|100)\s*(?:Gbit/s|Mbit/s|Full|Half)?|\d+\s*(?:Gbit/s|Mbit/s))\b", ptxt, re.I)
-                        found_uplinks.append({
-                            "switch": sw_name,
-                            "interface": nic_name,
-                            "type": "Uplink",
-                            "ip": "",
-                            "purpose": "",
-                            "role": "Standby Uplink" if is_standby else "Active Uplink",
-                            "speed": sm.group(1).strip() if sm else ""
-                        })
-
-            if not found_uplinks:
-                records.append({
-                    "switch": sw_name, "interface": "No Uplink", "type": "Uplink",
-                    "ip": "", "purpose": "", "role": "None", "speed": ""
-                })
-            else:
-                records.extend(found_uplinks)
-
-            # Logical Extraction: VMkernel & Inverted Port Group Filtering
-            log_lines = cluster_lines(logical_tokens, y_thresh=10.0)
-            vmk_items = []
-            pg_titles = []
-
-            for ll in log_lines:
-                ltxt = re.sub(r"[^\x20-\x7E]+", " ", ll["text"]).strip()
-                if not ltxt:
-                    continue
-
-                m_vmk = re.search(r"\b(vmk\s*[a-zA-Z0-9]{1,2})\s*[:;\s]\s*([0-9\.\s]{7,})", ltxt, re.I)
-                if m_vmk:
-                    healed_ip = heal_ipv4(m_vmk.group(2))
-                    if healed_ip:
-                        raw_v = re.sub(r"\s+", "", m_vmk.group(1)).lower()
-                        suf = raw_v[3:]
-                        clean_v = "vmk0" if suf in ("o", "0") else f"vmk{suf}" if suf.isdigit() else "vmk1"
-                        vmk_items.append({"vmk": clean_v, "ip": healed_ip, "y": ll["y"]})
-                        continue
-
-                # Exclude metadata rows
-                if re.search(r"\bV[L1I\|]?A?N\s*[I1l\|]?D|\bID\s*[:;]|\bVirtual\s*Machines|\bVMkernel\s*Ports|No\s*associated|\bSwitch\b", ltxt, re.I):
-                    continue
-
-                clean_title = re.sub(r"^[>\(\)\[\]\{\}\<\>\-\.\:\;\|\+\*\s]+", "", ltxt).strip()
-                clean_title = re.sub(r"(?:\s*\.{2,}|\s*\…|[\s\.\…\×\<\>\(\)\[\]\{\}\|\-\:\;])+$", "", clean_title).strip()
-                clean_title = apply_token_normalizations(clean_title, normalizations)
-
-                if len(clean_title) >= 2:
-                    pg_titles.append({"title": clean_title, "y": ll["y"]})
-
-            assigned_pgs = set()
-            for v in vmk_items:
-                candidates = [p for p in pg_titles if p["y"] <= v["y"]]
-                purpose = candidates[-1]["title"] if candidates else ("Management Network" if v["vmk"] == "vmk0" else v["vmk"])
-                if candidates:
-                    assigned_pgs.add(purpose)
-                records.append({
-                    "switch": sw_name, "interface": v["vmk"], "type": "VMkernel",
-                    "ip": v["ip"], "purpose": purpose, "role": "None", "speed": ""
-                })
-
-            for p in pg_titles:
-                if p["title"] not in assigned_pgs:
-                    assigned_pgs.add(p["title"])
-                    records.append({
-                        "switch": sw_name, "interface": "", "type": "Port Group",
-                        "ip": "", "purpose": p["title"], "role": "None", "speed": ""
-                    })
-
-        # Stage 4: Cross-Image Stub Cleanup
-        # If a switch has real uplinks or port groups, eliminate any dummy 'No Uplink' stubs for it
+        # Cleanup stubs if switch has active entries
         switches_with_data = {r["switch"] for r in records if r["interface"] != "No Uplink" or r["purpose"]}
         cleaned_records = [
             r for r in records 
