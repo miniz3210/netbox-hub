@@ -1,5 +1,5 @@
 """
-VMware ESXi & vDS Universal High-Recall Extractor (v4.8.27)
+VMware ESXi & vDS Universal High-Recall Extractor (v4.8.28)
 Standardized, Deterministic, Zero-Dropping Entity Pipeline.
 """
 
@@ -95,41 +95,44 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
             tok_copy["text"] = apply_token_normalizations(str(t.get("text", "")).strip(), normalizations)
             clean_tokens.append(tok_copy)
 
-        # Stage 2: Switch Header Extraction
+        # Stage 2: Switch Header Extraction (Immune to merged 'StandardSwitch' without spaces)
         lines = cluster_lines(clean_tokens, y_thresh=14.0)
         switches = []
         for l in lines:
             txt = l["text"].strip()
             if re.search(r"Virtual\s*switches|DVUplink", txt, re.I):
                 continue
-            if re.search(r"\b(?:Sw[i1l!t]+ch|Bridge)\b", txt, re.I):
-                parts = re.split(r"\b(?:Sw[i1l!t]+ch|Bridge)\b\s*[:;]?\s*", txt, maxsplit=1, flags=re.I)
-                if len(parts) > 1 and parts[1].strip():
-                    raw_name = parts[1].strip()
-                    clean_name = re.split(r"(?:\s*\|\s*|\s+(?:ADD|EDIT|MANAGE|ACTIONS)\b|\s*\.{2,})", raw_name, maxsplit=1, flags=re.I)[0].strip()
-                    clean_name = re.sub(r"^[>\(\)\[\]\{\}\<\>\-\.\:\;\|\+\*\s]+", "", clean_name).strip()
-                    clean_name = re.sub(r"[\s\.\…\×\<\>\(\)\[\]\{\}\|\-\:\;]+$", "", clean_name).strip()
-                    clean_name = apply_token_normalizations(clean_name, normalizations)
 
-                    if len(clean_name) >= 2:
-                        kw_x0 = l["x"]
-                        for tok in l["tokens"]:
-                            ttxt = str(tok.get("text", "")).strip()
-                            if re.search(r"(?:Standard|Distributed|Dist[a-z]*|Sw[i1l!t]+ch|Bridge)", ttxt, re.I):
-                                kw_x0 = max(0.0, get_bounding_box(tok)[0] - 20.0)
-                                break
+            # Universal match: Sw...ch followed by a colon or semicolon (no word-boundary requirement before Sw)
+            m_sw = re.search(r"Sw[i1l!t]+ch\s*[:;]\s*(.+)", txt, re.I)
+            if m_sw:
+                after_colon = m_sw.group(1).strip()
+                # Split off toolbar action buttons or pipe symbols
+                raw_name = re.split(r"(?:\s*\|\s*|\s+(?:ADD|EDIT|MANAGE|ACTIONS)\b|\s*\.{2,})", after_colon, maxsplit=1, flags=re.I)[0].strip()
+                clean_name = re.sub(r"^[>\(\)\[\]\{\}\<\>\-\.\:\;\|\+\*\s]+", "", raw_name).strip()
+                clean_name = re.sub(r"[\s\.\…\×\<\>\(\)\[\]\{\}\|\-\:\;]+$", "", clean_name).strip()
+                clean_name = apply_token_normalizations(clean_name, normalizations)
 
-                        if not any(abs(s["y"] - l["y"]) <= 18.0 and s["name"] == clean_name for s in switches):
-                            switches.append({
-                                "name": clean_name,
-                                "y": l["y"],
-                                "x": kw_x0,
-                                "collapsed": bool(re.match(r"^[>▶\+]", txt))
-                            })
+                if len(clean_name) >= 2:
+                    kw_x0 = l["x"]
+                    for tok in l["tokens"]:
+                        ttxt = str(tok.get("text", "")).strip()
+                        if re.search(r"Sw[i1l!t]+ch", ttxt, re.I):
+                            kw_x0 = max(0.0, get_bounding_box(tok)[0] - 20.0)
+                            break
+
+                    if not any(abs(s["y"] - l["y"]) <= 18.0 and s["name"] == clean_name for s in switches):
+                        switches.append({
+                            "name": clean_name,
+                            "y": l["y"],
+                            "x": kw_x0,
+                            "collapsed": bool(re.search(r"^[>▶\+]", txt))
+                        })
 
         if not switches:
             return []
 
+        # Sort switches by Y to establish spatial boundaries
         switches.sort(key=lambda s: s["y"])
         for idx, sw in enumerate(switches):
             sw["y_start"] = sw["y"]
@@ -138,11 +141,9 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
         sidebar_x = max(0.0, min(s["x"] for s in switches) - 15.0)
         records: List[Dict[str, Any]] = []
 
-        # Stage 3: Extract Records per Switch Band
+        # Stage 3: Extract Records per Switch Band (Maintain fence integrity)
         for sw in switches:
             sw_name = sw["name"]
-            if sw.get("collapsed", False) and (sw["y_end"] - sw["y_start"]) < 45.0:
-                continue
 
             band_tokens = [
                 t for t in clean_tokens
@@ -174,7 +175,7 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                 logical_tokens = band_tokens
                 physical_tokens = []
 
-            # Physical Uplink Extraction
+            # Physical Uplink Extraction (vmnici1, vmnlc2, vmnkc3 tolerance)
             found_uplinks = []
             phys_lines = cluster_lines(physical_tokens, y_thresh=8.0)
             seen_nics = set()
@@ -267,4 +268,12 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
                         "ip": "", "purpose": p["title"], "role": "None", "speed": ""
                     })
 
-        return records
+        # Stage 4: Cross-Image Stub Cleanup
+        # If a switch has real uplinks or port groups, eliminate any dummy 'No Uplink' stubs for it
+        switches_with_data = {r["switch"] for r in records if r["interface"] != "No Uplink" or r["purpose"]}
+        cleaned_records = [
+            r for r in records 
+            if not (r["switch"] in switches_with_data and r["interface"] == "No Uplink" and not r["purpose"])
+        ]
+
+        return cleaned_records
