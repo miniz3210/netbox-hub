@@ -3,6 +3,7 @@ import os
 import re
 from typing import Dict, List, Optional, Tuple, Any, Set
 import streamlit as st
+from config.constants import APP_VERSION
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -1313,6 +1314,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             if raw_uploaded:
                 import io as _io
                 existing_names = {getattr(f, "name", "") for f in st.session_state["staged_topology_imgs"]}
+                new_files_added = False
                 for uf in raw_uploaded:
                     if uf.name not in existing_names:
                         file_bytes = uf.read()
@@ -1321,6 +1323,10 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         bio.type = uf.type
                         bio.size = len(file_bytes)
                         st.session_state["staged_topology_imgs"].append(bio)
+                        new_files_added = True
+                if new_files_added:
+                    st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
+                    st.rerun()
 
         with col_up2:
             st.markdown("**📋 Or Paste from Clipboard (Ctrl+V)**")
@@ -1996,7 +2002,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             )
             st.stop()
 
-        _out_lines = ["# NOTE:\n# Generated from NetBox Hub v4.8.7 (Deterministic Engine).\n"]
+        _out_lines = [f"# NOTE:\n# Generated from NetBox Hub v{APP_VERSION} (Deterministic Engine).\n"]
         for _gparent in sorted(_groups.keys(), key=_natsort_key):
             _out_lines.append(f"=== {_gparent} ===")
             _sw_uplinks = [r for r in _groups[_gparent] if r.get("type") == "Uplink" and r.get("interface")]
