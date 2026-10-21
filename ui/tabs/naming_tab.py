@@ -1494,7 +1494,10 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         char_count = len(raw_ocr_text) if raw_ocr_text else 0
         img_count = len(staged_imgs)
         st.caption(f"ℹ️ Extracted {char_count:,} characters across {img_count} screenshot(s)")
-        st.text_area("Extracted OCR Tokens", value=raw_ocr_text, height=420, disabled=True)
+        if raw_ocr_text:
+            st.text_area("Extracted OCR Tokens", value=raw_ocr_text, height=420, disabled=True)
+        else:
+            st.info("No OCR data available. Upload screenshots and click Analyze & Auto-Populate.")
 
     # Execute analyze when button clicked
     start_analyze = btn_analyze
@@ -1536,6 +1539,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
 
         progress_bar = st.progress(0.0, text=f"Analyzing screenshots with {target_platform} extractor...")
         all_extracted_records = []
+        all_raw_tokens_by_image: list = []
         total_imgs = len(uploaded_imgs)
 
         for idx, img in enumerate(uploaded_imgs):
@@ -1550,6 +1554,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             # RapidOCR local extraction
             ocr_res = run_local_ocr_pipeline([raw_bytes])
             raw_boxes = ocr_res.get("raw_tokens", [])
+            img_raw_tokens_for_inspector = list(raw_boxes)
             img_w = ocr_res.get("image_width", 1920)
             img_h = ocr_res.get("image_height", 1080)
 
@@ -1561,6 +1566,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 plat_cfg=plat_cfg
             )
             all_extracted_records.extend(records)
+            all_raw_tokens_by_image.append(img_raw_tokens_for_inspector)
 
         # Universal Reducer & Deduplication
         reduced = reduce_topology_pipeline(all_extracted_records, plat_cfg, platform_tokens)
@@ -1579,6 +1585,20 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             key=_natsort_key
         )
         st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
+
+        # Persist raw OCR inspector data across reruns
+        _insp_lines: list = []
+        for _iidx, _tokens in enumerate(all_raw_tokens_by_image):
+            _fname = getattr(uploaded_imgs[_iidx], "name", f"image_{_iidx+1}") if _iidx < len(uploaded_imgs) else f"image_{_iidx+1}"
+            _insp_lines.append(f"--- [Image {_iidx + 1}: {_fname}] ---")
+            for _t in _tokens:
+                _txt = str(_t.get("text", "")).strip()
+                _box = _t.get("box") or [0, 0, 0, 0]
+                _conf = float(_t.get("confidence", 1.0))
+                if _txt:
+                    _insp_lines.append(f"[{_box[0]:.0f}, {_box[1]:.0f}] (conf: {_conf:.2f}) -> {_txt}")
+            _insp_lines.append("")
+        st.session_state["latest_ocr_raw_text"] = "\n".join(_insp_lines)
 
         progress_bar.progress(1.0, text="Extraction complete in < 2 seconds!")
         st.toast(f"✅ Extracted {len(reduced)} topology records in <2 seconds!", icon="⚡")
@@ -1607,16 +1627,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
 
     # Clean Empty State
     if not sw_options and not records:
-        st.info("ℹ️ No virtual switches discovered yet. Upload and analyze screenshots above, or add a switch manually below.")
-        col_add_swn, col_add_swb = st.columns([4, 1])
-        with col_add_swn:
-            manual_sw_name = st.text_input("New Switch Name", placeholder=f"e.g. {_dynamic_switch_pfx}0, vmbr0", key="manual_add_sw_input", label_visibility="collapsed")
-        with col_add_swb:
-            if st.button("➕ Add Switch", key="manual_add_sw_btn", width="stretch"):
-                if manual_sw_name.strip():
-                    st.session_state["discovered_switches"] = [manual_sw_name.strip()]
-                    st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
-                    st.rerun()
+        st.info("ℹ️ No virtual switches discovered yet. Upload and analyze screenshots above to auto-populate topology.")
     else:
         # ── Interactive Cards Overview ──
         st.markdown("#### 🔹 Topology Visual Overview & Card Controls")
