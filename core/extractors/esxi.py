@@ -1,13 +1,11 @@
 """
-VMware ESXi & vDS Universal High-Recall Extractor (v4.8.33-r6)
+VMware ESXi & vDS Universal High-Recall Extractor (v4.8.30)
 Standardized, Deterministic, Zero-Dropping Entity Pipeline.
 """
 
 import re
 from typing import List, Dict, Any, Optional
 from .base import BaseTopologyExtractor, get_bounding_box
-
-EXTRACTOR_VERSION = "esxi-4.8.33-r6"
 
 
 # --- STAGE 1: TEXT HELPERS & NORMALIZATION ---
@@ -42,6 +40,33 @@ def heal_ipv4(raw_str: str) -> Optional[str]:
     if len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
         return ".".join(str(int(p)) for p in parts)
     return None
+
+
+_IP_RE = re.compile(r"(?<![0-9A-Za-z])((?:[0-9BOolI|SZ]{1,3}\s*[.,]\s*){3}[0-9BOolI|SZ]{1,3})(?![0-9A-Za-z])")
+_IP_MAP = str.maketrans("BOolI|SZ", "80011152")  # B->8 O/o->0 l/I/|->1 S->5 Z->2
+
+
+def find_ipv4(text: str) -> Optional[str]:
+    """Find a dotted quad anywhere in text, repairing OCR look-alikes (e.g. 192.16B .40.23 -> 192.168.40.23)."""
+    for m in _IP_RE.finditer(text):
+        raw = re.sub(r"\s+", "", m.group(1)).replace(",", ".")
+        if any(len(p) > 1 and not re.search(r"\d", p) for p in raw.split(".")):
+            continue
+        parts = raw.translate(_IP_MAP).split(".")
+        if len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
+            return ".".join(str(int(p)) for p in parts)
+    return None
+
+
+_SW_SUFFIX = re.compile(r"^(?P<stem>.*?[Ss]witch)(?P<suf>[0-9oOQDalI|]{1,3})$")
+_SW_SUF_MAP = str.maketrans("oOQDalI|", "00000111")
+
+
+def repair_switch_name(name: str) -> str:
+    """dvSwitcha/dvSwitcho/dvSwitchO -> dvSwitch0, iDMZ-vdSwitchQ2 -> iDMZ-vdSwitch02. Only the <=3 chars after 'Switch'."""
+    name = re.sub(r"[-_ ]*DVUplinks.*$", "", name, flags=re.I).strip()
+    m = _SW_SUFFIX.match(name)
+    return (m.group("stem") + m.group("suf").translate(_SW_SUF_MAP)) if m else name
 
 
 def cluster_lines(tokens: List[Dict[str, Any]], y_thresh: float = 12.0, max_x_gap: Optional[float] = 60.0) -> List[Dict[str, Any]]:
@@ -111,10 +136,10 @@ def detect_switches(lines: List[Dict[str, Any]], normalizations: List[Dict[str, 
 
         if m_sw:
             raw_target = m_sw.group(1).strip()
-            clean_target = re.split(r"(?:\s*\|\s*|\s+(?:ADD|EDIT|MANAGE|ACTIONS)\b|\s*\.{2,})", raw_target, maxsplit=1, flags=re.I)[0].strip()
+            clean_target = re.split(r"\s*\|\s*|\s+(?:ADD|EDIT|MANAGE|ACTIONS)(?![a-z])|\s*\.{2,}", raw_target, maxsplit=1)[0].strip()
             clean_target = re.sub(r"^[>\(\)\[\]\{\}\<\>\-\.\:\;\|\+\*\s]+", "", clean_target).strip()
             clean_target = re.sub(r"[\s\.\…\×\<\>\(\)\[\]\{\}\|\-\:\;]+$", "", clean_target).strip()
-            sw_name = apply_token_normalizations(clean_target, normalizations)
+            sw_name = repair_switch_name(apply_token_normalizations(clean_target, normalizations))
 
             if len(sw_name) >= 2:
                 kw_x0 = l["x"]
@@ -159,7 +184,6 @@ def extract_physical_uplinks(tokens: List[Dict[str, Any]], sw_name: str, normali
 
         txt_clean = re.sub(r"\b(?:100000|40000|25000|10000|1000|100)\s*(?:Gbit/s|Mbit/s|Full|Half)?\b", " ", ptxt, flags=re.I)
 
-        # Captures vmnic0 to vmnic15, vmnici1, vmnlc2, vmnkc3, extracting the trailing digits
         for m in re.finditer(r"([xX!\*\+]\s*)?\b(?:v\s*[mn][a-z0-9]{1,4})\s*(\d+|[lI|])\b", txt_clean, re.I):
             status = m.group(1) or ""
             raw_digit = m.group(2)
@@ -200,13 +224,12 @@ def extract_logical_cards(tokens: List[Dict[str, Any]], sw_name: str, normalizat
 
     lines = cluster_lines(tokens, y_thresh=10.0, max_x_gap=65.0)
 
-    # 1. Multi-signal VMkernel extraction (handles vmk, vmlk, vmkd, vmko and IP healing)
     vmk_entries = []
     for l in lines:
         txt = re.sub(r"[^\x20-\x7E]+", " ", l["text"]).strip()
-        m_vmk = re.search(r"\b(vm[kldo0-9a-zA-Z]{1,4})\s*[:;\s]\s*([0-9\.\s]{6,})", txt, re.I)
+        m_vmk = re.search(r"\b(vm[kldo0-9a-zA-Z]{1,4})\s*[:;\s]\s*(\S.*)$", txt, re.I)
         if m_vmk:
-            healed = heal_ipv4(m_vmk.group(2))
+            healed = find_ipv4(m_vmk.group(2)) or heal_ipv4(m_vmk.group(2))
             if healed:
                 raw_v = m_vmk.group(1).lower()
                 m_dig = re.search(r"(\d+)", raw_v)
@@ -221,7 +244,6 @@ def extract_logical_cards(tokens: List[Dict[str, Any]], sw_name: str, normalizat
 
                 vmk_entries.append({"vmk": clean_v, "ip": healed, "y": l["y"]})
 
-    # 2. Card-Top Invariant: Only the single line directly above a 'VLAN ID' row is a Port Group
     vlan_rows = [
         l for l in lines
         if re.search(r"(?:V[L1I\|]?A?N\s*(?:[I1l\|]?D)?\s*[:;\s\-]|(?<!\w)ID\s*[:;]\s*(?:\d+|\-+))", l["text"], re.I)
@@ -230,22 +252,13 @@ def extract_logical_cards(tokens: List[Dict[str, Any]], sw_name: str, normalizat
     cards = []
     for v_idx, v_row in enumerate(vlan_rows):
         vy = v_row["y"]
-        vx = v_row["x"]
         prev_bound = vlan_rows[v_idx - 1]["y"] if v_idx > 0 else y_start
 
         candidates = []
         for l in lines:
             ly = l["y"]
-            lx = l["x"]
-
-            # Vertical constraint: directly above the VLAN ID row
             if not (prev_bound < ly < vy and 4.0 <= (vy - ly) <= 58.0):
                 continue
-
-            # Horizontal constraint: must align with the card's VLAN ID within 90px (eliminates 'b x e')
-            if abs(lx - vx) > 90.0:
-                continue
-
             txt = re.sub(r"[^\x20-\x7E]+", " ", l["text"]).strip()
             if re.search(r"\b(?:Sw[i1l!t]+ch|Bridge)\b\s*[:;]|ADD\s*NETWORKING|MANAGE\s*PHYS", txt, re.I):
                 continue
@@ -266,7 +279,6 @@ def extract_logical_cards(tokens: List[Dict[str, Any]], sw_name: str, normalizat
     records = []
     assigned_cards = set()
 
-    # 3. Associate VMkernels with the closest Port Group above them
     for v in vmk_entries:
         above = [c for c in cards if 0 <= (v["y"] - c["y"]) <= 160.0]
         if above:
@@ -281,7 +293,6 @@ def extract_logical_cards(tokens: List[Dict[str, Any]], sw_name: str, normalizat
             "ip": v["ip"], "purpose": purpose, "role": "None", "speed": ""
         })
 
-    # 4. Emit remaining Port Groups
     for c in cards:
         if c["title"] not in assigned_cards:
             assigned_cards.add(c["title"])
@@ -309,14 +320,12 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
         cfg = plat_cfg or {}
         normalizations = cfg.get("token_normalizations", [])
 
-        # Stage 1: Pre-normalization
         clean_tokens = []
         for t in raw_tokens:
             tok_copy = dict(t)
             tok_copy["text"] = apply_token_normalizations(str(t.get("text", "")).strip(), normalizations)
             clean_tokens.append(tok_copy)
 
-        # Stage 2: Switch Header Extraction
         header_lines = cluster_lines(clean_tokens, y_thresh=14.0, max_x_gap=None)
         switches = detect_switches(header_lines, normalizations)
         if not switches:
@@ -325,7 +334,6 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
         sidebar_x = max(0.0, min(s["x"] for s in switches) - 15.0)
         records: List[Dict[str, Any]] = []
 
-        # Stage 3: Extract per Switch Band
         for sw in switches:
             sw_name = sw["name"]
             if sw.get("collapsed", False) and (sw["y_end"] - sw["y_start"]) < 45.0:
@@ -339,13 +347,8 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
             ]
 
             if not band_tokens:
-                records.append({
-                    "switch": sw_name, "interface": "No Uplink", "type": "Uplink",
-                    "ip": "", "purpose": "", "role": "None", "speed": ""
-                })
-                continue
+                continue  # collapsed (OCR drops the '>' glyph) or cropped: uplinks unknown, not "none"
 
-            # Identify Physical Adapters column anchor
             phys_anchor_x = None
             for t in band_tokens:
                 ttxt = str(t.get("text", "")).strip()
@@ -364,7 +367,6 @@ class EsxiTopologyExtractor(BaseTopologyExtractor):
             records.extend(extract_physical_uplinks(physical_tokens, sw_name, normalizations))
             records.extend(extract_logical_cards(logical_tokens, sw_name, normalizations, sw["y_start"]))
 
-        # Cross-Image Stub Cleanup
         switches_with_data = {r["switch"] for r in records if r["interface"] != "No Uplink" or r["purpose"]}
         cleaned_records = [
             r for r in records
