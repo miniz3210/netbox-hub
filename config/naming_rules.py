@@ -1,3 +1,4 @@
+import yaml
 import os
 import json
 import re
@@ -561,17 +562,20 @@ def _is_str(value) -> bool:
     return isinstance(value, str)
 
 def _load_rules_dict_from_file() -> dict:
-    """Read the rules file as JSON."""
+    """Read the rules file using yaml.safe_load() with JSON fallback."""
     if not os.path.exists(RULES_FILE):
         return {}
     try:
         with open(RULES_FILE, "r", encoding="utf-8") as f:
-            raw = json.load(f)
+            data = yaml.safe_load(f)
+            return data if isinstance(data, dict) else {}
     except Exception:
-        return {}
-    if not isinstance(raw, dict):
-        return {}
-    return dict(raw)
+        try:
+            with open(RULES_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
 
 
 def _split_legacy_device_patterns(patterns: dict) -> dict:
