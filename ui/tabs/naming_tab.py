@@ -80,7 +80,7 @@ def _render_topology_datagrid(records: List[Dict[str, Any]]):
     if not records:
         return
     df = pd.DataFrame(records)
-    expected_cols = ["switch", "interface", "type", "ip", "purpose", "role", "speed"]
+    expected_cols = ["switch", "interface", "type", "ip", "purpose", "vlan", "role", "speed"]
     for col in expected_cols:
         if col not in df.columns:
             df[col] = ""
@@ -1786,13 +1786,19 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                             edit_target_val = s_purpose if s_purpose else s_iface
                             sc_label, sc_del = st.columns([5, 1])
                             with sc_label:
+                                _s_vlan = str(s_row.get("vlan", "")).strip()
                                 if is_vmkernel:
+                                    parts = [f"◆ {s_iface}"]
                                     if _s_ip:
-                                        st.caption(f"◆ {s_iface} • {_s_ip}")
-                                    else:
-                                        st.caption(f"◆ {s_iface}")
-                                elif _s_ip:
-                                    st.caption(f"◆ IP: {_s_ip}")
+                                        parts.append(_s_ip)
+                                    if _s_vlan:
+                                        parts.append(f"VLAN {_s_vlan}")
+                                    st.caption(" • ".join(parts))
+                                else:
+                                    if _s_vlan:
+                                        st.caption(f"◆ VLAN {_s_vlan}")
+                                    elif _s_ip:
+                                        st.caption(f"◆ IP: {_s_ip}")
                                 new_s_val = st.text_input(
                                     "Service Name",
                                     value=edit_target_val,
@@ -1859,7 +1865,8 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                         "ip": "",
                                         "purpose": "",
                                         "role": "None",
-                                        "speed": ""
+                                        "speed": "",
+                                        "vlan": ""
                                     })
                                     st.session_state["topology_records"] = records
                                     st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
@@ -1874,7 +1881,8 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                         "ip": "",
                                         "purpose": "",
                                         "role": new_up_role,
-                                        "speed": new_up_speed
+                                        "speed": new_up_speed,
+                                        "vlan": ""
                                     })
                                     st.session_state["topology_records"] = records
                                     st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
@@ -1966,7 +1974,8 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                          "type": new_svc_type,
                                          "ip": new_svc_ip,
                                          "purpose": effective_name,
-                                          "role": default_connected_role if new_svc_type == "VMkernel" and not _matched_iface else "None",
+                                         "vlan": str(_autofill.get("vlan", "")).strip(),
+                                         "role": default_connected_role if new_svc_type == "VMkernel" and not _matched_iface else "None",
                                          "speed": ""
                                      })
                                      # Sync corrected name back to session state so it replaces the old spelling
@@ -1984,7 +1993,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     st.markdown("#### 🎛️ Topology Data Grid")
     st.caption("Edit switch assignments, interface roles, and IPs directly. Changes update NetBox descriptions instantly.")
 
-    df = pd.DataFrame(records if records else [], columns=["switch", "interface", "type", "ip", "purpose", "role", "speed"])
+    df = pd.DataFrame(records if records else [], columns=["switch", "interface", "type", "ip", "purpose", "vlan", "role", "speed"])
     # Explicitly cast all columns to string to prevent pandas float-type conflicts
     for col in df.columns:
         df[col] = df[col].fillna("").astype(str)
@@ -1995,6 +2004,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         "type": st.column_config.SelectboxColumn("Type", options=["Uplink", "VMkernel", "Port Group"], required=False),
         "ip": st.column_config.TextColumn("IPv4 Address", required=False),
         "purpose": st.column_config.TextColumn("Service / Purpose", required=False),
+        "vlan": st.column_config.TextColumn("VLAN", required=False),
         "role": st.column_config.SelectboxColumn("Role", options=role_options, required=False),
         "speed": st.column_config.TextColumn("Link Speed", required=False),
     }
@@ -2143,6 +2153,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     "port_group": _svc_name,
                     "v_switch": _gparent,
                     "interface": _svc_iface,
+                    "vlan": str(_svc.get("vlan", "")).strip(),
                 }
                 _rendered_svc = render_dynamic_pattern(_svc_tpl, _svc_vals, _pattern_vars)
                 _rendered_svc = re.sub(r"\s{2,}", " ", _rendered_svc).strip()

@@ -73,7 +73,7 @@ def reduce_topology_pipeline(
             switches_with_real_content.add(sw)
 
     # Step 4: Filter & Deduplicate
-    seen_sigs: Set[Tuple[str, str, str, str, str]] = set()
+    seen_map = {}
     cleaned: List[Dict[str, Any]] = []
 
     for r in raw_records:
@@ -99,11 +99,14 @@ def reduce_topology_pipeline(
             continue
 
         sig = (sw.lower(), iface.lower(), rtype.lower(), purpose.lower(), ip_val)
-        if sig in seen_sigs:
+        if sig in seen_map:
+            dup_vlan = str(r.get("vlan", "")).strip()
+            if dup_vlan and not seen_map[sig].get("vlan"):
+                seen_map[sig]["vlan"] = dup_vlan
             continue
-        seen_sigs.add(sig)
+        seen_map[sig] = {}
 
-        cleaned.append({
+        rec = {
             "switch": sw,
             "interface": iface,
             "type": rtype,
@@ -112,7 +115,9 @@ def reduce_topology_pipeline(
             "role": role if rtype == "Uplink" else "None",
             "speed": speed,
             "vlan": str(r.get("vlan", "")).strip()
-        })
+        }
+        cleaned.append(rec)
+        seen_map[sig] = rec
 
     # Step 5: Disambiguate VMkernel vs Port Group with identical purpose
     vmk_purposes = {

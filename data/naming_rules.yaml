@@ -148,7 +148,6 @@ vlan_presets:
     prefix_pattern: ''
     items: []
 naming_patterns:
-  # Generated from NetBox Hub 4.8.33 (Deterministic Engine)
   branch_switch: SW<country><state><site><zone><seq>-<stack_id>
   branch_stack: VS<country><state><site><seq>-<stack_id>
   branch_ap: WAP<country><state><site><seq>
@@ -395,6 +394,12 @@ pattern_variables:
     default: ''
     optional: true
     scope: hypervisor
+  vlan:
+    label: VLAN ID (port group)
+    placeholder: e.g. 400
+    default: ''
+    optional: true
+    scope: hypervisor
 hardware_slot_mappings: {}
 csv_schemas:
   import_site:
@@ -520,12 +525,12 @@ topology_parsing_presets:
       replace: vmnic\1
     - pattern: \bvmk[oO0](\d*)\b
       replace: vmk0\1
-    - pattern: '(?i)\bvm[nN][kKiI1lLc]+(\d+)\b'
-      replace: 'vmnic\1'
-    - pattern: '(?i)Netwrork'
-      replace: 'Network'
-    - pattern: '(?i)Van_(\d+)'
-      replace: 'Vlan_\1'
+    - pattern: (?i)\bvm[nN][kKiI1lLc]+(\d+)\b
+      replace: vmnic\1
+    - pattern: (?i)Netwrork
+      replace: Network
+    - pattern: (?i)Van_(\d+)
+      replace: Vlan_\1
     - pattern: \s+
       replace: ' '
     - pattern: \bvmk[oO]\b
@@ -534,9 +539,9 @@ topology_parsing_presets:
       replace: Distributed
     - pattern: \bPHYSKCAL\b
       replace: PHYSICAL
-    - pattern: '(?<=Switch)[oO](?=\d*\b)'
+    - pattern: (?<=Switch)[oO](?=\d*\b)
       replace: '0'
-    - pattern: '(?<=[a-z])Network\b'
+    - pattern: (?<=[a-z])Network\b
       replace: ' Network'
     geometry:
       line_cluster_y_thresh: 8.0

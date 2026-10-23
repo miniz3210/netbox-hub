@@ -21,6 +21,18 @@ def apply_token_normalizations(text: str, normalizations: List[Dict[str, str]]) 
     return s.strip()
 
 
+def heal_vlan_id(raw_str: str) -> str:
+    m = re.search(r"(?:V[L1I\|]?A?N\s*(?:[I1l\|]?D)?\s*[:;\s\-]|(?<!\w)ID\s*[:;])\s*([0-9a-zA-Z\|\-]+)", raw_str, re.I)
+    if not m:
+        return ""
+    val = m.group(1).strip()
+    if set(val) <= {"-", ""}:
+        return ""
+    tr = str.maketrans({"O": "0", "o": "0", "l": "1", "I": "1", "|": "1", "B": "8", "S": "5"})
+    repaired = val.translate(tr)
+    m_dig = re.search(r"\d+", repaired)
+    return m_dig.group(0) if m_dig else ""
+
 def heal_ipv4(raw_str: str) -> Optional[str]:
     clean = re.sub(r"(?<=[0-9\.])\s+(?=[0-9\.])", "", raw_str)
     m = re.search(r"(\d[\d\.]{5,16}\d)", clean)
@@ -170,7 +182,7 @@ def extract_physical_uplinks(tokens: List[Dict[str, Any]], sw_name: str, normali
     if not tokens:
         return [{
             "switch": sw_name, "interface": "No Uplink", "type": "Uplink",
-            "ip": "", "purpose": "", "role": "None", "speed": ""
+            "ip": "", "purpose": "", "role": "None", "speed": "", "vlan": ""
         }]
 
     phys_lines = cluster_lines(tokens, y_thresh=8.0, max_x_gap=80.0)
@@ -207,12 +219,13 @@ def extract_physical_uplinks(tokens: List[Dict[str, Any]], sw_name: str, normali
                     "ip": "",
                     "purpose": "",
                     "role": "Standby Uplink" if is_standby else "Active Uplink",
-                    "speed": sm.group(1).strip() if sm else ""
+                    "speed": sm.group(1).strip() if sm else "",
+                    "vlan": ""
                 })
 
     return found_uplinks if found_uplinks else [{
         "switch": sw_name, "interface": "No Uplink", "type": "Uplink",
-        "ip": "", "purpose": "", "role": "None", "speed": ""
+        "ip": "", "purpose": "", "role": "None", "speed": "", "vlan": ""
     }]
 
 
@@ -274,7 +287,7 @@ def extract_logical_cards(tokens: List[Dict[str, Any]], sw_name: str, normalizat
 
         if candidates:
             candidates.sort(key=lambda c: c[0])
-            cards.append({"title": candidates[0][1], "y": candidates[0][2]})
+            cards.append({"title": candidates[0][1], "y": candidates[0][2], "vlan": heal_vlan_id(v_row["text"])})
 
     records = []
     assigned_cards = set()
@@ -290,7 +303,7 @@ def extract_logical_cards(tokens: List[Dict[str, Any]], sw_name: str, normalizat
 
         records.append({
             "switch": sw_name, "interface": v["vmk"], "type": "VMkernel",
-            "ip": v["ip"], "purpose": purpose, "role": "None", "speed": ""
+            "ip": v["ip"], "purpose": purpose, "vlan": above[0].get("vlan", "") if above else "", "role": "None", "speed": "", "vlan": ""
         })
 
     for c in cards:
@@ -298,7 +311,7 @@ def extract_logical_cards(tokens: List[Dict[str, Any]], sw_name: str, normalizat
             assigned_cards.add(c["title"])
             records.append({
                 "switch": sw_name, "interface": "", "type": "Port Group",
-                "ip": "", "purpose": c["title"], "role": "None", "speed": ""
+                "ip": "", "purpose": c["title"], "vlan": c.get("vlan", ""), "role": "None", "speed": "", "vlan": ""
             })
 
     return records
