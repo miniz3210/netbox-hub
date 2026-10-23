@@ -148,8 +148,8 @@ vlan_presets:
     prefix_pattern: ''
     items: []
 naming_patterns:
-# Generated from NetBox Hub 4.8.33 (Deterministic Engine)
-branch_switch: SW<country><state><site><zone><seq>-<stack_id>
+  # Generated from NetBox Hub 4.8.33 (Deterministic Engine)
+  branch_switch: SW<country><state><site><zone><seq>-<stack_id>
   branch_stack: VS<country><state><site><seq>-<stack_id>
   branch_ap: WAP<country><state><site><seq>
   branch_firewall: FW<country><state><site><vendor><seq>
@@ -511,21 +511,8 @@ topology_parsing_presets:
     - Security Profile
     - System Swap
     - Certificate
-    - Advanced System
-    - System Resource
-    - Firewall
-    - Services
-    - Summary
-    - Monitor
-    - Configure
-    - Permissions
-    - VMs
-    - Datastores
-    - Updates
-    - Actions
-    - Networking
-    - System
-    - Hardware
+    - Advanced System Settings
+    - System Resources
     token_normalizations:
     - pattern: vSwitch[oO](\d*)
       replace: vSwitch0\1
@@ -541,28 +528,16 @@ topology_parsing_presets:
       replace: 'Vlan_\1'
     - pattern: \s+
       replace: ' '
-    - pattern: (?i)PR\s*Spain\s*Fuenmayor
-      replace: PR Spain Fuenmayor
-    - pattern: (?i)PR\s*SpainFuenmayor
-      replace: PR Spain Fuenmayor
-    - pattern: (?i)FuenmayorAge
-      replace: Fuenmayor Age
-    - pattern: (?i)Age\s*VLab
-      replace: Age VLab
-    - pattern: (?i)AgeVLab
-      replace: Age VLab
-    - pattern: (?i)PR\s*Spain\s*Fuenmayor\s*VLab\s*VM.*
-      replace: PR Spain Fuenmayor VLab VM ...
     - pattern: \bvmk[oO]\b
       replace: vmk0
-    - pattern: (?i)Netwrork
-      replace: Network
     - pattern: \bDistibut(ed)?\b
       replace: Distributed
     - pattern: \bPHYSKCAL\b
       replace: PHYSICAL
-    - pattern: (?i)\bvm[nN][kKiI1lL]c(\d+)\b
-      replace: vmnic\1
+    - pattern: '(?<=Switch)[oO](?=\d*\b)'
+      replace: '0'
+    - pattern: '(?<=[a-z])Network\b'
+      replace: ' Network'
     geometry:
       line_cluster_y_thresh: 8.0
       vmk_to_title_max_dist: 160.0

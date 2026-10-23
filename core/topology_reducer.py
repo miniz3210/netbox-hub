@@ -110,7 +110,8 @@ def reduce_topology_pipeline(
             "ip": ip_val,
             "purpose": purpose,
             "role": role if rtype == "Uplink" else "None",
-            "speed": speed
+            "speed": speed,
+            "vlan": str(r.get("vlan", "")).strip()
         })
 
     # Step 5: Disambiguate VMkernel vs Port Group with identical purpose

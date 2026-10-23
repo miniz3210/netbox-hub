@@ -185,6 +185,7 @@ class LocalOCREngine:
                     raw_tokens.append({
                         "text": str(text).strip(),
                         "box": [xmin, ymin, xmax - xmin, ymax - ymin],
+                        "conf": float(conf),
                     })
         grouped_lines = self._spatial_row_grouping(result)
         return grouped_lines, confs, raw_tokens

@@ -40,6 +40,7 @@ from config.naming_rules import (
     get_esxi_network_presets, compute_suggested_site_code,
 )
 from core.topology_reducer import reduce_topology_pipeline
+from core.extractors.esxi_text import parse_vsphere_text
 
 # ---------------------------------------------------------------------------
 # Progressive VLM rendering helpers
@@ -1456,6 +1457,55 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         if cur_selected_plat in naming_platform_options:
             default_idx = naming_platform_options.index(cur_selected_plat)
 
+        # --- Pure Text Parser Section (No OCR) ---
+        with st.expander("📋 Paste vSphere page text (recommended – no OCR)", expanded=True):
+            st.caption("Expand every switch, VMkernel Ports and uplink first, run this one-liner in your browser Console on the vSphere tab, then paste here:")
+            st.code("copy([document,...[...document.querySelectorAll('iframe')].map(f=>{try{return f.contentDocument}catch(e){return null}}).filter(Boolean)].map(d=>d.body.innerText).join('\\n'))", language="javascript")
+
+            pasted_vsphere_text = st.text_area(
+                "vSphere Page Text",
+                height=180,
+                key="vsphere_paste_text",
+                placeholder="Paste the copied vSphere console text here...",
+                label_visibility="collapsed"
+            )
+
+            c_btn_text, c_info_text = st.columns([2, 5], vertical_alignment="center")
+            with c_btn_text:
+                if st.button("🚀 Parse Pasted Text", key="btn_parse_vsphere_text", type="primary", use_container_width=True):
+                    raw_text = st.session_state.get("vsphere_paste_text", "").strip()
+                    if not raw_text:
+                        st.toast("⚠️ Pasted text is empty. Please paste text from vSphere.", icon="⚠️")
+                    else:
+                        parsed_recs, text_warns = parse_vsphere_text(raw_text)
+                        if not parsed_recs:
+                            st.toast("⚠️ No virtual switch topology records detected in text.", icon="⚠️")
+                        else:
+                            reduced = reduce_topology_pipeline(parsed_recs, {}, {})
+                            st.session_state["topology_records"] = reduced
+                            st.session_state["discovered_switches"] = sorted(
+                                list({r["switch"] for r in reduced if r.get("switch")}),
+                                key=_natsort_key
+                            )
+                            st.session_state["discovered_uplink_candidates"] = sorted(
+                                list({r["interface"] for r in reduced if r.get("type") == "Uplink" and r.get("interface") and r.get("interface") != "No Uplink"}),
+                                key=_natsort_key
+                            )
+                            st.session_state["discovered_service_candidates"] = sorted(
+                                list({r["purpose"] for r in reduced if r.get("type") != "Uplink" and r.get("purpose")}),
+                                key=_natsort_key
+                            )
+                            st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
+
+                            # Surface warnings
+                            if text_warns:
+                                st.session_state["vsphere_text_warnings"] = text_warns
+                                st.toast(f"⚠️ {len(text_warns)} switch(es) need expanding in vSphere", icon="⚠️")
+                            else:
+                                st.session_state.pop("vsphere_text_warnings", None)
+                                st.toast(f"✅ Extracted {len(reduced)} topology records from text!", icon="🚀")
+                            st.rerun()
+
         col_plat, col_eng, col_btn_an, col_btn_clr = st.columns([5, 3, 3, 2], vertical_alignment="center")
         with col_plat:
             target_platform = st.selectbox(
@@ -1533,7 +1583,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
 
     if start_analyze:
         from core.extractors import get_topology_extractor
-        from core.topology_reducer import reduce_topology_pipeline
         from core.ocr_engine import run_local_ocr_pipeline
 
         plat_cfg = (naming_rules.get("topology_parsing_presets") or {}).get(target_platform, {})
@@ -1559,6 +1608,9 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
 
             # RapidOCR local extraction
             ocr_res = run_local_ocr_pipeline([raw_bytes])
+            if ocr_res.get("errors"):
+                for err in ocr_res["errors"]:
+                    st.toast(f"OCR error: {err}", icon="⚠️")
             raw_boxes = ocr_res.get("raw_tokens", [])
             img_raw_tokens_for_inspector = list(raw_boxes)
             img_w = ocr_res.get("image_width", 1920)
@@ -1600,14 +1652,17 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             for _t in _tokens:
                 _txt = str(_t.get("text", "")).strip()
                 _box = _t.get("box") or [0, 0, 0, 0]
-                _conf = float(_t.get("confidence", 1.0))
+                _conf = float(_t.get("conf", 0.0))
                 if _txt:
-                    _insp_lines.append(f"[{_box[0]:.0f}, {_box[1]:.0f}] (conf: {_conf:.2f}) -> {_txt}")
+                    _insp_lines.append(f"[{_box[0]:.0f}, {_box[1]:.0f}, {_box[2]:.0f}, {_box[3]:.0f}] (conf: {_conf:.2f}) -> {_txt}")
             _insp_lines.append("")
         st.session_state["latest_ocr_raw_text"] = "\n".join(_insp_lines)
 
         progress_bar.progress(1.0, text="Extraction complete in < 2 seconds!")
-        st.toast(f"✅ Extracted {len(reduced)} topology records in <2 seconds!", icon="⚡")
+        if not reduced:
+            st.toast("No topology found – check screenshot zoom/crop", icon="⚠️")
+        else:
+            st.toast(f"✅ Extracted {len(reduced)} topology records in <2 seconds!", icon="⚡")
         st.rerun()
 
     if start_analyze and st.session_state.get("topology_records"):

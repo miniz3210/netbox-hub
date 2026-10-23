@@ -286,7 +286,7 @@ def extract_logical_cards(tokens: List[Dict[str, Any]], sw_name: str, normalizat
             purpose = above[0]["title"]
             assigned_cards.add(purpose)
         else:
-            purpose = "Management Network" if v["vmk"] == "vmk0" else v["vmk"]
+            purpose = v["vmk"]
 
         records.append({
             "switch": sw_name, "interface": v["vmk"], "type": "VMkernel",
