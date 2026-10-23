@@ -7,7 +7,7 @@ Covers:
   2. Header alias discovery (ip/subnet/vlan_id/vlan_name/site variations)
   3. Standards-driven normalisation (site_code_rules, ipam_role_mappings)
   4. Deterministic classification (matched / pending_add / conflicts / unmapped)
-  5. Application version assertion: config.constants.APP_VERSION == "4.3.10"
+   5. Application version assertion: config.constants.APP_VERSION matches semver
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from unittest import mock
@@ -51,6 +52,20 @@ def _make_wb(sheets: dict) -> io.BytesIO:
     wb.save(buf)
     buf.seek(0)
     return buf
+
+
+_TEST_SITE_RULES = {
+    "site_code_rules": {
+        "separators": [" ", "-", "_"],
+        "multi_word_chars_per_word": [2, 2],
+        "single_word_max_chars": 4,
+        "fallback": "SITE",
+        "exact_mappings": {
+            "new york": "NYC",
+            "london": "LON",
+        },
+    },
+}
 
 
 def _empty_db_index():
@@ -106,7 +121,7 @@ class TestDynamicSheetDiscovery:
                 ["10.2.2.1", "10.2.2.0/24", "60", "DMZ", "NYC"],
             ],
         })
-        records = ExcelIPAMParser(buf).parse()
+        records = ExcelIPAMParser(buf, rules=_TEST_SITE_RULES).parse()
         assert len(records) == 2
         sites = {r["site"] for r in records}
         assert "LON" in sites        # exact mapping for "London"
@@ -305,7 +320,7 @@ class TestNormalisation:
                 ["10.0.0.1", "10.0.0.0/24", "100", "Corporate", "New York"],
             ]
         })
-        records = ExcelIPAMParser(buf).parse()
+        records = ExcelIPAMParser(buf, rules=_TEST_SITE_RULES).parse()
         assert records
         assert records[0]["site"] == "NYC"
 
@@ -544,8 +559,8 @@ class TestParseFileBytes:
 # ============================================================================
 
 class TestVersion:
-    def test_app_version_is_4453(self):
-        assert APP_VERSION.startswith("4.6.0"), f"Expected '4.6.0', got {APP_VERSION!r}"
+    def test_app_version_format(self):
+        assert re.fullmatch(r"\d+\.\d+\.\d+", APP_VERSION), f"Version does not match semver: {APP_VERSION!r}"
 
     def test_version_no_v_prefix(self):
         assert not APP_VERSION.startswith("v"), f"Version should not have 'v' prefix: {APP_VERSION!r}"

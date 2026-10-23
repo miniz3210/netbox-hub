@@ -572,3 +572,20 @@ hypervisor_presets:
     label: Linux Bridge
     pattern: <bridge> - <purpose>
 platform_tokens: {}
+
+site_code_rules:
+  separators:
+  - " "
+  - "-"
+  - _
+  multi_word_chars_per_word:
+  - 2
+  - 2
+  single_word_max_chars: 4
+  fallback: SITE
+  exact_mappings:
+    new york: NYC
+    london: LON
+    sydney: SYD
+    singapore: SIN
+    tokyo: TYO
