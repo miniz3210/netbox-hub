@@ -9,7 +9,7 @@ import io
 import re
 import sqlite3
 from typing import Dict, List, Any, Optional, Tuple, Set
-from datetime import datetime
+from datetime import datetime, timezone
 import pandas as pd
 import openpyxl
 import streamlit as st
@@ -61,9 +61,9 @@ class UniversalUploader:
             'by_model': {},
             'errors': []
         }
-        
-        uploaded_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
+
+        uploaded_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
         for file_obj in uploaded_files:
             try:
                 file_result = self._process_single_file(file_obj, uploaded_at)
@@ -104,9 +104,9 @@ class UniversalUploader:
             'by_model': {},
             'errors': []
         }
-        
-        uploaded_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
+
+        uploaded_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
         for file_obj in uploaded_files:
             try:
                 # Use confirmed endpoint if provided
@@ -658,8 +658,8 @@ class UniversalUploader:
         # Create dynamic table schema
         self._ensure_table_exists(table_name, records[0])
         
-        # Insert records with upsert logic
-        count = self._upsert_records(table_name, model_key, records, source_file, uploaded_at)
+        # Insert records with upsert logic (scoped delete for CSV replacement)
+        count = self._upsert_records(table_name, model_key, records, source_file, uploaded_at, scoped_delete=True)
         
         return count
     
@@ -672,25 +672,62 @@ class UniversalUploader:
     def _ensure_table_exists(self, table_name: str, sample_record: Dict[str, Any]) -> None:
         """
         Create table dynamically based on record schema if it doesn't exist.
+        Also creates an index on the primary key column for upsert performance.
         """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         # Check if table exists
         cursor.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
             (table_name,)
         )
-        
+
         if cursor.fetchone():
             # Table exists - add any new columns
             self._add_missing_columns(cursor, table_name, sample_record)
         else:
             # Create new table
             self._create_dynamic_table(cursor, table_name, sample_record)
-        
+
+        # Create index on PK column if not already present
+        pk_field = self._determine_primary_key_for_table(table_name)
+        if pk_field:
+            pk_col = self._sanitize_column_name(pk_field)
+            idx_name = f"idx_{table_name}_{pk_col}"
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' AND name=?",
+                (idx_name,)
+            )
+            if not cursor.fetchone():
+                cursor.execute(
+                    f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table_name}({pk_col})"
+                )
+
         conn.commit()
         conn.close()
+
+    def _determine_primary_key_for_table(self, table_name: str) -> Optional[str]:
+        """Get the primary key field name for an existing table's index."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(f"PRAGMA table_info({table_name})")
+            columns = cursor.fetchall()
+            conn.close()
+            # Look for common PK fields in order of preference
+            for col in columns:
+                col_name = col[1]
+                if col_name in ('id', 'vid', 'slug', 'name', 'pk'):
+                    return col_name
+            # Return first non-metadata column
+            for col in columns:
+                col_name = col[1]
+                if col_name not in ('_row_id', '_source_file', '_uploaded_at', '_model_key'):
+                    return col_name
+        except Exception:
+            pass
+        return None
     
     def _create_dynamic_table(self, cursor: sqlite3.Cursor, table_name: str, 
                              sample_record: Dict[str, Any]) -> None:
@@ -779,31 +816,48 @@ class UniversalUploader:
         else:
             return "TEXT"
     
-    def _upsert_records(self, table_name: str, model_key: str, records: List[Dict[str, Any]], 
-                       source_file: str, uploaded_at: str) -> int:
+    def _upsert_records(self, table_name: str, model_key: str, records: List[Dict[str, Any]],
+                       source_file: str, uploaded_at: str, scoped_delete: bool = False) -> int:
         """
-        Insert or update records with conflict resolution.
-        
+        Insert or update records with conflict resolution in a single transaction.
+
         Uses "latest upload wins" strategy - newer uploads overwrite existing records.
+        When scoped_delete is True, removes rows whose PK is not present in the new batch.
         """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         # Determine primary key field
         pk_field = self._determine_primary_key(model_key, records[0])
         pk_col = self._sanitize_column_name(pk_field)
-        
+
+        # Collect PK values from incoming records for scoped delete
+        incoming_pks: set = set()
+        if scoped_delete:
+            for record in records:
+                pv = record.get(pk_field)
+                if pv is not None:
+                    incoming_pks.add(str(pv))
+
+        # Scoped delete: remove rows not in the new upload
+        if scoped_delete and incoming_pks:
+            placeholders = ",".join("?" for _ in incoming_pks)
+            cursor.execute(
+                f"DELETE FROM {table_name} WHERE {pk_col} IN ({placeholders})",
+                [str(p) for p in incoming_pks]
+            )
+
         count = 0
         for record in records:
             # Prepare column names and values
             columns = ["_source_file", "_uploaded_at", "_model_key"]
             values = [source_file, uploaded_at, model_key]
             placeholders = ["?", "?", "?"]
-            
+
             for key, value in record.items():
                 col_name = self._sanitize_column_name(key)
                 columns.append(col_name)
-                
+
                 # Convert complex types to JSON string
                 if isinstance(value, (dict, list)):
                     import json
@@ -812,9 +866,9 @@ class UniversalUploader:
                     values.append(None)
                 else:
                     values.append(value)
-                
+
                 placeholders.append("?")
-            
+
             # Check if record exists
             pk_value = record.get(pk_field)
             if pk_value is not None:
@@ -823,7 +877,7 @@ class UniversalUploader:
                     (pk_value,)
                 )
                 existing = cursor.fetchone()
-                
+
                 if existing:
                     # Update existing record
                     set_clause = ", ".join([f"{col} = ?" for col in columns])
@@ -831,15 +885,15 @@ class UniversalUploader:
                     cursor.execute(update_sql, values + [existing[0]])
                     count += 1
                     continue
-            
+
             # Insert new record
             insert_sql = f"INSERT INTO {table_name} ({', '.join(columns)}) VALUES ({', '.join(placeholders)})"
             cursor.execute(insert_sql, values)
             count += 1
-        
+
         conn.commit()
         conn.close()
-        
+
         return count
     
     def _determine_primary_key(self, model_key: str, sample_record: Dict[str, Any]) -> str:

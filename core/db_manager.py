@@ -151,6 +151,7 @@ def init_db():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_sites_slug ON sites_records(slug)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_inventory_category ON inventory_records(category)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_inventory_name ON inventory_records(name)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inventory_lname ON inventory_records(category, LOWER(name))")
 
     conn.commit()
     conn.close()

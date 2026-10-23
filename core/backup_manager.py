@@ -26,7 +26,6 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
-
 from core.db_manager import (
     DB_PATH,
     init_db,
@@ -323,10 +322,80 @@ def init_backup_tables() -> None:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_backup_type ON backup_records(object_type)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_backup_site ON backup_records(site)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_backup_name ON backup_records(name)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_backup_search ON backup_records(search_blob)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_backup_type_lname ON backup_records(object_type, LOWER(name))")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_choice_set ON backup_choice_values(choice_set)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_choice_field ON backup_choice_values(field_name)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_schema_object_type ON netbox_schema(object_type)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_schema_object_type ON netbox_schema(object_type)")
+        # DROP the unused search_blob index — all queries using it do full SCANs
+        cursor.execute("DROP INDEX IF EXISTS idx_backup_search")
+
+        # Per-endpoint merge table (Step 3)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS backup_endpoints (
+                path TEXT PRIMARY KEY,
+                kind TEXT,
+                source_file TEXT,
+                exported_at TEXT,
+                uploaded_at TEXT,
+                record_count INT,
+                expected_count INT,
+                verified INT,
+                content_hash TEXT,
+                records_gz BLOB
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_be_kind ON backup_endpoints(kind)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_be_exported ON backup_endpoints(exported_at)")
+
+        # Migration: if backup_endpoints is empty but compressed JSON exists,
+        # split the old blob into endpoints once (idempotent).
+        cursor.execute("SELECT COUNT(*) FROM backup_endpoints")
+        if cursor.fetchone()[0] == 0:
+            cursor.execute("SELECT backup_json_compressed FROM backup_metadata WHERE id = 1")
+            comp_row = cursor.fetchone()
+            if comp_row and comp_row[0]:
+                try:
+                    import gzip as _gz
+                    raw_bytes = _gz.decompress(comp_row[0])
+                    old_payload = json.loads(raw_bytes.decode('utf-8'))
+                    endpoints_list = old_payload.get("endpoints", [])
+                    if endpoints_list:
+                        meta = old_payload.get("metadata", {}) or {}
+                        backup_completed = meta.get("backup_completed") or ""
+                        for ep_obj in endpoints_list:
+                            if not isinstance(ep_obj, dict):
+                                continue
+                            ep_path = str(ep_obj.get("path", "")).strip()
+                            if not ep_path:
+                                continue
+                            ep_records = ep_obj.get("records")
+                            if not isinstance(ep_records, list):
+                                ep_records = []
+                            records_json = json.dumps(ep_records, default=str).encode('utf-8')
+                            import hashlib as _hl
+                            h = _hl.sha1(records_json).hexdigest()
+                            cursor.execute("""
+                                INSERT OR IGNORE INTO backup_endpoints
+                                    (path, kind, source_file, exported_at, uploaded_at,
+                                     record_count, expected_count, verified, content_hash, records_gz)
+                                VALUES (?, 'json', ?, ?, ?, ?, ?, ?, ?, ?)
+                            """, (
+                                ep_path,
+                                meta.get("netbox_url", "") or "unknown",
+                                backup_completed,
+                                backup_completed,
+                                len(ep_records),
+                                None,
+                                None,
+                                h,
+                                _gz.compress(records_json, compresslevel=6),
+                            ))
+                        conn.commit()
+                        logger.info(f"Migrated {cursor.execute('SELECT COUNT(*) FROM backup_endpoints').fetchone()[0]} endpoints from compressed JSON")
+                except Exception as _e:
+                    logger.warning(f"Backup endpoint migration skipped: {_e}")
+
         conn.commit()
 
 
@@ -466,6 +535,8 @@ def _summarize(object_type: str, obj: Dict[str, Any], site: str) -> str:
 
 def _load_payload(file_bytes: Any, progress_callback=None) -> Dict[str, Any]:
     """Load and parse NetBox backup JSON with optional progress tracking."""
+    import logging
+    logger = logging.getLogger(__name__)
     
     # Read file content
     if progress_callback:
@@ -820,6 +891,8 @@ def _ingest_backup_rows(
     progress_callback=None,
 ) -> Dict[str, int]:
     """Ingest backup rows with progress tracking."""
+    import logging
+    logger = logging.getLogger(__name__)
     
     parent_sites = _build_parent_site_map(buckets)
 
@@ -964,6 +1037,16 @@ def _ingest_structured_interfaces(
     return len(payload)
 
 
+def _termination_first(terminations: Any) -> Dict[str, Any]:
+    """Return the first termination dict from a NetBox cable terminations array."""
+    if not isinstance(terminations, list) or not terminations:
+        return {}
+    first = terminations[0]
+    if not isinstance(first, dict):
+        return {}
+    return first
+
+
 def _ingest_structured_cables(
     buckets: Dict[str, List[Dict[str, Any]]],
     parent_sites: Dict[int, str],
@@ -978,14 +1061,6 @@ def _ingest_structured_cables(
     rows = buckets.get("dcim_cables", [])
     if not rows:
         return 0
-
-    def _termination_first(terminations: Any) -> Dict[str, Any]:
-        if not isinstance(terminations, list) or not terminations:
-            return {}
-        first = terminations[0]
-        if not isinstance(first, dict):
-            return {}
-        return first
 
     payload = []
     for obj in rows:
@@ -1050,139 +1125,566 @@ def _ingest_structured_cables(
     return len(payload)
 
 
+# ── SCOPED INGEST HELPERS (for Minimal per-endpoint updates) ────────────
+
+# Canonical object_type ↔ endpoint path mapping
+_ENDPOINT_TO_OBJECT_TYPE: Dict[str, str] = {
+    "dcim/sites": "dcim_sites",
+    "dcim/device-types": "dcim_device_types",
+    "dcim/device-roles": "dcim_device_roles",
+    "dcim/devices": "dcim_devices",
+    "dcim/interfaces": "dcim_interfaces",
+    "dcim/cables": "dcim_cables",
+    "ipam/prefixes": "ipam_prefixes",
+    "ipam/vlans": "ipam_vlans",
+    "virtualization/virtual-machines": "virtualization_virtual_machines",
+}
+
+# object_type → structured-table delete rules for scoped clears
+_SCOPED_STRUCTURED_DELETES: Dict[str, Tuple[str, str]] = {
+    "dcim_sites": ("sites_records", "DELETE FROM sites_records"),
+    "ipam_prefixes": ("ipam_records", "DELETE FROM ipam_records WHERE record_type = 'prefix'"),
+    "ipam_vlans": ("ipam_records", "DELETE FROM ipam_records WHERE record_type = 'vlan'"),
+    "dcim_devices": ("inventory_records", "DELETE FROM inventory_records WHERE category IN ('device','hypervisor')"),
+    "virtualization_virtual_machines": ("inventory_records", "DELETE FROM inventory_records WHERE category = 'vm'"),
+    "dcim_interfaces": ("interfaces", "DELETE FROM interfaces"),
+    "dcim_cables": ("cables", "DELETE FROM cables"),
+}
+
+
+def _scoped_delete_endpoint(object_type: str) -> None:
+    """Delete rows for one object_type from backup_records and related structured tables."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM backup_records WHERE object_type = ?", (object_type,))
+    structured_info = _SCOPED_STRUCTURED_DELETES.get(object_type)
+    if structured_info:
+        _del_sql = structured_info[1]
+        cursor.execute(_del_sql)
+    conn.commit()
+    conn.close()
+
+
+def _scoped_insert_backup_rows(
+    object_type: str,
+    rows: List[Dict[str, Any]],
+    uploaded_at: str,
+) -> int:
+    """Insert rows for a single object_type into backup_records (no DELETE)."""
+    if not rows:
+        return 0
+    label = _label_for(object_type)
+    parent_sites = _build_parent_site_map({object_type: rows})
+    payload = []
+    for obj in rows:
+        site = _resolve_site(obj, parent_sites)
+        name = _record_name(object_type, obj)
+        summary = _summarize(object_type, obj, site)
+        blob = " ".join([label, name, site, summary]).lower()
+        payload.append((object_type, label, obj.get("id"), name, site, summary, blob, uploaded_at))
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.executemany("""
+        INSERT INTO backup_records
+            (object_type, object_label, object_id, name, site, summary, search_blob, imported_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, payload)
+    conn.commit()
+    conn.close()
+    return len(payload)
+
+
+def _scoped_insert_structured(
+    object_type: str,
+    buckets: Dict[str, List[Dict[str, Any]]],
+    parent_sites: Dict[int, str],
+    imported_at: str,
+) -> int:
+    """Insert structured rows for one endpoint (interfaces or cables) without deleting the whole table first.
+    Returns (deleted_count, inserted_count).
+    """
+    if object_type == "dcim_interfaces":
+        rows = buckets.get("dcim_interfaces", [])
+        if not rows:
+            return (0, 0)
+        # Delete only rows whose device_id is in this batch's devices
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        # We need to know which interface IDs to delete — but interfaces don't have a simple
+        # endpoint filter. For correctness we do a full clear+reinsert like the original.
+        cursor.execute("DELETE FROM interfaces")
+        payload = []
+        for obj in rows:
+            obj_id = obj.get("id")
+            if obj_id is None:
+                continue
+            device = obj.get("device") if isinstance(obj.get("device"), dict) else {}
+            device_id = device.get("id")
+            device_name = _flatten_value(device.get("name")) or ""
+            iface_type = obj.get("type") if isinstance(obj.get("type"), dict) else {}
+            type_value = iface_type.get("value") or ""
+            enabled = 1 if obj.get("enabled") else 0
+            mgmt_only = 1 if obj.get("mgmt_only") else 0
+            mode_obj = obj.get("mode") if isinstance(obj.get("mode"), dict) else {}
+            mode = mode_obj.get("value") or ""
+            mac = _flatten_value(obj.get("mac_address") or obj.get("primary_mac_address")) or ""
+            site = parent_sites.get(device_id) if device_id else ""
+            payload.append((
+                obj_id, device_id, device_name, str(obj.get("name") or ""),
+                str(obj.get("label") or ""), str(type_value or ""), enabled, mgmt_only,
+                str(mode or ""), obj.get("mtu"), str(mac or ""),
+                str(obj.get("description") or ""), str(site or ""), imported_at,
+            ))
+        if payload:
+            cursor.executemany("""
+                INSERT INTO interfaces
+                    (id, device_id, device_name, name, label, type, enabled,
+                     mgmt_only, mode, mtu, mac_address, description, site, imported_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, payload)
+        conn.commit()
+        conn.close()
+        return (len(rows), len(payload))
+    elif object_type == "dcim_cables":
+        rows = buckets.get("dcim_cables", [])
+        if not rows:
+            return (0, 0)
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM cables")
+        payload = []
+        for obj in rows:
+            obj_id = obj.get("id")
+            if obj_id is None:
+                continue
+            status_obj = obj.get("status") if isinstance(obj.get("status"), dict) else {}
+            type_obj = obj.get("type") if isinstance(obj.get("type"), dict) else {}
+            a_side = _termination_first(obj.get("a_terminations"))
+            b_side = _termination_first(obj.get("b_terminations"))
+            def _side(side: Dict[str, Any]) -> tuple:
+                side_obj = side.get("object") if isinstance(side.get("object"), dict) else {}
+                if not side_obj:
+                    return (None, "", None, "")
+                device = side_obj.get("device") if isinstance(side_obj.get("device"), dict) else {}
+                return (
+                    device.get("id"),
+                    _flatten_value(device.get("name")) or "",
+                    side_obj.get("id"),
+                    _flatten_value(side_obj.get("name")) or "",
+                )
+            a_id, a_dev, a_iface_id, a_iface = _side(a_side)
+            b_id, b_dev, b_iface_id, b_iface = _side(b_side)
+            payload.append((
+                obj_id, str(obj.get("label") or ""),
+                str(status_obj.get("value") or ""), str(type_obj.get("value") or ""),
+                str(obj.get("description") or ""),
+                a_id, a_dev, a_iface_id, a_iface,
+                b_id, b_dev, b_iface_id, b_iface,
+                imported_at,
+            ))
+        if payload:
+            cursor.executemany("""
+                INSERT INTO cables
+                    (id, label, status, type, description,
+                     a_device_id, a_device_name, a_interface_id, a_interface_name,
+                     b_device_id, b_device_name, b_interface_id, b_interface_name,
+                     imported_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, payload)
+        conn.commit()
+        conn.close()
+        return (len(rows), len(payload))
+    return (0, 0)
+
+
 # ── PUBLIC API ──────────────────────────────────────────────────────────
 
 def save_netbox_backup(file_bytes: Any, filename: str = "", 
-                      enable_schema_discovery: bool = False,
-                      progress_callback=None) -> Dict[str, Any]:
-    """Ingest a NetBox master backup JSON file with progress tracking.
+                       enable_schema_discovery: bool = False,
+                       progress_callback=None) -> Dict[str, Any]:
+    """Ingest a NetBox master backup JSON file with per-endpoint merge rules.
 
-    Accepts both the legacy flat layout and the full API-walk layout produced by
-    `netbox-export.ps1` v2.0. Populates the Sites / IPAM / Inventory tables
-    (replacing existing records), stores a searchable row for every NetBox
-    object, and records custom field choice sets.
-    
-    Args:
-        file_bytes: File content (bytes or file-like object)
-        filename: Original filename for display
-        enable_schema_discovery: If True, runs schema discovery (adds ~1-3s for large files)
-                                Default False for fast uploads. Run manually with 
-                                'python field_manager.py discover' later if needed.
-        progress_callback: Optional callback function(message: str) for progress updates
-    
-    Returns:
-        Dict with upload statistics
+    Full backups (>=100 endpoints) replace everything wholesale.
+    Minimal backups (<100 endpoints) replace only the endpoints present in the file,
+    skipping stale, unverified, or suspicious-empty endpoints.
     """
-    import time
+    import logging
+    import time as _time
+    import gzip
+    import hashlib
+    logger = logging.getLogger(__name__)
     
-    start_time = time.time()
+    start_time = _time.perf_counter()
+    timings: Dict[str, float] = {}
     
     init_backup_tables()
 
-    # Phase 1: Load and parse JSON (slowest part for large files)
+    # Phase 1: Load and parse JSON
     if progress_callback:
         progress_callback("Loading JSON file...")
-    logger.info("=" * 60)
-    logger.info("Starting NetBox backup ingestion")
-    logger.info("=" * 60)
-    
-    parse_start = time.time()
+    t0 = _time.perf_counter()
     payload = _load_payload(file_bytes, progress_callback)
-    parse_time = time.time() - parse_start
-    logger.info(f"JSON parsing completed in {parse_time:.1f}s")
-    
+    timings["parse"] = _time.perf_counter() - t0
+
     # Phase 2: Bucket data
     if progress_callback:
         progress_callback("Organizing data...")
-    
-    bucket_start = time.time()
+    t0 = _time.perf_counter()
     buckets = _bucket_payload(payload)
     source_info = _payload_source_info(payload)
     uploaded_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    bucket_time = time.time() - bucket_start
-    logger.info(f"Data bucketing completed in {bucket_time:.1f}s")
-    logger.info(f"Found {len(buckets)} object types")
+    timings["bucket"] = _time.perf_counter() - t0
 
-    # Phase 3: Ingest records
-    if progress_callback:
-        progress_callback("Ingesting records into database...")
-    
-    ingest_start = time.time()
-    object_counts = _ingest_backup_rows(buckets, uploaded_at, progress_callback)
-    total = sum(object_counts.values())
-    ingest_time = time.time() - ingest_start
-    logger.info(f"Record ingestion completed in {ingest_time:.1f}s ({total} records)")
+    # Classify: full (>=100 endpoints) or minimal
+    endpoint_count = len(buckets)
+    is_full = endpoint_count >= 100
+    backup_completed = source_info.get("backup_completed") or ""
 
-    # Phase 4: Process sites, IPAM, inventory + structured interfaces/cables
-    if progress_callback:
-        progress_callback("Processing sites and IPAM data...")
+    # Build incoming endpoint map for merge planning
+    incoming: Dict[str, Dict[str, Any]] = {}
+    for path, object_type in _ENDPOINT_TO_OBJECT_TYPE.items():
+        rows = buckets.get(object_type, [])
+        if rows is not None:
+            incoming[path] = {
+                "records": rows,
+                "verified": None,
+                "downloaded_count": None,
+                "expected_count": None,
+            }
+    # Try to get verified/downloaded info from metadata
+    summary_data = payload.get("summary")
+    if isinstance(summary_data, list):
+        for item in summary_data:
+            if isinstance(item, dict):
+                ep_path = item.get("path") or item.get("endpoint")
+                if ep_path:
+                    norm_path = ep_path.strip().replace("/", "-").replace("_", "/")
+                    # try canonical mapping
+                    for p, ot in _ENDPOINT_TO_OBJECT_TYPE.items():
+                        if ot == norm_path or p == ep_path.strip().lstrip("/"):
+                            incoming[p]["verified"] = item.get("verified")
+                            incoming[p]["downloaded_count"] = item.get("downloaded_count")
+                            incoming[p]["expected_count"] = item.get("expected_count")
+                            break
 
-    parent_sites = _build_parent_site_map(buckets)
+    # Read stored endpoint state for merge planning
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT path, exported_at, record_count FROM backup_endpoints")
+    stored_rows = cursor.fetchall()
+    conn.close()
+    stored: Dict[str, Dict[str, Any]] = {
+        row[0]: {"exported_at": row[1], "count": row[2]} for row in stored_rows
+    }
 
-    sites = _ingest_sites(buckets)
-    ipam = _ingest_ipam(buckets)
-    inventory = _ingest_inventory(buckets)
-    choice_values = _ingest_choice_values(buckets, uploaded_at)
+    from core.backup_endpoint_merge import plan_endpoint_updates
+    plan = plan_endpoint_updates(incoming, backup_completed, stored, uploaded_at)
 
-    # Phase 4b: Structured interfaces and cables tables
-    if progress_callback:
-        progress_callback("Ingesting interfaces and cables...")
+    # Count skipped for reporting
+    skipped: Dict[str, str] = {}
+    replaced: Dict[str, str] = {}
+    for path, (action, reason) in plan.items():
+        if action == "replace":
+            replaced[path] = reason
+        else:
+            skipped[path] = reason
 
-    iface_count = _ingest_structured_interfaces(buckets, parent_sites, uploaded_at)
-    cable_count = _ingest_structured_cables(buckets, parent_sites, uploaded_at)
-    logger.info(f"Structured ingestion: {iface_count} interfaces, {cable_count} cables")
-    
-    schema_stats = {}
-    
-    # Phase 5: Optional schema discovery
-    if enable_schema_discovery:
+    if is_full:
+        # FULL: clear everything, rebuild from scratch
         if progress_callback:
-            progress_callback("Discovering schema (optional, can skip next time)...")
-        
-        try:
-            from core.field_registry import FieldRegistry
-            from core.db_manager_wrapper import DatabaseManager
-            
-            db_manager = DatabaseManager()
-            field_registry = FieldRegistry(db_manager)
-            netbox_version = source_info.get("netbox_version") if source_info else None
-            schema_stats = field_registry.discover_schema_from_backup(buckets, netbox_version)
-        except Exception as e:
-            logger.warning(f"Schema discovery failed: {e}")
-            schema_stats = {"error": str(e)}
+            progress_callback("Clearing old backup data...")
+        t0 = _time.perf_counter()
+        cursor = sqlite3.connect(DB_PATH).cursor()
+        cursor.execute("DELETE FROM backup_endpoints")
+        sqlite3.connect(DB_PATH).commit()
+        sqlite3.connect(DB_PATH).close()
+        timings["full_clear"] = _time.perf_counter() - t0
 
-    # Phase 6: Initialize and persist schema registry for CSV classification
+        # Re-ingest everything (same as before)
+        if progress_callback:
+            progress_callback("Ingesting records into database...")
+        t0 = _time.perf_counter()
+        object_counts = _ingest_backup_rows(buckets, uploaded_at, progress_callback)
+        timings["ingest_backup"] = _time.perf_counter() - t0
+
+        if progress_callback:
+            progress_callback("Processing sites and IPAM data...")
+        t0 = _time.perf_counter()
+        parent_sites = _build_parent_site_map(buckets)
+        sites = _ingest_sites(buckets)
+        ipam = _ingest_ipam(buckets)
+        _ingest_inventory(buckets)
+        choice_values = _ingest_choice_values(buckets, uploaded_at)
+        timings["structured_ingest"] = _time.perf_counter() - t0
+
+        if progress_callback:
+            progress_callback("Ingesting interfaces and cables...")
+        t0 = _time.perf_counter()
+        iface_count = _ingest_structured_interfaces(buckets, parent_sites, uploaded_at)
+        cable_count = _ingest_structured_cables(buckets, parent_sites, uploaded_at)
+        timings["structured_misc"] = _time.perf_counter() - t0
+
+        total = sum(object_counts.values())
+
+        # Store per-endpoint metadata in backup_endpoints
+        t0 = _time.perf_counter()
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        for path, object_type in _ENDPOINT_TO_OBJECT_TYPE.items():
+            rows = buckets.get(object_type, [])
+            if rows:
+                recs_json = json.dumps(rows, default=str).encode('utf-8')
+                h = hashlib.sha1(recs_json).hexdigest()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO backup_endpoints
+                        (path, kind, source_file, exported_at, uploaded_at,
+                         record_count, expected_count, verified, content_hash, records_gz)
+                    VALUES (?, 'full', ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    path, filename or "NetBox_Backup.json",
+                    backup_completed, uploaded_at,
+                    len(rows),
+                    incoming.get(path, {}).get("expected_count"),
+                    incoming.get(path, {}).get("verified"),
+                    h,
+                    gzip.compress(recs_json, compresslevel=6),
+                ))
+        conn.commit()
+        conn.close()
+        timings["store_endpoints"] = _time.perf_counter() - t0
+
+        # Drop CSV overlays and dynamic tables for full upload
+        try:
+            from core.shared_backup_state import SharedBackupState
+            SharedBackupState.clear_csv_only()
+        except Exception:
+            pass
+
+    else:
+        # MINIMAL: per-endpoint merge
+        if progress_callback:
+            progress_callback("Planning per-endpoint merge...")
+        t0 = _time.perf_counter()
+
+        # Build effective buckets from plan
+        effective_buckets: Dict[str, List[Dict[str, Any]]] = {}
+        effective_counts: Dict[str, int] = {}
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        parent_sites = _build_parent_site_map(buckets)
+        imported_at = uploaded_at
+
+        for path, (action, reason) in plan.items():
+            if action != "replace":
+                continue
+            object_type = _ENDPOINT_TO_OBJECT_TYPE.get(path)
+            if not object_type:
+                continue
+            rows = buckets.get(object_type, [])
+            effective_buckets[object_type] = rows
+            effective_counts[object_type] = len(rows)
+
+            # Compute content hash
+            recs_json = json.dumps(rows, default=str).encode('utf-8')
+            content_hash = hashlib.sha1(recs_json).hexdigest()
+
+            # Check if hash matches stored — skip rewrite if identical
+            cursor.execute("SELECT content_hash FROM backup_endpoints WHERE path = ?", (path,))
+            stored_hash_row = cursor.fetchone()
+            if stored_hash_row and stored_hash_row[0] == content_hash:
+                # Only update exported_at, no DB rewrite
+                cursor.execute(
+                    "UPDATE backup_endpoints SET exported_at = ? WHERE path = ?",
+                    (backup_completed, path)
+                )
+                continue
+
+            # Scoped delete + insert
+            _scoped_delete_endpoint(object_type)
+            _scoped_insert_backup_rows(object_type, rows, uploaded_at)
+
+            # Scoped structured insert
+            if object_type in ("dcim_interfaces", "dcim_cables"):
+                _scoped_insert_structured(object_type, buckets, parent_sites, imported_at)
+            elif object_type == "dcim_sites":
+                # Scoped: delete only this endpoint's sites, then reinsert
+                cursor = sqlite3.connect(DB_PATH).cursor()
+                cursor.execute("DELETE FROM sites_records")
+                sqlite3.connect(DB_PATH).commit()
+                sqlite3.connect(DB_PATH).close()
+                site_records = []
+                for site in rows:
+                    s_id = site.get("id")
+                    s_name = _flatten_value(site.get("name"))
+                    if s_id is None or not s_name:
+                        continue
+                    site_records.append({"id": s_id, "name": s_name, "slug": _flatten_value(site.get("slug"))})
+                if site_records:
+                    from core.db_manager import save_sites_batch
+                    save_sites_batch(site_records, clear_first=False, source=BACKUP_SOURCE)
+            elif object_type in ("ipam_prefixes", "ipam_vlans"):
+                from core.db_manager import save_ipam_records_batch
+                if object_type == "ipam_prefixes":
+                    # Delete only prefixes, keep VLANs
+                    conn2 = sqlite3.connect(DB_PATH)
+                    conn2.execute("DELETE FROM ipam_records WHERE record_type = 'prefix'")
+                    conn2.commit()
+                    conn2.close()
+                ipam_records = []
+                if object_type == "ipam_prefixes":
+                    for pfx in rows:
+                        prefix_str = _flatten_value(pfx.get("prefix"))
+                        if not prefix_str:
+                            continue
+                        vlan_obj = pfx.get("vlan") if isinstance(pfx.get("vlan"), dict) else {}
+                        site = _flatten_value(pfx.get("scope")) if pfx.get("scope_type") == "dcim.site" else _flatten_value(pfx.get("site"))
+                        ipam_records.append({
+                            "prefix_or_subnet": prefix_str,
+                            "vlan_id": vlan_obj.get("vid"),
+                            "vlan_name": _flatten_value(vlan_obj.get("name")),
+                            "role": _flatten_value(pfx.get("role")),
+                            "site": site,
+                            "scope_id": pfx.get("scope_id"),
+                            "description": _flatten_value(pfx.get("description")),
+                            "record_type": "prefix",
+                        })
+                elif object_type == "ipam_vlans":
+                    conn2 = sqlite3.connect(DB_PATH)
+                    conn2.execute("DELETE FROM ipam_records WHERE record_type = 'vlan'")
+                    conn2.commit()
+                    conn2.close()
+                    site_names = {
+                        _flatten_value(s.get("name")).strip().lower(): _flatten_value(s.get("name"))
+                        for s in buckets.get("dcim_sites", []) if _flatten_value(s.get("name"))
+                    }
+                    for vlan in rows:
+                        vid = vlan.get("vid")
+                        site = _vlan_site(vlan, site_names)
+                        ipam_records.append({
+                            "vlan_id": vid,
+                            "vlan_name": _flatten_value(vlan.get("name")),
+                            "role": _flatten_value(vlan.get("role")),
+                            "site": site,
+                            "scope_id": None,
+                            "description": _flatten_value(vlan.get("description")),
+                            "record_type": "vlan",
+                        })
+                if ipam_records:
+                    save_ipam_records_batch(ipam_records, clear_first=False, source=BACKUP_SOURCE)
+            elif object_type == "dcim_devices":
+                from core.db_manager import save_records_batch
+                conn2 = sqlite3.connect(DB_PATH)
+                conn2.execute("DELETE FROM inventory_records WHERE category IN ('device','hypervisor')")
+                conn2.commit()
+                conn2.close()
+                dev_records = []
+                for dev in rows:
+                    name = _flatten_value(dev.get("name"))
+                    if not name:
+                        continue
+                    model = _flatten_value(_dig(dev, "device_type.model"))
+                    role = _flatten_value(dev.get("role") or dev.get("device_role"))
+                    desc = _flatten_value(dev.get("description"))
+                    combined = f"{name} {role} {model} {desc}".lower()
+                    hints = get_hypervisor_device_hints()
+                    cat = "hypervisor" if any(h in combined for h in hints) else "device"
+                    dev_records.append({
+                        "category": cat,
+                        "name": name,
+                        "description": desc,
+                        "manufacturer": _flatten_value(_dig(dev, "device_type.manufacturer")),
+                        "model_or_role": model or role,
+                        "site": _flatten_value(dev.get("site")),
+                        "cluster": _flatten_value(dev.get("cluster")),
+                    })
+                if dev_records:
+                    save_records_batch(dev_records, clear_first=False, source=BACKUP_SOURCE)
+            elif object_type == "virtualization_virtual_machines":
+                from core.db_manager import save_records_batch
+                conn2 = sqlite3.connect(DB_PATH)
+                conn2.execute("DELETE FROM inventory_records WHERE category = 'vm'")
+                conn2.commit()
+                conn2.close()
+                vm_records = []
+                for vm in rows:
+                    name = _flatten_value(vm.get("name"))
+                    if not name:
+                        continue
+                    role = _flatten_value(vm.get("role"))
+                    vm_records.append({
+                        "category": "vm",
+                        "name": name,
+                        "description": _flatten_value(vm.get("description")),
+                        "manufacturer": "Virtual Machine",
+                        "model_or_role": role or "VM",
+                        "site": _flatten_value(vm.get("site")),
+                        "cluster": _flatten_value(vm.get("cluster")),
+                    })
+                if vm_records:
+                    save_records_batch(vm_records, clear_first=False, source=BACKUP_SOURCE)
+
+        # Store per-endpoint metadata
+        for path, (action, reason) in plan.items():
+            if action != "replace":
+                continue
+            object_type = _ENDPOINT_TO_OBJECT_TYPE.get(path)
+            if not object_type:
+                continue
+            rows = buckets.get(object_type, [])
+            recs_json = json.dumps(rows, default=str).encode('utf-8')
+            h = hashlib.sha1(recs_json).hexdigest()
+            cursor.execute("""
+                INSERT OR REPLACE INTO backup_endpoints
+                    (path, kind, source_file, exported_at, uploaded_at,
+                     record_count, expected_count, verified, content_hash, records_gz)
+                VALUES (?, 'minimal', ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                path, filename or "NetBox_Backup.json",
+                backup_completed, uploaded_at,
+                len(rows),
+                incoming.get(path, {}).get("expected_count"),
+                incoming.get(path, {}).get("verified"),
+                h,
+                gzip.compress(recs_json, compresslevel=6),
+            ))
+        conn.commit()
+        conn.close()
+
+        total = sum(effective_counts.values())
+        object_counts = effective_counts
+        sites = effective_counts.get("dcim_sites", 0)
+        ipam = effective_counts.get("ipam_prefixes", 0) + effective_counts.get("ipam_vlans", 0)
+        devices = effective_counts.get("dcim_devices", 0)
+        vms = effective_counts.get("virtualization_virtual_machines", 0)
+        iface_count = effective_counts.get("dcim_interfaces", 0)
+        cable_count = effective_counts.get("dcim_cables", 0)
+        choice_values = 0
+        timings["minimal_merge"] = _time.perf_counter() - t0
+
+    # Schema registry (Phase 6)
     if progress_callback:
         progress_callback("Initializing schema registry...")
-    
+    t0 = _time.perf_counter()
     try:
         from core.universal_schema_registry import UniversalSchemaRegistry
         registry = UniversalSchemaRegistry()
-        
-        # Convert backup data to flat format for schema introspection
         flat_data = _convert_to_flat_format(payload)
-        
         registry.introspect_backup_json(flat_data)
         registry.export_to_session_state()
         logger.info(f"Schema registry initialized with {len(registry.model_signatures)} models")
     except Exception as e:
         logger.warning(f"Failed to initialize schema registry: {e}")
-    
-    # Phase 7: Save metadata and compressed backup JSON to SQLite only.
-    # The uncompressed 88+ MB JSON is NOT written to disk — the compressed column
-    # in backup_metadata is the single source of truth for round-trip restore.
+    timings["schema_registry"] = _time.perf_counter() - t0
+
+    # Phase 7: Save metadata and compressed backup JSON
     if progress_callback:
         progress_callback("Saving metadata and compressed backup...")
-
+    t0 = _time.perf_counter()
     counts_payload = dict(object_counts)
     if source_info:
         counts_payload["__source__"] = source_info
-
-    # Compress the backup JSON for storage (gzip compression)
-    import gzip
     backup_json_bytes = json.dumps(payload).encode('utf-8')
     backup_json_compressed = gzip.compress(backup_json_bytes, compresslevel=6)
-
     logger.info(f"Compressed backup JSON: {len(backup_json_bytes)/1024/1024:.1f} MB -> {len(backup_json_compressed)/1024/1024:.1f} MB")
 
     conn = sqlite3.connect(DB_PATH)
@@ -1194,51 +1696,59 @@ def save_netbox_backup(file_bytes: Any, filename: str = "",
     """, (filename or "NetBox_Backup.json", uploaded_at, total, json.dumps(counts_payload), backup_json_compressed))
     conn.commit()
     conn.close()
+    timings["compress_store"] = _time.perf_counter() - t0
 
-    # Prune stale full-backup JSON files left on disk from prior versions
+    # Prune stale files
+    t0 = _time.perf_counter()
     _prune_stale_backup_files()
+    timings["prune"] = _time.perf_counter() - t0
 
+    # Sync metadata
     set_sync_metadata("netbox_backup", BACKUP_SOURCE)
     set_sync_metadata("ipam", BACKUP_SOURCE)
     set_sync_metadata("naming", BACKUP_SOURCE)
+    timings["metadata"] = _time.perf_counter() - t0
 
-    total_time = time.time() - start_time
-    
+    timings["total"] = _time.perf_counter() - start_time
+
+    # Store timings in session state
+    try:
+        import streamlit as st
+        st.session_state["last_backup_timing"] = timings
+    except Exception:
+        pass
+
     logger.info("=" * 60)
-    logger.info(f"Backup ingestion completed successfully in {total_time:.1f}s")
-    logger.info(f"  - JSON parsing: {parse_time:.1f}s")
-    logger.info(f"  - Data bucketing: {bucket_time:.1f}s")
-    logger.info(f"  - Record ingestion: {ingest_time:.1f}s")
-    logger.info(f"  - Total records: {total}")
+    logger.info(f"Backup ingestion completed in {timings.get('total', 0):.1f}s")
+    for k, v in timings.items():
+        if k != "total":
+            logger.info(f"  {k}: {v:.2f}s")
+    logger.info(f"  Total records: {total}")
     logger.info("=" * 60)
-    
+
     if progress_callback:
-        progress_callback(f"Complete! Processed {total} records in {total_time:.1f}s")
+        status = f"Complete! Processed {total} records in {timings.get('total', 0):.1f}s"
+        if skipped:
+            status += f" (skipped {len(skipped)} endpoint(s))"
+        progress_callback(status)
 
     result = {
         "total": total,
         "object_counts": object_counts,
         "sites": sites,
         "ipam": ipam,
-        "devices": inventory.get("device", 0) + inventory.get("hypervisor", 0),
-        "vms": inventory.get("vm", 0),
+        "devices": devices,
+        "vms": vms,
         "interfaces": iface_count,
         "cables": cable_count,
         "choice_values": choice_values,
         "object_types": len(object_counts),
         "source_info": source_info,
         "uploaded_at": uploaded_at,
-        "timings": {
-            "total": total_time,
-            "parse": parse_time,
-            "bucket": bucket_time,
-            "ingest": ingest_time
-        }
+        "timings": timings,
+        "skipped": skipped,
+        "backup_type": "full" if is_full else "minimal",
     }
-    
-    if schema_stats:
-        result["schema_discovery"] = schema_stats
-    
     return result
 
 
@@ -1316,74 +1826,127 @@ def restore_backup_to_session_state():
     """
     Restore backup data from database to SharedBackupState session state.
     Called when page is refreshed and session state is lost.
-    
-    Restores the full backup JSON from compressed storage, allowing full dynamic
-    inspection and AI context access.
+
+    Rebuilds the effective payload from backup_endpoints (per-endpoint storage),
+    falling back to decompressed JSON for legacy backups.
     """
     from core.shared_backup_state import SharedBackupState
+    import logging
     import gzip
-    
+    logger = logging.getLogger(__name__)
+
     try:
-        # Get backup metadata including compressed JSON
-        meta = get_backup_metadata()
-        if not meta["loaded"]:
-            return
-        
         init_backup_tables()
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        
-        # Try to get compressed backup JSON
+
+        # Try to rebuild from backup_endpoints first
         cursor.execute("""
-            SELECT backup_json_compressed FROM backup_metadata WHERE id = 1
+            SELECT path, kind, exported_at, uploaded_at, record_count,
+                   verified, content_hash, records_gz
+            FROM backup_endpoints ORDER BY path
         """)
+        ep_rows = cursor.fetchall()
+        conn.close()
+
+        if ep_rows:
+            # Reconstruct payload from per-endpoint storage
+            endpoints_list = []
+            for path, kind, exported_at, uploaded_at, record_count, verified, content_hash, records_gz in ep_rows:
+                try:
+                    records = json.loads(gzip.decompress(records_gz).decode('utf-8'))
+                except Exception:
+                    records = []
+                endpoints_list.append({
+                    "path": path,
+                    "records": records,
+                    "verified": verified,
+                    "downloaded_count": None,
+                    "expected_count": None,
+                })
+
+            # Build metadata
+            meta_row = None
+            conn2 = sqlite3.connect(DB_PATH)
+            try:
+                meta_row = conn2.execute(
+                    "SELECT filename, uploaded_at, record_count FROM backup_metadata WHERE id = 1"
+                ).fetchone()
+            finally:
+                conn2.close()
+            metadata = {
+                "netbox_version": "",
+                "backup_completed": exported_at or "",
+            }
+
+            backup_data = {
+                "metadata": metadata,
+                "endpoints": endpoints_list,
+                "summary": [],
+            }
+
+            filename = meta_row[0] if meta_row else "NetBox_Backup"
+            original_timestamp = meta_row[1] if meta_row else ""
+            SharedBackupState.load_backup(backup_data, filename, ingestion_timestamp=original_timestamp)
+
+            # Restore schema registry
+            try:
+                from core.universal_schema_registry import UniversalSchemaRegistry
+                registry = UniversalSchemaRegistry()
+                flat_data = _convert_to_flat_format(backup_data)
+                registry.introspect_backup_json(flat_data)
+                registry.export_to_session_state()
+                logger.info(f"Restored schema registry with {len(registry.model_signatures)} models")
+            except Exception as e:
+                logger.warning(f"Failed to restore schema registry: {e}")
+
+            # Restore CSV overrides
+            _restore_csv_overrides()
+
+            logger.info(f"Restored {len(ep_rows)} endpoints from backup_endpoints")
+            return
+
+        # Fallback: decompress full JSON (legacy path)
+        meta = get_backup_metadata()
+        if not meta["loaded"]:
+            return
+
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT backup_json_compressed FROM backup_metadata WHERE id = 1")
         row = cursor.fetchone()
         conn.close()
-        
+
         if not row or not row[0]:
-            # No compressed JSON stored (legacy backup) - fall back to count-only mode
             logger.info("No compressed backup JSON found - using count-only mode")
             _restore_counts_only(meta)
             return
-        
-        # Decompress and parse the backup JSON
+
         backup_json_compressed = row[0]
         backup_json_bytes = gzip.decompress(backup_json_compressed)
         backup_data = json.loads(backup_json_bytes.decode('utf-8'))
-        
+
         logger.info(f"Decompressed backup JSON: {len(backup_json_compressed)/1024/1024:.1f} MB -> {len(backup_json_bytes)/1024/1024:.1f} MB")
-        
-        # Create BackupInspector with restored data, preserving original timestamp
-        from core.dynamic_backup_inspector import BackupInspector
+
         filename = meta.get("filename", "NetBox Backup")
-        original_timestamp = meta.get("uploaded_at", "")  # Preserve original upload time
-        
-        # Load into SharedBackupState with preserved timestamp
+        original_timestamp = meta.get("uploaded_at", "")
         SharedBackupState.load_backup(backup_data, filename, ingestion_timestamp=original_timestamp)
-        
-        # Also restore the schema registry for CSV classification
+
         try:
             from core.universal_schema_registry import UniversalSchemaRegistry
             registry = UniversalSchemaRegistry()
-            
-            # Convert backup data to flat format for schema introspection
-            # The schema registry expects {"model.key": [records], ...} format
             flat_data = _convert_to_flat_format(backup_data)
-            
             registry.introspect_backup_json(flat_data)
             registry.export_to_session_state()
             logger.info(f"Restored schema registry with {len(registry.model_signatures)} models")
         except Exception as e:
             logger.warning(f"Failed to restore schema registry: {e}")
-        
-        # Restore CSV overrides from database tables
+
         _restore_csv_overrides()
-        
+
         logger.info(f"Successfully restored full backup inspector with {len(SharedBackupState.get_object_registry())} object types")
 
-        # Verify and restore structured database tables (sites, IPAM, inventory)
-        # These can become empty if clear_ipam_records() or clear_sites_records()
-        # is called after backup upload, but before a session restore.
+        # Verify and restore structured database tables
         try:
             conn2 = sqlite3.connect(DB_PATH)
             c = conn2.cursor()
@@ -1417,13 +1980,13 @@ def restore_backup_to_session_state():
             for table, obj_type in [("interfaces", "dcim_interfaces"), ("cables", "dcim_cables")]:
                 c.execute(f"SELECT COUNT(*) FROM {table}")
                 structured_count = c.fetchone()[0]
-                c.execute(f"SELECT COUNT(*) FROM backup_records WHERE object_type = ?", (obj_type,))
+                c.execute("SELECT COUNT(*) FROM backup_records WHERE object_type = ?", (obj_type,))
                 backup_count = c.fetchone()[0]
                 if structured_count != backup_count:
                     logger.warning(
-                        f"Mismatch: {table} has {structured_count} but backup_records has {backup_count} — re-ingesting"
+                        "Mismatch: %s has %d but backup_records has %d — re-ingesting",
+                        table, structured_count, backup_count,
                     )
-                    # Trigger re-ingestion by calling the ingest functions
                     buckets = _bucket_payload(backup_data)
                     parent_sites = _build_parent_site_map(buckets)
                     _ingest_structured_interfaces(buckets, parent_sites, meta.get("uploaded_at", ""))
@@ -1432,10 +1995,9 @@ def restore_backup_to_session_state():
             conn2.close()
         except Exception as e:
             logger.warning(f"Structured table verification failed: {e}")
-        
+
     except Exception as e:
         logger.warning(f"Failed to restore backup to session state: {e}")
-        # Try fallback to count-only mode
         try:
             meta = get_backup_metadata()
             if meta["loaded"]:
@@ -1451,6 +2013,8 @@ def _restore_csv_overrides():
     them as CSV overrides in SharedBackupState.
     """
     from core.shared_backup_state import SharedBackupState
+    import logging
+    logger = logging.getLogger(__name__)
     
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -1603,6 +2167,8 @@ def _restore_counts_only(meta: Dict[str, Any]):
     Used for legacy backups uploaded before the compression feature.
     """
     from core.shared_backup_state import SharedBackupState
+    import logging
+    logger = logging.getLogger(__name__)
     
     init_backup_tables()
     conn = sqlite3.connect(DB_PATH)

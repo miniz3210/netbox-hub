@@ -6,7 +6,7 @@ Provides unified backup inspection state across IPAM and Naming tabs.
 import threading
 import streamlit as st
 from typing import Dict, Any, Optional, List
-from core.dynamic_backup_inspector import BackupInspector, load_backup_from_file, load_backup_from_json_string
+from core.dynamic_backup_inspector import BackupInspector
 
 
 class SharedBackupState:
