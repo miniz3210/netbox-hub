@@ -7,7 +7,6 @@ adapts automatically to any NetBox version or custom configuration.
 """
 
 import json
-import re
 from typing import Dict, List, Set, Tuple, Any, Optional
 from collections import defaultdict
 import streamlit as st

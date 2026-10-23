@@ -6,19 +6,16 @@ Provides UI for importing Azure Virtual Machine exports into NetBox.
 import csv
 import html
 import io
-import json
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
-from typing import Optional
 
 from core.azure_vm_importer import (
     parse_azure_vm_csv,
     map_azure_to_netbox,
     check_vm_exists_in_db,
     build_vm_ip_index,
-    lookup_vm_ip_addresses,
     _strip_azure_prefix,
     _build_netbox_tags,
 )
@@ -26,7 +23,6 @@ from core.azure_csv_manager import (
     save_azure_csv_upload,
     get_azure_csv_upload,
     clear_azure_csv_upload,
-    has_azure_csv_upload,
 )
 from core.netbox_object_checker import (
     analyze_netbox_objects,

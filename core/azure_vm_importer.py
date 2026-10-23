@@ -10,7 +10,6 @@ import re
 import sqlite3
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
-from pathlib import Path
 
 from core.db_manager import DB_PATH, init_db
 

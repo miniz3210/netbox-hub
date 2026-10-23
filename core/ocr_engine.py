@@ -8,7 +8,6 @@ smart resolution capping, and zero redundant PNG compression cycles.
 import os
 import io
 import logging
-import sys
 from typing import List, Dict, Any, Tuple
 import numpy as np
 
@@ -17,7 +16,7 @@ os.environ.setdefault("OMP_NUM_THREADS", "2")
 os.environ.setdefault("ONNXRUNTIME_INTRA_OP_NUM_THREADS", "2")
 os.environ.setdefault("ONNXRUNTIME_INTER_OP_NUM_THREADS", "1")
 
-from PIL import Image, ImageEnhance
+from PIL import Image
 from rapidocr_onnxruntime import RapidOCR
 
 try:

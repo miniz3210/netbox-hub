@@ -7,9 +7,8 @@ available endpoints with visual indicators for the 64 essential endpoints,
 and a "Reset to Default Minimal" button.
 """
 
-from datetime import datetime
 from pathlib import Path
-from typing import List, Set
+from typing import Set
 import streamlit as st
 from config.backup_endpoints import NETBOX_ENDPOINTS, get_essential_endpoints, get_endpoint_count, get_all_endpoints
 

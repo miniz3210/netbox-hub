@@ -24,7 +24,7 @@ import io
 import logging
 import re
 import sqlite3
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Set, Tuple
 
 from core.db_manager import DB_PATH, init_db
 

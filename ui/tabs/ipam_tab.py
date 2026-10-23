@@ -5,7 +5,6 @@ from datetime import datetime
 from typing import Dict, List
 import streamlit as st
 import pandas as pd
-import openpyxl
 from config.naming_rules import load_naming_rules, get_vlan_presets, get_vlan_description_mappings, get_ipam_role_mappings
 from core.ipam_engine import (
     compute_chained_rows,
@@ -15,7 +14,6 @@ from core.ipam_engine import (
     get_subnet_availability_analysis,
     calculate_ip_range_str,
     format_branch_display,
-    lookup_role_description,
     resolve_pattern_template,
     resolve_vlan_description,
     resolve_vlan_name,
@@ -25,25 +23,14 @@ from core.ipam_engine import (
     generate_netbox_vlans_csv,
     generate_netbox_prefixes_csv
 )
-from core.db_manager import (get_all_site_names,
-    save_ipam_records_batch,
-    save_sites_batch,
+from core.db_manager import (
     clear_ipam_records,
-    clear_sites_records,
-    clear_vlans_records,
-    clear_prefixes_records,
-    get_total_ipam_count,
-    get_total_sites_count,
-    get_total_vlans_count,
-    get_total_prefixes_count,
     get_max_scope_id,
     lookup_scope_id,
     lookup_site_supernet_from_db,
     get_existing_prefix_strings,
-    get_sync_metadata,
-    get_site_summary,
     get_ipam_records_by_site,
-    get_full_site_inventory_summary
+    get_sync_metadata,
 )
 from core.shared_backup_state import SharedBackupState
 from utils.formatters import to_title_case_preserve_acronyms
@@ -424,14 +411,12 @@ def _reconcile_uploaded(file_bytes: io.BytesIO, filename: str):
 def _render_reconciliation_tab():
     """Progressive open-layout Master IPAM Reconciliation dashboard."""
     from core.ipam_excel_diff import (
-        export_pending_csvs,
         build_reconciliation_result,
         build_import_csvs,
         build_import_zip,
     )
-    from core.db_manager import get_all_site_names, get_sync_metadata
+    from core.db_manager import get_all_site_names
     from core.shared_backup_state import SharedBackupState
-    import ipaddress as _ipaddress
 
     st.markdown(
         "**Master IPAM Reconciliation** — Upload an Excel / CSV / JSON inventory and compare it "

@@ -362,16 +362,14 @@ def build_relationship_context(
 
 
 def enhance_result_with_relationships(
-    result: Dict[str, Any],
-    query_context: str
+    result: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
     Enhance a single result record with inferred relationship data.
-    
+
     Args:
         result: Original result record
-        query_context: Original query for context
-    
+
     Returns:
         Enhanced result with additional relationship fields
     """

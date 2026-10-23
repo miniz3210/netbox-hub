@@ -6,7 +6,7 @@ only by OCR whitespace jitter, enforces expanded-state precedence, and deduplica
 """
 
 import re
-from typing import List, Dict, Any, Set, Tuple
+from typing import List, Dict, Any, Set
 
 
 def apply_normalizations(text: str, normalizations: List[Dict[str, str]]) -> str:
@@ -114,8 +114,8 @@ def reduce_topology_pipeline(
             "purpose": purpose,
             "role": role if rtype == "Uplink" else "None",
             "speed": speed,
-            "vlan": str(r.get("vlan", "")).strip()
         }
+        rec.update({k: r[k] for k in ("vlan", "source", "is_uncertain", "note") if k in r})
         cleaned.append(rec)
         seen_map[sig] = rec
 

@@ -6,7 +6,7 @@ Eliminates hardcoded object lists and custom field mappings.
 
 import json
 import re
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional
 from datetime import datetime
 from pathlib import Path
 import logging

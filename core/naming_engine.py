@@ -1,6 +1,6 @@
 import re
 import json
-from typing import Dict, List, Any
+from typing import Dict
 from core.ai_client import call_ai
 from config.naming_rules import load_naming_rules, export_rules_as_prompt
 from core.db_manager import get_records_by_category
@@ -23,7 +23,6 @@ def build_inventory_context_for_ai(category: str, site_filter: str = "") -> str:
 
 def verify_and_suggest_with_ai(user_input_text: str, model_name: str, asset_type: str = "General Asset", category_key: str = "device", site_filter: str = "") -> str:
     # Load naming rules from session state if available (updated by Standards tab), otherwise from file
-    import streamlit as st
     from core.session_manager import SessionStateManager as SSM
     naming_rules = SSM.get_naming_rules(load_naming_rules())
     naming_context = export_rules_as_prompt(naming_rules)

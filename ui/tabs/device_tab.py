@@ -1,5 +1,4 @@
 import os
-import re
 import streamlit as st
 from core.catalog import get_canonical_manufacturer, search_catalog_wildcard, fetch_raw_content
 from core.yaml_generator import generate_device_yaml

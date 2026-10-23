@@ -21,7 +21,6 @@ Token format:
 
 import os
 import re
-import ipaddress
 import sqlite3
 import hashlib
 import logging

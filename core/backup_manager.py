@@ -19,9 +19,13 @@ Resource Group Set, ...) so object-existence checks can use authoritative data.
 """
 
 import json
+import logging
+import os
 import sqlite3
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 from core.db_manager import (
     DB_PATH,
@@ -462,8 +466,6 @@ def _summarize(object_type: str, obj: Dict[str, Any], site: str) -> str:
 
 def _load_payload(file_bytes: Any, progress_callback=None) -> Dict[str, Any]:
     """Load and parse NetBox backup JSON with optional progress tracking."""
-    import logging
-    logger = logging.getLogger(__name__)
     
     # Read file content
     if progress_callback:
@@ -818,8 +820,6 @@ def _ingest_backup_rows(
     progress_callback=None,
 ) -> Dict[str, int]:
     """Ingest backup rows with progress tracking."""
-    import logging
-    logger = logging.getLogger(__name__)
     
     parent_sites = _build_parent_site_map(buckets)
 
@@ -1073,9 +1073,7 @@ def save_netbox_backup(file_bytes: Any, filename: str = "",
     Returns:
         Dict with upload statistics
     """
-    import logging
     import time
-    logger = logging.getLogger(__name__)
     
     start_time = time.time()
     
@@ -1323,9 +1321,7 @@ def restore_backup_to_session_state():
     inspection and AI context access.
     """
     from core.shared_backup_state import SharedBackupState
-    import logging
     import gzip
-    logger = logging.getLogger(__name__)
     
     try:
         # Get backup metadata including compressed JSON
@@ -1455,8 +1451,6 @@ def _restore_csv_overrides():
     them as CSV overrides in SharedBackupState.
     """
     from core.shared_backup_state import SharedBackupState
-    import logging
-    logger = logging.getLogger(__name__)
     
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -1609,8 +1603,6 @@ def _restore_counts_only(meta: Dict[str, Any]):
     Used for legacy backups uploaded before the compression feature.
     """
     from core.shared_backup_state import SharedBackupState
-    import logging
-    logger = logging.getLogger(__name__)
     
     init_backup_tables()
     conn = sqlite3.connect(DB_PATH)

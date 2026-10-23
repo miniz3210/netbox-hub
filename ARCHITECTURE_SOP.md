@@ -209,6 +209,9 @@ docker push ghcr.io/miniz3210/netbox-hub:latest
 - [x] **4.8.36 Deterministic Processing**: Python-side noise filtering and token normalization ensure consistent extraction without stochastic model behavior.
 - [x] **4.8.36 Resilient JSON Object Recovery**: Regex-based extraction recovers valid JSON objects from partial streams, eliminating 0-record errors.
 - [x] **4.8.36 Expanded State Precedence**: Automatically purge placeholder 'No Uplink' records once real physical adapters are detected.
+- [x] **ESXi Topology Pipeline** (`core/extractors/esxi_pipeline.py`): Text-first, OCR fills gaps. Decision table: (1) pasted text non-empty with records → source "text"; if fillable gaps AND screenshots → source "text+ocr" (OCR fills only reported gaps); (2) no usable text + screenshots → source "ocr"; (3) nothing → source "none". Overlapping screenshot duplicates are deduped; VMkernel pools with disagreeing IPs are left unresolved.
+- [x] **ESXi Topology Clear All**: Single `_handle_clear_topology_all()` callback clears paste textarea, all topology session keys, OCR cache, and bumps uploader key version to reset staged screenshots.
+- [x] **Topology Reducer Extra-Field Preservation**: `reduce_topology_pipeline()` now preserves `source`, `is_uncertain`, `note`, and `vlan` on input records instead of rebuilding a 7-key dict.
 - [ ] Build Excel IPAM offline reconciliation script against `AW IPs & VLANs_Final (2).xlsx`.
 - [ ] Prune stale local git tags prior to 4.8.36 release.
 - [ ] Publish GHCR image release `4.8.36` (`ghcr.io/miniz3210/netbox-hub:4.8.36`).
@@ -229,12 +232,16 @@ docker push ghcr.io/miniz3210/netbox-hub:latest
 | `core/ai_two_pass_system.py`            | Multi-pass LLM extraction orchestration                            |
 | `core/db_manager.py`                    | SQLite schema, CRUD, site/prefix lookups                           |
 | `core/ipam_excel_diff.py`               | Offline Excel → IPAM reconciliation (multi-sheet, O(1) hash sets)  |
+| `core/extractors/esxi_pipeline.py`      | ESXi pipeline: text-first, OCR fills gaps; `_dedupe_ocr`, `merge_ocr_into_text` |
+| `core/extractors/esxi_text.py`          | vSphere page-text parser (`parse_vsphere_text_ex`) with gap detection |
+| `core/extractors/esxi.py`               | Deterministic ESXi OCR extractor (`EsxiTopologyExtractor`)          |
+| `core/topology_reducer.py`              | Universal dedup + normalisation (preserves source/is_uncertain/note)|
+| `ui/tabs/naming_tab.py`                 | Dynamic hostname/IPAM naming generation + unified analysis buttons |
 | `ui/tabs/standards_tab.py`              | Standards definition editor (Sections 1–4)                         |
-| `ui/tabs/naming_tab.py`                 | Dynamic hostname/IPAM naming generation                            |
 | `ui/tabs/ipam_tab.py`                   | IP address management, diff viewer                                 |
 | `ui/tabs/device_tab.py`                 | Device / NIC import via OCR                                        |
 | `ui/components.py`                      | Reusable header / badge / card layout components                   |
-| `tests/`                                | 114 unit & integration tests (`pytest -q`)                         |
+| `tests/`                                | 114+ unit & integration tests (`pytest -q`)                        |
 | `data/naming_rules.yaml`                | Live naming standard definitions (authoritative source of truth)   |
 | `data/netbox_hub.db`                    | Local SQLite persistence (protected from volume prune)             |
 | `.cursorrules`                          | Persistent agent operational invariants (local-only)               |
@@ -245,8 +252,11 @@ docker push ghcr.io/miniz3210/netbox-hub:latest
 ## 8. Constrained Operations Cheat-Sheet
 
 ```bash
+# Install dev dependencies (pytest, pyflakes)
+pip install -r requirements-dev.txt
+
 # Run full test suite
-python3 -m pytest tests/ -q
+python3 -m pytest tests/ -q -rs
 
 # Check version alignment
 python3 -c "from config.constants import APP_VERSION; print(APP_VERSION)"

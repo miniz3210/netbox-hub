@@ -303,7 +303,7 @@ def extract_logical_cards(tokens: List[Dict[str, Any]], sw_name: str, normalizat
 
         records.append({
             "switch": sw_name, "interface": v["vmk"], "type": "VMkernel",
-            "ip": v["ip"], "purpose": purpose, "vlan": above[0].get("vlan", "") if above else "", "role": "None", "speed": "", "vlan": ""
+            "ip": v["ip"], "purpose": purpose, "vlan": above[0].get("vlan", "") if above else "", "role": "None", "speed": ""
         })
 
     for c in cards:
@@ -311,7 +311,7 @@ def extract_logical_cards(tokens: List[Dict[str, Any]], sw_name: str, normalizat
             assigned_cards.add(c["title"])
             records.append({
                 "switch": sw_name, "interface": "", "type": "Port Group",
-                "ip": "", "purpose": c["title"], "vlan": c.get("vlan", ""), "role": "None", "speed": "", "vlan": ""
+                "ip": "", "purpose": c["title"], "vlan": c.get("vlan", ""), "role": "None", "speed": ""
             })
 
     return records

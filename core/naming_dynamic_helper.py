@@ -13,7 +13,6 @@ from utils.formatters import (
     apply_auto_corrections,
     normalize_network_name,
 )
-from utils.pattern_formatter import apply_pattern
 
 
 # ── Variable metadata helpers ─────────────────────────────────────────────

@@ -4,7 +4,7 @@ Reduces scattered st.session_state calls and improves maintainability
 """
 
 import streamlit as st
-from typing import Any, Optional, List
+from typing import Any, List
 
 
 class SessionStateManager:

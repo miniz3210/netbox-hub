@@ -7,22 +7,21 @@ import copy
 import streamlit as st
 from config.constants import RULES_FILE
 from config.naming_rules import (
-    load_naming_rules, save_naming_rules, export_rules_as_prompt,
+    load_naming_rules, save_naming_rules,
     load_history, restore_from_history, clear_history, add_to_history,
-    get_pattern_variables, get_naming_patterns, get_custom_patterns,
+    get_naming_patterns,
     get_device_presets, get_interface_presets, get_host_vm_presets,
     get_vlan_presets, get_vlan_description_mappings, make_preset_key,
-    get_esxi_network_presets, get_site_code_rules,
+    get_site_code_rules,
     default_presets_for, DEFAULT_PRESET_KEY_FIELD, DEFAULT_NAMING_PATTERNS,
     DEFAULT_HOST_TYPE_PRESETS, DEFAULT_VM_PRESETS,
-    DEFAULT_RULES, DEFAULT_VLAN_PRESETS, DEFAULT_VLAN_DESCRIPTION_MAPPINGS,
+    DEFAULT_VLAN_PRESETS, DEFAULT_VLAN_DESCRIPTION_MAPPINGS,
     get_ipam_role_mappings, DEFAULT_IPAM_ROLE_MAPPINGS,
     get_hardware_baseline_standards, DEFAULT_HARDWARE_BASELINE_STANDARDS,
     DEFAULT_HYPERVISOR_PRESETS,
 )
-from core.naming_engine import generate_naming_pattern, generate_autocorrect_rule
+from core.naming_engine import generate_autocorrect_rule
 from core.session_manager import SessionStateManager as SSM
-from core.ai_client import call_ai
 from utils.formatters import (
     load_auto_corrections, save_auto_corrections, reset_auto_corrections,
 )
@@ -2628,7 +2627,6 @@ def _render_hardware_baseline_editor(rules: dict, active_model: str | None = Non
     custom categories. Each category has its own save/reset buttons to avoid
     cross-card banner leakage.
     """
-    from config.naming_rules import compute_delta, add_to_history
     active_model = active_model or st.session_state.get("active_model", "")
 
     with st.container(border=True):

@@ -9,7 +9,7 @@ routing system that only queries relevant endpoints.
 """
 
 import time
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any, Optional
 from dataclasses import dataclass
 
 from core.ai_intent_router import classify_intent, IntentRouting, estimate_pass1_tokens
@@ -19,12 +19,9 @@ from core.backup_manager import (
     count_backup_records,
     get_backup_site_names,
     get_choice_values_for_field,
-    is_backup_active,
 )
 from core.ai_relationship_inference import (
     build_relationship_context,
-    infer_vms_from_host,
-    infer_cluster_from_identifier,
 )
 
 

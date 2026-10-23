@@ -1,26 +1,19 @@
 import logging
-import os
 import re
-from typing import Dict, List, Optional, Tuple, Any, Set
+from typing import Dict, List, Tuple, Any, Set
 import streamlit as st
 from config.constants import APP_VERSION
 import pandas as pd
 
 logger = logging.getLogger(__name__)
 from utils.formatters import normalize_port_shortname
-from utils.pattern_formatter import apply_pattern
 from core.naming_engine import verify_and_suggest_with_ai
-from data.standards_manager import StandardsManager
 from datetime import datetime
 from core.db_manager import (
-    save_universal_csv,
     get_records_by_category,
     clear_inventory_records,
-    clear_device_records,
-    clear_vm_records,
     get_total_record_count,
     get_sync_metadata,
-    get_file_sync_metadata,
 )
 from core.session_manager import SessionStateManager as SSM
 from core.shared_backup_state import SharedBackupState
@@ -28,9 +21,7 @@ from ui.components import render_ai_chat, render_backup_uploader
 from core.naming_dynamic_helper import (
     render_dynamic_pattern,
     render_token_widgets,
-    render_esxi_network_inputs,
     render_edit_mode_ui,
-    render_multi_edit_mode_ui,
     extract_tokens,
     token_label,
 )
@@ -40,7 +31,8 @@ from config.naming_rules import (
     get_esxi_network_presets, compute_suggested_site_code,
 )
 from core.topology_reducer import reduce_topology_pipeline
-from core.extractors.esxi_text import parse_vsphere_text
+
+from core.extractors.esxi_pipeline import analyze_esxi
 
 # ---------------------------------------------------------------------------
 # Progressive VLM rendering helpers
@@ -989,7 +981,6 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables, global_s
 
 
 def _asset_class_3(naming_rules: dict, casing: str, active_model: str = "", auto_correct: bool = True):
-    from core.ocr_engine import run_local_ocr_pipeline
     from core.vault import SanitizerVault
     vault = SanitizerVault()
     st.subheader("☁️ Hypervisor Network Description Formatter", help="Format standardized hypervisor network descriptions (VMware ESXi, Proxmox VE, Linux Bridges, etc.) matching infrastructure guidelines.")
@@ -1259,10 +1250,202 @@ def _render_interactive_hypervisor_mode(naming_rules: dict, casing: str, active_
         st.code(cleaned_output, language="text")
 
 
+# ---------------------------------------------------------------------------
+# Unified topology analysis helpers (Session-callback friendly)
+# ---------------------------------------------------------------------------
+def _publish_topology_records(
+    records: List[Dict[str, Any]],
+    mode_label: str = "",
+) -> None:
+    """Publish reduced topology records into session state and increment editor_ver."""
+    st.session_state["topology_records"] = records
+    st.session_state["discovered_switches"] = sorted(
+        list({r["switch"] for r in records if r.get("switch")}),
+        key=_natsort_key,
+    )
+    st.session_state["discovered_uplink_candidates"] = sorted(
+        list({r["interface"] for r in records if r.get("type") == "Uplink" and r.get("interface") and r.get("interface") != "No Uplink"}),
+        key=_natsort_key,
+    )
+    st.session_state["discovered_service_candidates"] = sorted(
+        list({r["purpose"] for r in records if r.get("type") != "Uplink" and r.get("purpose")}),
+        key=_natsort_key,
+    )
+    st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
+    if mode_label:
+        st.session_state["paste_mode"] = mode_label
+
+
+def _handle_clear_topology_all() -> None:
+    """Clear ALL topology-related session state (called by both Clear All buttons)."""
+    _topo_keys = [
+        "staged_topology_imgs",
+        "topology_records",
+        "discovered_switches",
+        "discovered_uplink_candidates",
+        "discovered_service_candidates",
+        "paste_gaps",
+        "paste_parse_warnings",
+        "paste_merge_report",
+        "paste_mode",
+        "latest_ocr_raw_text",
+        "topology_ocr_cache",
+        "esxi_analysis",
+    ]
+    for _k in _topo_keys:
+        st.session_state.pop(_k, None)
+    st.session_state["vsphere_paste_text"] = ""
+    st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
+    st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
+    st.session_state["paste_text_ver"] = st.session_state.get("paste_text_ver", 0) + 1
+    st.toast("Cleared")
+
+
+def _handle_topology_analyze() -> None:
+    """Callback for 'Analyze & Auto-Populate' button — unified pipeline entry point."""
+    from core.extractors import get_topology_extractor
+    from core.ocr_engine import run_local_ocr_pipeline
+
+    naming_rules = SSM.get_naming_rules() or load_naming_rules()
+    raw_text = st.session_state.get(f"vsphere_paste_text_{st.session_state.get('paste_text_ver', 0)}", "").strip()
+    images = st.session_state.get("staged_topology_imgs", [])
+    ocr_cache = st.session_state.setdefault("topology_ocr_cache", {})
+    st.session_state["_pending_ocr_raw_lines"] = []
+    target_platform = st.session_state.get("naming_target_platform", "VMware ESXi")
+    _unified_presets = naming_rules.get("topology_parsing_presets") or {}
+    plat_cfg = _unified_presets.get(target_platform, {}) if isinstance(_unified_presets.get(target_platform), dict) else {}
+    platform_tokens = (naming_rules.get("platform_tokens") or {}).get(target_platform, {})
+
+    def _ocr_single_image(img):
+        """Run OCR on a single image and return extracted records."""
+        if hasattr(img, "seek"):
+            img.seek(0)
+        raw_bytes = img.getvalue() if hasattr(img, "getvalue") else img.read()
+        if hasattr(img, "seek"):
+            img.seek(0)
+        ocr_res = run_local_ocr_pipeline([raw_bytes])
+        if ocr_res.get("errors"):
+            for err in ocr_res["errors"]:
+                st.toast(f"OCR error: {err}", icon="⚠️")
+        raw_boxes = ocr_res.get("raw_tokens", [])
+        img_w = ocr_res.get("image_width", 1920)
+        img_h = ocr_res.get("image_height", 1080)
+        extractor = get_topology_extractor(target_platform)
+        records = extractor.extract(raw_boxes, image_width=img_w, image_height=img_h, plat_cfg=plat_cfg)
+        for _r in records:
+            _r.setdefault("source", "ocr")
+        # Store raw tokens for inspector
+        _insp_lines = st.session_state.get("_pending_ocr_raw_lines", [])
+        _fname = getattr(img, "name", "image")
+        _insp_lines.append(f"--- [Image {_fname}] ---")
+        for _t in raw_boxes:
+            _txt = str(_t.get("text", "")).strip()
+            _box = _t.get("box") or [0, 0, 0, 0]
+            _conf = float(_t.get("conf", 0.0))
+            if _txt:
+                _insp_lines.append(f"[{_box[0]:.0f}, {_box[1]:.0f}, {_box[2]:.0f}, {_box[3]:.0f}] (conf: {_conf:.2f}) -> {_txt}")
+        _insp_lines.append("")
+        st.session_state["_pending_ocr_raw_lines"] = _insp_lines
+        return records
+
+    # ESXi-only path: use analyze_esxi which decides source and runs OCR only to fill gaps
+    if target_platform == "VMware ESXi":
+        def _ocr_records():
+            if not images:
+                return []
+            all_recs = []
+            import hashlib
+            for img in images:
+                _b = img.getvalue() if hasattr(img, "getvalue") else b""
+                _sha = hashlib.sha1(_b).hexdigest() if _b else ""
+                if _sha and _sha in ocr_cache:
+                    recs = [dict(r) for r in ocr_cache[_sha]]
+                else:
+                    recs = _ocr_single_image(img)
+                    if _sha:
+                        ocr_cache[_sha] = [dict(r) for r in recs]
+                all_recs.extend(recs)
+            return all_recs
+
+        result = analyze_esxi(raw_text, _ocr_records if images else None)
+        source = result["source"]
+        records_raw = result["records"]
+        warnings = result.get("warnings", [])
+        gaps = result.get("gaps", [])
+        report = result.get("report")
+
+        # Store diagnostics in session state
+        st.session_state["esxi_analysis"] = {
+            "source": source,
+            "warnings": warnings,
+            "gaps": gaps,
+            "report": report,
+        }
+        st.session_state["paste_gaps"] = gaps
+        st.session_state["paste_parse_warnings"] = warnings
+        st.session_state["paste_merge_report"] = report
+        st.session_state["paste_mode"] = source
+
+        if source == "none":
+            st.toast(warnings[0] if warnings else "Nothing to analyse.", icon="⚠️")
+            return
+
+        if source == "ocr":
+            reduced = reduce_topology_pipeline(records_raw, plat_cfg, platform_tokens)
+            _publish_topology_records(reduced, "ocr")
+            _insp_lines = st.session_state.pop("_pending_ocr_raw_lines", [])
+            st.session_state["latest_ocr_raw_text"] = "\n".join(_insp_lines) if _insp_lines else ""
+            filled = len(report.get("filled", [])) if report else 0
+            st.toast(f"Source: OCR only ({len(reduced)} records)", icon="📷")
+        elif source in ("text", "text+ocr"):
+            # Text is authoritative; strip normalizations and noise filters so real names survive
+            text_cfg = {**plat_cfg, "token_normalizations": [], "noise_filters": []}
+            reduced = reduce_topology_pipeline(records_raw, text_cfg, {})
+            _publish_topology_records(reduced, source)
+            if report:
+                filled = len(report.get("filled", []))
+                unresolved = len(report.get("unresolved", []))
+                if source == "text+ocr":
+                    st.toast(f"Source: text + OCR ({filled} filled, {unresolved} missing)")
+                else:
+                    st.toast(f"Source: text ({len(reduced)} records)")
+            else:
+                st.toast(f"Source: text ({len(reduced)} records)")
+            # Keep raw OCR inspector data if OCR ran
+            if source == "text+ocr":
+                _insp_lines = st.session_state.get("_pending_ocr_raw_lines", [])
+                if _insp_lines:
+                    st.session_state["latest_ocr_raw_text"] = "\n".join(_insp_lines)
+        else:
+            st.toast(f"Unhandled source: {source}", icon="⚠️")
+            return
+
+        if result.get("needs_screenshot"):
+            gap_msgs = [g.get("message", "") for g in gaps if g.get("ocr_can_help")]
+            if gap_msgs:
+                st.toast(f"Gap(s) detected in pasted text — upload a screenshot of that switch, then click Analyze again", icon="ℹ️")
+    else:
+        # Other platforms: screenshots only (the paste-text parser is vSphere-specific)
+        if raw_text:
+            st.toast("Pasted text is only supported for VMware ESXi - ignored.", icon="ℹ️")
+        if not images:
+            st.toast("Upload a screenshot first.", icon="⚠️")
+            return
+        all_recs = []
+        for img in images:
+            all_recs.extend(_ocr_single_image(img))
+        if not all_recs:
+            st.toast("OCR found no topology in the screenshots", icon="⚠️")
+            return
+        reduced = reduce_topology_pipeline(all_recs, plat_cfg, platform_tokens)
+        _publish_topology_records(reduced, "ocr")
+        _insp_lines = st.session_state.pop("_pending_ocr_raw_lines", [])
+        st.session_state["latest_ocr_raw_text"] = "\n".join(_insp_lines) if _insp_lines else ""
+        st.toast(f"OCR only: {len(reduced)} records")
+
+
 def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model: str, vault):
     """Render the full screenshot OCR/VLM pipeline openly (no expanders hiding the workflow)."""
-    from core.ocr_engine import run_local_ocr_pipeline
-    from data.standards_manager import StandardsManager
 
     if "hypervisor_editor_version" not in st.session_state:
         st.session_state["hypervisor_editor_version"] = 0
@@ -1458,53 +1641,58 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             default_idx = naming_platform_options.index(cur_selected_plat)
 
         # --- Pure Text Parser Section (No OCR) ---
-        with st.expander("📋 Paste vSphere page text (recommended – no OCR)", expanded=True):
+        with st.expander("📋 Paste vSphere page text (optional, recommended — no OCR)", expanded=True):
             st.caption("Expand every switch, VMkernel Ports and uplink first, run this one-liner in your browser Console on the vSphere tab, then paste here:")
             st.code("copy([document,...[...document.querySelectorAll('iframe')].map(f=>{try{return f.contentDocument}catch(e){return null}}).filter(Boolean)].map(d=>d.body.innerText).join('\\n'))", language="javascript")
 
+            paste_text_key = f"vsphere_paste_text_{st.session_state.get('paste_text_ver', 0)}"
             pasted_vsphere_text = st.text_area(
                 "vSphere Page Text",
                 height=180,
-                key="vsphere_paste_text",
+                key=paste_text_key,
                 placeholder="Paste the copied vSphere console text here...",
                 label_visibility="collapsed"
             )
 
             c_btn_text, c_info_text = st.columns([2, 5], vertical_alignment="center")
             with c_btn_text:
-                if st.button("🚀 Parse Pasted Text", key="btn_parse_vsphere_text", type="primary", use_container_width=True):
-                    raw_text = st.session_state.get("vsphere_paste_text", "").strip()
-                    if not raw_text:
-                        st.toast("⚠️ Pasted text is empty. Please paste text from vSphere.", icon="⚠️")
-                    else:
-                        parsed_recs, text_warns = parse_vsphere_text(raw_text)
-                        if not parsed_recs:
-                            st.toast("⚠️ No virtual switch topology records detected in text.", icon="⚠️")
-                        else:
-                            reduced = reduce_topology_pipeline(parsed_recs, {}, {})
-                            st.session_state["topology_records"] = reduced
-                            st.session_state["discovered_switches"] = sorted(
-                                list({r["switch"] for r in reduced if r.get("switch")}),
-                                key=_natsort_key
-                            )
-                            st.session_state["discovered_uplink_candidates"] = sorted(
-                                list({r["interface"] for r in reduced if r.get("type") == "Uplink" and r.get("interface") and r.get("interface") != "No Uplink"}),
-                                key=_natsort_key
-                            )
-                            st.session_state["discovered_service_candidates"] = sorted(
-                                list({r["purpose"] for r in reduced if r.get("type") != "Uplink" and r.get("purpose")}),
-                                key=_natsort_key
-                            )
-                            st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
+                btn_clear_topo = st.columns([1], gap="small")
+                with btn_clear_topo[0]:
+                    st.button("🗑️ Clear All", key="btn_clear_topology_all", width="stretch",
+                              on_click=_handle_clear_topology_all)
 
-                            # Surface warnings
-                            if text_warns:
-                                st.session_state["vsphere_text_warnings"] = text_warns
-                                st.toast(f"⚠️ {len(text_warns)} switch(es) need expanding in vSphere", icon="⚠️")
-                            else:
-                                st.session_state.pop("vsphere_text_warnings", None)
-                                st.toast(f"✅ Extracted {len(reduced)} topology records from text!", icon="🚀")
-                            st.rerun()
+            # Surface paste diagnostics below the textarea
+            _paste_gaps = st.session_state.get("paste_gaps", [])
+            _parse_warns = st.session_state.get("paste_parse_warnings", [])
+            _merge_report = st.session_state.get("paste_merge_report", None)
+            _paste_mode = st.session_state.get("paste_mode", "")
+            if _parse_warns:
+                for _w in _parse_warns:
+                    st.caption(f"⚠️ {_w}")
+            if _paste_gaps:
+                for _g in _paste_gaps:
+                    if not _g.get("ocr_can_help"):
+                        st.caption(f"⛔ {_g.get('message', '')}")
+                    elif not uploaded_imgs and _g.get("kind") in ("vmk_missing", "nic_missing"):
+                        st.caption(f"⛔ {_g.get('message', '')} — upload a screenshot of that switch, then click again")
+            if _merge_report:
+                _filled = _merge_report.get("filled", [])
+                if _filled:
+                    for _f in _filled:
+                        st.caption(f"🟡 {_f}")
+                _conflicts = _merge_report.get("conflicts", [])
+                if _conflicts:
+                    for _c in _conflicts:
+                        st.caption(f"⚠️ {_c}")
+                _suggestions = _merge_report.get("suggestions", [])
+                if _suggestions:
+                    for _s in _suggestions:
+                        st.caption(f"💡 {_s}")
+            if _paste_mode:
+                _mode_labels = {"text": "Source: text only", "text+ocr": "Source: text + OCR", "ocr": "Source: OCR only", "none": ""}
+                _mlabel = _mode_labels.get(_paste_mode, _paste_mode)
+                if _mlabel:
+                    st.caption(_mlabel)
 
         col_plat, col_eng, col_btn_an, col_btn_clr = st.columns([5, 3, 3, 2], vertical_alignment="center")
         with col_plat:
@@ -1520,153 +1708,60 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         with col_eng:
             st.markdown("**⚡ Instant Local OCR (Deterministic Python Engine)**")
         with col_btn_an:
-            btn_analyze = st.button("🚀 Analyze & Auto-Populate", type="primary", width="stretch")
+            btn_analyze = st.button("🚀 Analyze & Auto-Populate", type="primary", width="stretch",
+                                    on_click=_handle_topology_analyze)
         with col_btn_clr:
-            btn_clear = st.button("🗑️ Clear All", width="stretch")
-        if btn_clear:
-            st.session_state["staged_topology_imgs"] = []
-            st.session_state["hypervisor_parsed_descriptions"] = []
-            st.session_state["hypervisor_parsed_items"] = []
-            st.session_state["latest_ocr_raw_text"] = ""
-            st.session_state.pop("latest_vault_session", None)
-            st.session_state.pop("hypervisor_cascade_mappings", None)
-            st.session_state.pop("chips_unassigned", None)
-            st.session_state.pop("switch_deck", None)
-            st.session_state.pop("chips_session_corrections", None)
-            st.session_state.pop("_pool_initialized_v4", None)
-            st.session_state["topology_records"] = []
-            st.session_state["discovered_switches"] = []
-            st.session_state["discovered_uplink_candidates"] = []
-            st.session_state["discovered_service_candidates"] = []
-            st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
-            st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
-            st.session_state["hypervisor_editor_version"] = st.session_state.get("hypervisor_editor_version", 0) + 1
-            st.rerun()
+            st.button("🗑️ Clear All", key="btn_clear_topology_all_bottom", width="stretch",
+                      on_click=_handle_clear_topology_all)
 
-    # OCR Raw Text Inspector (collapsible)
+    # Raw Text / Warnings Inspector (collapsible)
     staged_imgs = st.session_state.get("staged_topology_imgs", [])
     raw_ocr_text = st.session_state.get("latest_ocr_raw_text", "")
-    with st.expander("📄 OCR Raw Text Inspector (Click to expand)", expanded=False):
+    esxi_analysis = st.session_state.get("esxi_analysis", {})
+    _ana_source = esxi_analysis.get("source", "")
+    _ana_warns = esxi_analysis.get("warnings", [])
+    _ana_gaps = esxi_analysis.get("gaps", [])
+    _ana_report = esxi_analysis.get("report")
+    with st.expander("📄 Raw Text / Warnings Inspector (Click to expand)", expanded=False):
         char_count = len(raw_ocr_text) if raw_ocr_text else 0
         img_count = len(staged_imgs)
         st.caption(f"ℹ️ Extracted {char_count:,} characters across {img_count} screenshot(s)")
+        if _ana_source:
+            st.caption(f"**Source:** {_ana_source}")
+        if _ana_warns:
+            for _w in _ana_warns:
+                st.caption(f"⚠️ {_w}")
+        if _ana_gaps:
+            for _g in _ana_gaps:
+                if not _g.get("ocr_can_help"):
+                    st.caption(f"⛔ {_g.get('message', '')} (expand it in vSphere and copy again)")
+                else:
+                    st.caption(f"🟡 {_g.get('message', '')}")
+        if _ana_report:
+            _filled = _ana_report.get("filled", [])
+            if _filled:
+                for _f in _filled:
+                    st.caption(f"🟡 {_f}")
+            _conflicts = _ana_report.get("conflicts", [])
+            if _conflicts:
+                for _c in _conflicts:
+                    st.caption(f"⚠️ {_c}")
+            _unresolved = _ana_report.get("unresolved", [])
+            if _unresolved:
+                for _u in _unresolved:
+                    st.caption(f"⛔ {_u}")
+            _suggestions = _ana_report.get("suggestions", [])
+            if _suggestions:
+                for _s in _suggestions:
+                    st.caption(f"💡 {_s}")
+            _unmatched = _ana_report.get("unmatched_switches", [])
+            if _unmatched:
+                for _u in _unmatched:
+                    st.caption(f"⚠️ Unmatched OCR switch: {_u}")
         if raw_ocr_text:
             st.text_area("Extracted OCR Tokens", value=raw_ocr_text, height=420, disabled=True)
         else:
             st.info("No OCR data available. Upload screenshots and click Analyze & Auto-Populate.")
-
-    # Execute analyze when button clicked
-    start_analyze = btn_analyze
-
-    preset_sm = StandardsManager()
-    # Reload parsing presets fresh from the SAME freshly-loaded rules dict
-    # (naming_rules) rather than calling load_naming_rules() again, to avoid
-    # hitting a potentially still-stale cache.
-    _unified_presets = naming_rules.get("topology_parsing_presets") or {}
-    parsing_presets = _unified_presets if _unified_presets else preset_sm.get_parsing_presets()
-
-    # Resolve active junk filter at function scope so Section 3 can access it
-    # on every render pass (not just when start_analyze is True).
-    active_plat_display = st.session_state.get("naming_target_platform", "VMware ESXi")
-    plat_cfg = (parsing_presets.get(active_plat_display) or {}) if isinstance(parsing_presets, dict) else {}
-    dynamic_blacklist: Set[str] = set(
-        s.strip().lower() for s in (plat_cfg.get("ui_noise_blacklist") or []) if s and str(s).strip()
-    )
-    active_junk_filter: Set[str] = UI_NAV_NOISE.union(dynamic_blacklist)
-
-    # Dynamic platform token prefixes (zero hardcoding) — available in both analyze and render paths
-    _plat_tok = ((naming_rules.get("platform_tokens") or {})
-                 .get(active_plat_display, {})) if isinstance(naming_rules.get("platform_tokens"), dict) else {}
-    _dynamic_uplink_pfx = str(_plat_tok.get("uplink_prefix", "vmnic")).strip()
-    _dynamic_vmk_pfx = str(_plat_tok.get("vmk_prefix", "vmk")).strip()
-    _dynamic_switch_pfx = str(_plat_tok.get("switch_prefix", "vSwitch")).strip()
-
-    if start_analyze:
-        from core.extractors import get_topology_extractor
-        from core.ocr_engine import run_local_ocr_pipeline
-
-        plat_cfg = (naming_rules.get("topology_parsing_presets") or {}).get(target_platform, {})
-        if not plat_cfg:
-            plat_cfg = (naming_rules.get("standards") or {}).get("esxi", {})
-        platform_tokens = (naming_rules.get("platform_tokens") or {}).get(target_platform, {})
-
-        extractor = get_topology_extractor(target_platform)
-
-        progress_bar = st.progress(0.0, text=f"Analyzing screenshots with {target_platform} extractor...")
-        all_extracted_records = []
-        all_raw_tokens_by_image: list = []
-        total_imgs = len(uploaded_imgs)
-
-        for idx, img in enumerate(uploaded_imgs):
-            progress_bar.progress((idx + 0.2) / total_imgs, text=f"Scanning screenshot {idx + 1}/{total_imgs} via RapidOCR...")
-
-            if hasattr(img, "seek"):
-                img.seek(0)
-            raw_bytes = img.getvalue() if hasattr(img, "getvalue") else img.read()
-            if hasattr(img, "seek"):
-                img.seek(0)
-
-            # RapidOCR local extraction
-            ocr_res = run_local_ocr_pipeline([raw_bytes])
-            if ocr_res.get("errors"):
-                for err in ocr_res["errors"]:
-                    st.toast(f"OCR error: {err}", icon="⚠️")
-            raw_boxes = ocr_res.get("raw_tokens", [])
-            img_raw_tokens_for_inspector = list(raw_boxes)
-            img_w = ocr_res.get("image_width", 1920)
-            img_h = ocr_res.get("image_height", 1080)
-
-            # Platform adapter extraction (Zero LLM, sub-second)
-            records = extractor.extract(
-                raw_boxes,
-                image_width=img_w,
-                image_height=img_h,
-                plat_cfg=plat_cfg
-            )
-            all_extracted_records.extend(records)
-            all_raw_tokens_by_image.append(img_raw_tokens_for_inspector)
-
-        # Universal Reducer & Deduplication
-        reduced = reduce_topology_pipeline(all_extracted_records, plat_cfg, platform_tokens)
-
-        st.session_state["topology_records"] = reduced
-        st.session_state["discovered_switches"] = sorted(
-            list({r["switch"] for r in reduced if r.get("switch")}),
-            key=_natsort_key
-        )
-        st.session_state["discovered_uplink_candidates"] = sorted(
-            list({r["interface"] for r in reduced if r.get("type") == "Uplink" and r.get("interface") and r.get("interface") != "No Uplink"}),
-            key=_natsort_key
-        )
-        st.session_state["discovered_service_candidates"] = sorted(
-            list({r["purpose"] for r in reduced if r.get("type") != "Uplink" and r.get("purpose")}),
-            key=_natsort_key
-        )
-        st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
-
-        # Persist raw OCR inspector data across reruns
-        _insp_lines: list = []
-        for _iidx, _tokens in enumerate(all_raw_tokens_by_image):
-            _fname = getattr(uploaded_imgs[_iidx], "name", f"image_{_iidx+1}") if _iidx < len(uploaded_imgs) else f"image_{_iidx+1}"
-            _insp_lines.append(f"--- [Image {_iidx + 1}: {_fname}] ---")
-            for _t in _tokens:
-                _txt = str(_t.get("text", "")).strip()
-                _box = _t.get("box") or [0, 0, 0, 0]
-                _conf = float(_t.get("conf", 0.0))
-                if _txt:
-                    _insp_lines.append(f"[{_box[0]:.0f}, {_box[1]:.0f}, {_box[2]:.0f}, {_box[3]:.0f}] (conf: {_conf:.2f}) -> {_txt}")
-            _insp_lines.append("")
-        st.session_state["latest_ocr_raw_text"] = "\n".join(_insp_lines)
-
-        progress_bar.progress(1.0, text="Extraction complete in < 2 seconds!")
-        if not reduced:
-            st.toast("No topology found – check screenshot zoom/crop", icon="⚠️")
-        else:
-            st.toast(f"✅ Extracted {len(reduced)} topology records in <2 seconds!", icon="⚡")
-        st.rerun()
-
-    if start_analyze and st.session_state.get("topology_records"):
-        st.rerun()
 
     # Load standards rules for dynamic role options (available to both cards and editor)
     _std_rules = SSM.get_naming_rules() or naming_rules
@@ -1681,6 +1776,12 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     target_platform = st.session_state.get("naming_target_platform", "VMware ESXi")
     tpp = naming_rules.get("topology_parsing_presets") or {}
     plat_cfg = tpp.get(target_platform, {}) if isinstance(tpp.get(target_platform), dict) else {}
+    dynamic_blacklist: Set[str] = {s.strip().lower() for s in (plat_cfg.get("ui_noise_blacklist") or []) if s and str(s).strip()}
+    active_junk_filter: Set[str] = UI_NAV_NOISE.union(dynamic_blacklist)
+    _plat_tok = ((naming_rules.get("platform_tokens") or {}).get(target_platform, {})) if isinstance(naming_rules.get("platform_tokens"), dict) else {}
+    _dynamic_uplink_pfx = str(_plat_tok.get("uplink_prefix", "vmnic")).strip()
+    _dynamic_vmk_pfx = str(_plat_tok.get("vmk_prefix", "vmk")).strip()
+    _dynamic_switch_pfx = str(_plat_tok.get("switch_prefix", "vSwitch")).strip()
     role_options = plat_cfg.get("role_options", ["Active Uplink", "Standby Uplink", "None"])
     default_connected_role = plat_cfg.get("default_connected_role", role_options[0] if role_options else "Active Uplink")
     default_disconnected_role = plat_cfg.get("default_disconnected_role", "None")
@@ -1734,20 +1835,25 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                             if not u_iface or _is_junk_token(u_iface, active_junk_filter) or re.search(r"\b\d+\s*(?:Gbit/s|Mbit/s|Kbit/s|Full|Half)\b", u_iface, re.I):
                                 continue
                             u_role = u_row.get("role") or default_connected_role
+                            _uncertain_prefix = "🟡 " if str(u_row.get("is_uncertain", False)).lower() in ("true", "1", "yes") else ""
 
                             uc_label, uc_role, uc_del = st.columns([3, 3, 1])
                             with uc_label:
-                                new_u_iface = st.text_input(
-                                    "Uplink Name",
-                                    value=u_iface,
-                                    key=f"card_up_edit_{idx}_{u_idx}_{u_iface}",
-                                    label_visibility="collapsed"
-                                ).strip()
-                                if new_u_iface and new_u_iface != u_iface:
-                                    records[u_idx]["interface"] = new_u_iface
-                                    st.session_state["topology_records"] = records
-                                    st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
-                                    st.rerun()
+                                 new_u_iface = st.text_input(
+                                     "Uplink Name",
+                                     value=f"{_uncertain_prefix}{u_iface}",
+                                     key=f"card_up_edit_{idx}_{u_idx}_{u_iface}",
+                                     label_visibility="collapsed"
+                                 ).strip()
+                                 # Strip the prefix before saving
+                                 display_val = new_u_iface
+                                 if display_val.startswith("🟡 "):
+                                     display_val = display_val[2:]
+                                 if display_val and display_val != u_iface:
+                                     records[u_idx]["interface"] = display_val
+                                     st.session_state["topology_records"] = records
+                                     st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
+                                     st.rerun()
                             with uc_role:
                                 current_role = u_role
                                 sel_idx = role_options.index(current_role) if current_role in role_options else 0
@@ -1784,11 +1890,13 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                             # VMkernel: display "purpose (vmk)" pairing with IP
                             is_vmkernel = s_row.get("type") == "VMkernel" and s_iface
                             edit_target_val = s_purpose if s_purpose else s_iface
+                            _s_uncertain = str(s_row.get("is_uncertain", False)).lower() in ("true", "1", "yes")
+                            _uncertain_prefix = "🟡 " if _s_uncertain else ""
                             sc_label, sc_del = st.columns([5, 1])
                             with sc_label:
                                 _s_vlan = str(s_row.get("vlan", "")).strip()
                                 if is_vmkernel:
-                                    parts = [f"◆ {s_iface}"]
+                                    parts = [f"◆ {_uncertain_prefix}{s_iface}"]
                                     if _s_ip:
                                         parts.append(_s_ip)
                                     if _s_vlan:
@@ -1796,18 +1904,21 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                     st.caption(" • ".join(parts))
                                 else:
                                     if _s_vlan:
-                                        st.caption(f"◆ VLAN {_s_vlan}")
+                                        st.caption(f"◆ {_uncertain_prefix}VLAN {_s_vlan}")
                                     elif _s_ip:
-                                        st.caption(f"◆ IP: {_s_ip}")
+                                        st.caption(f"◆ {_uncertain_prefix}IP: {_s_ip}")
+                                display_svc = f"{_uncertain_prefix}{edit_target_val}"
                                 new_s_val = st.text_input(
                                     "Service Name",
-                                    value=edit_target_val,
+                                    value=display_svc,
                                     key=f"card_svc_edit_{idx}_{s_idx}_{edit_target_val}",
                                     label_visibility="collapsed"
                                 ).strip()
-                                if new_s_val and new_s_val != edit_target_val:
+                                # Strip prefix before comparing/saving
+                                clean_new = new_s_val.lstrip("🟡 ").lstrip()
+                                if clean_new and clean_new != edit_target_val:
                                     if s_purpose:
-                                        records[s_idx]["purpose"] = new_s_val
+                                        records[s_idx]["purpose"] = clean_new
                                     else:
                                         records[s_idx]["interface"] = new_s_val
                                     st.session_state["topology_records"] = records
@@ -1993,10 +2104,12 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     st.markdown("#### 🎛️ Topology Data Grid")
     st.caption("Edit switch assignments, interface roles, and IPs directly. Changes update NetBox descriptions instantly.")
 
-    df = pd.DataFrame(records if records else [], columns=["switch", "interface", "type", "ip", "purpose", "vlan", "role", "speed"])
+    df = pd.DataFrame(records if records else [], columns=["switch", "interface", "type", "ip", "purpose", "vlan", "role", "speed", "source", "is_uncertain", "note"])
     # Explicitly cast all columns to string to prevent pandas float-type conflicts
     for col in df.columns:
         df[col] = df[col].fillna("").astype(str)
+    # Show "OCR – verify" for uncertain rows, blank otherwise
+    df["_check"] = df.apply(lambda r: "OCR – verify" if str(r.get("is_uncertain", "")).lower() in ("true", "1", "yes") else "", axis=1)
 
     column_config = {
         "switch": st.column_config.SelectboxColumn("Switch Container", options=sw_options if sw_options else [_dynamic_switch_pfx + "0"], required=False),
@@ -2007,6 +2120,10 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         "vlan": st.column_config.TextColumn("VLAN", required=False),
         "role": st.column_config.SelectboxColumn("Role", options=role_options, required=False),
         "speed": st.column_config.TextColumn("Link Speed", required=False),
+        "source": st.column_config.TextColumn("Source", required=False),
+        "is_uncertain": st.column_config.TextColumn("Uncertain", required=False),
+        "note": st.column_config.TextColumn("Note", required=False),
+        "_check": st.column_config.TextColumn("Check", required=False),
     }
 
     editor_key = f"topology_data_editor_{st.session_state.get('editor_ver', 0)}"
@@ -2446,9 +2563,6 @@ def _render_switch_card(
     switch_id: str,
     switch_data: dict,
     pool: list,
-    iface_chips: list,
-    service_chips: list,
-    speed_chips: list,
 ):
     import streamlit as st
     name = switch_data.get("name", switch_id)

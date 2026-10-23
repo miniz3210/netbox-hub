@@ -19,12 +19,8 @@ from core.db_manager import (
     get_total_sites_count,
     get_total_vlans_count,
     get_total_prefixes_count,
-    get_total_record_count,
     get_total_ipam_count,
-    get_max_scope_id,
-    get_site_summary,
     get_full_site_inventory_summary,
-    get_existing_prefix_strings
 )
 from core.backup_manager import (
     OBJECT_LABELS,
@@ -35,9 +31,8 @@ from core.backup_manager import (
     get_backup_site_names,
     get_choice_set_summary,
     get_choice_values_for_field,
-    is_backup_active,
+    init_backup_tables,
     search_backup_records,
-    verify_full_database,
 )
 import sqlite3
 

@@ -14,3 +14,4 @@ pyyaml
 opencv-python-headless
 numpy
 rapidocr_onnxruntime>=1.3.0
+

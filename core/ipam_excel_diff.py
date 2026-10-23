@@ -440,7 +440,6 @@ class ExcelIPAMParser:
         site_raw: str,
         default_site: str,
         source_sheet: str,
-        extra_row: Optional[List[Any]] = None,
         header_map: Optional[Dict[str, int]] = None,
     ) -> Optional[Dict[str, Any]]:
         ip_clean = self._normalise_ip(ip_raw)
@@ -615,7 +614,6 @@ class ExcelIPAMParser:
                     rec = self._make_record(
                         ip_raw, subnet_raw, mask_raw, vlan_id_raw, vlan_name_raw,
                         site_raw, default_site, sheet_name,
-                        extra_row=list(row),
                         header_map=block_map,
                     )
                     if rec is None:
@@ -671,7 +669,6 @@ def _records_from_dataframe(
         rec = parser._make_record(
             ip_raw, subnet_raw, mask_raw, vlan_id_raw, vlan_name_raw,
             site_raw, default_site, source,
-            extra_row=vals,
             header_map=header_map,
         )
         if rec is None:
