@@ -1444,6 +1444,46 @@ def _handle_topology_analyze() -> None:
         st.toast(f"OCR only: {len(reduced)} records")
 
 
+def _normalise_extra_cols(df: pd.DataFrame) -> pd.DataFrame:
+    """Prepare extra non-boolean columns for st.data_editor TextColumn display.
+
+    - `is_uncertain` (bool) -> "⚠️" or "" (str)
+    - `source`, `note`, `vlan` -> str, fillna("")
+    - `_check` -> str, fillna("")
+    """
+    out = df.copy()
+    if "is_uncertain" not in out.columns:
+        out["is_uncertain"] = ""
+    else:
+        out["is_uncertain"] = out["is_uncertain"].fillna(False).map(
+            lambda v: "⚠️" if bool(v) else ""
+        )
+    for col in ("source", "note", "vlan"):
+        if col in out.columns:
+            out[col] = out[col].apply(lambda x: "" if pd.isna(x) else str(x))
+        else:
+            out[col] = ""
+    if "_check" in out.columns:
+        out["_check"] = out["_check"].apply(lambda x: "" if pd.isna(x) else str(x))
+    else:
+        out["_check"] = ""
+    return out
+
+
+def _convert_back_to_records(df: pd.DataFrame) -> List[Dict[str, Any]]:
+    """Reverse _normalise_extra_cols: convert is_uncertain string back to bool,
+    keep source/note/vlan as strings, and return a list of record dicts."""
+    out_df = df.copy()
+    if "is_uncertain" in out_df.columns:
+        out_df["is_uncertain"] = out_df["is_uncertain"].apply(
+            lambda v: (v is True) or (isinstance(v, str) and v.strip() not in ("", "False", "false", "0"))
+        )
+    for col in ("source", "note", "vlan"):
+        if col in out_df.columns:
+            out_df[col] = out_df[col].apply(lambda x: "" if pd.isna(x) else str(x))
+    return out_df.to_dict(orient="records")
+
+
 def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model: str, vault):
     """Render the full screenshot OCR/VLM pipeline openly (no expanders hiding the workflow)."""
 
@@ -2139,8 +2179,10 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     }
 
     editor_key = f"topology_data_editor_{st.session_state.get('editor_ver', 0)}"
+    # Normalise extra columns to str so TextColumn receives strings, not bools.
+    df_for_editor = _normalise_extra_cols(df)
     edited_df = st.data_editor(
-        df,
+        df_for_editor,
         column_config=column_config,
         num_rows="dynamic",
         width="stretch",
@@ -2149,7 +2191,8 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     # Coerce user-edited / new rows back to the same dtypes so NaN cells from
     # empty user input cannot reintroduce float64 columns on the next render.
     _ensure_text_cols(edited_df)
-    st.session_state["topology_records"] = edited_df.to_dict(orient="records")
+    topology_records = _convert_back_to_records(edited_df)
+    st.session_state["topology_records"] = topology_records
 
     # ── Zone 3: Live NetBox Output ────────────────────────────────────────────
     st.divider()
