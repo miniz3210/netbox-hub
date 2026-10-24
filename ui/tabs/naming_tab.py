@@ -1444,44 +1444,53 @@ def _handle_topology_analyze() -> None:
         st.toast(f"OCR only: {len(reduced)} records")
 
 
-def _normalise_extra_cols(df: pd.DataFrame) -> pd.DataFrame:
-    """Prepare extra non-boolean columns for st.data_editor TextColumn display.
+_GRID_COLS = ["switch", "interface", "type", "ip", "purpose", "vlan", "role", "speed", "source", "is_uncertain", "note"]
+_GRID_TEXT_COLS = [_c for _c in _GRID_COLS if _c != "is_uncertain"]
 
-    - `is_uncertain` (bool) -> "⚠️" or "" (str)
-    - `source`, `note`, `vlan` -> str, fillna("")
-    - `_check` -> str, fillna("")
+
+def _is_blank(v) -> bool:
+    """True for None / NaN / pd.NA. Strings (even empty) are never 'blank' here."""
+    if v is None:
+        return True
+    if isinstance(v, str):
+        return False
+    try:
+        return bool(pd.isna(v))
+    except (TypeError, ValueError):
+        return False
+
+
+def _as_bool(v) -> bool:
+    """Tolerant bool: True/False, numpy bool, 1/0, 'true'/'yes'/'⚠️', None/NaN -> False."""
+    if _is_blank(v):
+        return False
+    if isinstance(v, str):
+        return v.strip().lower() in ("true", "1", "yes", "y", "\u26a0\ufe0f", "\u26a0")
+    return bool(v)
+
+
+def _records_to_grid_df(records: List[Dict[str, Any]]) -> pd.DataFrame:
+    """topology_records -> DataFrame for st.data_editor.
+
+    Text columns are always object/str, `is_uncertain` is always a real bool (also when there are
+    zero rows, where pandas .map() would otherwise keep the wrong dtype), `_check` is derived.
     """
-    out = df.copy()
-    if "is_uncertain" not in out.columns:
-        out["is_uncertain"] = ""
-    else:
-        out["is_uncertain"] = out["is_uncertain"].fillna(False).map(
-            lambda v: "⚠️" if bool(v) else ""
-        )
-    for col in ("source", "note", "vlan"):
-        if col in out.columns:
-            out[col] = out[col].apply(lambda x: "" if pd.isna(x) else str(x))
-        else:
-            out[col] = ""
-    if "_check" in out.columns:
-        out["_check"] = out["_check"].apply(lambda x: "" if pd.isna(x) else str(x))
-    else:
-        out["_check"] = ""
+    df = pd.DataFrame(list(records) if records else [], columns=_GRID_COLS)
+    for col in _GRID_TEXT_COLS:
+        df[col] = pd.Series(["" if _is_blank(v) else str(v) for v in df[col]], index=df.index, dtype="object")
+    df["is_uncertain"] = pd.Series([_as_bool(v) for v in df["is_uncertain"]], index=df.index, dtype="bool")
+    df["_check"] = pd.Series(["OCR \u2013 verify" if u else "" for u in df["is_uncertain"]], index=df.index, dtype="object")
+    return df
+
+
+def _grid_df_to_records(df: pd.DataFrame) -> List[Dict[str, Any]]:
+    """Edited grid DataFrame -> topology_records (plain str cells, real bool flag, no derived `_check`)."""
+    out: List[Dict[str, Any]] = []
+    for row in df.to_dict(orient="records"):
+        rec = {c: ("" if _is_blank(row.get(c)) else str(row.get(c))) for c in _GRID_TEXT_COLS}
+        rec["is_uncertain"] = _as_bool(row.get("is_uncertain"))
+        out.append(rec)
     return out
-
-
-def _convert_back_to_records(df: pd.DataFrame) -> List[Dict[str, Any]]:
-    """Reverse _normalise_extra_cols: convert is_uncertain string back to bool,
-    keep source/note/vlan as strings, and return a list of record dicts."""
-    out_df = df.copy()
-    if "is_uncertain" in out_df.columns:
-        out_df["is_uncertain"] = out_df["is_uncertain"].apply(
-            lambda v: (v is True) or (isinstance(v, str) and v.strip() not in ("", "False", "false", "0"))
-        )
-    for col in ("source", "note", "vlan"):
-        if col in out_df.columns:
-            out_df[col] = out_df[col].apply(lambda x: "" if pd.isna(x) else str(x))
-    return out_df.to_dict(orient="records")
 
 
 def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model: str, vault):
@@ -2141,28 +2150,9 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                      st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
                                      st.rerun()
 
-    st.markdown("#### 🎛️ Topology Data Grid")
+    st.markdown("#### \U0001F39B\uFE0F Topology Data Grid")
     st.caption("Edit switch assignments, interface roles, and IPs directly. Changes update NetBox descriptions instantly.")
-
-    df = pd.DataFrame(records if records else [], columns=["switch", "interface", "type", "ip", "purpose", "vlan", "role", "speed", "source", "is_uncertain", "note"])
-    # Preserve non-text column types; only coerce text-configured columns to str
-    # so pandas does not promote empty _check/source/note to float64 and conflict
-    # with the TextColumn editor config (Streamlit 1.53+ raises on text vs float).
-    def _ensure_text_cols(_df):
-        for _col in ("_check", "source", "note"):
-            if _col not in _df.columns:
-                _df[_col] = ""
-            _df[_col] = _df[_col].fillna("").astype(str)
-        if "is_uncertain" not in _df.columns:
-            _df["is_uncertain"] = False
-        elif len(_df) == 0:
-            _df["is_uncertain"] = pd.Series([], dtype=bool)
-        else:
-            _df["is_uncertain"] = _df["is_uncertain"].astype(str).str.strip().str.lower().map(lambda s: s in ("true", "1", "yes"))
-    _ensure_text_cols(df)
-    # Show "OCR – verify" for uncertain rows, blank otherwise
-    df["_check"] = df.apply(lambda r: "OCR – verify" if str(r.get("is_uncertain", "")).lower() in ("true", "1", "yes") else "", axis=1).astype(str)
-
+    df_for_editor = _records_to_grid_df(records)
     column_config = {
         "switch": st.column_config.SelectboxColumn("Switch Container", options=sw_options if sw_options else [_dynamic_switch_pfx + "0"], required=False),
         "interface": st.column_config.TextColumn("Interface / Port", required=False),
@@ -2173,25 +2163,23 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         "role": st.column_config.SelectboxColumn("Role", options=role_options, required=False),
         "speed": st.column_config.TextColumn("Link Speed", required=False),
         "source": st.column_config.TextColumn("Source", required=False),
-        "is_uncertain": st.column_config.TextColumn("Uncertain", required=False),
+        "is_uncertain": st.column_config.CheckboxColumn(
+            "Uncertain",
+            help="Ticked = value came from OCR or a filled gap and is not verified yet. Untick it after you have checked it.",
+            default=False,
+        ),
         "note": st.column_config.TextColumn("Note", required=False),
-        "_check": st.column_config.TextColumn("Check", required=False),
+        "_check": st.column_config.TextColumn("Check", disabled=True),
     }
-
     editor_key = f"topology_data_editor_{st.session_state.get('editor_ver', 0)}"
-    # Normalise extra columns to str so TextColumn receives strings, not bools.
-    df_for_editor = _normalise_extra_cols(df)
     edited_df = st.data_editor(
         df_for_editor,
         column_config=column_config,
         num_rows="dynamic",
         width="stretch",
-        key=editor_key
+        key=editor_key,
     )
-    # Coerce user-edited / new rows back to the same dtypes so NaN cells from
-    # empty user input cannot reintroduce float64 columns on the next render.
-    _ensure_text_cols(edited_df)
-    topology_records = _convert_back_to_records(edited_df)
+    topology_records = _grid_df_to_records(edited_df)
     st.session_state["topology_records"] = topology_records
 
     # ── Zone 3: Live NetBox Output ────────────────────────────────────────────
