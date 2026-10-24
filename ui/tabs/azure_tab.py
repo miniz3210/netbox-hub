@@ -255,7 +255,7 @@ def render_azure_tab(active_model=None):
                              os.unlink(st.session_state.azure_temp_file_path)
                          except OSError:
                              pass
-                         del st.session_state.azure_temp_file_path
+                          st.session_state.pop("azure_temp_file_path", None)
                      st.rerun()
         with c_ref:
             if st.button("🔄 Refresh", key="ref_azure_btn", width='stretch', help="Reload the view"):
@@ -321,7 +321,7 @@ def render_azure_tab(active_model=None):
                     os.unlink(st.session_state.azure_temp_file_path)
                 except OSError:
                     pass
-            del st.session_state.azure_temp_file_path
+            st.session_state.pop("azure_temp_file_path", None)
 
             # Save uploaded file temporarily with unique session path
             import tempfile
