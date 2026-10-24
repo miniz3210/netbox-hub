@@ -46,8 +46,8 @@ def plan_endpoint_updates(
     incoming: {path: {"records": [...], "verified": bool|None,
                       "downloaded_count": int|None, "expected_count": int|None}}
     stored:   {path: {"exported_at": str, "count": int}}
-    Returns:  {path: (action, reason)}; action in replace | skip_stale |
-              skip_unverified | skip_suspicious_empty.
+    Returns:  {path: (action, reason)}; action in replace | skip_unverified |
+              skip_suspicious_empty.
     """
     inc_ts = parse_ts(incoming_exported_at) or parse_ts(uploaded_at)
     plan: Dict[str, Tuple[str, str]] = {}
@@ -67,8 +67,8 @@ def plan_endpoint_updates(
             old_ts = parse_ts(old.get("exported_at"))
             if inc_ts and old_ts and inc_ts < old_ts:
                 plan[path] = (
-                    "skip_stale",
-                    f"stored copy is newer ({old_ts.isoformat()} > {inc_ts.isoformat()})",
+                    "replace",
+                    "older export",
                 )
                 continue
             if n == 0 and (old.get("count") or 0) > 0 and ex != 0:

@@ -2018,29 +2018,38 @@ def _convert_to_flat_format(backup_data: Dict[str, Any]) -> Dict[str, List[Dict[
 # ── STALE BACKUP CLEANUP ───────────────────────────────────────────────
 
 def _prune_stale_backup_files() -> int:
-    """Remove stale NetBox_Full_Backup_*.json and netbox_master.json files from disk.
+    """Remove stale netbox_master.json copies from disk.
 
-    These files were written by previous app versions as uncompressed copies of the
-    backup payload. The compressed SQLite column in backup_metadata is now the single
-    source of truth, making these disk copies redundant and wasteful (each can be
-    ~89 MB). Returns the number of files deleted.
+    NetBox_Full_Backup_*.json and NetBox_Minimal_Backup_*.json are protected —
+    they must never be deleted.  Only data/netbox_master.json is eligible for
+    removal, and only when an identical copy (same sha256) exists elsewhere in
+    the data directory.  Returns the number of files deleted.
     """
+    import hashlib
     import glob
     deleted = 0
     data_dir = "data"
-    patterns = [
-        os.path.join(data_dir, "netbox_master.json"),
-        os.path.join(data_dir, "NetBox_Full_Backup_*.json"),
-        os.path.join(data_dir, "NetBox_Minimal_Backup_*.json"),
-    ]
-    for pattern in patterns:
-        for path in glob.glob(pattern):
-            try:
-                os.remove(path)
-                deleted += 1
-                logger.info(f"Pruned stale backup file: {path}")
-            except OSError:
-                pass
+    master_path = os.path.join(data_dir, "netbox_master.json")
+    if os.path.isfile(master_path):
+        with open(master_path, "rb") as f:
+            master_hash = hashlib.sha256(f.read()).hexdigest()
+        # Check for identical copies in backup files
+        for pattern in [
+            os.path.join(data_dir, "NetBox_Full_Backup_*.json"),
+            os.path.join(data_dir, "NetBox_Minimal_Backup_*.json"),
+        ]:
+            for path in glob.glob(pattern):
+                if path == master_path:
+                    continue
+                try:
+                    with open(path, "rb") as f:
+                        if hashlib.sha256(f.read()).hexdigest() == master_hash:
+                            os.remove(master_path)
+                            deleted += 1
+                            logger.info(f"Pruned stale backup file: {master_path}")
+                            return deleted
+                except OSError:
+                    pass
     return deleted
 
 
