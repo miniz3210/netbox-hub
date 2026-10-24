@@ -2105,9 +2105,14 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     st.caption("Edit switch assignments, interface roles, and IPs directly. Changes update NetBox descriptions instantly.")
 
     df = pd.DataFrame(records if records else [], columns=["switch", "interface", "type", "ip", "purpose", "vlan", "role", "speed", "source", "is_uncertain", "note"])
-    # Explicitly cast all columns to string to prevent pandas float-type conflicts
-    for col in df.columns:
+    # Preserve non-text column types; only coerce text-configured columns to str
+    # so pandas does not promote empty _check/source/note to float64 and conflict
+    # with the TextColumn editor config (Streamlit 1.53+ raises on text vs float).
+    _TEXT_COLS = ("_check", "source", "note")
+    for col in _TEXT_COLS:
         df[col] = df[col].fillna("").astype(str)
+    if "is_uncertain" in df.columns:
+        df["is_uncertain"] = df["is_uncertain"].fillna(False).astype(bool)
     # Show "OCR – verify" for uncertain rows, blank otherwise
     df["_check"] = df.apply(lambda r: "OCR – verify" if str(r.get("is_uncertain", "")).lower() in ("true", "1", "yes") else "", axis=1)
 
@@ -2134,6 +2139,12 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         width="stretch",
         key=editor_key
     )
+    # Coerce user-edited / new rows back to the same dtypes so NaN cells from
+    # empty user input cannot reintroduce float64 columns on the next render.
+    for col in _TEXT_COLS:
+        edited_df[col] = edited_df[col].fillna("").astype(str)
+    if "is_uncertain" in edited_df.columns:
+        edited_df["is_uncertain"] = edited_df["is_uncertain"].fillna(False).astype(bool)
     st.session_state["topology_records"] = edited_df.to_dict(orient="records")
 
     # ── Zone 3: Live NetBox Output ────────────────────────────────────────────

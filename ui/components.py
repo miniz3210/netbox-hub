@@ -246,7 +246,13 @@ def _handle_json_backup_upload(uploader_key: str, scope_key: str) -> None:
     st.session_state[error_key] = ""
     st.session_state[result_key] = result
     st.session_state[f"netbox_backup_enabled_{scope_key}"] = True
-    
+
+    skipped = result.get("skipped", {}) if result else {}
+    if skipped:
+        count = len(skipped)
+        st.toast(f"Skipped {count} endpoint(s) — safety rules prevented replacement", icon="⚠️")
+        st.session_state[f"backup_skipped_endpoints_{scope_key}"] = skipped
+
     # Clear the file uploader by incrementing the counter
     counter_key = f"json_uploader_counter_{scope_key}"
     st.session_state[counter_key] = st.session_state.get(counter_key, 0) + 1
@@ -465,7 +471,15 @@ def _render_backup_contents_section(scope_key: str, meta: dict) -> None:
         object_count = len(object_registry)
         
         with st.expander(f"📋 Backup contents ({object_count} object types - dynamic)", expanded=False):
-            st.caption("🟡 = Essential endpoint (minimal backup) | 📦 = JSON backup | 📊 = CSV upload")
+            skipped = st.session_state.get(f"backup_skipped_endpoints_{scope_key}", {})
+            skip_caption_parts = []
+            for ep_path, reason in list(skipped.items())[:5]:
+                skip_caption_parts.append(f"{ep_path}: {reason}")
+            if skip_caption_parts:
+                skip_note = " | ".join(skip_caption_parts)
+                st.caption(f"🟡 = Essential endpoint (minimal backup) | 📦 = JSON backup | 📊 = CSV upload  ⚠️ Skipped: {skip_note}")
+            else:
+                st.caption("🟡 = Essential endpoint (minimal backup) | 📦 = JSON backup | 📊 = CSV upload")
             
             # Group endpoints by prefix (dcim/, ipam/, extras/, etc.)
             grouped_objects = {}
