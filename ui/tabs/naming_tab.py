@@ -2108,13 +2108,20 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     # Preserve non-text column types; only coerce text-configured columns to str
     # so pandas does not promote empty _check/source/note to float64 and conflict
     # with the TextColumn editor config (Streamlit 1.53+ raises on text vs float).
-    _TEXT_COLS = ("_check", "source", "note")
-    for col in _TEXT_COLS:
-        df[col] = df[col].fillna("").astype(str)
-    if "is_uncertain" in df.columns:
-        df["is_uncertain"] = df["is_uncertain"].fillna(False).astype(bool)
+    def _ensure_text_cols(_df):
+        for _col in ("_check", "source", "note"):
+            if _col not in _df.columns:
+                _df[_col] = ""
+            _df[_col] = _df[_col].fillna("").astype(str)
+        if "is_uncertain" not in _df.columns:
+            _df["is_uncertain"] = False
+        elif len(_df) == 0:
+            _df["is_uncertain"] = pd.Series([], dtype=bool)
+        else:
+            _df["is_uncertain"] = _df["is_uncertain"].astype(str).str.strip().str.lower().map(lambda s: s in ("true", "1", "yes"))
+    _ensure_text_cols(df)
     # Show "OCR – verify" for uncertain rows, blank otherwise
-    df["_check"] = df.apply(lambda r: "OCR – verify" if str(r.get("is_uncertain", "")).lower() in ("true", "1", "yes") else "", axis=1)
+    df["_check"] = df.apply(lambda r: "OCR – verify" if str(r.get("is_uncertain", "")).lower() in ("true", "1", "yes") else "", axis=1).astype(str)
 
     column_config = {
         "switch": st.column_config.SelectboxColumn("Switch Container", options=sw_options if sw_options else [_dynamic_switch_pfx + "0"], required=False),
@@ -2141,10 +2148,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     )
     # Coerce user-edited / new rows back to the same dtypes so NaN cells from
     # empty user input cannot reintroduce float64 columns on the next render.
-    for col in _TEXT_COLS:
-        edited_df[col] = edited_df[col].fillna("").astype(str)
-    if "is_uncertain" in edited_df.columns:
-        edited_df["is_uncertain"] = edited_df["is_uncertain"].fillna(False).astype(bool)
+    _ensure_text_cols(edited_df)
     st.session_state["topology_records"] = edited_df.to_dict(orient="records")
 
     # ── Zone 3: Live NetBox Output ────────────────────────────────────────────
