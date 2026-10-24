@@ -76,7 +76,7 @@ def _render_topology_datagrid(records: List[Dict[str, Any]]):
     for col in expected_cols:
         if col not in df.columns:
             df[col] = ""
-        df[col] = df[col].fillna("").astype(str)
+        df[col] = df[col].astype(object).where(df[col].notna(), "").astype(str)
     st.dataframe(df, width="stretch", hide_index=True)
 
 

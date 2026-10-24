@@ -411,7 +411,6 @@ def _render_ipam_role_mapping_manager(active_model: str) -> None:
 
     items = list(role_rules)
     updated = []
-    pending_delete = None
     for idx, rule in enumerate(items):
         col_p, col_r, col_d, col_del = st.columns(AUTOCORRECT_COLS, vertical_alignment="center")
         with col_p:
@@ -442,6 +441,7 @@ def _render_ipam_role_mapping_manager(active_model: str) -> None:
                 final["ipam_role_mappings"] = items
                 _persist_ipam_role_mappings(final)
                 st.rerun()
+                break  # exit loop after delete + rerun
         if p.strip():
             updated.append({
                 "pattern": p,

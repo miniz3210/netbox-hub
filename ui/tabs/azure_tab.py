@@ -239,17 +239,24 @@ def render_azure_tab(active_model=None):
             )
         with c_clr:
             if saved_upload:
-                if st.button("🗑️ Clear Azure CSV", key="clear_azure_csv_btn", help="Clear Azure CSV data", width='stretch'):
-                    clear_azure_csv_upload()
-                    # Clear session state
-                    st.session_state.azure_vms_parsed = None
-                    st.session_state.azure_vms_mapped = None
-                    st.session_state.azure_metadata = None
-                    st.session_state.azure_object_analysis = None
-                    st.session_state.azure_dedup_cache = None
-                    st.session_state.azure_preview_table_df = None
-                    st.session_state.azure_last_uploaded_file = None
-                    st.rerun()
+                 if st.button("🗑️ Clear Azure CSV", key="clear_azure_csv_btn", help="Clear Azure CSV data", width='stretch'):
+                     clear_azure_csv_upload()
+                     # Clear session state
+                     st.session_state.azure_vms_parsed = None
+                     st.session_state.azure_vms_mapped = None
+                     st.session_state.azure_metadata = None
+                     st.session_state.azure_object_analysis = None
+                     st.session_state.azure_dedup_cache = None
+                     st.session_state.azure_preview_table_df = None
+                     st.session_state.azure_last_uploaded_file = None
+                     if 'azure_temp_file_path' in st.session_state:
+                         import os
+                         try:
+                             os.unlink(st.session_state.azure_temp_file_path)
+                         except OSError:
+                             pass
+                         del st.session_state.azure_temp_file_path
+                     st.rerun()
         with c_ref:
             if st.button("🔄 Refresh", key="ref_azure_btn", width='stretch', help="Reload the view"):
                 # Clear preview table cache to force rebuild
@@ -306,17 +313,26 @@ def render_azure_tab(active_model=None):
             st.session_state.azure_object_analysis = None
             st.session_state.azure_dedup_cache = None
             st.session_state.azure_preview_table_df = None
+            if hasattr(st.session_state.get('azure_temp_file'), 'close'):
+                st.session_state.azure_temp_file.close()
+            if 'azure_temp_file_path' in st.session_state:
+                import os
+                try:
+                    os.unlink(st.session_state.azure_temp_file_path)
+                except OSError:
+                    pass
+            del st.session_state.azure_temp_file_path
 
-            # Save uploaded file temporarily
-            temp_path = Path("data/temp_azure_upload.csv")
-            temp_path.parent.mkdir(exist_ok=True)
-            
-            with open(temp_path, "wb") as f:
+            # Save uploaded file temporarily with unique session path
+            import tempfile
+            fd, temp_path_str = tempfile.mkstemp(suffix=".csv", prefix="azure_upload_", dir="data")
+            st.session_state.azure_temp_file_path = temp_path_str
+            with os.fdopen(fd, "wb") as f:
                 f.write(uploaded_file.getbuffer())
             
             # Parse the CSV
             with st.spinner("Parsing Azure VM data..."):
-                vm_records, warnings = parse_azure_vm_csv(str(temp_path))
+                vm_records, warnings = parse_azure_vm_csv(temp_path_str)
                 st.session_state.azure_vms_parsed = vm_records
                 st.session_state.azure_parsed_vms_table = vm_records
             
@@ -831,7 +847,7 @@ def render_azure_tab(active_model=None):
                     
                     vm_role = extract_val(db_vm, ['role', 'model_or_role']) or get_val_from_row(matched_row, ['Role', 'role']) or "---------"
                     
-                    vm_status = extract_val(db_vm, ['status']) or get_val_from_row(matched_row, ['Status', 'status']) or "Active"
+                    vm_status = extract_val(db_vm, ['status']) or get_val_from_row(matched_row, ['Status', 'status']) or "---------"
                     if isinstance(vm_status, str):
                         vm_status = vm_status.capitalize()
                     
@@ -846,22 +862,22 @@ def render_azure_tab(active_model=None):
                         vm_tags_display = format_tags(raw_tags) if raw_tags else "—"
                     
                     # Prioritize database values, then CSV values
-                    vm_location = extract_val(db_vm, ['site']) or get_val_from_row(matched_row, ['Location', 'site', 'Site']) or "Australia East"
+                    vm_location = extract_val(db_vm, ['site']) or get_val_from_row(matched_row, ['Location', 'site', 'Site']) or "---------"
                     if isinstance(vm_location, dict):
-                        vm_location = vm_location.get('name', 'Australia East')
+                        vm_location = vm_location.get('name', '---------')
                     
                     vm_cluster = extract_val(db_vm, ['cluster']) or "---------"
                     if isinstance(vm_cluster, dict):
-                        vm_cluster = vm_cluster.get('name', '---------')
+                         vm_cluster = vm_cluster.get('name', '---------') if isinstance(vm_cluster, dict) else vm_cluster
                     
                     vm_tenant_group = "Azure"
                     vm_tenant = extract_val(db_vm, ['tenant']) or get_val_from_row(matched_row, ['Subscription', 'tenant', 'Tenant']) or "---------"
                     if isinstance(vm_tenant, dict):
                         vm_tenant = vm_tenant.get('name', '---------')
                     
-                    vm_platform = extract_val(db_vm, ['platform']) or get_val_from_row(matched_row, ['Operating System', 'Platform', 'platform']) or "Windows Server"
+                    vm_platform = extract_val(db_vm, ['platform']) or get_val_from_row(matched_row, ['Operating System', 'Platform', 'platform']) or "---------"
                     if isinstance(vm_platform, dict):
-                        vm_platform = vm_platform.get('name', 'Windows Server')
+                        vm_platform = vm_platform.get('name', '---------')
                     
                     vm_ip = extract_val(db_vm, ['primary_ip', 'primary_ip4', 'ip']) or get_val_from_row(matched_row, ['Azure IP', 'ip', 'Primary IPv4']) or "---------"
                     if isinstance(vm_ip, dict):
