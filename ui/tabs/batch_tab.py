@@ -54,10 +54,15 @@ def render_batch_tab(catalog, active_model):
                 rows = list(df.iterrows())
                 with ThreadPoolExecutor(max_workers=5) as executor:
                     for i, res in enumerate(executor.map(process_row, rows)):
-                        if res:
+                        if res is None:
+                            pbar.progress((i + 1) / len(rows))
+                            continue
+                        try:
                             filename, content, meta = res
                             zf.writestr(filename, content)
                             results.append(meta)
+                        except Exception as e:
+                            results.append({"Category": "", "Manufacturer": "", "Model": "", "Source": f"❌ Error: {e}"})
                         pbar.progress((i + 1) / len(rows))
 
             st.success("Parallel Batch Generation Completed!")

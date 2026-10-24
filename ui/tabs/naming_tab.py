@@ -2286,17 +2286,17 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     _out_lines.append(_upline)
 
             # ── Port Groups & VMkernel (rendered per service, no teaming dup) ─
-            _seen_svc_names: Set[str] = set()
+            _seen_svc_keys: Set[tuple] = set()
             for _svc in _sw_services:
                 _svc_name = str(_svc.get("purpose", "")).strip() or str(_svc.get("interface", "")).strip()
                 if not _svc_name:
                     continue
-                if _svc_name in _seen_svc_names:
-                    continue
-                _seen_svc_names.add(_svc_name)
-
                 _svc_type = str(_svc.get("type", "Port Group")).strip()
                 _svc_iface = str(_svc.get("interface", "")).strip()
+                _dedup_key = (_svc_type, _svc_iface, _svc_name)
+                if _dedup_key in _seen_svc_keys:
+                    continue
+                _seen_svc_keys.add(_dedup_key)
 
                 if _svc_type == "VMkernel":
                     _svc_tpl = None
