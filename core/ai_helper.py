@@ -1069,14 +1069,17 @@ def _fetch_device_context(name: str, site_filter: str = "", limit: int = 200) ->
     # 1. Backup records — device, interfaces, IPs, VRFs, NAT, etc.
     # Allocate budget: 60% for backup, 40% for inventory
     backup_limit = min(limit * 3 // 5, limit)
-    cursor.execute(
-        f"SELECT object_type, object_label, name, site, summary FROM backup_records "
-        f"WHERE (LOWER(name) LIKE ? OR search_blob LIKE ?){where_site} "
-        f"ORDER BY object_type, name LIMIT {backup_limit}",
-        params + [pattern] + (params[1:] if site_filter else []),
-    )
-    for row in cursor.fetchall():
-        rows.append(dict(row))
+    try:
+        cursor.execute(
+            f"SELECT object_type, object_label, name, site, summary FROM backup_records "
+            f"WHERE (LOWER(name) LIKE ? OR search_blob LIKE ?){where_site} "
+            f"ORDER BY object_type, name LIMIT {backup_limit}",
+            params + [pattern] + (params[1:] if site_filter else []),
+        )
+        for row in cursor.fetchall():
+            rows.append(dict(row))
+    except sqlite3.OperationalError:
+        pass
 
     # 2. Inventory records — device/VM profile (remaining budget)
     inventory_limit = max(1, limit - len(rows))
