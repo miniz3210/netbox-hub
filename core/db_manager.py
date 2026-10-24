@@ -151,6 +151,7 @@ def init_db():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_sites_slug ON sites_records(slug)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_inventory_category ON inventory_records(category)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_inventory_name ON inventory_records(name)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inventory_lname ON inventory_records(category, LOWER(name))")
 
     conn.commit()
     conn.close()
@@ -158,10 +159,17 @@ def init_db():
 
 # ── METADATA TRACKING ───────────────────────────────────────────────────
 
-def set_sync_metadata(module: str, source: str):
-    init_db()
-    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    with sqlite3.connect(DB_PATH) as conn:
+def set_sync_metadata(module: str, source: str, conn=None) -> None:
+    if conn is None:
+        init_db()
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        with sqlite3.connect(DB_PATH) as c:
+            c.execute("""
+                INSERT OR REPLACE INTO sync_metadata (module, source, updated_at)
+                VALUES (?, ?, ?)
+            """, (module, source, now_str))
+    else:
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         conn.execute("""
             INSERT OR REPLACE INTO sync_metadata (module, source, updated_at)
             VALUES (?, ?, ?)
@@ -215,26 +223,30 @@ def get_sync_metadata(module: str) -> Dict[str, str]:
 
 # ── SMART SITE / SCOPE ID LOOKUP ─────────────────────────────────────────
 
-def save_sites_batch(sites: List[Dict[str, Any]], clear_first: bool = False, source: str = "Agent (PowerShell)") -> int:
-    init_db()
-    with sqlite3.connect(DB_PATH) as conn:
-        if clear_first:
-            conn.execute("DELETE FROM sites_records")
+def save_sites_batch(sites: List[Dict[str, Any]], clear_first: bool = False, source: str = "Agent (PowerShell)", conn=None) -> int:
+    if conn is None:
+        init_db()
+    _conn = conn if conn is not None else sqlite3.connect(DB_PATH)
+    _owns_conn = conn is None
+    if clear_first:
+        _conn.execute("DELETE FROM sites_records")
 
-        count = 0
-        for s in sites:
-            site_id = s.get("id") or s.get("ID")
-            name = str(s.get("name") or s.get("Name") or "").strip()
-            slug = str(s.get("slug") or s.get("Slug") or "").strip()
-            if name and name.lower() != "nan":
-                conn.execute("""
-                    INSERT OR REPLACE INTO sites_records (id, name, slug)
-                    VALUES (?, ?, ?)
-                """, (int(site_id) if str(site_id).isdigit() else None, name, slug))
-                count += 1
+    count = 0
+    for s in sites:
+        site_id = s.get("id") or s.get("ID")
+        name = str(s.get("name") or s.get("Name") or "").strip()
+        slug = str(s.get("slug") or s.get("Slug") or "").strip()
+        if name and name.lower() != "nan":
+            _conn.execute("""
+                INSERT OR REPLACE INTO sites_records (id, name, slug)
+                VALUES (?, ?, ?)
+            """, (int(site_id) if str(site_id).isdigit() else None, name, slug))
+            count += 1
 
-        conn.commit()
-    set_sync_metadata("netbox_sites", source)
+    if _owns_conn:
+        _conn.commit()
+        _conn.close()
+    set_sync_metadata("netbox_sites", source, conn=_conn if not _owns_conn else None)
     return count
 
 def lookup_scope_id(site_name: str) -> Optional[int]:
@@ -372,44 +384,47 @@ def _score_supernet_candidates(rows, clean: str) -> list:
 
 # ── INVENTORY RECORDS ───────────────────────────────────────────────────
 
-def save_records_batch(records: List[Dict[str, Any]], clear_first: bool = False, source: str = "Agent (PowerShell)") -> Dict[str, int]:
-    init_db()
-    with sqlite3.connect(DB_PATH) as conn:
-        if clear_first:
-            conn.execute("DELETE FROM inventory_records")
+def save_records_batch(records: List[Dict[str, Any]], clear_first: bool = False, source: str = "Agent (PowerShell)", conn=None) -> Dict[str, int]:
+    if conn is None:
+        init_db()
+    _conn = conn if conn is not None else sqlite3.connect(DB_PATH)
+    _owns_conn = conn is None
+    if clear_first:
+        _conn.execute("DELETE FROM inventory_records")
 
-        counts = {"device": 0, "hypervisor": 0, "vm": 0}
-        has_devices = False
-        has_vms = False
-        
-        for r in records:
-            cat = r.get("category", "device")
-            conn.execute("""
-                INSERT INTO inventory_records (category, name, description, manufacturer, model_or_role, site, cluster)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (
-                cat,
-                r.get("name", "").strip(),
-                r.get("description", "").strip(),
-                r.get("manufacturer", "").strip(),
-                r.get("model_or_role", "").strip(),
-                r.get("site", "").strip(),
-                r.get("cluster", "").strip()
-            ))
-            counts[cat] = counts.get(cat, 0) + 1
-            
-            if cat in ("device", "hypervisor"):
-                has_devices = True
-            elif cat == "vm":
-                has_vms = True
-
-        conn.commit()
+    counts = {"device": 0, "hypervisor": 0, "vm": 0}
+    has_devices = False
+    has_vms = False
     
-    # Set metadata based on what was imported
+    for r in records:
+        cat = r.get("category", "device")
+        _conn.execute("""
+            INSERT INTO inventory_records (category, name, description, manufacturer, model_or_role, site, cluster)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            cat,
+            r.get("name", "").strip(),
+            r.get("description", "").strip(),
+            r.get("manufacturer", "").strip(),
+            r.get("model_or_role", "").strip(),
+            r.get("site", "").strip(),
+            r.get("cluster", "").strip()
+        ))
+        counts[cat] = counts.get(cat, 0) + 1
+        
+        if cat in ("device", "hypervisor"):
+            has_devices = True
+        elif cat == "vm":
+            has_vms = True
+
+    if _owns_conn:
+        _conn.commit()
     if has_devices:
-        set_sync_metadata("netbox_devices", source)
+        set_sync_metadata("netbox_devices", source, conn=_conn if not _owns_conn else None)
     if has_vms:
-        set_sync_metadata("netbox_virtual_machines", source)
+        set_sync_metadata("netbox_virtual_machines", source, conn=_conn if not _owns_conn else None)
+    if _owns_conn:
+        _conn.close()
     
     return counts
 
@@ -523,62 +538,65 @@ def get_records_by_category(category: str, site_filter: str = "") -> List[Dict[s
 
 # ── DEDICATED IPAM & PREFIXES ───────────────────────────────────────────
 
-def save_ipam_records_batch(records: List[Dict[str, Any]], clear_first: bool = False, source: str = "Agent (PowerShell)") -> int:
-    init_db()
-    with sqlite3.connect(DB_PATH) as conn:
-        if clear_first:
-            conn.execute("DELETE FROM ipam_records")
+def save_ipam_records_batch(records: List[Dict[str, Any]], clear_first: bool = False, source: str = "Agent (PowerShell)", conn=None) -> int:
+    if conn is None:
+        init_db()
+    _conn = conn if conn is not None else sqlite3.connect(DB_PATH)
+    _owns_conn = conn is None
+    if clear_first:
+        _conn.execute("DELETE FROM ipam_records")
 
-        count = 0
-        has_vlans = False
-        has_prefixes = False
-        
-        for r in records:
-            raw_prefix = str(r.get("prefix_or_subnet") or r.get("prefix") or r.get("subnet") or r.get("address") or r.get("Prefixes") or "").strip()
-            if raw_prefix.lower() == "nan":
-                raw_prefix = ""
-
-            cidrs = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}/\d{1,2}\b', raw_prefix)
-            if not cidrs and "/" in raw_prefix:
-                cidrs = [raw_prefix]
-
-            v_id = int(r.get("vlan_id") or r.get("vid") or r.get("VID") or 0) if str(r.get("vlan_id") or r.get("vid") or r.get("VID") or "").isdigit() else None
-            rec_type = str(r.get("record_type") or ("vlan" if v_id or r.get("vlan_name") else "prefix")).strip().lower()
-
-            # VLANs are kept even without an assigned prefix; prefixes require a CIDR.
-            if not cidrs:
-                if rec_type != "vlan" or not (v_id or r.get("vlan_name")):
-                    continue
-                cidrs = [""]
-
-            if rec_type == "vlan":
-                has_vlans = True
-            else:
-                has_prefixes = True
-
-            for cidr in cidrs:
-                conn.execute("""
-                    INSERT INTO ipam_records (prefix_or_subnet, vlan_id, vlan_name, role, site, scope_id, description, record_type)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    cidr,
-                    v_id,
-                    str(r.get("vlan_name") or r.get("name") or r.get("Name") or "").strip(),
-                    str(r.get("role") or r.get("Role") or "").strip(),
-                    str(r.get("site") or r.get("Site") or "").strip(),
-                    int(r.get("scope_id")) if str(r.get("scope_id") or "").isdigit() else None,
-                    str(r.get("description") or r.get("desc") or r.get("Description") or "").strip(),
-                    rec_type
-                ))
-                count += 1
-
-        conn.commit()
+    count = 0
+    has_vlans = False
+    has_prefixes = False
     
-    # Set metadata based on what was imported
+    for r in records:
+        raw_prefix = str(r.get("prefix_or_subnet") or r.get("prefix") or r.get("subnet") or r.get("address") or r.get("Prefixes") or "").strip()
+        if raw_prefix.lower() == "nan":
+            raw_prefix = ""
+
+        cidrs = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}/\d{1,2}\b', raw_prefix)
+        if not cidrs and "/" in raw_prefix:
+            cidrs = [raw_prefix]
+
+        v_id = int(r.get("vlan_id") or r.get("vid") or r.get("VID") or 0) if str(r.get("vlan_id") or r.get("vid") or r.get("VID") or "").isdigit() else None
+        rec_type = str(r.get("record_type") or ("vlan" if v_id or r.get("vlan_name") else "prefix")).strip().lower()
+
+        # VLANs are kept even without an assigned prefix; prefixes require a CIDR.
+        if not cidrs:
+            if rec_type != "vlan" or not (v_id or r.get("vlan_name")):
+                continue
+            cidrs = [""]
+
+        if rec_type == "vlan":
+            has_vlans = True
+        else:
+            has_prefixes = True
+
+        for cidr in cidrs:
+            _conn.execute("""
+                INSERT INTO ipam_records (prefix_or_subnet, vlan_id, vlan_name, role, site, scope_id, description, record_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                cidr,
+                v_id,
+                str(r.get("vlan_name") or r.get("name") or r.get("Name") or "").strip(),
+                str(r.get("role") or r.get("Role") or "").strip(),
+                str(r.get("site") or r.get("Site") or "").strip(),
+                int(r.get("scope_id")) if str(r.get("scope_id") or "").isdigit() else None,
+                str(r.get("description") or r.get("desc") or r.get("Description") or "").strip(),
+                rec_type
+            ))
+            count += 1
+
+    if _owns_conn:
+        _conn.commit()
     if has_vlans:
-        set_sync_metadata("netbox_VLANs", source)
+        set_sync_metadata("netbox_VLANs", source, conn=_conn if not _owns_conn else None)
     if has_prefixes:
-        set_sync_metadata("netbox_prefixes", source)
+        set_sync_metadata("netbox_prefixes", source, conn=_conn if not _owns_conn else None)
+    if _owns_conn:
+        _conn.close()
     
     return count
 

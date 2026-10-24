@@ -437,10 +437,11 @@ def _render_ipam_role_mapping_manager(active_model: str) -> None:
             )
         with col_del:
             if _render_centered_del_btn(f"ipamrole_{idx}_del", "Delete this rule"):
-                pending_delete = idx
-
-        if pending_delete == idx:
-            continue
+                items.pop(idx)
+                final = dict(rules)
+                final["ipam_role_mappings"] = items
+                _persist_ipam_role_mappings(final)
+                st.rerun()
         if p.strip():
             updated.append({
                 "pattern": p,
