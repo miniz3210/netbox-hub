@@ -255,7 +255,7 @@ def render_azure_tab(active_model=None):
                              os.unlink(st.session_state.azure_temp_file_path)
                          except OSError:
                              pass
-                          st.session_state.pop("azure_temp_file_path", None)
+                     st.session_state.pop("azure_temp_file_path", None)
                      st.rerun()
         with c_ref:
             if st.button("🔄 Refresh", key="ref_azure_btn", width='stretch', help="Reload the view"):
