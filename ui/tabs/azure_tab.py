@@ -6,7 +6,8 @@ Provides UI for importing Azure Virtual Machine exports into NetBox.
 import csv
 import html
 import io
-from pathlib import Path
+import os
+import tempfile
 
 import pandas as pd
 import streamlit as st
@@ -234,29 +235,24 @@ def render_azure_tab(active_model=None):
                 "Upload Azure VM CSV file",
                 type=["csv"],
                 help="Upload the CSV file exported from Azure Resource Graph Explorer",
-                key="azure_csv_uploader",
+                key=f"azure_csv_uploader_{st.session_state.get('azure_uploader_key_ver', 0)}",
                 label_visibility="collapsed"
             )
         with c_clr:
             if saved_upload:
-                 if st.button("🗑️ Clear Azure CSV", key="clear_azure_csv_btn", help="Clear Azure CSV data", width='stretch'):
-                     clear_azure_csv_upload()
-                     # Clear session state
-                     st.session_state.azure_vms_parsed = None
-                     st.session_state.azure_vms_mapped = None
-                     st.session_state.azure_metadata = None
-                     st.session_state.azure_object_analysis = None
-                     st.session_state.azure_dedup_cache = None
-                     st.session_state.azure_preview_table_df = None
-                     st.session_state.azure_last_uploaded_file = None
-                     if 'azure_temp_file_path' in st.session_state:
-                         import os
-                         try:
-                             os.unlink(st.session_state.azure_temp_file_path)
-                         except OSError:
-                             pass
-                     st.session_state.pop("azure_temp_file_path", None)
-                     st.rerun()
+                  if st.button("🗑️ Clear Azure CSV", key="clear_azure_csv_btn", help="Clear Azure CSV data", width='stretch'):
+                      st.session_state['azure_uploader_key_ver'] = st.session_state.get('azure_uploader_key_ver', 0) + 1
+                      clear_azure_csv_upload()
+                      # Clear session state
+                      st.session_state.pop('azure_vms_parsed', None)
+                      st.session_state.pop('azure_vms_mapped', None)
+                      st.session_state.pop('azure_metadata', None)
+                      st.session_state.pop('azure_object_analysis', None)
+                      st.session_state.pop('azure_dedup_cache', None)
+                      st.session_state.pop('azure_preview_table_df', None)
+                      st.session_state.pop('azure_last_uploaded_file', None)
+                      st.session_state.pop("azure_temp_file_path", None)
+                      st.rerun()
         with c_ref:
             if st.button("🔄 Refresh", key="ref_azure_btn", width='stretch', help="Reload the view"):
                 # Clear preview table cache to force rebuild
@@ -316,7 +312,6 @@ def render_azure_tab(active_model=None):
             if hasattr(st.session_state.get('azure_temp_file'), 'close'):
                 st.session_state.azure_temp_file.close()
             if 'azure_temp_file_path' in st.session_state:
-                import os
                 try:
                     os.unlink(st.session_state.azure_temp_file_path)
                 except OSError:
@@ -324,7 +319,6 @@ def render_azure_tab(active_model=None):
             st.session_state.pop("azure_temp_file_path", None)
 
             # Save uploaded file temporarily with unique session path
-            import tempfile
             fd, temp_path_str = tempfile.mkstemp(suffix=".csv", prefix="azure_upload_", dir="data")
             st.session_state.azure_temp_file_path = temp_path_str
             with os.fdopen(fd, "wb") as f:
