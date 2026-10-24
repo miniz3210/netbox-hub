@@ -1133,7 +1133,7 @@ def _render_sql_query_tool(scope_key: str, meta: dict) -> None:
 
                     import pandas as pd
                     df = pd.DataFrame(result["rows"])
-                    st.dataframe(df, use_container_width=True, height=400)
+                    st.dataframe(df, width="stretch", height=400)
 
                     # Column stats
                     if not st.checkbox("Show column statistics", key=f"sql_stats_{scope_key}"):

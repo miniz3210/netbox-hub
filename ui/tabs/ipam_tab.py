@@ -37,16 +37,13 @@ from utils.formatters import to_title_case_preserve_acronyms
 from ui.components import render_ai_chat, render_backup_uploader
 from ui.tabs.naming_tab import _cached_fetch_toolbar_stats
 
-_last_site_lookup = {}  # tracks (site_name, scope_id, supernet) to avoid redundant DB queries
-
-
 def handle_site_change():
     """Triggered on site name input change: looks up Scope ID & Supernet once."""
     entered_site = st.session_state.get("ipam_site_in", "").strip()
-    cached = _last_site_lookup.get("site", "")
+    cached = st.session_state.get("ipam_last_site_lookup_site", "")
     if entered_site == cached:
         return  # no change since last lookup, skip
-    _last_site_lookup["site"] = entered_site
+    st.session_state["ipam_last_site_lookup_site"] = entered_site
 
     if entered_site:
         matched_scope = lookup_scope_id(entered_site)
@@ -55,8 +52,8 @@ def handle_site_change():
             st.session_state["ipam_scope_in"] = str(matched_scope)
         if matched_super is not None:
             st.session_state["ipam_super_in"] = str(matched_super)
-        _last_site_lookup["scope"] = matched_scope
-        _last_site_lookup["supernet"] = matched_super
+        st.session_state["ipam_last_site_lookup_scope"] = matched_scope
+        st.session_state["ipam_last_site_lookup_supernet"] = matched_super
 
 
 def handle_ipam_file_upload():
@@ -543,7 +540,7 @@ def _render_reconciliation_tab():
         if all_rows:
             df_all = pd.DataFrame(all_rows)
             display_cols = [c for c in df_all.columns if c != "_bucket"] + ["_bucket"]
-            st.dataframe(df_all[display_cols], use_container_width=True, hide_index=True)
+            st.dataframe(df_all[display_cols], width="stretch", hide_index=True)
         else:
             st.info("No records to display.")
 
@@ -580,7 +577,7 @@ def _render_reconciliation_tab():
                 st.session_state["recon_selected_sites"],
                 num_rows="dynamic",
                 key="recon_sites_editor",
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
                 column_config={
                     "Selected": st.column_config.CheckboxColumn(
@@ -642,7 +639,7 @@ def _render_reconciliation_tab():
                 st.session_state["recon_selected_vlans"],
                 num_rows="dynamic",
                 key="recon_vlans_editor",
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
                 column_config={
                     "Selected": st.column_config.CheckboxColumn("Import?", default=True),
@@ -683,7 +680,7 @@ def _render_reconciliation_tab():
                 st.session_state["recon_selected_prefixes"],
                 num_rows="dynamic",
                 key="recon_prefixes_editor",
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
                 column_config={
                     "Selected": st.column_config.CheckboxColumn("Import?", default=True),
@@ -723,7 +720,7 @@ def _render_reconciliation_tab():
                 st.session_state["recon_selected_ips"],
                 num_rows="dynamic",
                 key="recon_ips_editor",
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
                 column_config={
                     "Selected": st.column_config.CheckboxColumn("Import?", default=True),
@@ -1016,12 +1013,12 @@ def render_ipam_tab(active_model: str):
                 on_change=handle_site_change
             )
 
-        cached_site = _last_site_lookup.get("site", "")
+        cached_site = st.session_state.get("ipam_last_site_lookup_site", "")
         if site_name and site_name != cached_site:
             handle_site_change()
 
-        auto_scope_id = _last_site_lookup.get("scope")
-        auto_supernet = _last_site_lookup.get("supernet")
+        auto_scope_id = st.session_state.get("ipam_last_site_lookup_scope")
+        auto_supernet = st.session_state.get("ipam_last_site_lookup_supernet")
 
         if site_name and auto_supernet and not st.session_state.get("ipam_super_in"):
             st.session_state["ipam_super_in"] = str(auto_supernet)

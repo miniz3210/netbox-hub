@@ -3,6 +3,12 @@ import pandas as pd
 import pytest
 
 
+def _to_str_col(series: pd.Series) -> pd.Series:
+    """Coerce a series to str, replacing NaN with empty string without
+    triggering the Pandas future warning about fillna on float64."""
+    return series.astype(object).where(series.notna(), "").astype(str)
+
+
 def _ensure_text_cols(df: pd.DataFrame) -> None:
     """Ensure text-configured columns exist and are coerced to str; map is_uncertain
     from various string representations to bool without relying on astype(bool)."""
@@ -13,7 +19,7 @@ def _ensure_text_cols(df: pd.DataFrame) -> None:
             else:
                 df[col] = ""
         else:
-            df[col] = df[col].fillna("").astype(str)
+            df[col] = _to_str_col(df[col])
     if "is_uncertain" not in df.columns:
         if len(df) == 0:
             df["is_uncertain"] = pd.Series([], dtype=bool)
