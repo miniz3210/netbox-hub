@@ -7,6 +7,7 @@ from typing import Dict, List
 from datetime import datetime
 from config.constants import RULES_FILE, RULES_HISTORY_FILE, MAX_HISTORY_ENTRIES
 
+DEFAULT_AZURE_MAPPINGS = {"region_site": {"australiaeast": "Azure - Australia East", "australiasoutheast": "Azure - Australia Southeast", "francecentral": "Azure - France Central", "spaincentral": "Azure - Spain Central", "uksouth": "Azure - UK South"}, "platform": {"Windows": "Windows Server"}, "role_fallback": ""}
 DEFAULT_NAMING_PATTERNS = {
     "branch_switch": "SW<country><state><site><zone><seq>-<stack_id>",
     "branch_stack": "VS<country><state><site><seq>-<stack_id>",
@@ -1005,6 +1006,17 @@ def _normalize_rules(raw: dict) -> dict:
         ]
 
     # Drop any legacy tombstone key (one-time cleanup; deleted vars stay deleted).
+    _raw_az = raw.get("azure_mappings")
+    if not isinstance(_raw_az, dict):
+        merged["azure_mappings"] = copy.deepcopy(DEFAULT_AZURE_MAPPINGS)
+    else:
+        merged["azure_mappings"] = {
+            "region_site": {str(k).strip().lower(): str(v).strip()
+                            for k, v in (_raw_az.get("region_site") or {}).items() if str(k).strip()},
+            "platform": {str(k).strip(): str(v).strip()
+                         for k, v in (_raw_az.get("platform") or {}).items() if str(k).strip()},
+            "role_fallback": str(_raw_az.get("role_fallback") or ""),
+        }
     merged.pop("deleted_pattern_variables", None)
     merged["pattern_variables"] = variables
 
@@ -1462,6 +1474,12 @@ def get_pattern_variables(rules: dict) -> dict:
     if isinstance(variables, dict):
         return variables
     return copy.deepcopy(PATTERN_VARIABLES)
+
+
+def get_azure_mappings(rules: dict) -> dict:
+    """Azure import mappings from Standards (factory defaults only if missing)."""
+    az = rules.get("azure_mappings")
+    return az if isinstance(az, dict) else copy.deepcopy(DEFAULT_AZURE_MAPPINGS)
 
 
 def get_custom_patterns(rules: dict) -> List[dict]:
