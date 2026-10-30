@@ -19,6 +19,20 @@ logger = logging.getLogger("netbox-hub")
 _TAG_PLACEHOLDER_VALUES = {"-", "nan", "null", "none", "no policy"}
 
 
+def _apply_azure_mappings(site_raw, platform_raw, role_raw, maps):
+    region = maps.get("region_site") or {}
+    plat = {str(k).lower(): v for k, v in (maps.get("platform") or {}).items()}
+    s = (site_raw or "").strip()
+    if s and not (s.startswith("Azure - ") or s.startswith("UNMAPPED - ")):
+        s = region.get(s.lower(), f"UNMAPPED - {s}")
+    p = (platform_raw or "").strip()
+    p = plat.get(p.lower(), p) if p else p
+    r = (role_raw or "").strip()
+    if not r or r == "---------":
+        r = maps.get("role_fallback") or ""
+    return s, p, r
+
+
 def parse_azure_vm_csv(csv_path: str) -> Tuple[List[Dict[str, Any]], List[str]]:
     """Parse Azure Portal and Azure Resource Graph VM CSV exports."""
     vm_records = []
@@ -80,6 +94,9 @@ def parse_azure_vm_csv(csv_path: str) -> Tuple[List[Dict[str, Any]], List[str]]:
             # Dedup dictionary: name (lower) -> record
             vm_map = {}
 
+            from config.naming_rules import get_azure_mappings, load_naming_rules
+            _az_maps = get_azure_mappings(load_naming_rules())
+
             for row_num, row in enumerate(reader, start=2):
                 try:
                     vm_name = value_for(row, 'name')
@@ -128,14 +145,18 @@ def parse_azure_vm_csv(csv_path: str) -> Tuple[List[Dict[str, Any]], List[str]]:
                     role_val = value_for(row, 'role') or tag_app
                     owner_val = value_for(row, 'owner') or tag_owner
 
+                    site_val = value_for(row, 'location')
+                    platform_val = value_for(row, 'platform_value')
+                    _mapped_site, platform_val, role_val = _apply_azure_mappings(site_val, platform_val, role_val, _az_maps)
+
                     vm_record = {
                         'name': vm_name,
                         'subscription': value_for(row, 'subscription'),
                         'resource_group': value_for(row, 'resource_group'),
-                        'location': value_for(row, 'location'),
+                        'location': site_val,
                         'status': value_for(row, 'status'),
                         'operating_system': value_for(row, 'operating_system'),
-                        'platform_value': value_for(row, 'platform_value'),
+                        'platform_value': platform_val,
                         'size': value_for(row, 'size'),
                         'public_ip': public_ip or None,
                         'disk_count': value_for(row, 'disk_count'),
