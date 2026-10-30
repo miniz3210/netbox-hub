@@ -1,0 +1,832 @@
+import os
+import re
+import sqlite3
+import pandas as pd
+from datetime import datetime, timezone
+from typing import List, Dict, Any, Optional
+
+DB_PATH = "data/netbox_hub.db"
+
+# ── One-time DB initialisation flag ──────────────────────────────────────
+_db_init_done = False
+
+
+def init_db():
+    """Create tables and indexes if they do not already exist.
+
+    Calls are idempotent — subsequent invocations skip schema work when the
+    database file and its tables are present.
+    """
+    global _db_init_done
+    if _db_init_done:
+        return
+    os.makedirs("data", exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    # ── WAL hardening: enables concurrent reads during writes and faster I/O ──
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.execute("PRAGMA cache_size=-8000")  # 8 MB shared buffer cache
+    conn.commit()
+
+    # Metadata Table (Tracks Sync Source & Last Sync Timestamp)
+    cursor.execute("""
+            CREATE TABLE IF NOT EXISTS sync_metadata (
+                module TEXT PRIMARY KEY,
+                source TEXT,
+                updated_at TEXT
+            )
+        """)
+
+    # Sites / Scope Table
+    cursor.execute("""
+            CREATE TABLE IF NOT EXISTS sites_records (
+                id INTEGER PRIMARY KEY,
+                name TEXT UNIQUE,
+                slug TEXT,
+                imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+    """)
+
+    # Inventory Records (Devices, Hypervisors, VMs)
+    cursor.execute("""
+            CREATE TABLE IF NOT EXISTS inventory_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                category TEXT,
+                name TEXT,
+                description TEXT,
+                manufacturer TEXT,
+                model_or_role TEXT,
+                site TEXT,
+                cluster TEXT,
+                imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+    """)
+
+    # IPAM / Prefix Records
+    cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ipam_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                prefix_or_subnet TEXT,
+                vlan_id INTEGER,
+                vlan_name TEXT,
+                role TEXT,
+                site TEXT,
+                scope_id INTEGER,
+                description TEXT,
+                record_type TEXT DEFAULT 'prefix',
+                imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+    """)
+
+    # Azure CSV Upload Storage (persists across page refreshes)
+    cursor.execute("""
+            CREATE TABLE IF NOT EXISTS azure_csv_uploads (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                filename TEXT,
+                uploaded_at TEXT,
+                csv_data TEXT,
+                row_count INTEGER
+            )
+    """)
+
+    # Column migration check for existing DBs
+    cursor.execute("PRAGMA table_info(ipam_records)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if "record_type" not in columns:
+            cursor.execute("ALTER TABLE ipam_records ADD COLUMN record_type TEXT DEFAULT 'prefix'")
+
+    # Interfaces Table (structured from NetBox backup)
+    cursor.execute("""
+            CREATE TABLE IF NOT EXISTS interfaces (
+                id INTEGER PRIMARY KEY,
+                device_id INTEGER,
+                device_name TEXT,
+                name TEXT,
+                label TEXT,
+                type TEXT,
+                enabled INTEGER DEFAULT 0,
+                mgmt_only INTEGER DEFAULT 0,
+                mode TEXT,
+                mtu INTEGER,
+                mac_address TEXT,
+                description TEXT,
+                site TEXT,
+                imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_interfaces_device ON interfaces(device_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_interfaces_name ON interfaces(name)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_interfaces_site ON interfaces(site)")
+
+    # Cables Table (structured from NetBox backup)
+    cursor.execute("""
+            CREATE TABLE IF NOT EXISTS cables (
+                id INTEGER PRIMARY KEY,
+                label TEXT,
+                status TEXT,
+                type TEXT,
+                description TEXT,
+                a_device_id INTEGER,
+                a_device_name TEXT,
+                a_interface_id INTEGER,
+                a_interface_name TEXT,
+                b_device_id INTEGER,
+                b_device_name TEXT,
+                b_interface_id INTEGER,
+                b_interface_name TEXT,
+                imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_cables_a_device ON cables(a_device_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_cables_b_device ON cables(b_device_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_cables_a_interface ON cables(a_interface_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_cables_b_interface ON cables(b_interface_id)")
+
+    # Create indexes for performance optimization
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ipam_site ON ipam_records(site)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ipam_vlan_id ON ipam_records(vlan_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ipam_prefix ON ipam_records(prefix_or_subnet)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sites_slug ON sites_records(slug)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inventory_category ON inventory_records(category)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inventory_name ON inventory_records(name)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inventory_lname ON inventory_records(category, LOWER(name))")
+
+    conn.commit()
+    conn.close()
+    _db_init_done = True
+
+# ── METADATA TRACKING ───────────────────────────────────────────────────
+
+def set_sync_metadata(module: str, source: str, conn=None) -> None:
+    if conn is None:
+        init_db()
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        with sqlite3.connect(DB_PATH) as c:
+            c.execute("""
+                INSERT OR REPLACE INTO sync_metadata (module, source, updated_at)
+                VALUES (?, ?, ?)
+            """, (module, source, now_str))
+    else:
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        conn.execute("""
+            INSERT OR REPLACE INTO sync_metadata (module, source, updated_at)
+            VALUES (?, ?, ?)
+        """, (module, source, now_str))
+
+def clear_sync_metadata(modules: List[str]) -> None:
+    """Drop the sync source/timestamp rows for the given modules.
+
+    Called whenever the underlying records are deleted so the UI stops showing a
+    stale "last update time" for data that is no longer in the database.
+    """
+    if not modules:
+        return
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        placeholders = ",".join("?" for _ in modules)
+        conn.execute(f"DELETE FROM sync_metadata WHERE module IN ({placeholders})", tuple(modules))
+
+# Per-file metadata modules mapped to the query that counts their records, so a
+# timestamp can never outlive the data it describes.
+_MODULE_RECORD_COUNTS: Dict[str, str] = {
+    "netbox_sites": "SELECT COUNT(*) FROM sites_records",
+    "netbox_VLANs": "SELECT COUNT(*) FROM ipam_records WHERE record_type = 'vlan'",
+    "netbox_prefixes": "SELECT COUNT(*) FROM ipam_records WHERE record_type = 'prefix'",
+    "netbox_devices": "SELECT COUNT(*) FROM inventory_records WHERE category IN ('device', 'hypervisor')",
+    "netbox_virtual_machines": "SELECT COUNT(*) FROM inventory_records WHERE category = 'vm'",
+    "ipam": "SELECT (SELECT COUNT(*) FROM ipam_records) + (SELECT COUNT(*) FROM sites_records)",
+    "naming": "SELECT COUNT(*) FROM inventory_records",
+}
+
+def get_sync_metadata(module: str) -> Dict[str, str]:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT source, updated_at FROM sync_metadata WHERE module = ?", (module,))
+        row = cursor.fetchone()
+
+        if row and module in _MODULE_RECORD_COUNTS:
+            cursor.execute(_MODULE_RECORD_COUNTS[module])
+            if int(cursor.fetchone()[0] or 0) == 0:
+                # Records were removed without the timestamp being cleared (e.g. by an
+                # older build); drop the orphaned row so no stale date is displayed.
+                cursor.execute("DELETE FROM sync_metadata WHERE module = ?", (module,))
+                conn.commit()
+                row = None
+
+    if row:
+        return {"source": row["source"], "updated_at": row["updated_at"]}
+    return {"source": "None", "updated_at": "Never"}
+
+# ── SMART SITE / SCOPE ID LOOKUP ─────────────────────────────────────────
+
+def save_sites_batch(sites: List[Dict[str, Any]], clear_first: bool = False, source: str = "Agent (PowerShell)", conn=None) -> int:
+    if conn is None:
+        init_db()
+    _conn = conn if conn is not None else sqlite3.connect(DB_PATH)
+    _owns_conn = conn is None
+    if clear_first:
+        _conn.execute("DELETE FROM sites_records")
+
+    count = 0
+    for s in sites:
+        site_id = s.get("id") or s.get("ID")
+        name = str(s.get("name") or s.get("Name") or "").strip()
+        slug = str(s.get("slug") or s.get("Slug") or "").strip()
+        if name and name.lower() != "nan":
+            _conn.execute("""
+                INSERT OR REPLACE INTO sites_records (id, name, slug)
+                VALUES (?, ?, ?)
+            """, (int(site_id) if str(site_id).isdigit() else None, name, slug))
+            count += 1
+
+    if _owns_conn:
+        _conn.commit()
+        _conn.close()
+    set_sync_metadata("netbox_sites", source, conn=_conn if not _owns_conn else None)
+    return count
+
+def lookup_scope_id(site_name: str) -> Optional[int]:
+    """Smart lookup for Scope ID prioritizing exact and whole-word matches over substrings."""
+    if not site_name:
+        return None
+    init_db()
+    q = site_name.strip().lower()
+
+    # 1. Exact match via SQL — uses idx_sites_slug / name column directly
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, name, slug FROM sites_records WHERE LOWER(name) = ? OR LOWER(slug) = ?",
+            (q, q)
+        )
+        row = cursor.fetchone()
+        if row:
+            return row["id"]
+
+        # 2. Starts-with match via SQL — leverages index on name column
+        cursor.execute(
+            "SELECT id, name, slug FROM sites_records WHERE LOWER(name) LIKE ? OR LOWER(slug) LIKE ?",
+            (f"{q}%", f"{q}%")
+        )
+        starts_rows = cursor.fetchall()
+
+    if starts_rows:
+        starts_rows.sort(key=lambda r: (
+            any(c in (r["name"] or "").lower() or c in (r["slug"] or "").lower()
+                for c in ("azure", "aws", "gcp", "cloud")),
+            len(r["name"] or "")
+        ))
+        return starts_rows[0]["id"]
+
+    # 3. Fallback: full scan for word-boundary and substring matches (small table)
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, name, slug FROM sites_records")
+        all_sites = cursor.fetchall()
+
+    word_pattern = re.compile(rf'\b{re.escape(q)}\b', re.IGNORECASE)
+    word_matches = []
+    for row in all_sites:
+        sname_str = row["name"] or ""
+        sslug_str = (row["slug"] or "").replace("-", " ")
+        if word_pattern.search(sname_str) or word_pattern.search(sslug_str):
+            is_cloud = any(c in sname_str.lower() or c in sslug_str.lower() for c in ["azure", "aws", "gcp", "cloud"])
+            word_matches.append((is_cloud, len(sname_str), row["id"]))
+
+    if word_matches:
+        word_matches.sort(key=lambda x: (x[0], x[1]))
+        return word_matches[0][2]
+
+    # 4. Substring match (for query length >= 4)
+    if len(q) >= 4:
+        sub_matches = []
+        for row in all_sites:
+            sname_str = row["name"] or ""
+            sslug_str = row["slug"] or ""
+            if q in sname_str.lower() or q in sslug_str.lower():
+                is_cloud = any(c in sname_str.lower() or c in sslug_str.lower() for c in ["azure", "aws", "gcp", "cloud"])
+                sub_matches.append((is_cloud, len(sname_str), row["id"]))
+        if sub_matches:
+            sub_matches.sort(key=lambda x: (x[0], x[1]))
+            return sub_matches[0][2]
+
+    return None
+
+def lookup_site_supernet_from_db(site_name: str) -> Optional[str]:
+    if not site_name:
+        return None
+    init_db()
+    clean = site_name.strip().lower()
+
+    # Phase 1: Index-friendly exact match on site column
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT prefix_or_subnet, description, role, site, vlan_name FROM ipam_records
+            WHERE LOWER(site) = ? AND prefix_or_subnet LIKE '%/%'
+        """, (clean,))
+        rows = cursor.fetchall()
+
+    candidates = _score_supernet_candidates(rows, clean)
+    if candidates:
+        candidates.sort(key=lambda x: (-x["score"], x["mask"]))
+        return candidates[0]["prefix"]
+
+    # Phase 2: Fallback — substring scan (only if no exact match found)
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT prefix_or_subnet, description, role, site, vlan_name FROM ipam_records
+            WHERE (LOWER(site) LIKE ? OR LOWER(description) LIKE ? OR LOWER(role) LIKE ? OR LOWER(vlan_name) LIKE ?)
+            AND prefix_or_subnet LIKE '%/%'
+        """, (f"%{clean}%", f"%{clean}%", f"%{clean}%", f"%{clean}%"))
+        rows = cursor.fetchall()
+
+    candidates = _score_supernet_candidates(rows, clean)
+    if candidates:
+        candidates.sort(key=lambda x: (-x["score"], x["mask"]))
+        return candidates[0]["prefix"]
+    return None
+
+
+def _score_supernet_candidates(rows, clean: str) -> list:
+    """Score IPAM supernet candidates by relevance to the query string."""
+    candidates = []
+    for r in rows:
+        p_str = r["prefix_or_subnet"]
+        desc = (r["description"] or "").lower()
+        role = (r["role"] or "").lower()
+        site_val = (r["site"] or "").lower()
+        vname = (r["vlan_name"] or "").lower()
+
+        if p_str and "/" in p_str:
+            try:
+                mask = int(p_str.split("/")[1])
+                score = 0
+                if clean == site_val: score += 100
+                if "site subnet" in desc or "site subnet" in role: score += 50
+                if "supernet" in desc or "supernet" in role: score += 40
+                if "container" in desc or "container" in role: score += 30
+                if clean in site_val: score += 20
+                if clean in desc: score += 10
+                candidates.append({"prefix": p_str, "mask": mask, "score": score})
+            except (ValueError, IndexError):
+                pass
+    return candidates
+
+# ── INVENTORY RECORDS ───────────────────────────────────────────────────
+
+def save_records_batch(records: List[Dict[str, Any]], clear_first: bool = False, source: str = "Agent (PowerShell)", conn=None) -> Dict[str, int]:
+    if conn is None:
+        init_db()
+    _conn = conn if conn is not None else sqlite3.connect(DB_PATH)
+    _owns_conn = conn is None
+    if clear_first:
+        _conn.execute("DELETE FROM inventory_records")
+
+    counts = {"device": 0, "hypervisor": 0, "vm": 0}
+    has_devices = False
+    has_vms = False
+    
+    for r in records:
+        cat = r.get("category", "device")
+        _conn.execute("""
+            INSERT INTO inventory_records (category, name, description, manufacturer, model_or_role, site, cluster)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            cat,
+            r.get("name", "").strip(),
+            r.get("description", "").strip(),
+            r.get("manufacturer", "").strip(),
+            r.get("model_or_role", "").strip(),
+            r.get("site", "").strip(),
+            r.get("cluster", "").strip()
+        ))
+        counts[cat] = counts.get(cat, 0) + 1
+        
+        if cat in ("device", "hypervisor"):
+            has_devices = True
+        elif cat == "vm":
+            has_vms = True
+
+    if _owns_conn:
+        _conn.commit()
+    if has_devices:
+        set_sync_metadata("netbox_devices", source, conn=_conn if not _owns_conn else None)
+    if has_vms:
+        set_sync_metadata("netbox_virtual_machines", source, conn=_conn if not _owns_conn else None)
+    if _owns_conn:
+        _conn.close()
+    
+    return counts
+
+def save_universal_csv(file_bytes, filename: str = "", clear_first: bool = False) -> Dict[str, int]:
+    df = pd.read_csv(file_bytes)
+    cols = {str(c).lower().strip(): c for c in df.columns}
+
+    # Check for IPAM-specific files (should go to IPAM tab)
+    if "vid" in cols or "q-in-q role" in cols or "q-in-q svlan" in cols or "prefixes" in cols or "prefix" in cols:
+        raise ValueError(
+            "This appears to be an IPAM CSV file (VLANs or Prefixes). "
+            "Please upload it in the **🌐 IPAM** tab instead. "
+            "Naming tab accepts: netbox_devices.csv, netbox_virtual_machines.csv, "
+            "netbox_device_types.csv, netbox_device_roles.csv, netbox_platforms.csv"
+        )
+
+    if "asns" in cols or "facility" in cols or "time zone" in cols:
+        raise ValueError(
+            "This appears to be a NetBox Sites export (netbox_sites.csv). "
+            "Please upload it in the **🌐 IPAM** tab instead. "
+            "Naming tab accepts: netbox_devices.csv, netbox_virtual_machines.csv, "
+            "netbox_device_types.csv, netbox_device_roles.csv, netbox_platforms.csv"
+        )
+
+    name_col = cols.get("name")
+    if not name_col:
+        raise ValueError("Invalid CSV: missing 'Name' column.")
+
+    fname_lower = filename.lower()
+    is_vm_export = False
+    if "vcpus" in cols or "memory" in cols or "disk" in cols:
+        is_vm_export = True
+    elif "virtual" in fname_lower or "vm" in fname_lower:
+        is_vm_export = True
+    elif "device type" not in cols and "rack" not in cols and "serial" not in cols and "cluster" in cols:
+        is_vm_export = True
+
+    role_col = cols.get("role", cols.get("device role", cols.get("role name", "")))
+    type_col = cols.get("device type", cols.get("type", cols.get("device_type", "")))
+    mfg_col = cols.get("manufacturer", cols.get("make", ""))
+    site_col = cols.get("site", cols.get("location", ""))
+    desc_col = cols.get("description", cols.get("comments", ""))
+    cluster_col = cols.get("cluster", "")
+
+    records = []
+    for _, row in df.iterrows():
+        name = str(row.get(name_col, "")).strip()
+        if not name or name.lower() == "nan":
+            continue
+
+        role = str(row.get(role_col, "")).strip() if role_col else ""
+        dtype = str(row.get(type_col, "")).strip() if type_col else ""
+        mfg = str(row.get(mfg_col, "")).strip() if mfg_col else ""
+        site = str(row.get(site_col, "")).strip() if site_col else ""
+        desc = str(row.get(desc_col, "")).strip() if desc_col else ""
+        cluster = str(row.get(cluster_col, "")).strip() if cluster_col else ""
+
+        for k in [role, dtype, mfg, site, desc, cluster]:
+            if k.lower() == "nan": 
+                k = ""
+
+        if is_vm_export:
+            cat = "vm"
+        else:
+            combined = f"{name} {role} {dtype} {desc}".lower()
+            if any(h in combined for h in ["esx", "hypervisor", "infhost", "vmhost", "esxi"]):
+                cat = "hypervisor"
+            else:
+                cat = "device"
+
+        records.append({
+            "category": cat,
+            "name": name,
+            "description": desc if desc.lower() != "nan" else "",
+            "manufacturer": mfg if mfg.lower() != "nan" else "",
+            "model_or_role": dtype or role,
+            "site": site if site.lower() != "nan" else "",
+            "cluster": cluster if cluster.lower() != "nan" else ""
+        })
+
+    return save_records_batch(records, clear_first=clear_first, source="Manual CSV Upload")
+
+def get_records_by_category(category: str, site_filter: str = "") -> List[Dict[str, Any]]:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        clean_filter = site_filter.strip().lower()
+        if clean_filter:
+            # Use prefix match (index-friendly) first
+            cursor.execute("""
+                SELECT * FROM inventory_records
+                WHERE category = ? AND (LOWER(site) LIKE ? OR LOWER(name) LIKE ?)
+                ORDER BY id ASC
+            """, (category, f"{clean_filter}%", f"{clean_filter}%"))
+            rows = cursor.fetchall()
+            # Fall back to substring match only if prefix match returned nothing
+            if not rows:
+                cursor.execute("""
+                    SELECT * FROM inventory_records
+                    WHERE category = ? AND (LOWER(site) LIKE ? OR LOWER(name) LIKE ?)
+                    ORDER BY id ASC
+                """, (category, f"%{clean_filter}%", f"%{clean_filter}%"))
+                rows = cursor.fetchall()
+            return [dict(r) for r in rows]
+
+        cursor.execute("SELECT * FROM inventory_records WHERE category = ? ORDER BY id ASC", (category,))
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows]
+
+# ── DEDICATED IPAM & PREFIXES ───────────────────────────────────────────
+
+def save_ipam_records_batch(records: List[Dict[str, Any]], clear_first: bool = False, source: str = "Agent (PowerShell)", conn=None) -> int:
+    if conn is None:
+        init_db()
+    _conn = conn if conn is not None else sqlite3.connect(DB_PATH)
+    _owns_conn = conn is None
+    if clear_first:
+        _conn.execute("DELETE FROM ipam_records")
+
+    count = 0
+    has_vlans = False
+    has_prefixes = False
+    
+    for r in records:
+        raw_prefix = str(r.get("prefix_or_subnet") or r.get("prefix") or r.get("subnet") or r.get("address") or r.get("Prefixes") or "").strip()
+        if raw_prefix.lower() == "nan":
+            raw_prefix = ""
+
+        cidrs = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}/\d{1,2}\b', raw_prefix)
+        if not cidrs and "/" in raw_prefix:
+            cidrs = [raw_prefix]
+
+        v_id = int(r.get("vlan_id") or r.get("vid") or r.get("VID") or 0) if str(r.get("vlan_id") or r.get("vid") or r.get("VID") or "").isdigit() else None
+        rec_type = str(r.get("record_type") or ("vlan" if v_id or r.get("vlan_name") else "prefix")).strip().lower()
+
+        # VLANs are kept even without an assigned prefix; prefixes require a CIDR.
+        if not cidrs:
+            if rec_type != "vlan" or not (v_id or r.get("vlan_name")):
+                continue
+            cidrs = [""]
+
+        if rec_type == "vlan":
+            has_vlans = True
+        else:
+            has_prefixes = True
+
+        for cidr in cidrs:
+            _conn.execute("""
+                INSERT INTO ipam_records (prefix_or_subnet, vlan_id, vlan_name, role, site, scope_id, description, record_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                cidr,
+                v_id,
+                str(r.get("vlan_name") or r.get("name") or r.get("Name") or "").strip(),
+                str(r.get("role") or r.get("Role") or "").strip(),
+                str(r.get("site") or r.get("Site") or "").strip(),
+                int(r.get("scope_id")) if str(r.get("scope_id") or "").isdigit() else None,
+                str(r.get("description") or r.get("desc") or r.get("Description") or "").strip(),
+                rec_type
+            ))
+            count += 1
+
+    if _owns_conn:
+        _conn.commit()
+    if has_vlans:
+        set_sync_metadata("netbox_VLANs", source, conn=_conn if not _owns_conn else None)
+    if has_prefixes:
+        set_sync_metadata("netbox_prefixes", source, conn=_conn if not _owns_conn else None)
+    if _owns_conn:
+        _conn.close()
+    
+    return count
+
+def get_existing_prefix_strings() -> List[str]:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT DISTINCT prefix_or_subnet FROM ipam_records WHERE prefix_or_subnet != ''")
+        rows = cursor.fetchall()
+    return [r[0] for r in rows if r[0] and "/" in r[0]]
+
+def clear_device_records() -> int:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("DELETE FROM inventory_records WHERE category IN ('device', 'hypervisor')")
+        deleted = conn.total_changes
+        conn.commit()
+    clear_sync_metadata(["netbox_devices"])
+    return deleted
+
+def clear_vm_records() -> int:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("DELETE FROM inventory_records WHERE category = 'vm'")
+        deleted = conn.total_changes
+        conn.commit()
+    clear_sync_metadata(["netbox_virtual_machines"])
+    return deleted
+
+def clear_inventory_records() -> int:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("DELETE FROM inventory_records")
+        deleted = conn.total_changes
+        conn.commit()
+    clear_sync_metadata(["naming", "netbox_devices", "netbox_virtual_machines"])
+    return deleted
+
+def clear_sites_records() -> int:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("DELETE FROM sites_records")
+        deleted = conn.total_changes
+        conn.commit()
+    clear_sync_metadata(["netbox_sites"])
+    return deleted
+
+def clear_vlans_records() -> int:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("DELETE FROM ipam_records WHERE record_type = 'vlan'")
+        deleted = conn.total_changes
+        conn.commit()
+    clear_sync_metadata(["netbox_VLANs"])
+    return deleted
+
+def clear_prefixes_records() -> int:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("DELETE FROM ipam_records WHERE record_type = 'prefix'")
+        deleted = conn.total_changes
+        conn.commit()
+    clear_sync_metadata(["netbox_prefixes"])
+    return deleted
+
+def clear_ipam_records() -> int:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("DELETE FROM ipam_records")
+        conn.execute("DELETE FROM sites_records")
+        deleted = conn.total_changes
+        conn.commit()
+    clear_sync_metadata(["ipam", "netbox_sites", "netbox_VLANs", "netbox_prefixes"])
+    return deleted
+
+def get_total_record_count() -> int:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM inventory_records")
+        total = cursor.fetchone()[0]
+    return total
+
+def get_total_ipam_count() -> int:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM ipam_records")
+        total = cursor.fetchone()[0]
+    return total
+
+def get_total_vlans_count() -> int:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM ipam_records WHERE record_type = 'vlan'")
+        total = cursor.fetchone()[0]
+    return total
+
+def get_total_prefixes_count() -> int:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM ipam_records WHERE record_type = 'prefix'")
+        total = cursor.fetchone()[0]
+    return total
+
+def get_total_sites_count() -> int:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM sites_records")
+        total = cursor.fetchone()[0]
+    return total
+
+def get_file_sync_metadata() -> Dict[str, str]:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM sites_records")
+        sites = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM ipam_records")
+        ipam = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM inventory_records")
+        inventory = cursor.fetchone()[0]
+    return {
+        "sites_records": str(sites) if sites > 0 else "Never",
+        "ipam_records": str(ipam) if ipam > 0 else "Never",
+        "inventory_records": str(inventory) if inventory > 0 else "Never",
+    }
+
+
+def get_max_scope_id() -> Optional[int]:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT MAX(id) FROM sites_records")
+        row = cursor.fetchone()
+    return int(row[0]) if row and row[0] is not None else None
+
+def get_site_summary() -> str:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        # Check if 'description' column exists (it does not exist in sites_records)
+        cursor.execute("SELECT name FROM sites_records")
+        rows = cursor.fetchall()
+    if not rows:
+        return "No site data ingested."
+    return "\n".join([f"- {r[0]}" for r in rows])
+
+def get_ipam_records_by_site(site_name: str) -> List[Dict[str, Any]]:
+    init_db()
+    clean = site_name.strip().lower()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        # Exact match first (uses idx_ipam_site), then prefix match, then substring fallback
+        cursor.execute("SELECT * FROM ipam_records WHERE LOWER(site) = ?", (clean,))
+        rows = cursor.fetchall()
+        if not rows:
+            cursor.execute("SELECT * FROM ipam_records WHERE LOWER(site) LIKE ?", (f"{clean}%",))
+            rows = cursor.fetchall()
+        if not rows:
+            cursor.execute("SELECT * FROM ipam_records WHERE LOWER(site) LIKE ?", (f"%{clean}%",))
+            rows = cursor.fetchall()
+    return [dict(r) for r in rows]
+
+def lookup_vlan_description_from_db(role_name: str) -> Optional[str]:
+    """Look up standard VLAN description from ingested database based on Role name."""
+    if not role_name:
+        return None
+    clean_role = role_name.strip()
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            # 1. Exact match on role
+            cursor.execute(
+                "SELECT description FROM ipam_records WHERE LOWER(role) = LOWER(?) AND description != '' LIMIT 1",
+                (clean_role,)
+            )
+            row = cursor.fetchone()
+            if row and row[0]:
+                return row[0]
+
+            # 2. Match on VLAN name if role was stored under vlan_name
+            cursor.execute(
+                "SELECT description FROM ipam_records WHERE LOWER(vlan_name) = LOWER(?) AND description != '' LIMIT 1",
+                (clean_role,)
+            )
+            row = cursor.fetchone()
+            if row and row[0]:
+                return row[0]
+    except Exception:
+        pass
+    return None
+def get_all_site_names() -> List[str]:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sites_records")
+        rows = cursor.fetchall()
+    return [r[0] for r in rows if r[0]]
+
+def get_full_site_inventory_summary(site_name: str) -> str:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        clean = site_name.strip().lower()
+        
+        # Get IPAM
+        cursor.execute("SELECT prefix_or_subnet, vlan_name, role FROM ipam_records WHERE LOWER(site) = ?", (clean,))
+        ipam_rows = cursor.fetchall()
+        
+        # Get Inventory
+        cursor.execute("SELECT name, category, model_or_role FROM inventory_records WHERE LOWER(site) = ?", (clean,))
+        inv_rows = cursor.fetchall()
+    
+    summary = [f"### Inventory for {site_name}:"]
+    
+    summary.append("\n**IP Prefixes/VLANs:**")
+    if not ipam_rows: summary.append("- None")
+    for r in ipam_rows:
+        summary.append(f"- {r['prefix_or_subnet']} | {r['vlan_name']} | {r['role']}")
+        
+    summary.append("\n**Devices/VMs:**")
+    if not inv_rows: summary.append("- None")
+    for r in inv_rows:
+        summary.append(f"- {r['name']} ({r['category']}) | {r['model_or_role']}")
+        
+    return "\n".join(summary)

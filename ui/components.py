@@ -1,0 +1,1389 @@
+from pathlib import Path
+from typing import Callable
+from datetime import datetime
+
+import streamlit as st
+from config.constants import APP_VERSION
+from config.settings import AVAILABLE_MODELS, OPENROUTER_BASE_URL
+from core.ai_client import (
+    call_ai,
+    fetch_free_models,
+    healthcheck_ai,
+    sanitize_model_id,
+)
+from core.backup_manager import (
+    clear_backup_records,
+    get_backup_metadata,
+    save_netbox_backup,
+    set_backup_enabled,
+)
+from core.db_manager import DB_PATH, get_total_record_count, get_records_by_category
+from core.shared_backup_state import SharedBackupState
+from core.vault import SanitizerVault
+
+def _cached_fetch_toolbar_stats(backup_stats_version):
+    tot = get_total_record_count()
+    dev = len(get_records_by_category("device")) + len(get_records_by_category("hypervisor"))
+    vms = len(get_records_by_category("vm"))
+    return tot, dev, vms
+
+CHAT_HEIGHT = 380
+
+# Essential NetBox endpoints included in minimal backups
+ESSENTIAL_ENDPOINTS = {
+    # DCIM - Core infrastructure
+    "dcim/regions", "dcim/site-groups", "dcim/sites", "dcim/locations",
+    "dcim/rack-roles", "dcim/rack-groups", "dcim/rack-types", "dcim/racks",
+    "dcim/manufacturers", "dcim/platforms", "dcim/device-roles", "dcim/device-types",
+    "dcim/devices", "dcim/interfaces", "dcim/cables", "dcim/cable-terminations",
+    "dcim/console-ports", "dcim/console-server-ports", "dcim/power-ports",
+    "dcim/power-outlets", "dcim/power-panels", "dcim/power-feeds",
+    "dcim/modules", "dcim/module-types", "dcim/module-bays",
+    # IPAM - IP Address Management
+    "ipam/rirs", "ipam/asn-ranges", "ipam/asns", "ipam/aggregates",
+    "ipam/roles", "ipam/vrfs", "ipam/prefixes", "ipam/ip-ranges",
+    "ipam/ip-addresses", "ipam/vlan-groups", "ipam/vlans",
+    "ipam/service-templates", "ipam/services", "ipam/fhrp-groups",
+    "ipam/fhrp-group-assignments",
+    # Virtualization
+    "virtualization/cluster-types", "virtualization/cluster-groups",
+    "virtualization/clusters", "virtualization/virtual-machine-types",
+    "virtualization/virtual-machines", "virtualization/interfaces",
+    "virtualization/virtual-disks",
+    # Tenancy
+    "tenancy/tenant-groups", "tenancy/tenants", "tenancy/contact-groups",
+    "tenancy/contact-roles", "tenancy/contacts", "tenancy/contact-assignments",
+    # Circuits
+    "circuits/providers", "circuits/provider-accounts", "circuits/provider-networks",
+    "circuits/circuit-types", "circuits/circuits", "circuits/circuit-terminations",
+    # Extras - Configuration only
+    "extras/tags", "extras/custom-fields", "extras/custom-field-choice-sets",
+    "extras/config-contexts", "extras/config-templates",
+}
+
+# Stage-based progress mapping for JSON upload.
+# Each tuple: ( substrings to match, progress fraction 0..1 )
+_UPLOAD_STAGES = [
+    (["Reading file", "Decoding", "Loading JSON"], 0.10),
+    (["Parsing JSON"], 0.20),
+    (["JSON parsed", "Organizing"], 0.30),
+    (["Clearing old", "Planning per-endpoint"], 0.40),
+    (["Ingesting records"], 0.55),
+    (["Processing sites", "Ingesting interfaces", "Ingesting structured"], 0.70),
+    (["Initializing schema"], 0.85),
+    (["Saving metadata"], 0.95),
+    (["Complete"], 1.00),
+]
+
+
+def _authority_status() -> dict:
+    """Return compact authority status derived from persistent DB state (read-only)."""
+    import sqlite3
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    # JSON Baseline — reuse meta["loaded"] from caller; here just check row exists.
+    cursor.execute("SELECT record_count FROM backup_metadata WHERE id = 1")
+    meta_row = cursor.fetchone()
+    json_loaded = bool(meta_row and meta_row[0] and int(meta_row[0]) > 0)
+
+    # Full Catalogue count
+    try:
+        cursor.execute("SELECT COUNT(*) FROM full_endpoint_catalogue")
+        catalogue_count = cursor.fetchone()[0]
+    except Exception:
+        catalogue_count = 0
+
+    # Latest Full backup timestamp
+    try:
+        cursor.execute(
+            "SELECT latest_full_backup_completed FROM backup_metadata WHERE id = 1"
+        )
+        latest_full_row = cursor.fetchone()
+        latest_full = latest_full_row[0] if latest_full_row and latest_full_row[0] else None
+    except Exception:
+        latest_full = None
+
+    conn.close()
+
+    # CSV overrides — count entries whose source is CSV/Excel
+    registry = SharedBackupState.get_object_registry()
+    csv_count = sum(
+        1 for meta in registry.values()
+        if meta.get("source_type") == "csv"
+        or str(meta.get("source", "")).lower().endswith((".csv", ".xlsx"))
+    )
+
+    return {
+        "json_baseline": "Loaded" if json_loaded else "Cleared",
+        "catalogue_count": catalogue_count,
+        "latest_full": latest_full or "None",
+        "csv_count": csv_count,
+    }
+
+# The PowerShell exporters ship in the repo and are read from disk so the scripts and
+# the download buttons can never drift apart. They walk the NetBox REST API and
+# write NetBox_Full_Backup_<timestamp>.json or NetBox_Minimal_Backup_<timestamp>.json.
+NETBOX_EXPORT_FULL_PS1_PATH = Path(__file__).resolve().parent.parent / "data" / "netbox-export-full.ps1"
+NETBOX_EXPORT_MIN_PS1_PATH = Path(__file__).resolve().parent.parent / "data" / "netbox-export-min.ps1"
+
+_PS1_MISSING = (
+    "# netbox-export script was not found in this deployment.\n"
+    "# Expected at: data/netbox-export-full.ps1 or data/netbox-export-min.ps1\n"
+)
+
+
+@st.cache_data(show_spinner=False)
+def _load_export_script(path_str: str, mtime: float) -> str:
+    """Read the exporter from disk. `mtime` busts the cache when the file changes."""
+    try:
+        # utf-8-sig strips the BOM PowerShell editors add, which would otherwise
+        # render as a stray character at the top of the code block.
+        return Path(path_str).read_text(encoding="utf-8-sig")
+    except OSError:
+        return _PS1_MISSING
+
+
+def get_netbox_export_script(script_type: str = "full") -> str:
+    """Get the PowerShell export script content.
+    
+    Args:
+        script_type: Either "full" or "min" to select which script to load
+    """
+    if script_type == "min":
+        script_path = NETBOX_EXPORT_MIN_PS1_PATH
+    else:
+        script_path = NETBOX_EXPORT_FULL_PS1_PATH
+    
+    try:
+        mtime = script_path.stat().st_mtime
+    except OSError:
+        return _PS1_MISSING
+    return _load_export_script(str(script_path), mtime)
+
+
+def _clear_ai_chat(history_key: str, open_key: str) -> None:
+    st.session_state[history_key] = []
+    st.session_state[open_key] = True
+
+def _keep_ai_chat_open(open_key: str) -> None:
+    st.session_state[open_key] = True
+
+def render_ai_chat(
+    history_key: str,
+    caption: str,
+    placeholder: str,
+    active_model: str,
+    build_system_prompt: Callable[[str], str],
+    label: str = "🤖 AI Assistant",
+    height: int = CHAT_HEIGHT,
+) -> None:
+    """Render a self-contained AI chat panel.
+
+    The transcript lives in a fixed-height scrolling container and the input box is
+    rendered after it, so the input always stays at the bottom of the chat. Clearing
+    and submitting both run as widget callbacks, which fire before the panel is drawn
+    and therefore apply on the same run without an extra st.rerun().
+    """
+    open_key = f"{history_key}_open"
+    if history_key not in st.session_state:
+        st.session_state[history_key] = []
+    if open_key not in st.session_state:
+        st.session_state[open_key] = False
+
+    with st.expander(label, expanded=st.session_state[open_key]):
+        st.caption(caption)
+        history = st.session_state[history_key]
+
+        # Reserve the header row now, but render the button after this turn is
+        # processed so its disabled state reflects the messages just added.
+        _, c_clear = st.columns([3, 1])
+
+        transcript = st.container(height=height, border=True)
+        for message in history:
+            with transcript.chat_message(message["role"]):
+                st.markdown(message["content"])
+
+        prompt = st.chat_input(
+            placeholder,
+            key=f"{history_key}_input",
+            on_submit=_keep_ai_chat_open,
+            args=(open_key,),
+        )
+
+        if prompt:
+            history.append({"role": "user", "content": prompt})
+            with transcript.chat_message("user"):
+                st.markdown(prompt)
+
+            # Sanitize sensitive data in the system prompt before sending to the LLM.
+            # Generate ONE deterministic session_id and reuse it for both the system
+            # prompt and the user prompt so that every token lives in a single vault
+            # session dictionary and restore() can always find its mapping.
+            vault = SanitizerVault()
+            full_system_prompt = build_system_prompt(prompt)
+            safe_system_prompt, session_id = vault.sanitize(full_system_prompt)
+            safe_prompt, _ = vault.sanitize(prompt, session_id=session_id)
+
+            with transcript.chat_message("assistant"):
+                with st.spinner("Thinking..."):
+                    try:
+                        response = call_ai(
+                            safe_prompt,
+                            active_model,
+                            custom_system_msg=safe_system_prompt,
+                            _pre_sanitized=True,
+                        )
+                    except Exception as exc:
+                        response = f"❌ AI Assistant temporarily unavailable: {exc}"
+                    else:
+                        # Restore (de-tokenize) the LLM response using the same session
+                        response = vault.restore(response, session_id=session_id)
+                st.markdown(response)
+
+            history.append({"role": "assistant", "content": response})
+
+        c_clear.button(
+            "🗑️ Clear Chat",
+            key=f"{history_key}_clear",
+            on_click=_clear_ai_chat,
+            args=(history_key, open_key),
+            disabled=not history,
+            width="stretch",
+        )
+
+def _handle_json_backup_upload(uploader_key: str, scope_key: str) -> None:
+    """Handle JSON backup file upload only - optimized for speed."""
+    uploaded = st.session_state.get(uploader_key)
+    result_key = f"backup_upload_result_{scope_key}"
+    error_key = f"backup_upload_error_{scope_key}"
+
+    if not uploaded:
+        return
+
+    file_obj = uploaded
+    file_size_mb = file_obj.size / (1024 * 1024) if hasattr(file_obj, 'size') else 0
+    
+    # Show progress for large files
+    progress_placeholder = st.empty()
+    progress_bar = st.progress(0)
+    progress_caption = st.empty()
+
+    def progress_callback(message: str):
+        """Update Streamlit UI with deterministic stage-based progress."""
+        progress_placeholder.info(f"⏳ {message}")
+        progress_caption.caption(message)
+        matched = False
+        for patterns, fraction in _UPLOAD_STAGES:
+            if any(p in message for p in patterns):
+                progress_bar.progress(fraction)
+                matched = True
+                break
+        if not matched:
+            # Unknown message — keep current progress, just update status text.
+            pass
+
+    try:
+        if hasattr(file_obj, "seek"):
+            file_obj.seek(0)
+
+        # Read and parse JSON for dynamic inspection
+        import json
+        file_content = file_obj.read()
+
+        # Parse JSON and load into dynamic backup state + schema registry
+        try:
+            # Handle UTF-8 BOM if present (common in Windows-generated files)
+            content_str = file_content.decode('utf-8-sig')
+            backup_data = json.loads(content_str)
+            SharedBackupState.load_backup(backup_data, file_obj.name)
+
+            # Initialize universal schema registry from backup
+            from core.universal_schema_registry import initialize_schema_registry_from_uploaded_file
+            if hasattr(file_obj, "seek"):
+                file_obj.seek(0)
+            registry = initialize_schema_registry_from_uploaded_file(file_obj)
+        except json.JSONDecodeError as e:
+            st.session_state[error_key] = f"**{file_obj.name}**: Invalid JSON - {e}"
+            progress_bar.empty()
+            progress_placeholder.empty()
+            progress_caption.empty()
+            return
+        except UnicodeDecodeError as e:
+            st.session_state[error_key] = f"**{file_obj.name}**: File encoding error - {e}"
+            progress_bar.empty()
+            progress_placeholder.empty()
+            progress_caption.empty()
+            return
+
+        # Reset for save_netbox_backup
+        if hasattr(file_obj, "seek"):
+            file_obj.seek(0)
+
+        with st.spinner(f'Uploading {file_obj.name} ({file_size_mb:.1f} MB)...'):
+            result = save_netbox_backup(
+                file_obj,
+                filename=file_obj.name,
+                enable_schema_discovery=False,  # Fast upload - schema already initialized above
+                progress_callback=progress_callback
+            )
+
+        # Clear progress indicators
+        progress_bar.empty()
+        progress_placeholder.empty()
+        progress_caption.empty()
+
+        # Handle stale Full rejection
+        if result and result.get("error") == "stale_full":
+            st.session_state[error_key] = result["skipped"].get("full_backup", "Stale Full backup rejected")
+            st.session_state[result_key] = None
+            return
+
+    except Exception as exc:
+        progress_bar.empty()
+        progress_placeholder.empty()
+        progress_caption.empty()
+        st.session_state[error_key] = f"**{file_obj.name}**: {exc}"
+        st.session_state[result_key] = None
+        return
+
+    st.session_state[error_key] = ""
+    st.session_state[result_key] = result
+    st.session_state[f"netbox_backup_enabled_{scope_key}"] = True
+
+    skipped = result.get("skipped", {}) if result else {}
+    if skipped:
+        count = len(skipped)
+        st.toast(f"Skipped {count} endpoint(s) — safety rules prevented replacement", icon="⚠️")
+        st.session_state[f"backup_skipped_endpoints_{scope_key}"] = skipped
+
+    # Increment stats version so cached toolbar counters recompute
+    st.session_state["backup_stats_version"] = st.session_state.get("backup_stats_version", 0) + 1
+
+    # Show compact timing caption
+    if result and result.get("timings"):
+        total_s = result["timings"].get("total", 0)
+        if total_s > 0:
+            st.caption(f"Processing time: {total_s:.1f}s")
+
+    # Clear the file uploader by incrementing the counter
+    counter_key = f"json_uploader_counter_{scope_key}"
+    st.session_state[counter_key] = st.session_state.get(counter_key, 0) + 1
+
+
+def _handle_csv_backup_upload(uploader_key: str, scope_key: str) -> None:
+    """Handle CSV/Excel file uploads with user confirmation for endpoint classification."""
+    uploaded = st.session_state.get(uploader_key)
+    error_key = f"backup_upload_error_{scope_key}"
+
+    if not uploaded:
+        return
+
+    files = uploaded if isinstance(uploaded, list) else [uploaded]
+    
+    # Store pending files for confirmation
+    pending_key = f"csv_pending_confirmation_{scope_key}"
+    st.session_state[pending_key] = {
+        'files': files,
+        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    
+def _process_confirmed_csv_uploads(scope_key: str, confirmed_classifications: dict) -> None:
+    """Process CSV uploads after user confirmation."""
+    from core.universal_uploader import UniversalUploader
+    
+    pending_key = f"csv_pending_confirmation_{scope_key}"
+    error_key = f"backup_upload_error_{scope_key}"
+    
+    pending_data = st.session_state.get(pending_key)
+    if not pending_data:
+        return
+    
+    files = pending_data['files']
+    uploaded_at = pending_data['timestamp']
+    
+    try:
+        uploader = UniversalUploader()
+        
+        with st.spinner(f'Processing {len(files)} confirmed file(s)...'):
+            upload_result = uploader.process_uploaded_files_with_overrides(
+                files, 
+                confirmed_classifications
+            )
+        
+        if upload_result['errors']:
+            st.session_state[error_key] = "\n".join(upload_result['errors'])
+            return
+        
+        # Update SharedBackupState for dynamic backup display
+        source_files = ", ".join([f.name for f in files])
+        
+        for model_key, count in upload_result['by_model'].items():
+            # Map model keys to endpoint paths for SharedBackupState
+            endpoint = model_key.replace('.', '/')
+            SharedBackupState.add_csv_override(endpoint, count, source_files, uploaded_at)
+        
+        # Show success message
+        summary = uploader.get_processing_summary(upload_result)
+        st.toast(summary, icon="✅")
+        
+    except Exception as exc:
+        st.session_state[error_key] = f"Upload failed: {exc}"
+        return
+
+    st.session_state[error_key] = ""
+    
+    # Clear pending confirmation
+    del st.session_state[pending_key]
+    
+    # Clear the file uploader by incrementing the counter
+    counter_key = f"csv_uploader_counter_{scope_key}"
+    st.session_state[counter_key] = st.session_state.get(counter_key, 0) + 1
+
+
+
+def _handle_backup_toggle(checkbox_key: str) -> None:
+    set_backup_enabled(bool(st.session_state.get(checkbox_key)))
+
+
+def _handle_backup_clear(scope_key: str) -> None:
+    clear_backup_records(preserve_csv=True)
+    SharedBackupState.clear_json_only()
+
+    # Clear Schema Registry from session state
+    if "netbox_runtime_signatures" in st.session_state:
+        del st.session_state["netbox_runtime_signatures"]
+
+    st.session_state[f"backup_upload_result_{scope_key}"] = None
+    st.session_state[f"backup_upload_error_{scope_key}"] = ""
+    st.session_state.pop(f"netbox_backup_enabled_{scope_key}", None)
+
+    st.session_state["backup_stats_version"] = st.session_state.get("backup_stats_version", 0) + 1
+
+
+def _handle_backup_clear_all(scope_key: str) -> None:
+    """Clear all backup data: JSON, Minimal, CSV, catalogue, and session state."""
+    clear_backup_records(preserve_csv=False)
+    SharedBackupState.clear()
+
+    # Clear Schema Registry from session state
+    if "netbox_runtime_signatures" in st.session_state:
+        del st.session_state["netbox_runtime_signatures"]
+
+    st.session_state[f"backup_upload_result_{scope_key}"] = None
+    st.session_state[f"backup_upload_error_{scope_key}"] = ""
+    st.session_state.pop(f"netbox_backup_enabled_{scope_key}", None)
+
+    st.session_state["backup_stats_version"] = st.session_state.get("backup_stats_version", 0) + 1
+    st.toast("JSON, Minimal, CSV, endpoint catalogue and backup session state cleared.", icon="🗑️")
+
+
+def _handle_csv_clear(scope_key: str) -> None:
+    """Clear only CSV data, preserving JSON backup."""
+    count = SharedBackupState.clear_csv_only()
+    if count > 0:
+        st.toast(f"Cleared {count} CSV entries", icon="✅")
+    else:
+        st.toast("No CSV data to clear", icon="ℹ️")
+
+
+def _render_json_backup_section(scope_key: str, meta: dict, json_uploader_key: str, 
+                                checkbox_key: str, result_key: str, error_key: str) -> None:
+    """Render Step 1: JSON Backup upload, PowerShell scripts, and status display."""
+    st.markdown("**JSON Backup**")
+    st.caption("Customize which NetBox endpoints to include in your PowerShell backup script, then upload the generated JSON to initialize the schema registry.")
+    
+    # Show custom backup generator (includes dynamic usage instructions)
+    with st.expander("Get a backup (PowerShell export)", expanded=False):
+        from ui.custom_backup_generator import render_custom_backup_selector
+        render_custom_backup_selector(scope_key)
+
+    # JSON Upload Section
+    st.file_uploader(
+        "📦 Upload NetBox JSON Backup (Full or Minimal)",
+        type=["json"],
+        accept_multiple_files=False,
+        key=json_uploader_key,
+        on_change=_handle_json_backup_upload,
+        args=(json_uploader_key, scope_key),
+        help="Upload the JSON backup file generated by PowerShell export scripts."
+    )
+
+    error = st.session_state.get(error_key)
+    if error:
+        st.error(f"❌ {error}")
+
+    result = st.session_state.get(result_key)
+    if result:
+        message = (
+            f"✅ Ingested {result['total']} NetBox objects across "
+            f"{result.get('object_types', 0)} object types "
+            f"({result['sites']} sites, {result['ipam']} IPAM records, "
+            f"{result['devices']} devices, {result['vms']} VMs"
+        )
+        if result.get("choice_values"):
+            message += f", {result['choice_values']} custom field choices"
+        st.success(message + ").")
+        st.session_state[result_key] = None
+
+    # Backup Authority status (read-only, refreshes immediately)
+    try:
+        auth = _authority_status()
+        baseline_icon = "🟢" if auth["json_baseline"] == "Loaded" else "⚪"
+        latest = auth["latest_full"]
+        latest_str = latest.replace("T", " ")[:16] if latest and latest != "None" else "—"
+        st.caption(
+            f"JSON Baseline: {baseline_icon} {auth['json_baseline']} | "
+            f"Full catalogue: {auth['catalogue_count']} endpoints | "
+            f"Latest Full: {latest_str} | "
+            f"CSV overrides: {auth['csv_count']} active"
+        )
+    except Exception:
+        pass  # Non-blocking; status line is best-effort
+
+    # Authority status section — only when a JSON backup is loaded
+    if meta["loaded"]:
+        # The database holds the authoritative enabled flag; seed the widget from it.
+        if checkbox_key not in st.session_state:
+            st.session_state[checkbox_key] = meta["enabled"]
+
+        c_chk, c_clr = st.columns([3, 1])
+        with c_chk:
+            st.checkbox(
+                f"Include in AI Assistant — `{meta['filename']}` uploaded {meta['uploaded_at']} "
+                f"({meta['record_count']} objects)",
+                key=checkbox_key,
+                on_change=_handle_backup_toggle,
+                args=(checkbox_key,),
+                help="Tick to let the AI Assistant read this backup file. Untick to exclude it without deleting.",
+            )
+        with c_clr:
+            st.button(
+                "🗑️ Clear All JSON",
+                key=f"btn_clear_backup_{scope_key}",
+                on_click=_handle_backup_clear,
+                args=(scope_key,),
+                width="stretch",
+                type="secondary",
+                help="Clear all JSON backup data from backup_records table",
+            )
+
+        source = meta.get("source_info") or {}
+        if source:
+            bits = []
+            if source.get("netbox_url"):
+                bits.append(f"Source: `{source['netbox_url']}`")
+            if source.get("netbox_version"):
+                bits.append(f"NetBox `{source['netbox_version']}`")
+            if source.get("successful_endpoints") is not None:
+                bits.append(
+                    f"Endpoints: {source['successful_endpoints']}/"
+                    f"{source.get('endpoints_processed', '?')} OK"
+                )
+            if source.get("failed_endpoints"):
+                bits.append(f"⚠️ {source['failed_endpoints']} endpoint(s) failed")
+            if bits:
+                st.caption(" | ".join(bits))
+
+        if not meta["enabled"]:
+            st.warning("Backup is uploaded but excluded from AI Assistant lookups.", icon="⚠️")
+    else:
+        st.caption("⚪ No backup file uploaded — AI Assistant uses CSV/agent data only.")
+
+    # Clear Everything is rendered at the bottom of render_backup_uploader (A3)
+
+
+def _render_backup_contents_section(scope_key: str, meta: dict) -> None:
+    """Render the Backup contents expander with grouped endpoints."""
+    # Try to restore dynamic state from database if needed
+    if not SharedBackupState.has_backup() and meta["loaded"]:
+        # JSON backup exists in DB but not in session state - restore it
+        try:
+            from core.backup_manager import restore_backup_to_session_state
+            restore_backup_to_session_state()
+        except Exception:
+            pass  # Fall back to legacy system if restore fails
+    
+    if SharedBackupState.has_backup():
+        # Use dynamic inspection system
+        object_registry = SharedBackupState.get_object_registry()
+        object_count = len(object_registry)
+        
+        # Pre-calculate counts for expander title using requested is_csv rule
+        n_json_total = 0
+        n_csv_total = 0
+        for metadata in object_registry.values():
+            if metadata.get("source_type") == "csv" or str(metadata.get("source","")).lower().endswith((".csv", ".xlsx")):
+                n_csv_total += 1
+            else:
+                n_json_total += 1
+        
+        with st.expander(f"Backup contents (JSON {n_json_total} | CSV {n_csv_total})", expanded=False):
+            skipped = st.session_state.get(f"backup_skipped_endpoints_{scope_key}", {})
+            skip_caption_parts = []
+            for ep_path, reason in list(skipped.items())[:5]:
+                skip_caption_parts.append(f"{ep_path}: {reason}")
+            if skip_caption_parts:
+                skip_note = " | ".join(skip_caption_parts)
+                st.caption(f"⚠️ Skipped endpoints: {skip_note}")
+            
+            # Group endpoints by prefix (dcim/, ipam/, extras/, etc.)
+            grouped_objects = {}
+            ungrouped_objects = []
+            csv_endpoints = []  # Track CSV endpoints
+            
+            for endpoint, metadata in object_registry.items():
+                ep = str(endpoint)
+                source_type = metadata.get("source_type", "json")
+                is_csv = source_type == "csv" or metadata.get("source", "").lower().endswith((".csv", ".xlsx"))
+                
+                if is_csv:
+                    csv_endpoints.append((endpoint, metadata))
+                
+                if "/" in ep:
+                    prefix = ep.split("/")[0]
+                    if prefix not in grouped_objects:
+                        grouped_objects[prefix] = []
+                    grouped_objects[prefix].append((endpoint, metadata))
+                else:
+                    ungrouped_objects.append((endpoint, metadata))
+            
+            # Sort groups by prefix, then sort items within each group by label
+            sorted_groups = sorted(grouped_objects.items())
+            for prefix, items in sorted_groups:
+                items.sort(key=lambda x: x[1]["label"])
+            
+            # Sort ungrouped items by label
+            ungrouped_objects.sort(key=lambda x: x[1]["label"])
+            
+            # Build dataframe rows from all items
+            df_rows = []
+            n_json = 0
+            n_csv = 0
+            for prefix, items in sorted_groups:
+                for endpoint, metadata in items:
+                    label = metadata["label"]
+                    count = metadata["count"]
+                    timestamp = metadata["timestamp"]
+                    ep = metadata.get("endpoint", "")
+                    source_type = metadata.get("source_type", "json")
+                    is_csv_row = source_type == "csv" or str(metadata.get("source", "")).lower().endswith((".csv", ".xlsx"))
+                    if is_csv_row:
+                        n_csv += 1
+                    else:
+                        n_json += 1
+                    is_essential = ep in ESSENTIAL_ENDPOINTS
+                    try:
+                        if isinstance(timestamp, str):
+                            dt = datetime.fromisoformat(timestamp.replace("UTC", "").strip())
+                            compact_time = dt.strftime("%d-%m-%y %H:%M")
+                        else:
+                            compact_time = str(timestamp)
+                    except Exception:
+                        compact_time = str(timestamp)[:16] if timestamp else "N/A"
+                    df_rows.append({
+                        "Group": prefix if "/" in str(endpoint) else str(endpoint),
+                        "Endpoint": ep,
+                        "Label": label,
+                        "Count": count,
+                        "Source": "📊 CSV" if is_csv_row else "📦 JSON",
+                        "Essential": is_essential,
+                        "Updated": compact_time,
+                    })
+            for endpoint, metadata in ungrouped_objects:
+                label = metadata["label"]
+                count = metadata["count"]
+                timestamp = metadata["timestamp"]
+                ep = metadata.get("endpoint", "")
+                source_type = metadata.get("source_type", "json")
+                is_csv_row = source_type == "csv" or str(metadata.get("source", "")).lower().endswith((".csv", ".xlsx"))
+                if is_csv_row:
+                    n_csv += 1
+                else:
+                    n_json += 1
+                is_essential = ep in ESSENTIAL_ENDPOINTS
+                try:
+                    if isinstance(timestamp, str):
+                        dt = datetime.fromisoformat(timestamp.replace("UTC", "").strip())
+                        compact_time = dt.strftime("%d-%m-%y %H:%M")
+                    else:
+                        compact_time = str(timestamp)
+                except Exception:
+                    compact_time = str(timestamp)[:16] if timestamp else "N/A"
+                df_rows.append({
+                    "Group": str(endpoint),
+                    "Endpoint": ep,
+                    "Label": label,
+                    "Count": count,
+                    "Source": "📊 CSV" if is_csv_row else "📦 JSON",
+                    "Essential": is_essential,
+                    "Updated": compact_time,
+                })
+
+            import pandas as pd
+            df_backup = pd.DataFrame(df_rows) if df_rows else pd.DataFrame(columns=["Group", "Endpoint", "Label", "Count", "Source", "Essential", "Updated"])
+            
+            # Apply filtering before styling
+            filter_key = f"backup_filter_{scope_key}"
+            hide_key = f"backup_hide_empty_{scope_key}"
+            if filter_key not in st.session_state:
+                st.session_state[filter_key] = ""
+            if hide_key not in st.session_state:
+                st.session_state[hide_key] = False
+
+            _filter_txt = st.text_input("Filter endpoints", key=filter_key)
+            _hide_empty = st.toggle("Hide empty (0)", key=hide_key)
+
+            if _filter_txt:
+                df_backup = df_backup[df_backup["Label"].str.contains(_filter_txt, case=False, na=False)]
+            if _hide_empty:
+                df_backup = df_backup[df_backup["Count"] > 0]
+
+            # Pandas Styler for row highlighting
+            def highlight_csv(row):
+                if row["Source"] == "📊 CSV":
+                    return ["background-color: rgba(251,146,60,0.15)"] * len(row)
+                return [""] * len(row)
+
+            try:
+                st.dataframe(df_backup.style.apply(highlight_csv, axis=1), width="stretch", hide_index=True)
+            except Exception:
+                st.dataframe(df_backup, width="stretch", hide_index=True)
+            
+
+            
+def _render_choice_sets_section() -> None:
+    """Render the Custom field choice sets expander."""
+    # Show custom field choice sets dynamically
+    if SharedBackupState.has_backup():
+        choice_sets = SharedBackupState.get_choice_sets()
+        if choice_sets:
+            with st.expander(
+                f"⚙️ Custom field choice sets ({len(choice_sets)})", expanded=False
+            ):
+                st.caption(
+                    "Dynamically discovered from backup. These are the "
+                    "authoritative values used when checking whether custom field values "
+                    "already exist in NetBox."
+                )
+                
+                # Prepare data for dataframe display
+                df_rows = []
+                for set_name, set_data in choice_sets.items():
+                    label = set_data.get("label", set_name)
+                    field_key = set_data.get("field_key", "")
+                    count = set_data.get("count", 0)
+                    timestamp = set_data.get("timestamp", "")
+                    
+                    # Determine icon based on source type
+                    source_type = set_data.get("source_type", "json")
+                    if source_type == "csv" or str(set_data.get("source", "")).lower().endswith(".csv"):
+                        source_icon = "📊"
+                    else:
+                        source_icon = "📦"
+                    
+                    # Format timestamp as dd-mm-yy HH:mm
+                    try:
+                        from datetime import datetime
+                        if isinstance(timestamp, str):
+                            dt = datetime.fromisoformat(timestamp.replace("UTC", "").strip())
+                            formatted_time = dt.strftime("%d-%m-%y %H:%M")
+                        else:
+                            formatted_time = str(timestamp)
+                    except Exception:
+                        formatted_time = str(timestamp)[:16] if timestamp else "N/A"
+                    
+                    df_rows.append({
+                        "Set": label,
+                        "Choices": count,
+                        "Source": source_icon,
+                        "Updated": formatted_time
+                    })
+                
+                if df_rows:
+                    import pandas as pd
+                    df = pd.DataFrame(df_rows)
+                    st.dataframe(df, width="stretch", hide_index=True)
+
+
+def _render_csv_upload_section(scope_key: str, csv_uploader_key: str) -> None:
+    """Render CSV/Excel overrides upload with confirmation UI."""
+    st.markdown("---")
+    st.markdown("**CSV / Excel Overrides (optional)**")
+
+    # Manage CSV endpoints (Bug B)
+    object_registry = SharedBackupState.get_object_registry()
+    csv_endpoints = []
+    for endpoint, metadata in object_registry.items():
+        if metadata.get("source_type") == "csv" or str(metadata.get("source","")).lower().endswith((".csv", ".xlsx")):
+            csv_endpoints.append((endpoint, metadata))
+
+    if csv_endpoints:
+        edit_mode_key = f"csv_edit_mode_{scope_key}"
+        col_info, col_btn = st.columns([3, 1])
+        with col_info:
+            st.caption(f"📊 {len(csv_endpoints)} CSV endpoint(s)")
+        with col_btn:
+            if st.button("📊 Manage CSV", key=f"btn_manage_csv_{scope_key}", width='stretch'):
+                st.session_state[edit_mode_key] = True
+                st.rerun()
+        
+        # Show CSV management interface if in edit mode
+        if st.session_state.get(edit_mode_key, False):
+            st.markdown("---")
+            st.markdown("**Manage CSV Endpoints - remove individual entries**")
+            
+            # Sort CSV endpoints by label for easy browsing
+            csv_endpoints.sort(key=lambda x: x[1]["label"])
+            
+            # If there is exactly one CSV endpoint, show the entry row directly instead of the Manage CSV toggle (Bug C)
+            if len(csv_endpoints) == 1:
+                # Extract the single endpoint
+                endpoint, metadata = csv_endpoints[0]
+                label = metadata["label"]
+                count = metadata["count"]
+                ep = metadata.get("endpoint", "")
+                timestamp = metadata["timestamp"]
+                
+                # Format timestamp
+                try:
+                    if isinstance(timestamp, str):
+                        dt = datetime.fromisoformat(timestamp.replace("UTC", "").strip())
+                        compact_time = dt.strftime("%d-%m-%y %H:%M")
+                    else:
+                        compact_time = str(timestamp)
+                except Exception:
+                    compact_time = str(timestamp)[:16] if timestamp else "N/A"
+                
+                col_text, col_btn = st.columns([12, 1])
+                with col_text:
+                    st.markdown(
+                        f'<p style="color: #fb923c; font-size: 0.875rem; margin: 0.25rem 0;">'
+                        f'<strong>{label}</strong>: {count} 📊 ({ep}) <code style="background: rgba(251, 146, 60, 0.1); padding: 2px 4px; border-radius: 3px;">{compact_time}</code>'
+                        f'</p>',
+                        unsafe_allow_html=True
+                    )
+                with col_btn:
+                    if st.button("×", key=f"remove_{endpoint}_{scope_key}", help=f"Remove {label}"):
+                        if SharedBackupState.remove_csv_entry(endpoint):
+                            st.toast(f"Removed {label}", icon="✅")
+                        st.rerun()
+            else:
+                # Multiple endpoints - show the normal Manage CSV interface
+                # Display CSV endpoints with remove buttons
+                for endpoint, metadata in csv_endpoints:
+                    label = metadata["label"]
+                    count = metadata["count"]
+                    ep = metadata.get("endpoint", "")
+                    timestamp = metadata["timestamp"]
+                    
+                    # Format timestamp
+                    try:
+                        if isinstance(timestamp, str):
+                            dt = datetime.fromisoformat(timestamp.replace("UTC", "").strip())
+                            compact_time = dt.strftime("%d-%m-%y %H:%M")
+                        else:
+                            compact_time = str(timestamp)
+                    except Exception:
+                        compact_time = str(timestamp)[:16] if timestamp else "N/A"
+                    
+                    col_text, col_btn = st.columns([12, 1])
+                    with col_text:
+                        st.markdown(
+                            f'<p style="color: #fb923c; font-size: 0.875rem; margin: 0.25rem 0;">'
+                            f'<strong>{label}</strong>: {count} 📊 ({ep}) <code style="background: rgba(251, 146, 60, 0.1); padding: 2px 4px; border-radius: 3px;">{compact_time}</code>'
+                            f'</p>',
+                            unsafe_allow_html=True
+                        )
+                    with col_btn:
+                        if st.button("×", key=f"remove_{endpoint}_{scope_key}", help=f"Remove {label}"):
+                            if SharedBackupState.remove_csv_entry(endpoint):
+                                st.toast(f"Removed {label}", icon="✅")
+                            st.rerun()
+                
+                # Action buttons at the bottom (FIXED INDENTATION)
+                st.markdown("---")
+                col_clear, col_done = st.columns([1, 1])
+                
+                with col_clear:
+                    # Show count in the Clear All CSV button
+                    csv_count = len(csv_endpoints)
+                    if st.button(f"🗑️ Clear All CSV ({csv_count})", key=f"btn_clear_all_csv_{scope_key}", width='stretch', help=f"Remove all {csv_count} CSV endpoints at once"):
+                        # Clear all CSV entries
+                        count = SharedBackupState.clear_csv_only()
+                        if count > 0:
+                            st.toast(f"Cleared {count} CSV endpoint(s)", icon="✅")
+                        st.session_state[edit_mode_key] = False
+                        st.rerun()
+                
+                with col_done:
+                    if st.button("✅ Done", key=f"btn_done_manage_{scope_key}", width='stretch'):
+                        st.session_state[edit_mode_key] = False
+                        st.rerun()
+    
+    # Show "Clear CSV (N)" button at top if CSV data exists
+    try:
+        import sqlite3
+        _conn = sqlite3.connect(DB_PATH)
+        _cur = _conn.cursor()
+        _cur.execute("SELECT COUNT(DISTINCT endpoint) FROM csv_backup_entries")
+        _csv_count = _cur.fetchone()[0] or 0
+        _conn.close()
+    except Exception:
+        _csv_count = 0
+    if _csv_count > 0:
+        if st.button(f"Clear CSV ({_csv_count})", key=f"btn_clear_csv_top_{scope_key}", type="secondary", width="stretch",
+                     help="Remove all CSV override entries"):
+            SharedBackupState.clear_csv_only()
+            st.toast(f"Cleared {_csv_count} CSV entries", icon="✅")
+            st.rerun()
+    
+    # Header without Clear All CSV button
+    st.markdown("**Step 2 — Upload CSV/Excel Files (Auto-Classified)**")
+    st.caption("Upload individual CSV/Excel exports. Files are automatically classified and routed based on their columns.")
+    
+    # Check if there are pending files awaiting confirmation
+    pending_key = f"csv_pending_confirmation_{scope_key}"
+    pending_data = st.session_state.get(pending_key)
+    
+    if pending_data:
+        # Show confirmation UI
+        st.warning("**Confirm Endpoint Classification** — Review and confirm the detected NetBox endpoints before importing:", icon="⚠️")
+        
+        from core.universal_uploader import UniversalUploader
+        uploader = UniversalUploader()
+        
+        files = pending_data['files']
+        confirmed_classifications = {}
+        
+        # Pre-read all files once to avoid multiple reads
+        file_previews = []
+        for file_obj in files:
+            if hasattr(file_obj, "seek"):
+                file_obj.seek(0)
+            
+            # Read columns
+            import pandas as pd
+            import io
+            filename_lower = file_obj.name.lower()
+            
+            try:
+                if filename_lower.endswith('.csv'):
+                    content = file_obj.getvalue().decode('utf-8', errors='replace')
+                    df = pd.read_csv(io.StringIO(content), nrows=0)  # Just read headers
+                elif filename_lower.endswith('.xlsx'):
+                    import openpyxl
+                    wb = openpyxl.load_workbook(io.BytesIO(file_obj.getvalue()), data_only=True)
+                    ws = wb[wb.sheetnames[0]]
+                    df = pd.DataFrame(columns=[str(cell.value) for cell in ws[1] if cell.value])
+                else:
+                    continue
+                
+                columns = list(df.columns)
+                
+                # Get suggested classification using BOTH filename and columns
+                # Try filename first (high confidence), then columns
+                filename_classification = uploader._classify_by_filename(file_obj.name)
+                column_classification = uploader._classify_columns(columns)
+                
+                # Choose the best classification based on confidence
+                if filename_classification and column_classification:
+                    # Both methods returned a result - pick the one with higher confidence
+                    filename_endpoint, filename_conf = filename_classification
+                    column_endpoint, column_conf = column_classification
+                    
+                    if filename_conf >= column_conf:
+                        classification = filename_classification
+                    else:
+                        classification = column_classification
+                elif filename_classification:
+                    # Only filename classification worked
+                    classification = filename_classification
+                elif column_classification:
+                    # Only column classification worked
+                    classification = column_classification
+                else:
+                    # Neither worked
+                    classification = None
+                
+                if classification:
+                    suggested_endpoint, confidence = classification
+                    # Convert dot notation to slash notation for consistency (e.g., users.owners -> users/owners)
+                    suggested_endpoint = suggested_endpoint.replace('.', '/')
+                    confidence_pct = int(confidence * 100)
+                else:
+                    suggested_endpoint = f"unclassified/{file_obj.name.replace('.csv', '').replace('.xlsx', '').replace(' ', '_').lower()}"
+                    confidence_pct = 0
+                
+                file_previews.append({
+                    'file_obj': file_obj,
+                    'columns': columns,
+                    'suggested_endpoint': suggested_endpoint,
+                    'confidence_pct': confidence_pct
+                })
+            except Exception as e:
+                st.error(f"Error reading {file_obj.name}: {e}")
+        
+        # Build endpoint options dynamically from backup registry + common fallbacks
+        # Get all endpoints from the JSON backup if available
+        backup_registry = SharedBackupState.get_object_registry()
+        dynamic_endpoints = []
+        
+        if backup_registry:
+            # Extract endpoints from JSON backup (excluding CSV entries for the dropdown)
+            for endpoint, metadata in backup_registry.items():
+                source_type = metadata.get("source_type", "json")
+                # Only include JSON backup endpoints, not CSV uploads
+                if source_type == "json":
+                    dynamic_endpoints.append(endpoint)
+        
+        # Common fallback endpoints (used if no backup is loaded)
+        fallback_endpoints = [
+            # Tenancy & Contacts
+            "tenancy/contact-groups",
+            "tenancy/contacts",
+            "tenancy/tenant-groups", 
+            "tenancy/tenants",
+            # Users & Permissions
+            "users/owner-groups",
+            "users/owners",
+            "users/groups",
+            "users/users",
+            # DCIM
+            "dcim/regions",
+            "dcim/site-groups",
+            "dcim/sites",
+            "dcim/locations",
+            "dcim/racks",
+            "dcim/rack-roles",
+            "dcim/devices",
+            "dcim/device-types",
+            "dcim/device-roles",
+            "dcim/platforms",
+            "dcim/manufacturers",
+            "dcim/interfaces",
+            "dcim/cables",
+            # IPAM
+            "ipam/vlans",
+            "ipam/vlan-groups",
+            "ipam/prefixes",
+            "ipam/ip-addresses",
+            "ipam/vrfs",
+            "ipam/aggregates",
+            "ipam/rirs",
+            # Virtualization
+            "virtualization/virtual-machines",
+            "virtualization/clusters",
+            "virtualization/cluster-types",
+            "virtualization/cluster-groups",
+            # Circuits
+            "circuits/circuits",
+            "circuits/providers",
+            "circuits/circuit-types",
+            # Wireless
+            "wireless/wireless-lans",
+            "wireless/wireless-lan-groups",
+        ]
+        
+        # Merge dynamic and fallback endpoints, remove duplicates, and sort
+        if dynamic_endpoints:
+            # Use dynamic endpoints from backup, add any missing fallbacks
+            all_endpoints = dynamic_endpoints + [ep for ep in fallback_endpoints if ep not in dynamic_endpoints]
+        else:
+            # No backup loaded, use fallback list
+            all_endpoints = fallback_endpoints
+        
+        # Sort by category prefix, then alphabetically
+        common_endpoints = sorted(all_endpoints, key=lambda x: (x.split('/')[0], x))
+        
+        # Display confirmation UI for each file
+        for idx, preview in enumerate(file_previews):
+            file_obj = preview['file_obj']
+            columns = preview['columns']
+            suggested_endpoint = preview['suggested_endpoint']
+            confidence_pct = preview['confidence_pct']
+            
+            with st.expander(f"📄 {file_obj.name}", expanded=True):
+                # Show first 8 detected columns; full list in collapsed expander
+                if len(columns) > 8:
+                    st.markdown(f"**Detected Columns:** `{', '.join(columns[:8])}` +**{len(columns) - 8} more**")
+                    with st.expander(f"All {len(columns)} columns", expanded=False):
+                        st.code(", ".join(columns))
+                else:
+                    st.markdown(f"**Detected Columns:** `{', '.join(columns)}`")
+                
+                if confidence_pct < 60:
+                    st.caption("Low confidence - please verify the endpoint before importing.")
+                
+                # Put suggested endpoint first if not already in list
+                if suggested_endpoint not in common_endpoints and not suggested_endpoint.startswith('unclassified'):
+                    endpoint_options = [f"{suggested_endpoint} (Suggested)"] + common_endpoints
+                    # Store actual endpoint without suffix
+                    actual_suggested = suggested_endpoint
+                else:
+                    endpoint_options = common_endpoints
+                    actual_suggested = suggested_endpoint
+                
+                # Find index of suggested endpoint
+                if suggested_endpoint in common_endpoints:
+                    default_idx = common_endpoints.index(suggested_endpoint)
+                elif not suggested_endpoint.startswith('unclassified'):
+                    default_idx = 0  # First item is the suggested one
+                else:
+                    default_idx = 0
+                
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    selected_endpoint = st.selectbox(
+                        "Select NetBox Endpoint",
+                        options=endpoint_options,
+                        index=default_idx,
+                        key=f"endpoint_select_{scope_key}_{idx}",
+                        help="Choose the correct NetBox endpoint for this file"
+                    )
+                with col2:
+                    if confidence_pct > 0:
+                        st.metric("Confidence", f"{confidence_pct}%")
+                    else:
+                        st.caption("⚪ Manual")
+                
+                # Clean up " (Suggested)" suffix if present
+                selected_clean = selected_endpoint.replace(" (Suggested)", "")
+                confirmed_classifications[file_obj.name] = selected_clean
+        
+        # Confirmation buttons
+        col_confirm, col_cancel = st.columns([1, 1])
+        with col_confirm:
+            if st.button("✅ Confirm & Import", key=f"btn_confirm_csv_{scope_key}", type="primary", width='stretch'):
+                _process_confirmed_csv_uploads(scope_key, confirmed_classifications)
+                st.rerun()
+        with col_cancel:
+            if st.button("❌ Cancel", key=f"btn_cancel_csv_{scope_key}", width='stretch'):
+                # Clear pending confirmation
+                del st.session_state[pending_key]
+                # Clear the file uploader
+                counter_key = f"csv_uploader_counter_{scope_key}"
+                st.session_state[counter_key] = st.session_state.get(counter_key, 0) + 1
+                st.rerun()
+    else:
+        # CSV Upload Section
+        st.file_uploader(
+            "📊 Upload CSV/Excel Files (Multiple Files Supported)",
+            type=["csv", "xlsx"],
+            accept_multiple_files=True,
+            key=csv_uploader_key,
+            on_change=_handle_csv_backup_upload,
+            args=(csv_uploader_key, scope_key),
+            help="Upload CSV or Excel files exported from NetBox. Multiple files can be uploaded at once."
+        )
+
+
+def render_backup_uploader(scope_key: str) -> dict:
+    """
+    Main orchestrator for NetBox backup and CSV upload UI.
+    
+    Renders a clean, modular interface for:
+    - Step 1: JSON backup upload with PowerShell scripts
+    - Backup contents display
+    - Custom field choice sets display
+    - Step 2: CSV/Excel upload with auto-classification
+    
+    Args:
+        scope_key: Unique key for this uploader instance (e.g., "ipam", "naming")
+        
+    Returns:
+        Backup metadata dictionary
+    """
+    meta = get_backup_metadata()
+    
+    # Initialize uploader key counters if not present
+    json_counter_key = f"json_uploader_counter_{scope_key}"
+    csv_counter_key = f"csv_uploader_counter_{scope_key}"
+    if json_counter_key not in st.session_state:
+        st.session_state[json_counter_key] = 0
+    if csv_counter_key not in st.session_state:
+        st.session_state[csv_counter_key] = 0
+    
+    json_uploader_key = f"netbox_json_uploader_{scope_key}_{st.session_state[json_counter_key]}"
+    csv_uploader_key = f"netbox_csv_uploader_{scope_key}_{st.session_state[csv_counter_key]}"
+    checkbox_key = f"netbox_backup_enabled_{scope_key}"
+    result_key = f"backup_upload_result_{scope_key}"
+    error_key = f"backup_upload_error_{scope_key}"
+    
+    # Step 1: JSON Backup Upload
+    _render_json_backup_section(scope_key, meta, json_uploader_key, checkbox_key, result_key, error_key)
+
+    # Display backup contents
+    _render_backup_contents_section(scope_key, meta)
+
+    # Display custom field choice sets
+    _render_choice_sets_section()
+    _render_csv_upload_section(scope_key, csv_uploader_key)
+
+    # Clear Everything rendered ONCE at bottom, gated per A3
+    _auth_csv = 0
+    _auth_cat = 0
+    try:
+        import sqlite3
+        _conn = sqlite3.connect(DB_PATH)
+        _cur = _conn.cursor()
+        _cur.execute("SELECT COUNT(DISTINCT endpoint) FROM csv_backup_entries")
+        _auth_csv = _cur.fetchone()[0] or 0
+        _cur.execute("SELECT COUNT(*) FROM endpoint_catalogue")
+        _auth_cat = _cur.fetchone()[0] or 0
+        _conn.close()
+    except Exception:
+        pass
+    if meta["loaded"] or _auth_csv > 0 or _auth_cat > 0:
+        st.button(
+            "🗑️ Clear Everything",
+            key=f"btn_clear_all_backup_{scope_key}",
+            on_click=_handle_backup_clear_all,
+            args=(scope_key,),
+            width="stretch",
+            type="secondary",
+            help="Permanently clears JSON/Minimal backup data, CSV overrides, endpoint catalogue and backup session state.",
+        )
+
+    return meta
+def _sidebar_placeholder(loaded: bool, has_options: bool) -> str:
+    if not loaded:
+        return "-- Click refresh to load models --"
+    if not has_options:
+        return "-- No usable models available --"
+    return "-- Select a model --"
+
+
+def render_sidebar() -> str:
+    with st.sidebar:
+        st.header("⚙️ AI Engine Selection")
+
+        # 1. Preset Models from environment (sanitized so deprecated/unreachable
+        #    endpoints never appear in the quick-select list).
+        verified_presets = [m for m in AVAILABLE_MODELS if sanitize_model_id(m)]
+        if not verified_presets:
+            verified_presets = AVAILABLE_MODELS
+        selected_preset = st.selectbox(
+            "Preset Models",
+            options=verified_presets,
+            index=0,
+            help="Configured environment presets (sanitized to functional chat models).",
+        )
+
+        # 2. Sanitized quick-select cache (only populated when user clicks refresh)
+        if "free_models_cache" not in st.session_state:
+            st.session_state["free_models_cache"] = []
+        if "models_loaded" not in st.session_state:
+            st.session_state["models_loaded"] = False
+        if "model_test_history" not in st.session_state:
+            st.session_state["model_test_history"] = {}
+
+        test_models = st.session_state["free_models_cache"]
+
+        # Dropdown candidates: only sanitized models, minus any that are presets.
+        dropdown_options = [
+            m for m in test_models if m not in AVAILABLE_MODELS
+        ]
+
+        placeholder = _sidebar_placeholder(
+            st.session_state["models_loaded"], bool(dropdown_options)
+        )
+
+        q1, q2 = st.columns([4, 1])
+        with q1:
+            quick_pick = st.selectbox(
+                "Quick-Select Test Model",
+                options=[placeholder] + dropdown_options,
+                index=0,
+                help="Sanitized models. Refresh to reload.",
+            )
+        with q2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🔄", key="btn_refresh_models", help="Refresh sanitized model list"):
+                with st.spinner("Loading models..."):
+                    fetched = fetch_free_models()
+                    st.session_state["free_models_cache"] = fetched
+                    st.session_state["models_loaded"] = True
+                    if not fetched:
+                        st.warning("No usable models found. Check logs for details.")
+                    else:
+                        st.success(f"Loaded {len(fetched)} usable models")
+                st.rerun()
+
+        # Unified Apply & Verify action
+        selected_quick = "" if quick_pick.startswith("--") else quick_pick
+        if selected_quick:
+            if st.button("➔ Apply & Verify Model", key="btn_apply_verify", type="primary", width="stretch"):
+                ok, latency, msg = healthcheck_ai(selected_quick)
+                if ok:
+                    st.session_state["active_ai_model"] = selected_quick
+                    history = st.session_state.get("model_test_history", {})
+                    history[selected_quick] = {
+                        "ok": ok, "latency": latency, "msg": msg,
+                    }
+                    st.session_state["model_test_history"] = history
+                    st.toast(f"Active model: {selected_quick}", icon="✅")
+                    st.rerun()
+                else:
+                    st.error(f"❌ Failed to connect: {msg}")
+                    history = st.session_state.get("model_test_history", {})
+                    history[selected_quick] = {
+                        "ok": False, "latency": None, "msg": msg,
+                    }
+                    st.session_state["model_test_history"] = history
+
+        # 3. Custom Manual Input
+        default_manual = "" if quick_pick.startswith("--") else quick_pick
+        custom_model = st.text_input(
+            "Custom Model",
+            value=default_manual,
+            placeholder="Type or edit model slug...",
+            help="Overrides preset when populated.",
+        ).strip()
+
+        # Active Model Resolution
+        if custom_model:
+            active_model = custom_model
+        else:
+            active_model = selected_preset
+
+        # Clean active badge
+        history = st.session_state.get("model_test_history", {})
+        if active_model in history:
+            res = history[active_model]
+            if res["ok"]:
+                st.success(f"**Active:** `{active_model}` — ⚡ **{res['latency']}ms**")
+            else:
+                st.warning(f"**Active:** `{active_model}` — ❌ *(Offline)*")
+        else:
+            st.info(f"**Active:** `{active_model}`")
+
+        # Model Test Log Expander
+        with st.expander("📋 Model Test Log", expanded=False):
+            entries = st.session_state.get("model_test_history", [])
+            for m_name, data in (entries.items() if isinstance(entries, dict) else entries):
+                if isinstance(data, dict) and data.get("ok"):
+                    st.markdown(f"• {m_name}: 🟢 {data['latency']}ms")
+                else:
+                    st.markdown(f"• ~~{m_name}~~: 🔴 Fail")
+
+        st.caption(f"🔌 Routed via **OmniRoute** (`{OPENROUTER_BASE_URL}`)")
+
+        # Version badge at the bottom of sidebar
+        st.markdown("---")
+        st.markdown(
+            f"""
+            <div style="text-align: left; padding: 8px 0;">
+                <span style="background: #1e293b; color: #38bdf8; padding: 5px 12px; 
+                             border-radius: 6px; font-size: 12px; 
+                             font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; 
+                             font-weight: 600; border: 1px solid #334155; 
+                             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); display: inline-block;">
+                    📦 NetBox Hub v{APP_VERSION}
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    return active_model
