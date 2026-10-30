@@ -98,15 +98,6 @@ AZURE_KQL_QUERY = r'''Resources
     ),
     RawTags = tostring(tags)
 | extend
-    NetBoxSite = case(
-        location =~ "australiaeast", "Azure - Australia East",
-        location =~ "australiasoutheast", "Azure - Australia Southeast",
-        location =~ "francecentral", "Azure - France Central",
-        location =~ "spaincentral", "Azure - Spain Central",
-        location =~ "uksouth", "Azure - UK South",
-        strcat("UNMAPPED - ", location)
-    )
-| extend
     ExactOperatingSystem = case(
         isnotempty(guestOsName),
             strcat(baseOsType, " (", guestOsName, ")"),
@@ -156,7 +147,6 @@ AZURE_KQL_QUERY = r'''Resources
         name,
         resourceGroup,
         location,
-        NetBoxSite,
         SubscriptionName,
         subscriptionId,
         vmSize,
@@ -172,15 +162,11 @@ AZURE_KQL_QUERY = r'''Resources
 | project
     ['Name'] = name,
     ['Status'] = "active",
-    ['Site'] = NetBoxSite,
+    ['Site'] = location,
     ['Tenant'] = SubscriptionName,
-    ['Role'] = coalesce(tagRole, tagApp, "---------"),
+    ['Role'] = coalesce(tagRole, tagApp),
     ['Operating_System'] = ExactOperatingSystem,
-    ['Platform'] = iff(
-        baseOsType =~ "Windows",
-        "Windows Server",
-        baseOsType
-    ),
+    ['Platform'] = baseOsType,
     ['PrimaryIPv4'] = PrimaryIPv4,
     ['VNet'] = VNet,
     ['Subnet'] = Subnet,
