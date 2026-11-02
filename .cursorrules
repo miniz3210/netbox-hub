@@ -1,0 +1,70 @@
+# NetBox Hub — Persistent Agent Operational Rules
+
+## Identity & Baseline
+- Project: NetBox Hub v4.3.3
+- Platform: Oracle Cloud Ampere A1 (ARM64 / aarch64), Linux, Python 3.11+, Streamlit
+- Version constant: `config/constants.py::APP_VERSION == "4.3.3"`
+
+## STRICT NO-HARDCODE
+- Never hardcode vendor strings, interface names (`vmnic`, `eth`, `vmbr`), or site names in backend logic.
+- All naming and parsing must be dynamically driven by Standards Tab definitions and `naming_rules.yaml`.
+- Any new feature must discover available values at runtime from the local database or standards config, never bake them in.
+
+## SPATIAL INVARIANTS
+- Rely on resolution-agnostic relative geometry throughout the OCR pipeline.
+- Always apply cumulative Y-axis offsets when processing sequential multi-image payloads:
+  ```python
+  cumulative_y += img_height  # before next image's tokens
+  ```
+- Do not assume absolute pixel coordinates; use bounding-box ratios and relative clustering.
+
+## LOCAL-FIRST PRIVACY & ZERO LEAKAGE
+- Execute redaction and de-tokenization strictly on local RAM via `core/spatial_redactor.py` and `core/sanitizer_vault.py`.
+- Never transmit raw IP addresses, MAC addresses, or internal network topology to third-party endpoints (LLMs, APIs).
+- Detokenization and local restoration happen only in client-side memory after LLM extraction returns.
+- The sanitizer vault maps tokens to original values in-memory; these mappings must never be serialized or logged.
+
+## STREAMLIT ARCHITECTURE
+- `@st.cache_data` must be placed **strictly at module top level**. Never inside functions, classes, or loops.
+- Use `st.toast()` exclusively for user notifications. Do not leave lingering success/info banners that distort card layouts.
+- **Never** nest `st.container` inside `st.expander` ("no box-in-a-box").
+- Trigger `SSM.refresh_naming_rules()` and bump `standards_nonce` upon any Standards tab update that affects naming rules.
+- Keep UI flat: headers, badges, and content at one indentation level per card.
+
+## MEMORY DISK PURITY
+- Do not generate intermediate temp files on disk.
+- Keep all runtime transformations (OCR → parse → redact → restore) purely in-memory.
+- Bulk operations must stream through `io.BytesIO` / `io.StringIO` buffers when file I/O is required.
+
+## CLEAN WORKFLOW
+- Inspect `git status` and `git diff` before making changes.
+- Run the full test suite (`python3 -m pytest tests/ -q`) after edits.
+- Ensure syntax validity with `python3 -m py_compile <file>` on modified modules.
+- Never commit `.cursorrules` or `ARCHITECTURE_SOP.md` — they are local-only handover artifacts.
+
+## DEPLOYMENT (Docker / GHCR)
+- Version tag format: `ghcr.io/miniz3210/netbox-hub:v4.3.3` and `:latest`.
+- Docker cache cleanup: `docker image prune -a -f` and `docker builder prune -a -f`.
+  - **NEVER** prune volumes — protects local SQLite data (`data/netbox_hub.db`).
+- Before release: verify `APP_VERSION == "4.3.3"`, snapshot Standards tab baseline, and run full test suite.
+
+## PROHIBITED PATTERNS (anti-patterns to avoid)
+```python
+# BAD: hardcoded vendor/interface check
+if "vmnic" in text or "eth0" in text:
+
+# BAD: @st.cache_data inside a function
+def my_func():
+    @st.cache_data
+    def inner(): ...
+
+# BAD: st.info / st.success banner that persists
+st.success("Saved!")  # use st.toast("Saved!") instead
+
+# BAD: nested containers
+with st.expander("..."):
+    with st.container(border=True):  # box-in-a-box — flatten
+
+# BAD: leaking IPs to LLM without redaction
+prompt = f"Extract data from {raw_image_text}"  # raw IPs present!
+```
