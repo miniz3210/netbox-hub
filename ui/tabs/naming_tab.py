@@ -923,7 +923,7 @@ def _handle_topology_analyze() -> None:
                 recs = [dict(r) for r in ocr_cache[_cache_key]]
             else:
                 recs = _ocr_single_image(img)
-                if _cache_key:
+                if _cache_key and recs:
                     ocr_cache[_cache_key] = [dict(r) for r in recs]
             all_recs.extend(recs)
         return all_recs

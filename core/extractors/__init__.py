@@ -1,3 +1,4 @@
+import logging
 from typing import Callable, Dict, List, Optional
 
 from .base import BaseTopologyExtractor
@@ -5,6 +6,8 @@ from .esxi import EsxiTopologyExtractor
 from .esxi_pipeline import analyze_esxi
 from .esxi_text import parse_vsphere_text_ex
 from .proxmox import ProxmoxTopologyExtractor
+
+logger = logging.getLogger(__name__)
 
 # ── Legacy registries (preserved for external callers; not used by generic routing) ──
 
@@ -199,8 +202,10 @@ def run_topology_pipeline(preset: dict, text, get_ocr_records=None):
     if image_module_id and has_images:
         try:
             ocr_recs = get_ocr_records()
-        except Exception:
+        except Exception as _exc:
+            logger.exception("OCR step failed")
             ocr_recs = []
+            ocr_warnings.append("OCR failed: %s" % _exc)
         if ocr_recs:
             mod = PROCESSING_MODULES[image_module_id]
             handler = mod["handler"]
@@ -257,7 +262,13 @@ def run_topology_pipeline(preset: dict, text, get_ocr_records=None):
         report = empty_rep
         needs_screenshot = False
     else:
-        all_warnings.append("No processing module configured for this platform.")
+        all_warnings.extend(ocr_warnings)
+        if has_images and image_module_id:
+            all_warnings.append("OCR found no topology in the screenshot(s).")
+        elif text_input and text_module_id:
+            all_warnings.append("The text parser found no topology in the pasted text.")
+        else:
+            all_warnings.append("No processing module configured for this platform.")
         source = "none"
         records = []
         gaps = []
