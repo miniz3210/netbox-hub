@@ -422,6 +422,20 @@ def _edit_toggle(pattern_key):
     return bool(toggled)
 
 
+def _missing_tokens(pat, values, variables):
+    """Required <tokens> in pat that have no value yet (optional ones excluded)."""
+    toks = re.findall(r"<([a-zA-Z0-9_]+)>", pat)
+    return [t for t in dict.fromkeys(toks)
+            if not str(values.get(t, "") or "").strip()
+            and not ((variables.get(t) or {}).get("optional"))]
+
+
+def _warn_missing_tokens(pat, values, variables):
+    m = _missing_tokens(pat, values, variables)
+    if m:
+        st.warning("Missing value for: " + ", ".join(f"<{t}>" for t in m))
+
+
 def _interface_key(intf_code, presets):
     for code, _label, key in presets:
         if code == intf_code:
@@ -549,6 +563,7 @@ def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, varia
             defaults["site"] = auto_code
         order = (naming_rules.get("token_order") or {}).get(pk)
         values = render_token_widgets(pat, variables, f"dev_{pk}", defaults, custom_order=order)
+        _warn_missing_tokens(pat, values, variables)
         interpolated = render_dynamic_pattern(pat, values, variables)
         final = apply_case(interpolated, case_mode)
         st.caption("Generated Device Hostname:")
@@ -602,6 +617,7 @@ def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, varia
         else:
             order = (naming_rules.get("token_order") or {}).get(ipk)
             vals = render_token_widgets(pat, variables, f"intf_{ipk}", custom_order=order)
+            _warn_missing_tokens(pat, vals, variables)
             if st.session_state.get("esxi_auto_corr", True):
                 for port_token in ("local_port", "remote_port"):
                     if port_token in vals and vals.get(port_token):
