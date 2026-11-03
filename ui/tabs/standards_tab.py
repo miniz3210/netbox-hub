@@ -498,13 +498,46 @@ def _render_site_code_mapping_manager(key_prefix: str = "std_scm") -> None:
                 row["r"] = st.text_input("Replacement", value=row["r"], key=f"wc_{name}_{row['_uid']}_r", label_visibility="collapsed")
             with c3:
                 _wc_row_actions(name, rows, idx)
-        if _wc_values(rows, ("p", "r")) != [(str(k).strip(), str(v).strip()) for k, v in saved.items()]:
+        from config.naming_rules import DEFAULT_SITE_CODE_RULES as _DSR
+        _sr = get_site_code_rules(load_naming_rules())
+
+        def _n(v, d):
+            try:
+                return max(1, min(8, int(str(v).strip())))
+            except (ValueError, TypeError):
+                return int(d)
+
+        _per_d = list(_DSR["multi_word_chars_per_word"])
+        _per = list(_sr.get("multi_word_chars_per_word") or _per_d)
+        _w1_s = _n(_per[0], _per_d[0])
+        _w2_s = _n(_per[1] if len(_per) > 1 else _per_d[1], _per_d[1])
+        _sg_s = _n(_sr.get("single_word_max_chars"), _DSR["single_word_max_chars"])
+        _fb_s = str(_sr.get("fallback") or _DSR["fallback"])
+        st.markdown("**Fallback when no mapping matches**")
+        st.caption(
+            "Used only when the location is not in the table above. Two or more words: first N letters of "
+            "word 1 + first N letters of word 2. One word: its first N letters. Empty input: the fallback text."
+        )
+        f1, f2, f3, f4 = st.columns(4, vertical_alignment="bottom")
+        with f1:
+            _fb_w1 = st.number_input("Letters from word 1", min_value=1, max_value=8, value=_w1_s, step=1, key=f"{name}_fb_w1")
+        with f2:
+            _fb_w2 = st.number_input("Letters from word 2", min_value=1, max_value=8, value=_w2_s, step=1, key=f"{name}_fb_w2")
+        with f3:
+            _fb_sg = st.number_input("Letters for single word", min_value=1, max_value=8, value=_sg_s, step=1, key=f"{name}_fb_sg")
+        with f4:
+            _fb_txt = st.text_input("Empty-input text", value=_fb_s, key=f"{name}_fb_txt")
+        _fb_dirty = (int(_fb_w1), int(_fb_w2), int(_fb_sg), str(_fb_txt).strip()) != (_w1_s, _w2_s, _sg_s, _fb_s)
+        if _wc_values(rows, ("p", "r")) != [(str(k).strip(), str(v).strip()) for k, v in saved.items()] or _fb_dirty:
             st.caption("⚠️ Unsaved changes — click Save & Apply Changes to keep them.")
         c_s, c_r = st.columns(2)
         with c_s:
             if st.button("💾 Save & Apply Changes", key=f"{name}_save", type="primary", width="stretch"):
                 new_rules = load_naming_rules()
                 new_rules["site_code_rules"] = dict(get_site_code_rules(new_rules))
+                new_rules["site_code_rules"]["multi_word_chars_per_word"] = [int(_fb_w1), int(_fb_w2)]
+                new_rules["site_code_rules"]["single_word_max_chars"] = int(_fb_sg)
+                new_rules["site_code_rules"]["fallback"] = str(_fb_txt).strip() or _fb_s
                 new_rules["site_code_rules"]["exact_mappings"] = {
                     r["p"].strip().lower(): r["r"].strip().upper() for r in rows if r["p"].strip()}
                 _wc_discard(name)
