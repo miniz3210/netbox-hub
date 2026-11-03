@@ -371,9 +371,7 @@ def _render_ipam_role_mapping_manager(active_model: str) -> None:
     fields = ("pattern", "replacement", "description", "enabled")
     COLS = AUTOCORRECT_COLS
 
-    with st.expander("🧩 IPAM Role Mapping Rules", expanded=False):
-        st.caption("Map regex patterns to role names for IP address management.")
-
+    with st.container():
         ch_p, ch_r, ch_d, ch_act = st.columns(COLS, vertical_alignment="center")
         with ch_p:
             st.markdown("**Original Pattern**")
@@ -1721,9 +1719,7 @@ def _render_vlan_description_mappings_editor(rules: dict) -> None:
     fields = ("role", "desc")
     COLS = VLAND_MAPPINGS_COLS
 
-    with st.expander("🏷️ VLAN Description Mappings", expanded=False):
-        st.caption("Map VLAN roles to descriptive names for consistent naming.")
-
+    with st.container():
         h_role, h_desc, h_act = st.columns(COLS, vertical_alignment="center")
         with h_role:
             st.markdown("**Role**")
@@ -2369,6 +2365,7 @@ def render_standards_tab(active_model):
                         unsafe_allow_html=True
                     )
                 _preset_type_editor("device", get_device_presets(current_rules), current_rules, prefix="branch",
+                                    wrap_expander=False)
                                      card_title="🔧 DEVICE TYPE PRESETS",
                                      card_caption="",
                                      section="device_presets", section_label="Device Type Presets", expanded=True,
@@ -2384,6 +2381,7 @@ def render_standards_tab(active_model):
                         unsafe_allow_html=True
                     )
                 _preset_type_editor("interface", get_interface_presets(current_rules), current_rules, prefix="iface",
+                                    wrap_expander=False)
                                      card_title="🔌 INTERFACE TYPE PRESETS",
                                      card_caption="",
                                      section="interface_presets", section_label="Interface Type Presets",
