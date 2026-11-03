@@ -98,35 +98,22 @@ def _wc_values(rows: list, fields: tuple) -> list:
     return [tuple(str(r.get(f, "")).strip() for f in fields) for r in rows]
 
 
-def _wc_row_actions(name: str, rows: list, idx: int, min_rows: int = 0, show_delete: bool = True) -> None:
+def _wc_row_actions(name: str, rows: list, idx: int, min_rows: int = 0) -> None:
     """Up / Down / Delete on the working copy only; saved by Save & Apply Changes."""
     uid = rows[idx]["_uid"]
-    if show_delete:
-        c_up, c_dn, c_del = st.columns(PRESET_ACTION_COLS)
-        with c_up:
-            if idx > 0 and st.button("⬆️", key=f"wc_{name}_{uid}_up", help="Move up"):
-                rows[idx - 1], rows[idx] = rows[idx], rows[idx - 1]
-                st.rerun()
-        with c_dn:
-            if idx < len(rows) - 1 and st.button("⬇️", key=f"wc_{name}_{uid}_dn", help="Move down"):
-                rows[idx + 1], rows[idx] = rows[idx], rows[idx + 1]
-                st.rerun()
-        with c_del:
-            if st.button("🗑️", key=f"wc_{name}_{uid}_del", help="Delete", disabled=len(rows) <= min_rows):
-                rows.pop(idx)
-                st.rerun()
-    else:
-        c_up, c_dn = st.columns(2)
-        with c_up:
-            if idx > 0 and st.button("⬆️", key=f"wc_{name}_{uid}_up", help="Move up"):
-                rows[idx - 1], rows[idx] = rows[idx], rows[idx - 1]
-                st.rerun()
-        with c_dn:
-            if idx < len(rows) - 1 and st.button("⬇️", key=f"wc_{name}_{uid}_dn", help="Move down"):
-                rows[idx + 1], rows[idx] = rows[idx], rows[idx + 1]
-                st.rerun()
-
-
+    c_up, c_dn, c_del = st.columns(PRESET_ACTION_COLS)
+    with c_up:
+        if idx > 0 and st.button("⬆️", key=f"wc_{name}_{uid}_up", help="Move up"):
+            rows[idx - 1], rows[idx] = rows[idx], rows[idx - 1]
+            st.rerun()
+    with c_dn:
+        if idx < len(rows) - 1 and st.button("⬇️", key=f"wc_{name}_{uid}_dn", help="Move down"):
+            rows[idx + 1], rows[idx] = rows[idx], rows[idx + 1]
+            st.rerun()
+    with c_del:
+        if st.button("🗑️", key=f"wc_{name}_{uid}_del", help="Delete", disabled=len(rows) <= min_rows):
+            rows.pop(idx)
+            st.rerun()
 def _wc_rows_with_names(name: str, loader) -> tuple:
     rows = _wc_rows(name, loader)
     names = [r.get("name") for r in rows if r.get("name")]
@@ -1384,11 +1371,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
                           section: str = "presets", section_label: str = "Presets", expanded: bool = False,
                           wrap_expander: bool = True) -> None:
     name = f"preset_{kind}"
-    key_field = "device_presets" if kind == "device" else (
-        "interface_presets" if kind == "interface" else (
-            "host_vm_presets" if kind == "host_vm" else "esxi_network_presets"
-        )
-    )
+    key_field = DEFAULT_PRESET_KEY_FIELD[kind]
     saved = presets
     rows = _wc_rows(name, lambda: [dict(r, _uid=uuid.uuid4().hex[:8]) for r in saved])
 
@@ -1491,23 +1474,6 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
         final_patterns = dict(patterns)
         final_patterns.update(patterns_updates)
 
-        if kind == "esxi_network":
-            for p_item in final_presets:
-                pk = p_item.get("pattern_key", "")
-                tpl_val = final_patterns.get(pk, "")
-                if pk.startswith("esxinet_"):
-                    alt_pk = pk.replace("esxinet_", "esxi_")
-                elif pk.startswith("esxi_"):
-                    alt_pk = pk.replace("esxi_", "esxinet_")
-                else:
-                    alt_pk = f"esxi_{pk}"
-                final_patterns[pk] = tpl_val
-                final_patterns[alt_pk] = tpl_val
-                rules[pk] = tpl_val
-                rules[alt_pk] = tpl_val
-                p_item["pattern"] = tpl_val
-                p_item["pattern_template"] = tpl_val
-
         _wc_discard(name)
         rules["naming_patterns"] = final_patterns
         rules[key_field] = final_presets
@@ -1604,9 +1570,9 @@ def _host_editor(rules: dict) -> None:
 
         c_code, c_label, c_pattern, c_actions = st.columns(PRESET_COLS, vertical_alignment="center")
         with c_code:
-            row["code"] = st.text_input("Code", value=row.get("code") or "ESXi", key=f"wc_{name}_{row['_uid']}_code", label_visibility="collapsed").strip()
+            row["code"] = st.text_input("Code", value=row.get("code", ""), key=f"wc_{name}_{row['_uid']}_code", label_visibility="collapsed").strip()
         with c_label:
-            row["label"] = st.text_input("Label", value=row.get("label") or "ESXi Host", key=f"wc_{name}_{row['_uid']}_label", label_visibility="collapsed").strip()
+            row["label"] = st.text_input("Label", value=row.get("label", ""), key=f"wc_{name}_{row['_uid']}_label", label_visibility="collapsed").strip()
         with c_pattern:
             row["tpl"] = st.text_input("Pattern Template", value=row.get("tpl", tpl), key=f"wc_{name}_{row['_uid']}_tpl", label_visibility="collapsed").strip()
         with c_actions:
@@ -1765,7 +1731,19 @@ def _vm_editor(rules: dict) -> None:
     with c_r:
         if st.button("🔄 Reset to Defaults", key=f"{name}_reset", width="stretch"):
             _wc_discard(name)
-            _reset_presets("vm_host", rules, section="vm_roles", section_label="VM Role Presets")
+            from config.naming_rules import DEFAULT_VM_PRESETS
+            new_rules = load_naming_rules()
+            new_patterns = dict(new_rules.get("naming_patterns") or {})
+            keep_hosts = [p for p in get_host_vm_presets(new_rules) if not is_vm_preset_key(p.get("pattern_key"))]
+            shared_tpl = str(DEFAULT_NAMING_PATTERNS.get("vm_host", ""))
+            reset_vm = []
+            for p in DEFAULT_VM_PRESETS:
+                pk = "vm_" + (re.sub(r"[^a-z0-9]+", "_", str(p.get("code", "")).lower()).strip("_") or "role")
+                new_patterns[pk] = shared_tpl
+                reset_vm.append(dict(p, pattern_key=pk))
+            new_rules["naming_patterns"] = new_patterns
+            new_rules["host_vm_presets"] = keep_hosts + reset_vm
+            _save_presets(new_rules, section="vm_roles", section_label="VM Role Presets")
             return
 
     _wc_add_row(name, rows, [
@@ -2012,27 +1990,12 @@ def _vlan_presets_editor(rules: dict) -> None:
                         help="Default template for Prefix Description across all items in this group.",
                     )
 
-        if group_name is not None and not items_wc:
-            st.info("ℹ️ No preset VLAN items defined in this group. It will load as a blank table in IPAM, or you can add items below.")
 
         col_save, col_reset = st.columns(2, vertical_alignment="center")
         with col_save:
             saved_presets = st.button("💾 Save & Apply Changes", key="vlan_pre_save", type="primary", width='stretch')
         with col_reset:
             reset_presets = st.button("🔄 Reset to Defaults", key="vlan_pre_reset", width='stretch')
-
-        add_vlan = False
-        new_vid = ""
-        new_role = ""
-        if group_name is not None and not items_wc:
-            with st.form(key=f"wc_{items_name}_addform", clear_on_submit=True):
-                ca_vid, ca_role, ca_act = st.columns(PRESET_VLAN_COLS, vertical_alignment="center")
-                with ca_vid:
-                    new_vid = st.text_input("New VID", value="", placeholder="900", key="vlan_pre_new_vid", label_visibility="collapsed").strip()
-                with ca_role:
-                    new_role = st.text_input("New Role", value="", placeholder="e.g. Surveillance / CCTV", key="vlan_pre_new_role", label_visibility="collapsed").strip()
-                with ca_act:
-                    add_vlan = st.form_submit_button("➕ Add", width='stretch', help="Add new VLAN entry")
 
     # Collect group-level pattern values when not custom
     gnpat = group.get("vlan_name_pattern", "<role>")
@@ -2045,45 +2008,8 @@ def _vlan_presets_editor(rules: dict) -> None:
         if group_name is not None:
             _wc_discard(items_name)
         _clear_session_state_prefixes("vlan_pre")
-        import copy
         rules["vlan_presets"] = copy.deepcopy(dict(DEFAULT_VLAN_PRESETS))
         _save_presets(rules, section="vlan_presets", section_label="VLAN Allocation Presets")
-        return
-
-    if group_name is not None and add_vlan:
-        if is_custom:
-            if not new_group_name or not new_group_name.strip():
-                st.error("⚠️ Provide a name for the new preset group.")
-                return
-            group_key = new_group_name.strip()
-            try:
-                new_vid_int = int(new_vid) if new_vid else None
-            except (ValueError, TypeError):
-                new_vid_int = None
-            if new_role or new_vid:
-                vlan_presets[group_key] = {
-                    "vlan_name_pattern": "<role>",
-                    "prefix_pattern": "<site> <role> -- VLAN <vid>",
-                    "items": [{
-                        "vid": new_vid_int,
-                        "role": new_role,
-                    }]
-                }
-                rules["vlan_presets"] = vlan_presets
-                st.session_state["pending_vlan_group"] = group_key
-                _clear_session_state_prefixes("vlan_pre_new_vid", "vlan_pre_new_role", "vlan_pre_new_group")
-                _save_presets(rules, section="vlan_presets", section_label="VLAN Allocation Presets")
-            else:
-                st.error("⚠️ Enter at least a Role or VID for the first entry.")
-            return
-        if new_role or new_vid:
-            try:
-                new_vid_int = int(new_vid) if new_vid else None
-            except (ValueError, TypeError):
-                new_vid_int = None
-            items_wc.append({"vid": new_vid_int, "role": new_role})
-        else:
-            st.warning("⚠️ Enter at least a Role or VID to add.")
         return
 
     if saved_presets:
@@ -2599,7 +2525,6 @@ def render_standards_tab(active_model):
                     if st.button("🔄 Reset to Defaults", key=f"reset_scope_{s_key}", type="secondary", width="stretch"):
                         _wc_discard(name)
                         from config.naming_rules import PATTERN_VARIABLES
-                        default_scope_vars = {k: v for k, v in PATTERN_VARIABLES.items() if (v.get("scope") or "shared") == s_key}
                         _persist_variables(current_rules, {k: copy.deepcopy(v) for k, v in PATTERN_VARIABLES.items() if (v.get("scope") or "shared") == s_key}, section_key=s_key)
 
                 if saved_vars:
