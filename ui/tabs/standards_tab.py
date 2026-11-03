@@ -2365,7 +2365,6 @@ def render_standards_tab(active_model):
                         unsafe_allow_html=True
                     )
                 _preset_type_editor("device", get_device_presets(current_rules), current_rules, prefix="branch",
-                                    wrap_expander=False)
                                      card_title="🔧 DEVICE TYPE PRESETS",
                                      card_caption="",
                                      section="device_presets", section_label="Device Type Presets", expanded=True,
@@ -2381,7 +2380,6 @@ def render_standards_tab(active_model):
                         unsafe_allow_html=True
                     )
                 _preset_type_editor("interface", get_interface_presets(current_rules), current_rules, prefix="iface",
-                                    wrap_expander=False)
                                      card_title="🔌 INTERFACE TYPE PRESETS",
                                      card_caption="",
                                      section="interface_presets", section_label="Interface Type Presets",
