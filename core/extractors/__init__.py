@@ -206,17 +206,15 @@ def run_topology_pipeline(preset: dict, text, get_ocr_records=None):
             logger.exception("OCR step failed")
             ocr_recs = []
             ocr_warnings.append("OCR failed: %s" % _exc)
-        if ocr_recs:
-            mod = PROCESSING_MODULES[image_module_id]
-            handler = mod["handler"]
-            if hasattr(handler, "extract"):
-                recs = handler.extract(ocr_recs, plat_cfg=preset)
-            else:
-                recs = handler(ocr_recs, plat_cfg=preset) if callable(handler) else []
-            if isinstance(recs, list):
-                for r in recs:
-                    r.setdefault("source", "ocr")
-                ocr_result = {"records": recs, "warnings": list(ocr_warnings)}
+        # get_ocr_records() returns EXTRACTED records (the caller already ran the platform's image module on
+        # every screenshot), so they are used as-is. When a text module produced records, analyze_esxi has
+        # already merged them (gap filling), so adding them again would duplicate rows.
+        _text_has_records = isinstance(text_result, dict) and bool(text_result.get("records"))
+        if ocr_recs and not _text_has_records:
+            recs = [dict(r) for r in ocr_recs if isinstance(r, dict)]
+            for r in recs:
+                r.setdefault("source", "ocr")
+            ocr_result = {"records": recs, "warnings": list(ocr_warnings)}
 
     # Determine source and merge
     all_warnings = list(validation_warnings)
