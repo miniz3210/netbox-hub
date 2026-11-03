@@ -1121,6 +1121,15 @@ def get_host_vm_presets(rules: dict) -> list:
     return _normalize_presets(raw, HOST_VM_PRESETS)
 
 
+# A host/VM preset is a VM when its pattern_key starts with this prefix ("vm_host" = legacy shared key).
+# Standards and Naming both import this; do not re-implement the test elsewhere.
+VM_PATTERN_KEY_PREFIX = "vm_"
+
+
+def is_vm_preset_key(pattern_key) -> bool:
+    return str(pattern_key or "").startswith(VM_PATTERN_KEY_PREFIX)
+
+
 def get_esxi_network_presets(rules: dict) -> list:
     """Return the ESXi network description presets list from a rules dict."""
     raw = rules.get("esxi_network_presets")

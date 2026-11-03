@@ -23,7 +23,7 @@ from core.naming_dynamic_helper import (
 from config.naming_rules import (
     load_naming_rules, get_naming_patterns, get_pattern_variables,
     get_device_presets, get_interface_presets, get_host_vm_presets,
-    compute_suggested_site_code,
+    compute_suggested_site_code, is_vm_preset_key as _is_vm_key,
 )
 from core.topology_reducer import reduce_topology_pipeline
 from core.extractors import run_topology_pipeline, preview_topology_text, PROCESSING_MODULES
@@ -47,15 +47,6 @@ MODE_OPTIONS = {
     "interactive": "🛠️ Interactive Single Item Mode",
     "batch_screenshot": "📸 Screenshot Batch Mode (Topology Parsing)",
 }
-
-# Host/VM presets share one list in Standards. A preset is a VM when its pattern_key
-# starts with this prefix (the legacy shared key "vm_host" matches too); everything else is a Host.
-VM_PATTERN_KEY_PREFIX = "vm_"
-
-
-def _is_vm_key(pattern_key: str) -> bool:
-    return str(pattern_key or "").startswith(VM_PATTERN_KEY_PREFIX)
-
 
 def _interface_description_records(desc_regex: str = "") -> list:
     """Ingested NetBox interface descriptions (optionally filtered by regex) as reference rows."""

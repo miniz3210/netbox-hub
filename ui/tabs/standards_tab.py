@@ -11,7 +11,7 @@ from config.naming_rules import (
     load_naming_rules, save_naming_rules,
     load_history, restore_from_history, clear_history, add_to_history,
     get_naming_patterns,
-    get_device_presets, get_interface_presets, get_host_vm_presets,
+    get_device_presets, get_interface_presets, get_host_vm_presets, is_vm_preset_key,
     get_vlan_presets, get_vlan_description_mappings, make_preset_key,
     get_site_code_rules,
     default_presets_for, DEFAULT_PRESET_KEY_FIELD, DEFAULT_NAMING_PATTERNS,
@@ -1535,8 +1535,8 @@ def _render_delta_table(delta: dict) -> None:
 
 def _host_editor(rules: dict) -> None:
     all_presets = list(get_host_vm_presets(rules))
-    host_presets = [p for p in all_presets if p.get("pattern_key") != "vm_host"]
-    vm_presets = [p for p in all_presets if p.get("pattern_key") == "vm_host"]
+    host_presets = [p for p in all_presets if not is_vm_preset_key(p.get("pattern_key"))]
+    vm_presets = [p for p in all_presets if is_vm_preset_key(p.get("pattern_key"))]
     patterns = dict(rules.get("naming_patterns") or {})
 
     name = "host_presets"
@@ -1635,18 +1635,20 @@ def _host_editor(rules: dict) -> None:
 
 
 def _vm_editor(rules: dict) -> None:
+    import re as _re
     name = "vm_presets"
-    saved_vm = [p for p in get_host_vm_presets(rules) if p.get("pattern_key") == "vm_host"]
-    host_presets = [p for p in get_host_vm_presets(rules) if str(p.get("pattern_key", "")) != "vm_host"]
     patterns = dict(rules.get("naming_patterns") or {})
-    saved_tpl = patterns.get("vm_host", "")
-
-    rows = _wc_rows(name, lambda: saved_vm)
-    tpl = st.session_state.get("wc_vm_presets_tpl", saved_tpl)
+    saved_vm = [dict(p, tpl=str(patterns.get(p.get("pattern_key", ""), "")))
+                for p in get_host_vm_presets(rules) if is_vm_preset_key(p.get("pattern_key"))]
+    rows = _wc_rows(name, lambda: [dict(p) for p in saved_vm])
+    cols = PRESET_COLS
 
     c_hdr_left, c_hdr_right = st.columns([0.82, 0.18])
     with c_hdr_left:
-        st.caption("Manage virtual machine roles (cvi, afs, sani, vlab) and their shared hostname template.")
+        st.caption(
+            "Manage virtual machine roles (" + ", ".join(str(p.get("code", "")) for p in saved_vm)
+            + "). Each role has its own hostname template."
+        )
     with c_hdr_right:
         st.markdown(
             f"<div style='text-align:right;color:#94a3b8;font-size:0.85rem;padding-top:2px;'>"
@@ -1656,52 +1658,70 @@ def _vm_editor(rules: dict) -> None:
 
     _inject_preset_table_style()
 
-    h_code, h_label, h_act = st.columns([1.2, 7.6, 1.2], vertical_alignment="center")
+    h_code, h_label, h_tpl, h_act = st.columns(cols, vertical_alignment="center")
     with h_code:
         st.markdown("**Code**")
     with h_label:
         st.markdown("**Label**")
+    with h_tpl:
+        st.markdown("**Pattern Template**")
     with h_act:
         st.markdown("<span class='action-header'>**Action**</span>", unsafe_allow_html=True)
 
-    st.text_input(
-        "Shared Pattern Template",
-        value=tpl,
-        key="wc_vm_presets_tpl",
-        placeholder="<country><site><role><seq>",
-        help="Shared pattern template for all VM presets"
-    )
-
     for idx, row in enumerate(list(rows)):
-        c1, c2, c3 = st.columns([1.2, 7.6, 1.2], vertical_alignment="center")
+        uid = row["_uid"]
+        c1, c2, c3, c4 = st.columns(cols, vertical_alignment="center")
         with c1:
-            row["code"] = st.text_input("Code", value=row.get("code", ""), key=f"wc_{name}_{row['_uid']}_code", label_visibility="collapsed").strip().lower()
+            row["code"] = st.text_input("Code", value=row.get("code", ""), key=f"wc_{name}_{uid}_code", label_visibility="collapsed").strip().lower()
         with c2:
-            row["label"] = st.text_input("Label", value=row.get("label", ""), key=f"wc_{name}_{row['_uid']}_label", label_visibility="collapsed").strip()
+            row["label"] = st.text_input("Label", value=row.get("label", ""), key=f"wc_{name}_{uid}_label", label_visibility="collapsed").strip()
         with c3:
+            row["tpl"] = st.text_input("Pattern Template", value=row.get("tpl", ""), key=f"wc_{name}_{uid}_tpl", label_visibility="collapsed").strip()
+        with c4:
             _wc_row_actions(name, rows, idx, min_rows=1)
 
-    if _wc_values(rows, ("code", "label")) != [(str(r.get("code", "")).strip().lower(), str(r.get("label", "")).strip()) for r in saved_vm]:
+    if _wc_values(rows, ("code", "label", "tpl")) != [(str(r.get("code", "")).strip().lower(), str(r.get("label", "")).strip(), str(r.get("tpl", "")).strip()) for r in saved_vm]:
         st.caption("⚠️ Unsaved changes — click Save & Apply Changes to keep them.")
 
     c_s, c_r = st.columns(2)
     with c_s:
         if st.button("💾 Save & Apply Changes", key=f"{name}_save", type="primary", width="stretch"):
+            _missing = [str(r.get("code", "")).strip() or str(r.get("label", "")).strip() or "(blank)"
+                        for r in rows if not str(r.get("code", "")).strip() or not str(r.get("tpl", "")).strip()]
+            if _missing:
+                st.toast("Not saved: Code and Pattern Template are required for " + ", ".join(_missing), icon="⚠️")
+                return
+            _codes = [str(r.get("code", "")).strip().lower() for r in rows]
+            _dups = sorted({c for c in _codes if _codes.count(c) > 1})
+            if _dups:
+                st.toast("Not saved: duplicate VM code " + ", ".join(_dups), icon="⚠️")
+                return
             new_rules = load_naming_rules()
-            new_rules["naming_patterns"] = dict(new_rules.get("naming_patterns") or {})
-            tpl_val = st.session_state.get("wc_vm_presets_tpl", "").strip()
-            new_rules["naming_patterns"]["vm_host"] = tpl_val or "<country><site><role><seq>"
+            new_patterns = dict(new_rules.get("naming_patterns") or {})
+            host_presets = [p for p in get_host_vm_presets(new_rules) if not is_vm_preset_key(p.get("pattern_key"))]
+            # "vm_host" is the legacy shared key: reserved so no new role reuses it.
+            used = {p.get("pattern_key") for p in host_presets} | {"vm_host"}
             final_vm = []
             for r in rows:
+                code = str(r.get("code", "")).strip().lower()
+                pk = str(r.get("pattern_key", "") or "")
+                if not is_vm_preset_key(pk) or pk in used:
+                    base = "vm_" + (_re.sub(r"[^a-z0-9]+", "_", code).strip("_") or "role")
+                    pk, n = base, 2
+                    while pk in used:
+                        pk = f"{base}_{n}"
+                        n += 1
+                used.add(pk)
+                new_patterns[pk] = str(r.get("tpl", "")).strip()
                 final_vm.append({
-                    "code": str(r.get("code", "")).strip().lower(),
-                    "label": str(r.get("label", "")).strip(),
-                    "pattern_key": "vm_host",
-                    "description": ""
+                    "code": code,
+                    "label": str(r.get("label", "")).strip() or code,
+                    "pattern_key": pk,
+                    "description": str(r.get("description", "")),
                 })
+            new_rules["naming_patterns"] = new_patterns
             new_rules["host_vm_presets"] = host_presets + final_vm
             _wc_discard(name)
-            st.session_state.pop("wc_vm_presets_tpl", None)
             _save_presets(new_rules, section="vm_roles", section_label="VM Role Presets")
             return
     with c_r:
@@ -1710,7 +1730,11 @@ def _vm_editor(rules: dict) -> None:
             _reset_presets("vm_host", rules, section="vm_roles", section_label="VM Role Presets")
             return
 
-    _wc_add_row(name, rows, [("code", "e.g. cvi"), ("label", "e.g. Core Virtualization")], [1.2, 7.6, 1.2])
+    _wc_add_row(name, rows, [
+        ("code", "e.g. cvi"),
+        ("label", "e.g. Core Virtualization"),
+        ("tpl", "e.g. <country><site><role><seq>"),
+    ], cols)
 
 
 def _render_vlan_description_mappings_editor(rules: dict) -> None:
