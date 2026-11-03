@@ -25,6 +25,11 @@
   "branch_pa": "PA<country><state><site><zone><seq>",
   "host_vm_openshift": "<site_prefix>pve<seq>.<domain>",
   "iface_pa_zone": "<role_zone>_<vlan_id>",
+  "vm_cvi": "<country><site><role><seq>",
+  "vm_afs": "<country><site><role><seq>",
+  "vm_sani": "<country><site><role><seq>",
+  "vm_vlab": "<country><site><role><seq>",
+  "vm_tst": "<country><site><role><seq>",
   "device_presets": [
     {
       "code": "SW",
@@ -117,25 +122,25 @@
     {
       "code": "cvi",
       "label": "Core Virtualization (cvi)",
-      "pattern_key": "vm_host",
+      "pattern_key": "vm_cvi",
       "description": ""
     },
     {
       "code": "afs",
       "label": "App & File Services (afs)",
-      "pattern_key": "vm_host",
+      "pattern_key": "vm_afs",
       "description": ""
     },
     {
       "code": "sani",
       "label": "Storage Infrastructure (sani)",
-      "pattern_key": "vm_host",
+      "pattern_key": "vm_sani",
       "description": ""
     },
     {
       "code": "vlab",
       "label": "Virtual Lab / Test (vlab)",
-      "pattern_key": "vm_host",
+      "pattern_key": "vm_vlab",
       "description": ""
     }
   ],
@@ -252,7 +257,12 @@
     "branch_corefw": "TST<country><state><site><zone><seq>",
     "branch_pa": "PA<country><state><site><zone><seq>",
     "host_vm_openshift": "<site_prefix>pve<seq>.<domain>",
-    "iface_pa_zone": "<role_zone>_<vlan_id>"
+    "iface_pa_zone": "<role_zone>_<vlan_id>",
+    "vm_cvi": "<country><site><role><seq>",
+    "vm_afs": "<country><site><role><seq>",
+    "vm_sani": "<country><site><role><seq>",
+    "vm_vlab": "<country><site><role><seq>",
+    "vm_tst": "<country><site><role><seq>"
   },
   "pattern_variables": {
     "site": {

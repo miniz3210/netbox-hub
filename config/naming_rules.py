@@ -1716,6 +1716,11 @@ def export_rules_as_prompt(rules: Dict[str, str]) -> str:
         for name, placeholder in domain_vars
     )
 
+    vm_lines = "\n".join(
+        f"- Virtual Machine (VM) Hostname ({_vp.get('code', '')}): {p.get(_vp.get('pattern_key'), '')}"
+        for _vp in get_host_vm_presets(rules) if is_vm_preset_key(_vp.get("pattern_key"))
+    )
+
     return f"""# INFRASTRUCTURE & NAMING CONVENTIONS STANDARD (AUTOMATION GRADE)
 
 1. Network & Security Devices:
@@ -1737,7 +1742,7 @@ def export_rules_as_prompt(rules: Dict[str, str]) -> str:
 3. Hypervisors & Virtual Machines:
 - ESXi Hypervisor Hostname: {p.get('esxi_host', '')}
 {domain_lines if domain_lines else ''}
-- Virtual Machine (VM) Hostname: {p.get('vm_host', '')}
+{vm_lines}
 
 4. ESXi Network Descriptions:
 - ESXi Physical Uplink Description: {p.get('esxi_uplink', '')}
