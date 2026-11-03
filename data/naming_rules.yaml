@@ -429,76 +429,106 @@
     "zone": {
       "label": "Zone / Role / Vendor (Optional)",
       "placeholder": "e.g. CORE, DIST, EDGE, PA",
+      "default": "",
+      "optional": false,
       "scope": "naming"
     },
     "vendor": {
       "label": "Vendor (Optional)",
       "placeholder": "e.g. PA, CISCO, HUAWEI",
+      "default": "",
+      "optional": false,
       "scope": "naming"
     },
     "seq": {
       "label": "Sequence Number",
       "placeholder": "e.g. 01, 02",
+      "default": "",
+      "optional": false,
       "scope": "naming"
     },
     "stack_id": {
       "label": "Stack / Member ID (Optional)",
       "placeholder": "e.g. 0, 1",
+      "default": "",
+      "optional": false,
       "scope": "naming"
     },
     "local_device": {
       "label": "Local Device Hostname",
       "placeholder": "e.g. SWUSNYC01-0",
+      "default": "",
+      "optional": false,
       "scope": "naming"
     },
     "local_port": {
       "label": "Local Port",
       "placeholder": "e.g. Gi1/0/48, Te1/0/1",
+      "default": "",
+      "optional": false,
       "scope": "naming"
     },
     "remote_device": {
       "label": "Remote Device Hostname",
       "placeholder": "e.g. SWUSNYC02-0",
+      "default": "",
+      "optional": false,
       "scope": "naming"
     },
     "remote_port": {
       "label": "Remote Port",
       "placeholder": "e.g. Gi1/0/48, Te1/0/1",
+      "default": "",
+      "optional": false,
       "scope": "naming"
     },
     "local_po_id": {
       "label": "Local Port-Channel ID",
       "placeholder": "LAG1",
+      "default": "",
+      "optional": false,
       "scope": "naming"
     },
     "device": {
       "label": "Connected Device",
       "placeholder": "e.g. WAP01",
+      "default": "",
+      "optional": false,
       "scope": "naming"
     },
     "port": {
       "label": "Connected Port",
       "placeholder": "e.g. Gi0/1",
+      "default": "",
+      "optional": false,
       "scope": "naming"
     },
     "role_zone": {
       "label": "Security Zone / Role",
       "placeholder": "e.g. INSIDE, OUTSIDE",
+      "default": "",
+      "optional": false,
       "scope": "naming"
     },
     "role_esx": {
       "label": "Host Role (Optional)",
       "placeholder": "e.g. esx, otinfhost, infhost",
+      "default": "",
+      "optional": false,
       "scope": "naming"
     },
     "site_prefix": {
       "label": "Site Prefix (Short Code)",
       "placeholder": "e.g. age, nyc, lon, syd",
+      "default": "",
+      "optional": false,
       "scope": "naming"
     },
     "vm_site": {
       "label": "Site Prefix / Country & Site",
       "placeholder": "e.g. age, usnyc, uklon",
+      "default": "",
+      "optional": false,
       "scope": "naming"
     },
     "vmnic": {

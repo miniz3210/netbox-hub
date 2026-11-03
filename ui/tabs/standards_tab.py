@@ -8,6 +8,7 @@ import uuid
 import streamlit as st
 from config.constants import RULES_FILE
 from config.naming_rules import (
+    REQUIRED_HYPERVISOR_TEMPLATE_CODES,
     load_naming_rules, save_naming_rules,
     load_history, restore_from_history, clear_history, add_to_history,
     get_naming_patterns,
@@ -996,6 +997,13 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                                          "hidden": bool(r.get("hidden", False))} for r in plat_patterns])
         fields = ("code", "label", "pattern", "hidden")
         HYP_TPL_COLS = [1.2, 2.2, 4.4, 0.8, 1.4]
+        _have_codes = {str(r.get("code", "")).strip() for r in rows if not r.get("hidden")}
+        _lack_codes = [c for c in REQUIRED_HYPERVISOR_TEMPLATE_CODES if c not in _have_codes]
+        if _lack_codes:
+            st.caption(
+                "⚠️ Missing or hidden required template(s): " + ", ".join(_lack_codes)
+                + ". Naming > Screenshot Batch cannot generate output for this platform until they exist and are not hidden."
+            )
 
         c_h0, c_h1, c_h2, c_h3, c_h4 = st.columns(HYP_TPL_COLS, vertical_alignment="center")
         with c_h0:
