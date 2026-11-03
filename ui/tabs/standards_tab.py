@@ -1438,6 +1438,10 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
         return
 
     if saved_presets:
+        _missing = [str(r.get("code", "")).strip() or str(r.get("label", "")).strip() or "(blank)" for r in rows if not str(r.get("code", "")).strip() or not str(r.get("tpl", "")).strip()]
+        if _missing:
+            st.toast("Not saved: Code and Pattern Template are required for " + ", ".join(_missing), icon="⚠️")
+            return
         final_presets = []
         for row in rows:
             ncode = row.get("code", "").strip()
