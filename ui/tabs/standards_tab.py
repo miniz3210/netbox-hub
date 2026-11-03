@@ -15,7 +15,7 @@ from config.naming_rules import (
     get_vlan_presets, get_vlan_description_mappings, make_preset_key,
     get_site_code_rules,
     default_presets_for, DEFAULT_PRESET_KEY_FIELD, DEFAULT_NAMING_PATTERNS,
-    DEFAULT_HOST_TYPE_PRESETS, DEFAULT_VM_PRESETS,
+    DEFAULT_VM_PRESETS,
     DEFAULT_VLAN_PRESETS, DEFAULT_VLAN_DESCRIPTION_MAPPINGS,
     get_ipam_role_mappings, DEFAULT_IPAM_ROLE_MAPPINGS,
     get_hardware_baseline_standards, DEFAULT_HARDWARE_BASELINE_STANDARDS,

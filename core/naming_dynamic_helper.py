@@ -328,7 +328,7 @@ def render_edit_mode_ui(pattern_key: str, pattern_value: str, variables: Dict):
         rules[alt_key] = edited
 
         for p_item in rules.get("esxi_network_presets", []):
-            if p_item.get("pattern_key") in (pattern_key, alt_key) or p_item.get("code", "").lower() in pattern_key.lower():
+            if p_item.get("pattern_key") in (pattern_key, alt_key):
                 patterns[p_item.get("pattern_key")] = edited
                 p_item["pattern"] = edited
                 p_item["pattern_template"] = edited
