@@ -123,25 +123,25 @@
       "code": "cvi",
       "label": "Core Virtualization (cvi)",
       "pattern_key": "vm_cvi",
-      "description": ""
+      "description": "Core / Virtualization VM"
     },
     {
       "code": "afs",
       "label": "App & File Services (afs)",
       "pattern_key": "vm_afs",
-      "description": ""
+      "description": "Application / File Services VM"
     },
     {
       "code": "sani",
       "label": "Storage Infrastructure (sani)",
       "pattern_key": "vm_sani",
-      "description": ""
+      "description": "Storage Infrastructure VM"
     },
     {
       "code": "vlab",
       "label": "Virtual Lab / Test (vlab)",
       "pattern_key": "vm_vlab",
-      "description": ""
+      "description": "Virtual Lab / Test VM"
     }
   ],
   "esxi_network_presets": [

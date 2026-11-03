@@ -347,8 +347,6 @@ def _render_auto_correction_manager(active_model: str) -> None:
                         st.warning("⚠️ Please describe the correction first.")
 
 
-
-
 def _render_ipam_role_mapping_manager(active_model: str) -> None:
     name = "ipam_role"
     rules = load_naming_rules()
@@ -459,7 +457,6 @@ def _reset_ipam_role_mappings() -> None:
     SSM.refresh_naming_rules()
     st.toast("✅ IPAM Role Mapping Rules reset to defaults!", icon="🔄")
     st.rerun()
-
 
 
 def _render_site_code_mapping_manager(key_prefix: str = "std_scm") -> None:
@@ -722,195 +719,6 @@ def _save_vlan_desc_mappings(rules: dict, section: str = "vlan_desc_mappings", s
     st.toast(f"✅ {section_label} saved & applied!", icon="💾")
     _clear_session_state_prefixes("vlandesc_")
     st.rerun()
-
-
-def _render_spatial_anchors_redaction_editor(
-    plat_parsing: dict,
-    active_plat: str,
-) -> None:
-    """Render Section 2.5: Relative Spatial Anchors & Local Privacy Redaction UI."""
-    sp_cfg = plat_parsing.get("spatial_anchors_and_redaction")
-    if not isinstance(sp_cfg, dict):
-        sp_cfg = {}
-
-    # Handle pending add from session state (deferred from clear_on_submit form)
-    pending_add_key = f"_spat_pending_add_{active_plat}"
-    if st.session_state.pop(pending_add_key, False):
-        new_role = st.session_state.pop(f"spat_new_role_{active_plat}", "").strip()
-        new_pat = st.session_state.pop(f"spat_new_pat_{active_plat}", "").strip()
-        if new_role:
-            pat_list = [p.strip() for p in new_pat.split(",") if p.strip()] if new_pat else []
-            anchors_list = sp_cfg.get("anchors")
-            if not isinstance(anchors_list, list):
-                anchors_list = []
-            anchors_list.append({"role": new_role, "patterns": pat_list})
-            sp_cfg["anchors"] = anchors_list
-            plat_parsing["spatial_anchors_and_redaction"] = sp_cfg
-
-    enabled = sp_cfg.get("enabled", False)
-
-    # Migrate legacy scalar fields into the new anchors list format on-the-fly
-    anchors_list = sp_cfg.get("anchors")
-    if not isinstance(anchors_list, list) or not anchors_list:
-        legacy_map = [
-            ("left_boundary_anchor", "left_boundary"),
-            ("container_header", "container_header"),
-            ("adapter_column_anchor", "adapter_column"),
-        ]
-        anchors_list = []
-        for legacy_key, role in legacy_map:
-            val = sp_cfg.get(legacy_key)
-            if isinstance(val, str) and val.strip():
-                anchors_list.append({"role": role, "patterns": [val.strip()]})
-            elif isinstance(val, list) and val:
-                anchors_list.append({"role": role, "patterns": list(val)})
-        if not anchors_list:
-            anchors_list = [
-                {"role": "left_boundary", "patterns": ["Virtual switches"]},
-                {"role": "container_header", "patterns": ["Standard Switch:"]},
-                {"role": "adapter_column", "patterns": ["Physical Adapters"]},
-            ]
-        sp_cfg["anchors"] = anchors_list
-
-    redact_ipv4 = sp_cfg.get("redact_ipv4", True)
-    redact_domains = sp_cfg.get("redact_domains", True)
-    redact_mac = sp_cfg.get("redact_mac", True)
-    domain_pats = sp_cfg.get("domain_patterns", ["\\.adds$", "\\.local$", "\\.internal$", "\\.corp$"])
-    if not isinstance(domain_pats, list):
-        domain_pats = []
-    domain_pats_str = ", ".join(domain_pats)
-
-    st.caption(
-        "Configure dynamic relative spatial boundaries (resolution-agnostic) and "
-        "on-device deterministic data redaction. When enabled, OCR tokens are grouped "
-        "by virtual-switch containers using anchor-based geometry instead of fixed "
-        "pixel offsets, and sensitive values (IPs, domains, MACs) are replaced locally "
-        "with deterministic tokens before the payload reaches any external LLM."
-    )
-
-    enabled_ui = st.checkbox(
-        "Enable Relative Spatial Grouping & Local Redaction",
-        value=bool(enabled),
-        key=f"spat_enabled_{active_plat}",
-        help="When enabled, OCR tokens are spatially grouped and sensitive data is redacted locally.",
-    )
-
-    sp_cfg_out = dict(sp_cfg)
-    sp_cfg_out["enabled"] = enabled_ui
-
-    if enabled_ui:
-        # ── Dynamic Anchor Rows (identical UX to Section 2) ──────────────
-        st.markdown(
-            "<div style='display:flex; justify-content:space-between; align-items:center; margin-top:8px; margin-bottom:4px;'>"
-            "<span style='font-size:0.95rem; font-weight:600;'>Anchor Roles &amp; Patterns</span>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
-        st.caption("Each row defines a spatial anchor role with one or more text patterns. Patterns are matched case-insensitively against OCR token text.")
-
-        ANC_COLS = [2.0, 5.3, 1.2]
-        ac_role, ac_pat, ac_act = st.columns(ANC_COLS, vertical_alignment="center")
-        with ac_role:
-            st.markdown("**Anchor Role**")
-        with ac_pat:
-            st.markdown("**Anchor Patterns (comma-separated)**")
-        with ac_act:
-            pass
-
-        updated_anchors = []
-        for idx, anchor_entry in enumerate(anchors_list):
-            role = anchor_entry.get("role", "")
-            patterns = anchor_entry.get("patterns", [])
-            if not isinstance(patterns, list):
-                patterns = [str(patterns)]
-            pat_str = ", ".join(patterns)
-
-            rc, rp, ra = st.columns(ANC_COLS, vertical_alignment="center")
-            with rc:
-                new_role = st.text_input(
-                    "Anchor Role", value=role,
-                    key=f"spat_role_{active_plat}_{idx}",
-                    label_visibility="collapsed",
-                ).strip()
-            with rp:
-                new_pat = st.text_input(
-                    "Patterns", value=pat_str,
-                    key=f"spat_pat_{active_plat}_{idx}",
-                    label_visibility="collapsed",
-                ).strip()
-            with ra:
-                if _render_centered_del_btn(f"spat_del_{active_plat}_{idx}", "Delete anchor row"):
-                    continue  # skip re-adding this row
-            if new_role:
-                pat_list = [p.strip() for p in new_pat.split(",") if p.strip()] if new_pat else []
-                updated_anchors.append({"role": new_role, "patterns": pat_list})
-
-        # Inline add-row form (clear_on_submit avoids layout crashes)
-        with st.form(key=f"spat_add_form_{active_plat}", clear_on_submit=True):
-            ca1, ca2, ca3 = st.columns(ANC_COLS, vertical_alignment="center")
-            with ca1:
-                new_role = st.text_input(
-                    "New Role", value="", key=f"spat_new_role_{active_plat}",
-                    placeholder="e.g. container_header", label_visibility="collapsed",
-                )
-            with ca2:
-                new_pat = st.text_input(
-                    "New Patterns", value="", key=f"spat_new_pat_{active_plat}",
-                    placeholder="e.g. Standard Switch:, DVSwitch:", label_visibility="collapsed",
-                )
-            with ca3:
-                add_anchor = st.form_submit_button("➕ Add", width='stretch', help="Add new anchor row")
-            if add_anchor:
-                if new_role.strip():
-                    pat_list = [p.strip() for p in new_pat.split(",") if p.strip()] if new_pat.strip() else []
-                    updated_anchors.append({"role": new_role.strip(), "patterns": pat_list})
-                    st.session_state[f"_spat_pending_add_{active_plat}"] = True
-                    st.rerun()
-                else:
-                    st.warning("⚠️ Enter an anchor role name.")
-
-        st.divider()
-
-        # ── Redaction Controls ────────────────────────────────────────────
-        redact_ipv4_ui = st.checkbox(
-            "Redact IPv4 addresses",
-            value=bool(redact_ipv4),
-            key=f"spat_redact_ip_{active_plat}",
-        )
-        redact_domains_ui = st.checkbox(
-            "Redact internal domains",
-            value=bool(redact_domains),
-            key=f"spat_redact_domain_{active_plat}",
-        )
-        redact_mac_ui = st.checkbox(
-            "Redact MAC addresses",
-            value=bool(redact_mac),
-            key=f"spat_redact_mac_{active_plat}",
-        )
-
-        if redact_domains_ui:
-            domain_pats_ui = st.text_input(
-                "Domain Suffix Patterns (comma-separated regex)",
-                value=domain_pats_str,
-                key=f"spat_domain_pats_{active_plat}",
-                help="Regex patterns matching internal domain suffixes to redact (e.g. '.adds, .local').",
-            )
-        else:
-            domain_pats_ui = domain_pats_str
-
-        sp_cfg_out.update({
-            "redact_ipv4": redact_ipv4_ui,
-            "redact_domains": redact_domains_ui,
-            "redact_mac": redact_mac_ui,
-            "domain_patterns": [
-                p.strip() for p in domain_pats_ui.split(",") if p.strip()
-            ] if redact_domains_ui else [],
-        })
-    else:
-        # Preserve anchor settings while the feature is disabled.
-        sp_cfg_out.setdefault("anchors", anchors_list)
-
-    plat_parsing["spatial_anchors_and_redaction"] = sp_cfg_out
 
 
 def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | None = None):
@@ -1599,7 +1407,17 @@ def _host_editor(rules: dict) -> None:
 
     if reset:
         _wc_discard(name)
-        _reset_presets("host_vm", rules, section="hosts", section_label="Hosts Type Presets")
+        new_rules = load_naming_rules()
+        new_patterns = dict(new_rules.get("naming_patterns") or {})
+        keep_vm = [copy.deepcopy(p) for p in get_host_vm_presets(new_rules) if is_vm_preset_key(p.get("pattern_key"))]
+        reset_hosts = [copy.deepcopy(p) for p in default_presets_for("host_vm") if not is_vm_preset_key(p.get("pattern_key"))]
+        for p in reset_hosts:
+            pk = p.get("pattern_key", "")
+            if pk in DEFAULT_NAMING_PATTERNS:
+                new_patterns[pk] = DEFAULT_NAMING_PATTERNS[pk]
+        new_rules["naming_patterns"] = new_patterns
+        new_rules["host_vm_presets"] = reset_hosts + keep_vm
+        _save_presets(new_rules, section="hosts", section_label="Hosts Type Presets")
         return
 
     if saved:
@@ -2041,8 +1859,6 @@ def _vlan_presets_editor(rules: dict) -> None:
         _save_presets(rules, section="vlan_presets", section_label="VLAN Allocation Presets")
 
 
-
-
 def _render_azure_mappings_editor(rules: dict):
     from config.naming_rules import get_azure_mappings, DEFAULT_AZURE_MAPPINGS
     saved = get_azure_mappings(rules)
@@ -2237,7 +2053,6 @@ def _render_hardware_baseline_editor(rules: dict, active_model: str | None = Non
                         st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
                         st.toast(f"✅ {display_name} reset to defaults!", icon="🔄")
                         st.rerun()
-
 
 
 def render_standards_tab(active_model):
@@ -2564,7 +2379,6 @@ def render_standards_tab(active_model):
                 for row in rows:
                     row.setdefault("optional", False)
                     row.setdefault("scope", s_key)
-
 
 
         with st.expander("🧩 Active Patterns", expanded=False):
