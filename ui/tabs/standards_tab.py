@@ -828,6 +828,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
     if sel_choice == CREATE_OPTION:
         st.markdown("##### ➕ Create New Platform Preset")
         new_plat_name = st.text_input("New Platform Name", placeholder="e.g. Nutanix AHV, OpenStack").strip()
+        st.selectbox("Copy templates and settings from", names, key="new_plat_copy_from", help="The new platform starts as a copy of this platform (description templates, processing modules, role options, teaming rules). Edit it afterwards.")
         c_add_btn, c_cancel_btn = st.columns([2, 2])
         with c_add_btn:
             if st.button("➕ Create Platform", type="primary", width="stretch"):
@@ -836,16 +837,19 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 elif new_plat_name in names:
                     st.warning(f"Platform '{new_plat_name}' already exists.")
                 else:
-                    hyp_presets[new_plat_name] = [
-                        {"code": "Uplink", "label": "Physical Uplink", "pattern": "<interface> - <parent> <purpose>"},
-                        {"code": "Default", "label": "Default Interface", "pattern": "<interface> (<purpose>)"}
-                    ]
+                    _copy_src = st.session_state.get("new_plat_copy_from") or ""
+                    hyp_presets[new_plat_name] = copy.deepcopy(hyp_presets.get(_copy_src) or [])
                     parsing_presets[new_plat_name] = {
                         "platform": new_plat_name,
                         "aliases": {},
                         "instructions": f"[PLATFORM ARCHITECTURE: {new_plat_name.upper()}]\n1. Extract network topology into atomic attributes.",
                         "export_prompt": f"You are an expert network engineer specializing in {new_plat_name}...",
                     }
+                    _src_cfg = parsing_presets.get(_copy_src)
+                    if isinstance(_src_cfg, dict):
+                        for _k, _v in _src_cfg.items():
+                            if _k not in ("platform", "aliases", "instructions", "export_prompt"):
+                                parsing_presets[new_plat_name][_k] = copy.deepcopy(_v)
                     rules["hypervisor_presets"] = hyp_presets
                     rules["topology_parsing_presets"] = parsing_presets
                     save_naming_rules(rules, source=f"Create Platform {new_plat_name}")
@@ -1049,8 +1053,8 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 st.rerun()
         with c_r:
             if st.button("🔄 Reset to Defaults", key=f"btn_reset_s1_{active_plat}", width="stretch"):
-                default_hyp = DEFAULT_HYPERVISOR_PRESETS.get(active_plat, [])
-                hyp_presets[active_plat] = [dict(t) for t in default_hyp]
+                default_hyp = DEFAULT_HYPERVISOR_PRESETS.get(active_plat)
+                hyp_presets[active_plat] = [dict(t) for t in (default_hyp if default_hyp is not None else plat_patterns)]
                 rules["hypervisor_presets"] = hyp_presets
                 save_naming_rules(rules, source=f"Reset Section 1 for {active_plat}")
                 _wc_discard(name)

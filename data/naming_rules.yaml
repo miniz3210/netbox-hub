@@ -978,6 +978,10 @@
       "site",
       "role",
       "seq"
+    ],
+    "switch_uplink_desc": [
+      "remote_device",
+      "remote_port"
     ]
   }
 }
