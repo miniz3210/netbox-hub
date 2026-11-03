@@ -50,27 +50,6 @@ COMPANY NAMING STANDARDS:
     prompt = f"Audit this {asset_type}:\n```\n{user_input_text}\n```"
     return call_ai(prompt, model_name, custom_system_msg=system_msg)
 
-def parse_prompt_to_rules(prompt_text: str, model_name: str) -> Dict[str, str]:
-    extract_prompt = f"""
-Analyze this natural language naming standard and return a valid JSON matching this schema:
-{{
-  "branch_switch": "...", "branch_stack": "...", "branch_ap": "...",
-  "branch_firewall": "...", "branch_ion": "...", "branch_router": "...", "branch_va": "...",
-  "branch_security": "...",
-  "switch_uplink_desc": "...",
-  "switch_lag_member": "...", "switch_port_channel": "...", "switch_access_desc": "...",
-  "firewall_interface": "...", "esxi_host": "...", "vm_host": "...",
-  "esxi_uplink": "...", "esxi_portgroup": "...", "esxi_vmkernel": "...", "netbox_server_yaml": "..."
-}}
-Input Prompt:
-{prompt_text}
-Output ONLY raw JSON.
-"""
-    raw_res = call_ai(extract_prompt, model_name, custom_system_msg="You are an expert JSON generator for network naming standards. Output ONLY valid, raw JSON.")
-    clean_json = re.sub(r"^```(?:json)?|```$", "", raw_res.strip(), flags=re.IGNORECASE).strip()
-    return json.loads(clean_json)
-
-
 def generate_autocorrect_rule(natural_language: str, model_name: str) -> Dict[str, str]:
     """Generate a regex auto-correction rule from a natural language description.
 
