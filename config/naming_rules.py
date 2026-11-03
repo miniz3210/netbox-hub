@@ -402,6 +402,25 @@ LEGACY_PATTERN_KEYS = list(DEFAULT_NAMING_PATTERNS.keys())
 # and so the Standards tab can import them as a single source of truth.
 REQUIRED_HYPERVISOR_TEMPLATE_CODES = ("Switch_Teaming", "Uplink", "PortGroup", "VMkernel")
 
+def find_hypervisor_template(presets, type_name):
+    """Return the pattern of the first non-hidden preset whose code matches type_name.
+    
+    Matching ignores case, whitespace, underscores and hyphens.
+    Returns None if not found.
+    """
+    def _norm(v):
+        return re.sub(r"[\s_\-]+", "", str(v or "")).lower()
+    
+    want = _norm(type_name)
+    if not want:
+        return None
+    
+    for p in presets or []:
+        if not p.get("hidden", False) and _norm(p.get("code", "")) == want:
+            return p.get("pattern", "")
+    
+    return None
+
 DEFAULT_HYPERVISOR_PRESETS = {
     "VMware ESXi": [
         {

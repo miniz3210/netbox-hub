@@ -25,6 +25,7 @@ from config.naming_rules import (
     get_device_presets, get_interface_presets, get_host_vm_presets,
     compute_suggested_site_code, is_vm_preset_key as _is_vm_key,
     REQUIRED_HYPERVISOR_TEMPLATE_CODES,
+    find_hypervisor_template,
 )
 from core.topology_reducer import reduce_topology_pipeline
 from core.extractors import run_topology_pipeline, preview_topology_text, PROCESSING_MODULES
@@ -1692,10 +1693,19 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     st.markdown("##### \U0001F39B\uFE0F Topology Data Grid")
     st.caption("Edit switch assignments, interface roles, and IPs directly. Changes update NetBox descriptions instantly.")
     df_for_editor = _records_to_grid_df(records)
+    _grid_type_options = ["Uplink", "VMkernel", "Port Group"]
+    for _t in (((_std_rules.get("hypervisor_presets") or {}).get(target_platform)) or []):
+        _c = str(_t.get("code", "")).strip()
+        if _c and not _t.get("hidden") and _c not in REQUIRED_HYPERVISOR_TEMPLATE_CODES and _c not in _grid_type_options:
+            _grid_type_options.append(_c)
+    for _r in records:
+        _rt = str(_r.get("type", "")).strip()
+        if _rt and _rt not in _grid_type_options:
+            _grid_type_options.append(_rt)
     column_config = {
         "switch": st.column_config.SelectboxColumn("Switch Container", options=sw_options if sw_options else [_dynamic_switch_pfx + "0"], required=False),
         "interface": st.column_config.TextColumn("Interface / Port", required=False),
-        "type": st.column_config.SelectboxColumn("Type", options=["Uplink", "VMkernel", "Port Group"], required=False),
+        "type": st.column_config.SelectboxColumn("Type", options=_grid_type_options, required=False),
         "ip": st.column_config.TextColumn("IPv4 Address", required=False),
         "purpose": st.column_config.TextColumn("Service / Purpose", required=False),
         "vlan": st.column_config.TextColumn("VLAN", required=False),
@@ -1771,7 +1781,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             _out_lines.append(f"=== {_gparent} ===")
             _sw_uplinks = [r for r in _groups[_gparent] if r.get("type") == "Uplink" and r.get("interface")]
             _sw_services = [r for r in _groups[_gparent] if r.get("type") != "Uplink" and (r.get("interface") or r.get("purpose"))]
-            _sw_vmks = [r for r in _groups[_gparent] if r.get("type") == "VMkernel"]
             # Dynamic teaming clause
             teaming_str = _build_dynamic_teaming_clause(_sw_uplinks)
             # ── Switch Teaming Header (rendered ONCE per switch) ──────────────
@@ -1829,18 +1838,8 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 if _dedup_key in _seen_svc_keys:
                     continue
                 _seen_svc_keys.add(_dedup_key)
-                if _svc_type == "VMkernel":
-                    _svc_tpl = None
-                    for _stpl in _active_hyp_presets:
-                        if _stpl.get("code") == "VMkernel" and not _stpl.get("hidden", False):
-                            _svc_tpl = _stpl.get("pattern", "")
-                            break
-                else:
-                    _svc_tpl = None
-                    for _ptpl in _active_hyp_presets:
-                        if _ptpl.get("code") == "PortGroup" and not _ptpl.get("hidden", False):
-                            _svc_tpl = _ptpl.get("pattern", "")
-                            break
+                _svc_tpl = (find_hypervisor_template(_active_hyp_presets, _svc_type)
+                            or find_hypervisor_template(_active_hyp_presets, "PortGroup"))
                 _svc_vals = {
                     "purpose": _svc_name,
                     "port_group": _svc_name,
