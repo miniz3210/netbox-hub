@@ -915,8 +915,7 @@
       "instructions": "",
       "export_prompt": "",
       "modules": [
-        "proxmox_ocr",
-        "vsphere_text"
+        "proxmox_ocr"
       ]
     }
   },

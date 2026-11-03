@@ -24,11 +24,10 @@ from config.naming_rules import (
     load_naming_rules, get_naming_patterns, get_pattern_variables,
     get_device_presets, get_interface_presets, get_host_vm_presets,
     compute_suggested_site_code, is_vm_preset_key as _is_vm_key,
-    REQUIRED_HYPERVISOR_TEMPLATE_CODES,
     find_hypervisor_template,
 )
 from core.topology_reducer import reduce_topology_pipeline
-from core.extractors import run_topology_pipeline, preview_topology_text, PROCESSING_MODULES
+from core.extractors import run_topology_pipeline, preview_topology_text, PROCESSING_MODULES, required_template_codes_for
 # ---------------------------------------------------------------------------
 # Progressive VLM rendering helpers
 # ---------------------------------------------------------------------------
@@ -1697,9 +1696,10 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     st.caption("Edit switch assignments, interface roles, and IPs directly. Changes update NetBox descriptions instantly.")
     df_for_editor = _records_to_grid_df(records)
     _grid_type_options = ["Uplink", "VMkernel", "Port Group"]
+    _required_editor_codes = required_template_codes_for(plat_cfg.get("modules", []))
     for _t in (((_std_rules.get("hypervisor_presets") or {}).get(target_platform)) or []):
         _c = str(_t.get("code", "")).strip()
-        if _c and not _t.get("hidden") and _c not in REQUIRED_HYPERVISOR_TEMPLATE_CODES and _c not in _grid_type_options:
+        if _c and not _t.get("hidden") and _c not in _required_editor_codes and _c not in _grid_type_options:
             _grid_type_options.append(_c)
     for _r in records:
         _rt = str(_r.get("type", "")).strip()
@@ -1764,21 +1764,25 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 f"(Hypervisor > Description Templates). Please configure templates there before generating output."
             )
             st.stop()
-        _required_codes = set(REQUIRED_HYPERVISOR_TEMPLATE_CODES)
-        _available_codes = {
-            p.get("code", "").strip()
-            for p in _active_hyp_presets
-            if not p.get("hidden", False)
-        }
-        _missing_codes = _required_codes - _available_codes
-        if _missing_codes:
-            st.error(
-                f"❌ Missing required template codes for platform '{_plat_key}': "
-                f"{', '.join(sorted(_missing_codes))}. "
-                f"Configure all four templates ({', '.join(sorted(REQUIRED_HYPERVISOR_TEMPLATE_CODES))}) "
-                f"in the Standards Tab under Hypervisor > Description Templates, then retry."
-            )
-            st.stop()
+        _required_codes_list = required_template_codes_for(
+            (_tpp_std.get(_plat_key) or {}).get("modules", [])
+        )
+        if _required_codes_list:
+            _required_codes_set = set(_required_codes_list)
+            _available_codes = {
+                p.get("code", "").strip()
+                for p in _active_hyp_presets
+                if not p.get("hidden", False)
+            }
+            _missing_codes = _required_codes_set - _available_codes
+            if _missing_codes:
+                st.error(
+                    f"❌ Missing required template codes for platform '{_plat_key}': "
+                    f"{', '.join(sorted(_missing_codes))}. "
+                    f"Configure all required templates ({', '.join(_required_codes_list)}) "
+                    f"in the Standards Tab under Hypervisor > Description Templates, then retry."
+                )
+                st.stop()
         _out_lines = [f"# NOTE:\n# Generated from NetBox Hub v{APP_VERSION} (Deterministic Engine).\n"]
         for _gparent in sorted(_groups.keys(), key=_natsort_key):
             _out_lines.append(f"=== {_gparent} ===")

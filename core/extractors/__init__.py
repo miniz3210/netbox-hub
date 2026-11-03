@@ -1,5 +1,7 @@
 import logging
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
+
+from config.naming_rules import REQUIRED_HYPERVISOR_TEMPLATE_CODES
 
 from .base import BaseTopologyExtractor
 from .esxi import EsxiTopologyExtractor
@@ -17,6 +19,7 @@ TEXT_PARSERS: Dict[str, Dict[str, Callable]] = {
         "preview": parse_vsphere_text_ex,
         "metadata": {
             "display_name": "vSphere Text Parser",
+            "required_template_codes": REQUIRED_HYPERVISOR_TEMPLATE_CODES,
             "input_kind": "text",
             "paste_label": "vSphere Page Text",
             "paste_help": "Expand every switch, VMkernel Ports and uplink first, run this one-liner in your browser Console on the vSphere tab, then paste here:",
@@ -105,7 +108,9 @@ PROCESSING_MODULES: Dict[str, Dict[str, object]] = {
         "display_name": "ESXi Screenshot Extractor",
         "handler": EsxiTopologyExtractor(),
         "preview": None,
-        "metadata": {},
+        "metadata": {
+            "required_template_codes": REQUIRED_HYPERVISOR_TEMPLATE_CODES,
+        },
     },
     "proxmox_ocr": {
         "id": "proxmox_ocr",
@@ -116,6 +121,18 @@ PROCESSING_MODULES: Dict[str, Dict[str, object]] = {
         "metadata": {},
     },
 }
+
+
+def required_template_codes_for(module_ids: List[str]) -> Tuple[str, ...]:
+    seen: List[str] = []
+    for mid in module_ids:
+        if mid not in PROCESSING_MODULES:
+            continue
+        codes = PROCESSING_MODULES[mid]["metadata"].get("required_template_codes", ())
+        for c in codes:
+            if c not in seen:
+                seen.append(c)
+    return tuple(seen)
 
 
 def validate_processing_modules(module_ids: List[str]) -> List[str]:

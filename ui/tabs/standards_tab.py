@@ -8,7 +8,6 @@ import uuid
 import streamlit as st
 from config.constants import RULES_FILE
 from config.naming_rules import (
-    REQUIRED_HYPERVISOR_TEMPLATE_CODES,
     load_naming_rules, save_naming_rules,
     load_history, restore_from_history, clear_history, add_to_history,
     get_naming_patterns,
@@ -22,7 +21,7 @@ from config.naming_rules import (
     get_hardware_baseline_standards, DEFAULT_HARDWARE_BASELINE_STANDARDS,
     DEFAULT_HYPERVISOR_PRESETS, get_azure_mappings, DEFAULT_AZURE_MAPPINGS,
     )
-from core.extractors import PROCESSING_MODULES
+from core.extractors import PROCESSING_MODULES, required_template_codes_for
 PROCESSING_MODULES_MAP = {m["display_name"]: mid for mid, m in PROCESSING_MODULES.items()}
 from core.naming_engine import generate_autocorrect_rule
 from core.session_manager import SessionStateManager as SSM
@@ -998,7 +997,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
         fields = ("code", "label", "pattern", "hidden")
         HYP_TPL_COLS = [1.2, 2.2, 4.4, 0.8, 1.4]
         _have_codes = {str(r.get("code", "")).strip() for r in rows if not r.get("hidden")}
-        _lack_codes = [c for c in REQUIRED_HYPERVISOR_TEMPLATE_CODES if c not in _have_codes]
+        _lack_codes = [c for c in required_template_codes_for(plat_parsing.get("modules", [])) if c not in _have_codes]
         if _lack_codes:
             st.caption(
                 "⚠️ Missing or hidden required template(s): " + ", ".join(_lack_codes)
