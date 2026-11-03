@@ -39,7 +39,7 @@ PRESET_ACTION_COLS = [1, 1, 1]
 # VLAN allocation preset columns: VID, Role, Action (sum = 10.0)
 PRESET_VLAN_COLS = [1.5, 7.3, 1.2]
 # Standardized 3-column ratio for Key-Value mappings: Key, Value, Action
-VLAND_MAPPINGS_COLS = [4.0, 5.0, 1.2]
+VLAN_DESC_MAPPINGS_COLS = [4.0, 5.0, 1.2]
 # Auto-Correction rule columns: Original Pattern, Replacement, Description, Action.
 AUTOCORRECT_COLS = [3.5, 3.0, 4.0, 1.0]
 
@@ -1718,7 +1718,7 @@ def _render_vlan_description_mappings_editor(rules: dict) -> None:
     saved = dict(get_vlan_description_mappings(rules))
     rows = _wc_rows(name, lambda: [{"role": k, "desc": v} for k, v in saved.items()])
     fields = ("role", "desc")
-    COLS = VLAND_MAPPINGS_COLS
+    COLS = VLAN_DESC_MAPPINGS_COLS
 
     with st.container():
         h_role, h_desc, h_act = st.columns(COLS, vertical_alignment="center")
@@ -2357,7 +2357,7 @@ def render_standards_tab(active_model):
             with st.expander("🔧 Device Type Presets", expanded=False):
                 c_hdr_left, c_hdr_right = st.columns([0.82, 0.18])
                 with c_hdr_left:
-                    st.caption("Manage device naming patterns and presets (SW, VS, FW, ION, WAP, RTR, VA).")
+                    st.caption(f"Manage device naming patterns and presets ({', '.join(p.get('code', '') for p in get_device_presets(current_rules))}).")
                 with c_hdr_right:
                     st.markdown(
                         f"<div style='text-align:right;color:#94a3b8;font-size:0.85rem;padding-top:2px;'>"
@@ -2372,7 +2372,7 @@ def render_standards_tab(active_model):
             with st.expander("🔌 Interface Type Presets", expanded=False):
                 c_hdr_left, c_hdr_right = st.columns([0.82, 0.18])
                 with c_hdr_left:
-                    st.caption("Manage interface description presets (Uplink, LAG, Po, Access, FW Zone).")
+                    st.caption(f"Manage interface description presets ({', '.join(p.get('code', '') for p in get_interface_presets(current_rules))}).")
                 with c_hdr_right:
                     st.markdown(
                         f"<div style='text-align:right;color:#94a3b8;font-size:0.85rem;padding-top:2px;'>"
