@@ -891,13 +891,6 @@ def _handle_topology_analyze() -> None:
                 for _r in recs:
                     _r.setdefault("source", "ocr")
                 merged_records.extend(recs)
-        if not merged_records:
-            if not _img_mod_ids:
-                st.toast("No image module configured for this platform.", icon="⚠️")
-            else:
-                st.toast("OCR found no topology in the screenshot.", icon="⚠️")
-            return []
-        # Store raw tokens for inspector
         _insp_lines = st.session_state.get("_pending_ocr_raw_lines", [])
         _fname = getattr(img, "name", "image")
         _insp_lines.append(f"--- [Image {_fname}] ---")
@@ -909,6 +902,13 @@ def _handle_topology_analyze() -> None:
                 _insp_lines.append(f"[{_box[0]:.0f}, {_box[1]:.0f}, {_box[2]:.0f}, {_box[3]:.0f}] (conf: {_conf:.2f}) -> {_txt}")
         _insp_lines.append("")
         st.session_state["_pending_ocr_raw_lines"] = _insp_lines
+        # Store raw tokens for inspector
+        if not merged_records:
+            if not _img_mod_ids:
+                st.toast("No image module configured for this platform.", icon="⚠️")
+            else:
+                st.toast("OCR found no topology in the screenshot.", icon="⚠️")
+            return []
         return merged_records
     def _ocr_records():
         if not images:
@@ -945,6 +945,9 @@ def _handle_topology_analyze() -> None:
     st.session_state["paste_merge_report"] = report
     st.session_state["paste_mode"] = source
     if source == "none":
+        _pending_raw = st.session_state.get("_pending_ocr_raw_lines", [])
+        if _pending_raw:
+            st.session_state["latest_ocr_raw_text"] = "\n".join(_pending_raw)
         st.toast(warnings[0] if warnings else "Nothing to analyse.", icon="⚠️")
         return
     if source == "ocr":
