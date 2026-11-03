@@ -295,25 +295,6 @@ def normalize_manufacturer_name(name: str) -> str:
     return mapping.get(m_clean.lower(), m_clean.title() if len(m_clean) > 3 else m_clean.upper())
 
 @st.cache_data(ttl=300, show_spinner=False)
-def compute_suggested_site_code(location_name: str) -> str:
-    cleaned = re.sub(r"[^a-zA-Z\s]", "", location_name).strip()
-    if not cleaned:
-        return "SITE"
-    words = cleaned.split()
-    if len(words) >= 2:
-        return (words[0][:2] + words[1][:2]).upper()
-    elif len(words) == 1:
-        w = words[0]
-        return w[:4].upper() if len(w) >= 4 else w.upper()
-    return "SITE"
-    words = cleaned.split()
-    if len(words) >= 2:
-        return (words[0][:2] + words[1][:2]).upper()
-    elif len(words) == 1:
-        w = words[0]
-        return w[:4].upper() if len(w) >= 4 else w.upper()
-    return "SITE"
-
 def normalize_port_shortname(port_name: str) -> str:
     """
     Shorten an interface name using only the user-configured ``port_shortening``

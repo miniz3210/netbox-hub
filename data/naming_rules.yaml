@@ -953,6 +953,12 @@
       "site",
       "scope_id",
       "site_supernet"
+    ],
+    "vm_cvi": [
+      "country",
+      "site",
+      "role",
+      "seq"
     ]
   }
 }
