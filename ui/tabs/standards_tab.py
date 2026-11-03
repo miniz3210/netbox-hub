@@ -40,90 +40,12 @@ PRESET_ACTION_COLS = [1, 1, 1]
 PRESET_VLAN_COLS = [1.5, 7.3, 1.2]
 # Standardized 3-column ratio for Key-Value mappings: Key, Value, Action
 VLAND_MAPPINGS_COLS = [4.0, 5.0, 1.2]
-# Manage Pattern Variables columns: Name, Label, Placeholder, Auto-Fill, Optional, Up, Down, Delete.
-VARIABLE_COLS = [1.5, 2.5, 2.5, 1.5, 0.9, 0.45, 0.45, 0.45]
 # Auto-Correction rule columns: Original Pattern, Replacement, Description, Action.
 AUTOCORRECT_COLS = [3.5, 3.0, 4.0, 1.0]
-
-def _render_preset_row_actions(
-    idx: int,
-    total: int,
-    items: list,
-    key_prefix: str,
-    on_reorder=None,
-    on_delete=None,
-    swap_key: str = None,
-) -> None:
-    """Render Up / Down / Delete buttons matching the preset table style.
-
-    ``on_reorder(new_items)`` is called when a reorder is requested.
-    ``on_delete(del_idx)`` is called when delete is requested (caller handles pending).
-    If ``swap_key`` is given, reorders are deferred via session state (preserving
-    inline edits) instead of firing ``on_reorder`` immediately.
-    """
-    col_up, col_down, col_del = st.columns(PRESET_ACTION_COLS)
-    with col_up:
-        if idx > 0:
-            if st.button("⬆️", key=f"{key_prefix}_{idx}_up", help="Move up"):
-                if swap_key:
-                    st.session_state[swap_key] = (idx, idx - 1)
-                    st.rerun()
-                elif on_reorder:
-                    new_items = list(items)
-                    new_items[idx], new_items[idx - 1] = new_items[idx - 1], new_items[idx]
-                    on_reorder(new_items)
-        else:
-            st.empty()
-    with col_down:
-        if idx < total - 1:
-            if st.button("⬇️", key=f"{key_prefix}_{idx}_dn", help="Move down"):
-                if swap_key:
-                    st.session_state[swap_key] = (idx, idx + 1)
-                    st.rerun()
-                elif on_reorder:
-                    new_items = list(items)
-                    new_items[idx], new_items[idx + 1] = new_items[idx + 1], new_items[idx]
-                    on_reorder(new_items)
-        else:
-            st.empty()
-    with col_del:
-        if on_delete is not None:
-            if st.button("🗑️", key=f"{key_prefix}_{idx}_del", help="Delete this entry"):
-                on_delete(idx)
 
 
 def _normalize_var_name(raw: str) -> str:
     return re.sub(r"[^a-z0-9_]", "", raw.strip().lower().replace(" ", "_"))
-
-def find_variable_references(rules: dict, name: str) -> list[str]:
-    """Scan naming_patterns and schemas for usages of the given variable."""
-    refs = []
-    look_for = [f"<{name}>", f"{{{name}}}"]
-    patterns = rules.get("naming_patterns", {})
-    for key, val in patterns.items():
-        if any(tok in str(val) for tok in look_for):
-            refs.append(f"Pattern: {key}")
-    schemas = rules.get("csv_schemas", {})
-    for s_key, s_data in schemas.items():
-        row_tpl = s_data.get("row_template", [])
-        if any(any(tok in str(cell) for tok in look_for) for cell in row_tpl):
-            refs.append(f"CSV Schema: {s_key}")
-    return refs
-
-def find_variable_references(rules: dict, name: str) -> list[str]:
-    """Scan naming_patterns and schemas for usages of the given variable."""
-    refs = []
-    look_for = [f"<{name}>", f"{{{name}}}"]
-    patterns = rules.get("naming_patterns", {})
-    for key, val in patterns.items():
-        if any(tok in str(val) for tok in look_for):
-            refs.append(f"Pattern: {key}")
-    schemas = rules.get("csv_schemas", {})
-    for s_key, s_data in schemas.items():
-        row_tpl = s_data.get("row_template", [])
-        if any(any(tok in str(cell) for tok in look_for) for cell in row_tpl):
-            refs.append(f"CSV Schema: {s_key}")
-    return refs
 
 def find_variable_references(rules: dict, name: str) -> list[str]:
     """Scan naming_patterns and schemas for references to <name> or {name}."""
