@@ -2415,7 +2415,7 @@ def render_standards_tab(active_model):
                 with col_b2:
                     if st.button("🔄 Restore All Standards to Baseline", width="stretch"):
                         standards_mgr.restore_from_baseline()
-                        st.warning("⚠️ All standards restored to baseline snapshot.")
+                        st.toast("All standards restored to baseline snapshot.", icon="⚠️")
                         st.rerun()
 
                 st.divider()
@@ -2445,8 +2445,8 @@ def render_standards_tab(active_model):
             scope_items = grouped_vars.get(s_key, {})
             with st.expander(f"{title} ({len(scope_items)} variables)", expanded=False):
                 col_t1, col_t2 = st.columns([3, 1])
-                with col_t1:
-                    st.markdown(f"#### {title}")
+            with col_t1:
+                st.markdown(f"##### {title}")
                 with col_t2:
                     st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(scope_items)} variables</span></div>", unsafe_allow_html=True)
                 st.caption(desc)
