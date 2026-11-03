@@ -1604,6 +1604,11 @@ def _host_editor(rules: dict) -> None:
         return
 
     if saved:
+        _missing = [str(r.get("code", "")).strip() or str(r.get("label", "")).strip() or "(blank)"
+                    for r in rows if not str(r.get("code", "")).strip() or not str(r.get("tpl", "")).strip()]
+        if _missing:
+            st.toast("Not saved: Code and Pattern Template are required for " + ", ".join(_missing), icon="⚠️")
+            return
         final_host = []
         final_patterns = dict(rules.get("naming_patterns") or {})
         for row in rows:
