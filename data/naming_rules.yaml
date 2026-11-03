@@ -21,6 +21,7 @@
   "esxi_vmkernel": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
   "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
   "vlan_name_pattern": "<role>",
+  "branch_corefw": "TST<country><state><site><zone><seq>",
   "device_presets": [
     {
       "code": "SW",
@@ -244,7 +245,8 @@
     "esxi_vmkernel_name": "<vmk>",
     "esxi_vmkernel": "<purpose> Network - <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
     "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
-    "vlan_name_pattern": "<role>"
+    "vlan_name_pattern": "<role>",
+    "branch_corefw": "TST<country><state><site><zone><seq>"
   },
   "pattern_variables": {
     "site": {

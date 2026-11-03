@@ -1403,7 +1403,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
                 with c_label:
                     row["label"] = st.text_input("Label", value=row.get("label", ""), key=f"wc_{name}_{uid}_label", label_visibility="collapsed").strip()
                 with c_pattern:
-                    row["tpl"] = st.text_input("Pattern Template", value=orig_tpl, key=f"wc_{name}_{uid}_tpl", label_visibility="collapsed").strip()
+                    row["tpl"] = st.text_input("Pattern Template", value=row.get("tpl", orig_tpl), key=f"wc_{name}_{uid}_tpl", label_visibility="collapsed").strip()
                 with c_actions:
                     _wc_row_actions(name, rows, idx, min_rows=0)
 
@@ -1576,7 +1576,7 @@ def _host_editor(rules: dict) -> None:
         with c_label:
             row["label"] = st.text_input("Label", value=row.get("label") or "ESXi Host", key=f"wc_{name}_{row['_uid']}_label", label_visibility="collapsed").strip()
         with c_pattern:
-            row["tpl"] = st.text_input("Pattern Template", value=tpl, key=f"wc_{name}_{row['_uid']}_tpl", label_visibility="collapsed").strip()
+            row["tpl"] = st.text_input("Pattern Template", value=row.get("tpl", tpl), key=f"wc_{name}_{row['_uid']}_tpl", label_visibility="collapsed").strip()
         with c_actions:
             _wc_row_actions(name, rows, idx, min_rows=1)
 
