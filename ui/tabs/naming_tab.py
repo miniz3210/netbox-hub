@@ -597,35 +597,17 @@ def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, varia
             render_edit_mode_ui(ipk, pat, variables)
             st.stop()
 
-        if ipk == "switch_access_desc":
-            tokens = extract_tokens(pat)
-            vlan_id = ""
-            vlan_name = ""
-            dev_end = ""
-            port_end = ""
-            if "vlan_id" in tokens:
-                vlan_id = st.text_input("Access VLAN ID (Optional)", value="", placeholder="e.g. 10, 100", key="ac_vlan").strip()
-            if "vlan_name" in tokens:
-                vlan_name = st.text_input("VLAN Name (Optional)", value="", placeholder="e.g. Data, Voice", key="ac_vlan_name").strip()
-            if "device" in tokens:
-                dev_end = st.text_input("Connected Device/Host", value="", placeholder="e.g. PC-001", key="ac_device").strip()
-            if "port" in tokens:
-                port_end = st.text_input("Endpoint Port (Optional)", value="", placeholder="e.g. eth0", key="ac_port").strip()
-            vlan_disp = vlan_name or (f"VLAN{vlan_id}" if vlan_id else "")
-            vals = {"vlan_id": vlan_id or "<vlan_id>", "vlan_name": vlan_disp, "device": dev_end or "<device>", "port": port_end or "<port>"}
-            gen = render_dynamic_pattern(pat, vals, variables)
-        else:
-            order = (naming_rules.get("token_order") or {}).get(ipk)
-            vals = render_token_widgets(pat, variables, f"intf_{ipk}", custom_order=order)
-            _warn_missing_tokens(pat, vals, variables)
-            if st.session_state.get("esxi_auto_corr", True):
-                for port_token in ("local_port", "remote_port"):
-                    if port_token in vals and vals.get(port_token):
-                        vals[port_token] = normalize_port_shortname(vals[port_token])
+        order = (naming_rules.get("token_order") or {}).get(ipk)
+        vals = render_token_widgets(pat, variables, f"intf_{ipk}", custom_order=order)
+        _warn_missing_tokens(pat, vals, variables)
+        if st.session_state.get("esxi_auto_corr", True):
             for port_token in ("local_port", "remote_port"):
                 if port_token in vals and vals.get(port_token):
-                    vals[port_token] = vals[port_token].strip()
-            gen = render_dynamic_pattern(pat, vals, variables)
+                    vals[port_token] = normalize_port_shortname(vals[port_token])
+        for port_token in ("local_port", "remote_port"):
+            if port_token in vals and vals.get(port_token):
+                vals[port_token] = vals[port_token].strip()
+        gen = render_dynamic_pattern(pat, vals, variables)
 
         st.caption("Generated Interface Description:")
         st.code(gen, language="text")
