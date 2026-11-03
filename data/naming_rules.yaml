@@ -888,13 +888,6 @@
         "proxmox_ocr",
         "vsphere_text"
       ]
-    },
-    "Openshift": {
-      "platform": "Openshift",
-      "aliases": {},
-      "instructions": "[PLATFORM ARCHITECTURE: OPENSHIFT]\n1. Extract network topology into atomic attributes.",
-      "export_prompt": "You are an expert network engineer specializing in Openshift...",
-      "modules": []
     }
   },
   "hypervisor_presets": {
@@ -934,18 +927,6 @@
         "code": "Bridge",
         "label": "Linux Bridge",
         "pattern": "<bridge> - <purpose>"
-      }
-    ],
-    "Openshift": [
-      {
-        "code": "Uplink",
-        "label": "Physical Uplink",
-        "pattern": "<interface> - <parent> <purpose>"
-      },
-      {
-        "code": "Default",
-        "label": "Default Interface",
-        "pattern": "<interface> (<purpose>)"
       }
     ]
   },

@@ -400,6 +400,8 @@ LEGACY_PATTERN_KEYS = list(DEFAULT_NAMING_PATTERNS.keys())
 # Factory-default hypervisor description templates.  These live here so that
 # _normalize_rules can deep-copy them when the on-disk file is missing or empty,
 # and so the Standards tab can import them as a single source of truth.
+REQUIRED_HYPERVISOR_TEMPLATE_CODES = ("Switch_Teaming", "Uplink", "PortGroup", "VMkernel")
+
 DEFAULT_HYPERVISOR_PRESETS = {
     "VMware ESXi": [
         {

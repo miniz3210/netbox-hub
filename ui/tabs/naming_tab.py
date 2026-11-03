@@ -24,6 +24,7 @@ from config.naming_rules import (
     load_naming_rules, get_naming_patterns, get_pattern_variables,
     get_device_presets, get_interface_presets, get_host_vm_presets,
     compute_suggested_site_code, is_vm_preset_key as _is_vm_key,
+    REQUIRED_HYPERVISOR_TEMPLATE_CODES,
 )
 from core.topology_reducer import reduce_topology_pipeline
 from core.extractors import run_topology_pipeline, preview_topology_text, PROCESSING_MODULES
@@ -1750,7 +1751,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 f"(Hypervisor > Description Templates). Please configure templates there before generating output."
             )
             st.stop()
-        _required_codes = {"Switch_Teaming", "Uplink", "PortGroup", "VMkernel"}
+        _required_codes = set(REQUIRED_HYPERVISOR_TEMPLATE_CODES)
         _available_codes = {
             p.get("code", "").strip()
             for p in _active_hyp_presets
@@ -1761,7 +1762,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             st.error(
                 f"❌ Missing required template codes for platform '{_plat_key}': "
                 f"{', '.join(sorted(_missing_codes))}. "
-                f"Configure all four templates (Switch_Teaming, Uplink, PortGroup, VMkernel) "
+                f"Configure all four templates ({', '.join(sorted(REQUIRED_HYPERVISOR_TEMPLATE_CODES))}) "
                 f"in the Standards Tab under Hypervisor > Description Templates, then retry."
             )
             st.stop()
