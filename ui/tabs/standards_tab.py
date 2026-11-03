@@ -1430,8 +1430,6 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
             ("code", "e.g. DSwitch"),
             ("label", "e.g. Distributed Switch Uplink"),
             ("tpl", "e.g. <interface> - <parent> <purpose>"),
-            ("pattern_key", ""),
-            ("description", "")
         ], cols)
 
     if reset_presets:
