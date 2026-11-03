@@ -543,7 +543,6 @@ def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, varia
         if edit_on:
             render_edit_mode_ui(pk, pat, variables)
             st.stop()
-            return
 
         defaults = {}
         if auto_code:
@@ -582,7 +581,6 @@ def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, varia
         if edit_on:
             render_edit_mode_ui(ipk, pat, variables)
             st.stop()
-            return
 
         if ipk == "switch_access_desc":
             tokens = extract_tokens(pat)
@@ -713,7 +711,6 @@ def _asset_class_2(case_mode, active_model, naming_patterns, variables, global_s
         if _edit_toggle(vm_pk):
             render_edit_mode_ui(vm_pk, vm_pat, variables)
             st.stop()
-            return
         order = (naming_rules.get("token_order") or {}).get(vm_pk)
         values = render_token_widgets(vm_pat, variables, "vm", defaults=vm_defaults, custom_order=order)
         _tokens = re.findall(r"<([a-zA-Z0-9_]+)>", vm_pat)
@@ -978,7 +975,6 @@ def _render_interactive_hypervisor_mode(naming_rules: dict, casing: str, active_
         if edit_on:
             render_hypervisor_edit_mode_ui(edit_key, current_preset, sel_platform, naming_rules)
             st.stop()
-            return
 
         pattern = current_preset.get("pattern", "")
         tokens = list(dict.fromkeys(re.findall(r"<([a-zA-Z0-9_]+)>", pattern)))

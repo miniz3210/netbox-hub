@@ -22,7 +22,7 @@
   "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
   "vlan_name_pattern": "<role>",
   "branch_corefw": "TST<country><state><site><zone><seq>",
-  "branch_pa": "PA<country><state><site><vendor><seq>",
+  "branch_pa": "PA<country><state><site><zone><seq>",
   "host_vm_openshift": "<site_prefix>pve<seq>.<domain>",
   "iface_pa_zone": "<role_zone>_<vlan_id>",
   "device_presets": [
@@ -250,7 +250,7 @@
     "netbox_server_yaml": "console-ports: Serial (de-9); module-bays: PSU1, PSU2, OCP3, PCIe1, PCIe2, PCIe3; interfaces: OOB Management ONLY (1000base-t, mgmt_only: true)",
     "vlan_name_pattern": "<role>",
     "branch_corefw": "TST<country><state><site><zone><seq>",
-    "branch_pa": "PA<country><state><site><vendor><seq>",
+    "branch_pa": "PA<country><state><site><zone><seq>",
     "host_vm_openshift": "<site_prefix>pve<seq>.<domain>",
     "iface_pa_zone": "<role_zone>_<vlan_id>"
   },
