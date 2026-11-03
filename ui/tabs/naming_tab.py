@@ -4,13 +4,11 @@ from typing import Dict, List, Tuple, Any, Set
 import streamlit as st
 from config.constants import APP_VERSION
 import pandas as pd
-
 logger = logging.getLogger(__name__)
 from utils.formatters import normalize_port_shortname
 from core.naming_engine import verify_and_suggest_with_ai
 from core.db_manager import (
     get_records_by_category,
-    get_total_record_count,
     get_sync_metadata,
 )
 from core.session_manager import SessionStateManager as SSM
@@ -28,66 +26,93 @@ from config.naming_rules import (
     compute_suggested_site_code,
 )
 from core.topology_reducer import reduce_topology_pipeline
-
 from core.extractors import run_topology_pipeline, preview_topology_text, PROCESSING_MODULES
-
 # ---------------------------------------------------------------------------
 # Progressive VLM rendering helpers
 # ---------------------------------------------------------------------------
-
 from ui.components import _cached_fetch_toolbar_stats
-
-
 # ---------------------------------------------------------------------------
 # Stable widget option keys (display text must not change)
 # ---------------------------------------------------------------------------
-
 NAMING_CASE_OPTIONS = {
     "UPPERCASE": "UPPERCASE",
     "lowercase": "lowercase",
 }
-
 NAMING_CAT_OPTIONS = {
     "network_security": "🔧 Network & Security Devices (Switches, APs, Firewalls, Routers)",
     "host_vm": "🖥️ Hosts & Virtual Machines (ESXi & VMs)",
     "hypervisor_desc": "☁️ Hypervisor Network Descriptions (ESXi, Proxmox, etc.)",
 }
-
 MODE_OPTIONS = {
     "interactive": "🛠️ Interactive Single Item Mode",
     "batch_screenshot": "📸 Screenshot Batch Mode (Topology Parsing)",
 }
 
+# Host/VM presets share one list in Standards. A preset is a VM when its pattern_key
+# starts with this prefix (the legacy shared key "vm_host" matches too); everything else is a Host.
+VM_PATTERN_KEY_PREFIX = "vm_"
+
+
+def _is_vm_key(pattern_key: str) -> bool:
+    return str(pattern_key or "").startswith(VM_PATTERN_KEY_PREFIX)
+
+
+def _interface_description_records(desc_regex: str = "") -> list:
+    """Ingested NetBox interface descriptions (optionally filtered by regex) as reference rows."""
+    from core.shared_backup_state import SharedBackupState
+    rx = None
+    if desc_regex:
+        try:
+            rx = re.compile(desc_regex, re.IGNORECASE)
+        except re.error:
+            rx = None
+    objects = []
+    for endpoint in ("dcim/interfaces", "dcim_interfaces", "dcim/interface-templates"):
+        try:
+            objs = SharedBackupState.get_objects_by_type(endpoint)
+        except Exception:
+            objs = []
+        if objs:
+            objects = objs
+            break
+    out = []
+    for obj in objects:
+        if not isinstance(obj, dict):
+            continue
+        desc = str(obj.get("description") or "").strip()
+        if not desc or (rx and not rx.search(desc)):
+            continue
+        device = obj.get("device") or obj.get("device_name") or obj.get("virtual_machine") or ""
+        if isinstance(device, dict):
+            device = device.get("name") or device.get("display") or ""
+        if_name = obj.get("name") or obj.get("interface") or ""
+        out.append({"_line": f'{device} | {if_name}: "{desc}"'})
+    return out
+
 
 @st.cache_data(ttl=60, show_spinner=False)
-def _cached_get_reference_records(category_key, site_filter="", name_filter=""):
+def _cached_get_reference_records(category_key, site_filter="", name_filter="", desc_regex=""):
     """Cache reference records to avoid full-table SQLite scans on every widget interaction."""
+    if category_key == "interface":
+        return _interface_description_records(desc_regex)
     items = get_records_by_category(category_key, site_filter=site_filter)
     if name_filter:
         nfu = name_filter.upper()
         items = [r for r in items if r.get('name', '').upper().startswith(nfu)]
     return items
-
-
 # ---------------------------------------------------------------------------
 # Switch name normalization
 # ---------------------------------------------------------------------------
-
 def _natsort_key(s: str):
     """Return a sort key that orders numeric substrings as integers,
     so vmnic1 < vmnic2 < vmnic10 instead of alphabetical ordering."""
     return [int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", s)]
-
-
-
 # ---------------------------------------------------------------------------
 # Strict noise / junk-token filter for chip pool hygiene
 # ---------------------------------------------------------------------------
 UI_NAV_NOISE = {
     "true", "false", "null", "none", "is_uncertain",
 }
-
-
 def _is_junk_token(text: str, dynamic_filter: set | None = None) -> bool:
     t = text.strip()
     if not t or len(t) <= 1:
@@ -108,14 +133,11 @@ def _is_junk_token(text: str, dynamic_filter: set | None = None) -> bool:
     if re.match(r"^vlan\s*id\s*:\s*(?:--|\d+)", low, re.IGNORECASE):
         return True
     return False
-
-
 # ---------------------------------------------------------------------------
 # Standards-driven noise set helper — reads ui_noise_blacklist from YAML
 # ---------------------------------------------------------------------------
 def _get_platform_noise_set(naming_rules: dict, platform_name: str) -> Tuple[Set[str], Set[str]]:
     """Return (exact_lower_set, nospace_alnum_set) from ui_noise_blacklist.
-
     exact_lower_set contains every blacklist entry lower-cased and stripped.
     nospace_alnum_set contains every entry with all spaces and trailing
     punctuation/ellipses removed, also lower-cased.  A token is noise if its
@@ -136,8 +158,6 @@ def _get_platform_noise_set(naming_rules: dict, platform_name: str) -> Tuple[Set
         stripped = re.sub(r"[\s\.]+", "", low)
         nospace_alnum_set.add(stripped)
     return exact_lower_set, nospace_alnum_set
-
-
 def _is_noise_token(text: str, naming_rules: dict, platform_name: str) -> bool:
     """Check whether a token matches the platform's ui_noise_blacklist."""
     t = text.strip()
@@ -148,59 +168,14 @@ def _is_noise_token(text: str, naming_rules: dict, platform_name: str) -> bool:
         return True
     exact_set, nospace_set = _get_platform_noise_set(naming_rules, platform_name)
     return low in exact_set or re.sub(r"[\s\.]+", "", low) in nospace_set
-
-
-@st.cache_data(ttl=60, show_spinner=False)
-def _interface_ref_examples_cached(intf_code: str):
-    from core.shared_backup_state import SharedBackupState
-
-    _, defaults = _interface_ref(intf_code)
-    rx = INTERFACE_REF_PATTERNS.get(intf_code, INTERFACE_REF_PATTERNS["Uplink"])
-
-    objects = []
-    for endpoint in ("dcim/interfaces", "dcim_interfaces", "dcim/interface-templates"):
-        try:
-            objs = SharedBackupState.get_objects_by_type(endpoint)
-        except Exception:
-            objs = []
-        if objs:
-            objects = objs
-            break
-
-    matches = []
-    for obj in objects:
-        if not isinstance(obj, dict):
-            continue
-        desc = str(obj.get("description") or "").strip()
-        if not desc:
-            continue
-        if rx.search(desc):
-            device = obj.get("device") or obj.get("device_name") or obj.get("virtual_machine") or ""
-            if isinstance(device, dict):
-                device = device.get("name") or device.get("display") or ""
-            if_name = obj.get("name") or obj.get("interface") or ""
-            matches.append(f'{device} | {if_name}: "{desc}"')
-
-    matches = matches[:15]
-    if matches:
-        header = f"🟢 NetBox Interface Descriptions ({len(matches)}):"
-        return header, "\n".join(matches)
-
-    return f"🟡 Default Examples — No ingested interface descriptions found matching this type.", defaults
-
-
 def build_naming_system_prompt(prompt: str) -> str:
     """Build the grounded naming/inventory system prompt for the AI Assistant."""
     from core.ai_helper import build_comprehensive_naming_context
-
     comprehensive_context = build_comprehensive_naming_context(prompt)
-
     return f"""You are an expert in infrastructure naming conventions, inventory management, and NetBox administration.
 You have DIRECT ACCESS to the complete inventory database. Analyze the user's request and respond accurately using the ACTUAL DATABASE DATA provided below.
-
 === COMPLETE DATABASE CONTEXT ===
 {comprehensive_context}
-
 === IMPORTANT GUIDELINES ===
 1. **Answer ALL questions using the ACTUAL DATA above** - You have complete database access
 2. When asked to list devices, VMs, or inventory:
@@ -232,10 +207,8 @@ You have DIRECT ACCESS to the complete inventory database. Analyze the user's re
     - Treat it as authoritative for any object type (sites, racks, devices, interfaces, IPs, VMs, clusters, tenants, circuits, VRFs)
     - Use its "total in backup" figures when stating counts
     - Quote the exact records listed rather than generalizing"""
-
 def apply_case(text: str, mode: str) -> str:
     return text.upper() if mode == "UPPERCASE" else text.lower()
-
 def _render_casing_selector():
     """Return the active casing mode ('UPPERCASE'/'lowercase') selected globally."""
     if "naming_case_radio" not in st.session_state:
@@ -251,21 +224,19 @@ def _render_casing_selector():
     )
     SSM.set_naming_case_mode(case_mode)
     return case_mode
-
-
-
-def display_reference_box(category_key: str, default_lines: str, label: str, site_filter: str = "", name_filter: str = ""):
-    real_items = _cached_get_reference_records(category_key, site_filter=site_filter, name_filter=name_filter)
-
+def display_reference_box(category_key: str, default_lines: str, label: str, site_filter: str = "", name_filter: str = "", desc_regex: str = ""):
+    real_items = _cached_get_reference_records(category_key, site_filter=site_filter, name_filter=name_filter, desc_regex=desc_regex)
     filter_hint = f" matching '{site_filter.upper()}'" if site_filter else ""
     if name_filter:
         filter_hint += f" (prefix: {name_filter})"
-
     with st.expander(f"💡 Click to view reference {label} examples ({len(real_items) if real_items else 'Default'} records{filter_hint})", expanded=False):
         if real_items:
             st.markdown(f"##### 🟢 NetBox Ingested Data ({len(real_items)} records{filter_hint}):")
             formatted = []
             for r in real_items[:15]:
+                if r.get("_line"):
+                    formatted.append(r["_line"])
+                    continue
                 meta_parts = []
                 if r.get('manufacturer') and r.get('model_or_role'):
                     meta_parts.append(f"{r['manufacturer']} - {r['model_or_role']}")
@@ -275,39 +246,29 @@ def display_reference_box(category_key: str, default_lines: str, label: str, sit
                     meta_parts.append(f"Site: {r['site']}")
                 if r.get('description'):
                     meta_parts.append(r['description'])
-
                 meta_str = f"  ({', '.join(meta_parts)})" if meta_parts else ""
                 formatted.append(f"{r['name']}{meta_str}")
             st.code("\n".join(formatted), language="text")
         else:
-            st.markdown("##### 🟡 Default Examples:")
+            st.markdown("##### 🟡 Default Examples (pattern template from Standards):")
             st.code(default_lines, language="text")
-
 def render_compact_toolbar(active_model):
     # Early restore: Check if backup exists in DB but not in session state and restore it
     from core.shared_backup_state import SharedBackupState
     from core.backup_manager import get_backup_metadata, restore_backup_to_session_state
-    
     if not SharedBackupState.has_backup():
         meta = get_backup_metadata()
         if meta.get("loaded", False):
             try:
                 restore_backup_to_session_state()
             except Exception as e:
-                import logging
-                logging.getLogger(__name__).warning(f"Failed to restore backup on tab load: {e}")
-    
+                logger.warning(f"Failed to restore backup on tab load: {e}")
     total_recs, device_count, vm_count = _cached_fetch_toolbar_stats(st.session_state.get("backup_stats_version", 0))
-    
     status_tag = f"🟢 ({device_count} Devices, {vm_count} VMs in DB)" if total_recs > 0 else "⚪ (Default Examples)"
-    tick_devices = " ✅" if device_count > 0 else ""
-    tick_vms = " ✅" if vm_count > 0 else ""
-    
     with st.expander(f"📥 Ingest NetBox Data (Backup / CSV) {status_tag}", expanded=False):
         # Schema Registry Status Check
         from core.universal_schema_registry import UniversalSchemaRegistry
         registry = UniversalSchemaRegistry.load_from_session_state()
-        
         if registry and registry.model_signatures:
             model_count = len(registry.model_signatures)
             st.caption(f"Schema registry active - {model_count} models loaded.")
@@ -317,20 +278,15 @@ def render_compact_toolbar(active_model):
                 "Upload a NetBox backup JSON below to enable automatic classification.",
                 icon="⚠️"
             )
-        
         if total_recs > 0:
             # Get metadata for devices and VMs
             meta_devices = get_sync_metadata("netbox_devices")
             meta_vms = get_sync_metadata("netbox_virtual_machines")
-            
             # Use the most recent source that's not "None"
             sources = [m['source'] for m in [meta_devices, meta_vms] if m['source'] != "None"]
             display_source = sources[0] if sources else "Manual CSV Upload"
-            
             st.markdown(f"**DB Status:** `Source: {display_source}`")
-
         render_backup_uploader("naming")
-    
     # AI Assistant
     render_ai_chat(
         history_key="naming_chat_history",
@@ -339,74 +295,21 @@ def render_compact_toolbar(active_model):
         active_model=active_model,
         build_system_prompt=build_naming_system_prompt,
     )
-
-
     auto_correct = st.checkbox(
         "⚡ Apply Syntax Auto-Correction (Port Shortening & VMware Conventions)",
         value=True, key="esxi_auto_corr",
         help="When checked, enables interface port regex shortening (<Local_Port>/<Remote_Port>) and VMware casing normalization across all asset classes, driven by the Auto-Correction Rules in the Standards Tab.",
     )
     st.session_state["auto_correct"] = bool(auto_correct)
-
-# Preset choices (Device Type / Interface Type) are loaded dynamically from the structured
-# `device_presets` / `interface_presets` collections in data/naming_rules.yaml,
+# Preset choices (Device / Interface / Host / VM) are loaded dynamically from the structured
+# `device_presets` / `interface_presets` / `host_vm_presets` collections in data/naming_rules.yaml,
 # so any Add/Modify/Delete in the Standards Tab is reflected immediately here.
-# Reference (label, filter/examples) metadata keyed by device preset code.
-DEVICE_REF_INFO = {
-    "SW": ("Switch", "SW", "SWUSNYC01-0       (Switch Stack, Member 0)\nSWIUSLON01        (London Switch 01)"),
-    "VS": ("Virtual Chassis", "VS", "VSUSNYC01-0       (Virtual Chassis, Member 0)\nVSUSLON01-1"),
-    "FW": ("Firewall", "FW", "FWUSNYC01         (NYC Firewall 01)\nFWUSNYCPA01       (NYC Palo Alto FW 01)"),
-    "ION": ("SD-WAN ION", "ION", "IONUSNYC01        (NYC SD-WAN 01)\nIONUSLON01"),
-    "WAP": ("Wireless AP", "WAP", "WAPUSNYC01        (Access Point NYC 01)\nWAPUSLON01        (Access Point London 01)"),
-    "RTR": ("Router", "RTR", "RTRUSNYC01        (NYC Router 01)\nRTRUSLON01"),
-    "VA": ("Virtual Appliance", "VA", "VAUSNYC01         (NYC Virtual Appliance 01)\nVAUSLON01"),
-}
-
-# Reference (label, default examples) metadata keyed by interface preset code.
-INTERFACE_REF_INFO = {
-    "Uplink": ("Switch Uplink Interface", "Uplink_to_SWUSNYC02-0_Gi1/0/48\nUplink_to_FWUSNYC01_Te1/0/1\nUplink_to_Huawei-Core_XGE0/0/31"),
-    "LAG": ("LAG Member Port", "LACP_to_SWUSNYC02-0_Gi1/0/1\nLACP_to_FWUSNYC01_Po1\nLACP_to_SWUSLONCORE01_Te1/0/1"),
-    "Po": ("Port-Channel Interface", "LAG1_to_SWUSNYC02-0\nLAG2_to_FWUSNYC01\nLAG5_to_CV-CPD"),
-    "Access": ("Access Port Interface", "Data - PC-001_eth0\nVoice - IP-Phone-101_PoE\nGuest - Printer-Lab_NIC1"),
-    "FW Zone": ("Firewall Interface", "TRUST_10\nUNTRUST_100\nDMZ_50"),
-}
-
-INTERFACE_REF_PATTERNS = {
-    "Uplink": re.compile(r'(?i)uplink|to_'),
-    "LAG": re.compile(r'(?i)lacp|lag_member'),
-    "Po": re.compile(r'(?i)\bpo\d+|port.channel|lag\d+'),
-    "Access": re.compile(r'(?i)\bvlan|access|_eth|_nic|_poe'),
-    "FW Zone": re.compile(r'(?i)\b(trust|untrust|dmz|zone|inside|outside|if)\b|\.\d+'),
-}
-
-
-def _device_presets(rules, naming_patterns):
-    """Device preset (code, label, pattern_key) tuples loaded from YAML."""
-    presets = get_device_presets(rules)
+# Nothing in this file may name a specific preset code (SW, Uplink, cvi, ...): Standards builds the
+# Lego bricks, Naming only assembles them.
+def _preset_tuples(presets: list, naming_patterns: dict) -> list:
+    """(code, label, pattern_key) tuples for presets whose pattern exists in Standards."""
     return [(p["code"], p["label"], p["pattern_key"])
             for p in presets if p["pattern_key"] in naming_patterns]
-
-
-def _interface_presets(rules, naming_patterns):
-    """Interface preset (code, label, pattern_key) tuples loaded from YAML."""
-    presets = get_interface_presets(rules)
-    return [(p["code"], p["label"], p["pattern_key"])
-            for p in presets if p["pattern_key"] in naming_patterns]
-
-
-def _dev_pattern_key(dev_code, presets):
-    for code, _label, key in presets:
-        if code == dev_code:
-            return key
-    return presets[0][2] if presets else "branch_switch"
-
-
-def _interface_ref(intf_code):
-    return INTERFACE_REF_INFO.get(intf_code, ("Interface", ""))
-def _ref_info(dev_code):
-    return DEVICE_REF_INFO.get(dev_code, ("Device", "", "SWUSNYC01-0       (Switch Stack)\nWAPUSNYC01        (Access Point 01)\nFWUSNYCPA01       (Firewall 01)"))
-
-
 def _edit_toggle(pattern_key):
     flag_key = f"edit_mode_{pattern_key}"
     ver = st.session_state.get(f"edit_toggle_ver_{pattern_key}", 0)
@@ -420,48 +323,65 @@ def _edit_toggle(pattern_key):
     )
     st.session_state[flag_key] = bool(toggled)
     return bool(toggled)
-
-
 def _missing_tokens(pat, values, variables):
     """Required <tokens> in pat that have no value yet (optional ones excluded)."""
     toks = re.findall(r"<([a-zA-Z0-9_]+)>", pat)
     return [t for t in dict.fromkeys(toks)
             if not str(values.get(t, "") or "").strip()
             and not ((variables.get(t) or {}).get("optional"))]
-
-
 def _warn_missing_tokens(pat, values, variables):
     m = _missing_tokens(pat, values, variables)
     if m:
         st.warning("Missing value for: " + ", ".join(f"<{t}>" for t in m))
-
-
-def _interface_key(intf_code, presets):
-    for code, _label, key in presets:
-        if code == intf_code:
-            return key
-    return presets[0][2] if presets else "switch_uplink_desc"
-
-
-def _interface_ref_examples(intf_code):
-    """Return ``(header, records_text)`` for the active interface type.
-
-    **header** — status title rendered with ``st.markdown`` (bold).
-    **records_text** — lines joined by newlines, passed to ``st.code(... language=None)``
-    so every entry occupies its own monospace row matching Column 1's reference box.
-    """
-    from core.shared_backup_state import SharedBackupState
-    return _interface_ref_examples_cached(intf_code)
-
-
-
-
-
-
+def _tpl_prefix(tpl: str) -> str:
+    """Literal text in front of the first <token>, e.g. 'SW<site><seq>' -> 'SW'."""
+    return re.split(r"<[a-zA-Z0-9_]+>", tpl or "", maxsplit=1)[0].strip()
+def _tpl_regex(tpl: str) -> str:
+    """Pattern template -> regex string ('' = no filter). Literal text is escaped, each <token> becomes '.+?'."""
+    parts = re.split(r"<[a-zA-Z0-9_]+>", tpl or "")
+    if len(parts) < 2 or not any(p.strip() for p in parts):
+        return ""
+    return "^" + ".+?".join(re.escape(p) for p in parts) + "$"
+def _reference_box(category_key: str, form: dict, site_filter: str = "") -> None:
+    """Reference examples for the active preset, derived only from its Standards pattern template."""
+    tpl = form["pattern"]
+    if category_key == "interface":
+        display_reference_box(category_key, tpl, form["label"], desc_regex=_tpl_regex(tpl))
+    else:
+        display_reference_box(category_key, tpl, form["label"], site_filter=site_filter,
+                              name_filter=_tpl_prefix(tpl))
+def _render_preset_form(presets, radio_key, prefix_fmt, help_text, naming_rules, variables,
+                        naming_patterns, defaults=None, empty_msg=""):
+    """One shared flow for Device / Interface / Host / VM:
+    radio -> label caption -> Edit Mode -> token inputs -> missing-token warning.
+    Returns {code, label, pk, pattern, values}, or None when nothing can be rendered."""
+    if not presets:
+        st.info(empty_msg or "No presets defined. Add one in Standards.")
+        return None
+    codes = [code for code, _label, _key in presets]
+    label_map = {code: label for code, label, _key in presets}
+    code = st.radio(
+        "Preset", codes, horizontal=True, key=radio_key,
+        label_visibility="collapsed", help=help_text,
+    )
+    st.caption(f"ℹ️ **{code}**: {label_map.get(code, '')}")
+    pk = next(key for c, _label, key in presets if c == code)
+    pat = naming_patterns.get(pk, "")
+    if _edit_toggle(pk):
+        render_edit_mode_ui(pk, pat, variables)
+        st.stop()
+    if not pat:
+        st.info(f"No naming pattern for {code}. Add one in Standards.")
+        return None
+    order = (naming_rules.get("token_order") or {}).get(pk)
+    values = render_token_widgets(pat, variables, prefix_fmt.format(pk=pk),
+                                  defaults=defaults, custom_order=order)
+    _warn_missing_tokens(pat, values, variables)
+    return {"code": code, "label": label_map.get(code, code), "pk": pk,
+            "pattern": pat, "values": values}
 def render_naming_tab(active_model):
     st.subheader("🏷️ Standardized Infrastructure Naming Generator", help="Generate and validate standardized hostnames and interface descriptions. All preset-driven patterns are configured in the Standards Tab.")
     st.caption("Generate and validate standardized hostnames for network devices, servers, VMs, and ESXi configurations using AI-powered naming conventions aligned with your NetBox inventory data.")
-
     naming_rules = SSM.get_naming_rules()
     if not naming_rules:
         naming_rules = load_naming_rules()
@@ -469,7 +389,6 @@ def render_naming_tab(active_model):
     naming_patterns = get_naming_patterns(naming_rules)
     variables = get_pattern_variables(naming_rules)
     render_compact_toolbar(active_model)
-
     ac_row_c1, ac_row_c2 = st.columns([3, 1], vertical_alignment="bottom")
     with ac_row_c1:
         _naming_cat_key = st.session_state.get("naming_cat")
@@ -491,19 +410,16 @@ def render_naming_tab(active_model):
         )
     with ac_row_c2:
         case_mode = _render_casing_selector()
-
     global_site = ""
     if "network_security" in naming_cat or "host_vm" in naming_cat:
         global_site = _site_code_assistant_compact(naming_rules, "global")
     st.divider()
-
     if "network_security" in naming_cat:
         _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, variables, global_site)
     elif "host_vm" in naming_cat:
-        _asset_class_2(case_mode, active_model, naming_patterns, variables, global_site)
+        _asset_class_2(case_mode, active_model, naming_rules, naming_patterns, variables, global_site)
     else:
         _asset_class_3(naming_rules, case_mode, active_model)
-
 def _site_code_assistant_compact(naming_rules, prefix: str) -> str:
     with st.expander("📍 Site Code Assistant", expanded=False):
         loc_c, btn_c, badge_c, clear_c = st.columns([3, 1.2, 2.5, 1], vertical_alignment="center")
@@ -528,209 +444,97 @@ def _site_code_assistant_compact(naming_rules, prefix: str) -> str:
                     st.session_state.pop(f"_suggested_site_{prefix}", None)
                     st.rerun()
     return st.session_state.get(f"_suggested_site_{prefix}", "")
-
 def _asset_class_1(case_mode, active_model, naming_rules, naming_patterns, variables, global_site=""):
     col_a, col_b = st.columns([1, 1])
-    dev_presets = _device_presets(naming_rules, naming_patterns)
-    intf_presets = _interface_presets(naming_rules, naming_patterns)
-    dev_codes = [code for code, _label, _key in dev_presets]
-    intf_codes = [code for code, _label, _key in intf_presets]
-    if not intf_codes:
-        intf_defaults = [p["code"] for p in get_interface_presets(naming_rules)]
-        intf_codes = intf_defaults or ["Uplink"]
-    if not dev_codes:
-        dev_codes = [p["code"] for p in get_device_presets(naming_rules)] or ["SW"]
-
-    dev_label_map = {code: label for code, label, _key in dev_presets}
-    if not dev_label_map:
-        dev_label_map = {p["code"]: p["label"] for p in get_device_presets(naming_rules)}
-    intf_label_map = {code: label for code, label, _key in intf_presets}
+    dev_presets = _preset_tuples(get_device_presets(naming_rules), naming_patterns)
+    intf_presets = _preset_tuples(get_interface_presets(naming_rules), naming_patterns)
     with col_a:
         st.subheader("Universal Device Hostname Generator", help="Generate standardized device hostnames using preset-driven patterns. Device type and interface presets are configured in the Standards Tab > Device Type Presets / Interface Type Presets.")
-        auto_code = global_site
-        dev_type = st.radio("Device Type", dev_codes, horizontal=True, key="dev_prefix_sel", label_visibility="collapsed", help="Select the device class to generate a standardized hostname. Choices are configured in the Standards Tab (Device Type Presets).", format_func=lambda c: c)
-        if dev_type:
-            st.caption(f"ℹ️ **{dev_type}**: {dev_label_map.get(dev_type, '')}")
-        pk = _dev_pattern_key(dev_type, dev_presets)
-        edit_on = _edit_toggle(pk)
-        pat = naming_patterns.get(pk, "")
-        if edit_on:
-            render_edit_mode_ui(pk, pat, variables)
-            st.stop()
-
-        defaults = {}
-        if auto_code:
-            defaults["site"] = auto_code
-        order = (naming_rules.get("token_order") or {}).get(pk)
-        values = render_token_widgets(pat, variables, f"dev_{pk}", defaults, custom_order=order)
-        _warn_missing_tokens(pat, values, variables)
-        interpolated = render_dynamic_pattern(pat, values, variables)
-        final = apply_case(interpolated, case_mode)
-        st.caption("Generated Device Hostname:")
-        st.code(final, language="text")
-
-        if st.button("AI Verify / Suggest Device Hostname", key="ai_chk_dev"):
-            with st.spinner("Auditing..."):
-                dev_label = dev_label_map.get(dev_type, dev_type)
-                st.info(verify_and_suggest_with_ai(final, active_model, asset_type=f"Network/Security Device ({dev_label})", category_key="device", site_filter=values.get("site", "")))
-
-        ref_lbl, ref_flt, ref_ex = _ref_info(dev_type)
-        display_reference_box("device", ref_ex, ref_lbl, values.get("site", ""), ref_flt)
-
+        dev = _render_preset_form(
+            dev_presets, "dev_prefix_sel", "dev_{pk}",
+            "Select the device class to generate a standardized hostname. Choices are configured in the Standards Tab (Device Type Presets).",
+            naming_rules, variables, naming_patterns,
+            defaults={"site": global_site} if global_site else None,
+            empty_msg="No device presets. Add one in Standards > Device Type Presets.",
+        )
+        if dev:
+            final = apply_case(render_dynamic_pattern(dev["pattern"], dev["values"], variables), case_mode)
+            st.caption("Generated Device Hostname:")
+            st.code(final, language="text")
+            if st.button("AI Verify / Suggest Device Hostname", key="ai_chk_dev"):
+                with st.spinner("Auditing..."):
+                    st.info(verify_and_suggest_with_ai(final, active_model, asset_type=f"Network/Security Device ({dev['label']})", category_key="device", site_filter=dev["values"].get("site", "")))
+            _reference_box("device", dev, site_filter=dev["values"].get("site", ""))
     with col_b:
         st.subheader("Switch & Firewall Interface Formatter", help="Select the interface class to format. Choices are configured in the Standards Tab > Interface Type Presets.")
-        intf_type = st.radio(
-            "Interface Type",
-            intf_codes,
-            horizontal=True,
-            key="p_cat_sel",
-            label_visibility="collapsed",
-            help="Select the interface class to format. Choices are configured in the Standards Tab (Interface Type Presets).",
-            format_func=lambda c: c,
+        intf = _render_preset_form(
+            intf_presets, "p_cat_sel", "intf_{pk}",
+            "Select the interface class to format. Choices are configured in the Standards Tab (Interface Type Presets).",
+            naming_rules, variables, naming_patterns,
+            empty_msg="No interface presets. Add one in Standards > Interface Type Presets.",
         )
-        if intf_type:
-            st.caption(f"ℹ️ **{intf_type}**: {intf_label_map.get(intf_type, '')}")
-        ipk = _interface_key(intf_type, intf_presets)
-        edit_on = _edit_toggle(ipk)
-        pat = naming_patterns.get(ipk, "")
-        if edit_on:
-            render_edit_mode_ui(ipk, pat, variables)
-            st.stop()
-
-        order = (naming_rules.get("token_order") or {}).get(ipk)
-        vals = render_token_widgets(pat, variables, f"intf_{ipk}", custom_order=order)
-        _warn_missing_tokens(pat, vals, variables)
-        if st.session_state.get("esxi_auto_corr", True):
+        if intf:
+            vals = intf["values"]
             for port_token in ("local_port", "remote_port"):
-                if port_token in vals and vals.get(port_token):
-                    vals[port_token] = normalize_port_shortname(vals[port_token])
-        for port_token in ("local_port", "remote_port"):
-            if port_token in vals and vals.get(port_token):
-                vals[port_token] = vals[port_token].strip()
-        gen = render_dynamic_pattern(pat, vals, variables)
-
-        st.caption("Generated Interface Description:")
-        st.code(gen, language="text")
-        ref_lbl, ref_ex = _interface_ref(intf_type)
-        if st.button("AI Verify Interface Description", key="ai_chk_intf"):
-            with st.spinner("Auditing..."):
-                st.info(verify_and_suggest_with_ai(gen, active_model, asset_type=ref_lbl, category_key="device", site_filter=""))
-        with st.expander(f"💡 Click to view reference {ref_lbl} examples", expanded=False):
-            ih, it = _interface_ref_examples(intf_type)
-            st.markdown(f"**{ih}**")
-            st.code(it, language=None)
-
-
-def _host_vm_presets(rules, naming_patterns):
-    """Host/VM preset (code, label, pattern_key) tuples loaded from YAML."""
-    presets = get_host_vm_presets(rules)
-    return [(p["code"], p["label"], p["pattern_key"])
-            for p in presets if p["pattern_key"] in naming_patterns]
-
-
-
-def _asset_class_2(case_mode, active_model, naming_patterns, variables, global_site=""):
-    naming_rules = SSM.get_naming_rules()
-    if not naming_rules:
-        naming_rules = load_naming_rules()
-        SSM.set_naming_rules(naming_rules)
-    presets = _host_vm_presets(naming_rules, naming_patterns)
-
-    host_keys = [code for code, _label, key in presets if key != "vm_host"]
-    host_label_map = {code: label for code, label, _key in presets}
-    if not host_keys:
-        st.info("No host type presets. Add one in Standards.")
-    
-    vm_pk = "vm_host"
-    vm_keys = [code for code, _label, key in presets if key == "vm_host"]
-    vm_label_map = {code: label for code, label, _key in presets}
-
-    hst_defaults = {"site_prefix": global_site, "site": global_site} if global_site else {}
-    vm_defaults = {"site": global_site} if global_site else {}
-
+                if vals.get(port_token):
+                    port_val = vals[port_token]
+                    if st.session_state.get("esxi_auto_corr", True):
+                        port_val = normalize_port_shortname(port_val)
+                    vals[port_token] = port_val.strip()
+            gen = render_dynamic_pattern(intf["pattern"], vals, variables)
+            st.caption("Generated Interface Description:")
+            st.code(gen, language="text")
+            if st.button("AI Verify Interface Description", key="ai_chk_intf"):
+                with st.spinner("Auditing..."):
+                    st.info(verify_and_suggest_with_ai(gen, active_model, asset_type=intf["label"], category_key="device", site_filter=""))
+            _reference_box("interface", intf)
+def _asset_class_2(case_mode, active_model, naming_rules, naming_patterns, variables, global_site=""):
+    presets = _preset_tuples(get_host_vm_presets(naming_rules), naming_patterns)
+    host_presets = [p for p in presets if not _is_vm_key(p[2])]
+    vm_presets = [p for p in presets if _is_vm_key(p[2])]
+    hst_defaults = {"site_prefix": global_site, "site": global_site} if global_site else None
+    vm_defaults = {"site": global_site} if global_site else None
     col_a, col_b = st.columns(2)
     with col_a:
         st.subheader("Host Type", help="Select the host type to generate a hostname. Choices are configured in the Standards Tab > Hosts Type Presets.")
-        if host_keys:
-            host_type = st.radio(
-                "Host Type",
-                host_keys,
-                horizontal=True,
-                key="host_type_sel",
-                label_visibility="collapsed",
-                help="Select the host type to generate a hostname. Choices are configured in the Standards Tab (Hosts & Virtual Machines Presets).",
-                format_func=lambda c: c,
-            )
-            if host_type:
-                st.caption(f"ℹ️ **{host_type}**: {host_label_map.get(host_type, '')}")
-            host_pk = next((p[2] for p in presets if p[0] == host_type), None)
-            pat = naming_patterns.get(host_pk, "")
-            if not host_pk or not pat:
-                st.info(f"No naming pattern for {host_type}. Add one in Standards.")
-                return
-            order = (naming_rules.get("token_order") or {}).get(host_pk)
-            values = render_token_widgets(pat, variables, f"hst_{host_pk}", defaults=hst_defaults, custom_order=order)
-            _tokens = re.findall(r"<([a-zA-Z0-9_]+)>", pat)
-            _missing = [t for t in dict.fromkeys(_tokens)
-                        if not str(values.get(t, "") or "").strip()
-                        and not ((variables.get(t) or {}).get("optional"))]
-            if _missing:
-                st.warning("Missing value for: " + ", ".join(f"<{t}>" for t in _missing))
-            gen_raw = render_dynamic_pattern(pat, values, variables)
-            gen_raw = gen_raw.strip()
+        hst = _render_preset_form(
+            host_presets, "host_type_sel", "hst_{pk}",
+            "Select the host type to generate a hostname. Choices are configured in the Standards Tab (Hosts & Virtual Machines Presets).",
+            naming_rules, variables, naming_patterns, defaults=hst_defaults,
+            empty_msg="No host type presets. Add one in Standards.",
+        )
+        if hst:
+            gen_raw = render_dynamic_pattern(hst["pattern"], hst["values"], variables).strip()
             gen_raw = re.sub(r"\.+", ".", gen_raw).strip(".")
             if "." in gen_raw:
                 parts = gen_raw.split(".", 1)
                 gen = f"{apply_case(parts[0], case_mode)}.{parts[1].lower()}"
             else:
                 gen = apply_case(gen_raw, case_mode)
-            host_label = host_label_map.get(host_type, host_type)
-            st.caption(f"Generated {host_label} Hostname:")
+            st.caption(f"Generated {hst['label']} Hostname:")
             st.code(gen, language="text")
-            if st.button(f"AI Verify {host_label} Host", key="ai_chk_hst"):
+            if st.button(f"AI Verify {hst['label']} Host", key="ai_chk_hst"):
                 with st.spinner("Auditing..."):
-                    st.info(verify_and_suggest_with_ai(gen, active_model, asset_type=f"{host_label} Hypervisor Hostname", category_key="hypervisor", site_filter=values.get("site_prefix", "")))
-            display_reference_box("hypervisor", "NYCESX001.corp.internal\nLONESX001.corp.internal\nSYDESX01.corp.local", "Hypervisor", site_filter=values.get("site_prefix", ""))
-
+                    st.info(verify_and_suggest_with_ai(gen, active_model, asset_type=f"{hst['label']} Hypervisor Hostname", category_key="hypervisor", site_filter=hst["values"].get("site_prefix", "")))
+            _reference_box("hypervisor", hst, site_filter=hst["values"].get("site_prefix", ""))
     with col_b:
         st.subheader("Virtual Machine (VM) Hostname", help="Select the VM role/type to generate a hostname. Choices are configured in the Standards Tab > Virtual Machine Presets.")
-        vm_type = st.radio(
-            "VM Role / Type",
-            vm_keys,
-            horizontal=True,
-            key="host_vm_vm_role",
-            label_visibility="collapsed",
-            help="Select the VM role/type. Choices are configured in the Standards Tab (Hosts & Virtual Machines Presets).",
-            format_func=lambda c: c,
+        vm = _render_preset_form(
+            vm_presets, "host_vm_vm_role", "vm_{pk}",
+            "Select the VM role/type. Choices are configured in the Standards Tab (Hosts & Virtual Machines Presets).",
+            naming_rules, variables, naming_patterns, defaults=vm_defaults,
+            empty_msg="No VM presets. Add one in Standards.",
         )
-        if vm_type:
-            st.caption(f"ℹ️ **{vm_type}**: {vm_label_map.get(vm_type, '')}")
-        vm_pat = naming_patterns.get(vm_pk, "")
-        if _edit_toggle(vm_pk):
-            render_edit_mode_ui(vm_pk, vm_pat, variables)
-            st.stop()
-        order = (naming_rules.get("token_order") or {}).get(vm_pk)
-        values = render_token_widgets(vm_pat, variables, "vm", defaults=vm_defaults, custom_order=order)
-        _tokens = re.findall(r"<([a-zA-Z0-9_]+)>", vm_pat)
-        _missing = [t for t in dict.fromkeys(_tokens)
-                    if not str(values.get(t, "") or "").strip()
-                    and not ((variables.get(t) or {}).get("optional"))]
-        if _missing:
-            st.warning("Missing value for: " + ", ".join(f"<{t}>" for t in _missing))
-        gen_raw = render_dynamic_pattern(vm_pat, values, variables)
-        gen_raw = gen_raw.strip()
-        gen = apply_case(gen_raw, case_mode)
-        st.caption(f"Generated {vm_label_map.get(vm_type, 'VM')} Hostname:")
-        st.code(gen, language="text")
-        if st.button("AI Verify VM Hostname", key="ai_chk_vm"):
-            with st.spinner("Auditing..."):
-                st.info(verify_and_suggest_with_ai(gen, active_model, asset_type="Virtual Machine (VM) Hostname", category_key="vm", site_filter=values.get("site", "")))
-        display_reference_box("vm", "USNYCAPP01     (NYC Application Server 01)\nUKLONDB01\nAUSYDFS01", "Virtual Machine", site_filter=values.get("site", ""))
-
-
+        if vm:
+            gen = apply_case(render_dynamic_pattern(vm["pattern"], vm["values"], variables).strip(), case_mode)
+            st.caption(f"Generated {vm['label']} Hostname:")
+            st.code(gen, language="text")
+            if st.button("AI Verify VM Hostname", key="ai_chk_vm"):
+                with st.spinner("Auditing..."):
+                    st.info(verify_and_suggest_with_ai(gen, active_model, asset_type="Virtual Machine (VM) Hostname", category_key="vm", site_filter=vm["values"].get("site", "")))
+            _reference_box("vm", vm, site_filter=vm["values"].get("site", ""))
 def _asset_class_3(naming_rules: dict, casing: str, active_model: str = ""):
     st.subheader("☁️ Hypervisor Network Description Formatter", help="Format standardized hypervisor network descriptions (VMware ESXi, Proxmox VE, Linux Bridges, etc.) matching infrastructure guidelines.")
-
     if "mode_selector" not in st.session_state:
         st.session_state["mode_selector"] = "interactive"
     _mode_key = st.session_state.get("mode_selector")
@@ -751,16 +555,12 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = ""):
         label_visibility="collapsed",
         key="mode_selector",
     )
-
     if "interactive" == mode:
         _render_interactive_hypervisor_mode(naming_rules, casing, active_model)
     else:
         _render_screenshot_batch_mode(naming_rules, casing, active_model)
-
-
 def _build_dynamic_teaming_clause(uplinks: list) -> str:
     """Dynamically synthesize teaming description string without hardcoded assumptions.
-
     Reads empty_role_token and no_uplink_display from Standards (topology_parsing_presets +
     pattern_variables.uplink_role).  If uplinks is empty (or all are "No physical network
     adapters" state), returns the standards-driven no_uplink_text instead of an empty string.
@@ -785,7 +585,6 @@ def _build_dynamic_teaming_clause(uplinks: list) -> str:
             return str(_nlu).strip()
         _ur_cfg = (_rules.get("pattern_variables") or {}).get("uplink_role") or {}
         return str(_ur_cfg.get("no_uplink_fallback") or "").strip()
-
     def _is_junk_or_speed(text: str) -> bool:
         t = text.strip()
         if not t:
@@ -793,7 +592,6 @@ def _build_dynamic_teaming_clause(uplinks: list) -> str:
         if _is_junk_token(t, None):
             return True
         return bool(re.search(r"\b\d+\s*(?:Gbit/s|Mbit/s|Kbit/s|Full|Half)\b", t, re.I))
-
     # Load teaming rules once at function scope
     _rules = SSM.get_naming_rules() or {}
     _tpp = _rules.get("topology_parsing_presets") or {}
@@ -809,7 +607,6 @@ def _build_dynamic_teaming_clause(uplinks: list) -> str:
     _empty_role_token = str(_teaming.get("empty_role_token")
         or ((_rules.get("pattern_variables") or {}).get("uplink_role") or {}).get("empty_role_token")
         or "None").strip().lower()
-
     parts = []
     for u in uplinks:
         iface = str(u.get("interface", "")).strip()
@@ -822,10 +619,7 @@ def _build_dynamic_teaming_clause(uplinks: list) -> str:
             parts.append(iface)
         else:
             parts.append(f"{iface} {teaming_status}")
-
     return " / ".join(parts)
-
-
 def _clean_rendered_clause(rendered: str) -> str:
     """Removes dangling slashes, empty parens, and orphan active/standby markers."""
     rendered = re.sub(r"\(\s*/\s*\)", "", rendered)
@@ -837,16 +631,12 @@ def _clean_rendered_clause(rendered: str) -> str:
     rendered = re.sub(r"\(\s*\)", "", rendered)
     rendered = re.sub(r"\s{2,}", " ", rendered)
     return rendered.strip()
-
-
 def render_hypervisor_edit_mode_ui(pattern_key: str, current_preset: dict, platform: str, naming_rules: dict):
     """Edit mode UI for hypervisor presets, syncing pattern back to hypervisor_presets and persisting."""
     from config.naming_rules import save_naming_rules as _save_naming_rules
-
     edit_key = f"edit_mode_{pattern_key}"
     pending_key = f"_edit_pending_{pattern_key}"
     initial = st.session_state.pop(pending_key, current_preset.get("pattern", "") or "")
-
     edited = st.text_area(
         "Pattern Template",
         value=initial,
@@ -854,9 +644,7 @@ def render_hypervisor_edit_mode_ui(pattern_key: str, current_preset: dict, platf
         key=f"edit_text_{pattern_key}",
         help="Edit the pattern using <Token> placeholders. Manage variables in the Standards tab > Pattern Variables Reference.",
     )
-
     current_tokens = extract_tokens(edited)
-
     rules = SSM.get_naming_rules({})
     saved_token_order = (rules.get("token_order") or {}).get(pattern_key, [])
     order_key = f"field_order_{pattern_key}"
@@ -873,7 +661,6 @@ def render_hypervisor_edit_mode_ui(pattern_key: str, current_preset: dict, platf
             if t not in custom_order:
                 custom_order.append(t)
         st.session_state[order_key] = list(custom_order)
-
     if custom_order:
         with st.expander("🎛️ Field Order Configuration", expanded=False):
             st.caption("Reorder the input fields. The saved order is used when rendering the generator.")
@@ -891,20 +678,16 @@ def render_hypervisor_edit_mode_ui(pattern_key: str, current_preset: dict, platf
                         custom_order[i], custom_order[i + 1] = custom_order[i + 1], custom_order[i]
                         st.session_state[order_key] = list(custom_order)
                         st.rerun()
-
     if st.button("💾 Save to Standards", key=f"hyp_save_{pattern_key}", type="primary"):
         rules = SSM.get_naming_rules({})
         hyp_presets = rules.get("hypervisor_presets") or {}
         plat_presets = list(hyp_presets.get(platform, []))
-
         for item in plat_presets:
             if item.get("code") == current_preset.get("code"):
                 item["pattern"] = edited
                 break
-
         hyp_presets[platform] = plat_presets
         rules["hypervisor_presets"] = hyp_presets
-
         token_order_map = rules.get("token_order", {})
         if not isinstance(token_order_map, dict):
             token_order_map = {}
@@ -912,30 +695,24 @@ def render_hypervisor_edit_mode_ui(pattern_key: str, current_preset: dict, platf
         rules["token_order"] = token_order_map
         rules["naming_patterns"] = rules.get("naming_patterns") or {}
         rules["naming_patterns"][pattern_key] = edited
-
         SSM.set_naming_rules(rules)
         st.session_state.pop(order_key, None)
         _save_naming_rules(rules, source=f"Edit Mode: {pattern_key}")
-
         st.session_state[edit_key] = False
         st.session_state[f"edit_toggle_ver_{pattern_key}"] = (
             st.session_state.get(f"edit_toggle_ver_{pattern_key}", 0) + 1
         )
         st.session_state.pop(pending_key, None)
         st.rerun()
-
-
 def _render_interactive_hypervisor_mode(naming_rules: dict, casing: str, active_model: str):
     """Token-driven dynamic generator displaying default as yellow hint next to label."""
     with st.container(border=True):
         st.markdown("##### 🛠️ Universal Hypervisor Description Generator")
         st.caption("Dynamically generated token-based forms driven entirely by platform templates.")
-
         presets_map = naming_rules.get("hypervisor_presets") or {}
         if not presets_map:
             from config.naming_rules import DEFAULT_HYPERVISOR_PRESETS
             presets_map = DEFAULT_HYPERVISOR_PRESETS
-
         _tpp = naming_rules.get("topology_parsing_presets") or {}
         if isinstance(_tpp, list):
             _tpp = {
@@ -952,34 +729,29 @@ def _render_interactive_hypervisor_mode(naming_rules: dict, casing: str, active_
         platforms = _platforms if _platforms else _tpp_keys[:1]
         if not platforms:
             st.info("No platforms configured. Add one in Standards.")
-        else:
-            col_p1, col_p2 = st.columns([1, 2])
-            with col_p1:
-                sel_platform = st.selectbox("Platform", platforms, key="hyp_gen_platform_sel")
-            with col_p2:
-                presets = presets_map.get(sel_platform, [])
-                interactive_presets = [p for p in presets if not p.get("hidden", False)] or presets
-                codes = [p.get('code') for p in interactive_presets]
-                sel_code = st.radio("Template", codes, horizontal=True, key="hyp_gen_preset_sel", format_func=lambda c: c)
-                current_preset = next((p for p in interactive_presets if p.get('code') == sel_code), interactive_presets[0] if interactive_presets else {})
-                st.caption(f"ℹ️ **{current_preset.get('label', sel_code)}**")
-
+            return
+        col_p1, col_p2 = st.columns([1, 2])
+        with col_p1:
+            sel_platform = st.selectbox("Platform", platforms, key="hyp_gen_platform_sel")
+        with col_p2:
+            presets = presets_map.get(sel_platform, [])
+            interactive_presets = [p for p in presets if not p.get("hidden", False)] or presets
+            codes = [p.get('code') for p in interactive_presets]
+            sel_code = st.radio("Template", codes, horizontal=True, key="hyp_gen_preset_sel", format_func=lambda c: c)
+            current_preset = next((p for p in interactive_presets if p.get('code') == sel_code), interactive_presets[0] if interactive_presets else {})
+            st.caption(f"ℹ️ **{current_preset.get('label', sel_code)}**")
         if not presets:
             st.warning("No templates defined for this platform.")
             return
-
         edit_key = f"hyp_{sel_platform}_{sel_code}"
         edit_on = _edit_toggle(edit_key)
         if edit_on:
             render_hypervisor_edit_mode_ui(edit_key, current_preset, sel_platform, naming_rules)
             st.stop()
-
         pattern = current_preset.get("pattern", "")
         tokens = list(dict.fromkeys(re.findall(r"<([a-zA-Z0-9_]+)>", pattern)))
-
         # Load registered pattern variables metadata
         all_vars = get_pattern_variables(naming_rules)
-
         st.markdown(f"**Pattern Template:** `{pattern}`")
         input_values = {}
         cols = st.columns(min(len(tokens), 3) if tokens else 1)
@@ -988,7 +760,6 @@ def _render_interactive_hypervisor_mode(naming_rules: dict, casing: str, active_
             lbl = var_meta.get("label") or token.replace("_", " ").title()
             ph = var_meta.get("placeholder") or f"<{token}>"
             hint = var_meta.get("default") or ""
-
             with cols[idx % len(cols)]:
                 # Render label with yellow hint if default metadata exists
                 if hint:
@@ -1012,26 +783,20 @@ def _render_interactive_hypervisor_mode(naming_rules: dict, casing: str, active_
                         key=f"dyn_tok_val_{sel_platform}_{token}",
                         placeholder=ph
                     ).strip()
-
         rendered = pattern
         for token, val in input_values.items():
             if val:
                 rendered = rendered.replace(f"<{token}>", val)
             else:
                 rendered = rendered.replace(f"<{token}>", "")
-
         cleaned_output = _clean_rendered_clause(rendered)
-
         # Apply Auto-Correction if enabled globally
         if st.session_state.get("auto_correct", True):
             from utils.formatters import apply_auto_corrections
             cleaned_output = apply_auto_corrections(cleaned_output, "ocr_cleaning")
             cleaned_output = apply_auto_corrections(cleaned_output, "vmware")
-
         st.caption("Generated NetBox Description:")
         st.code(cleaned_output, language="text")
-
-
 # ---------------------------------------------------------------------------
 # Unified topology analysis helpers (Session-callback friendly)
 # ---------------------------------------------------------------------------
@@ -1056,8 +821,6 @@ def _publish_topology_records(
     st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
     if mode_label:
         st.session_state["paste_mode"] = mode_label
-
-
 def _handle_clear_topology_all() -> None:
     """Clear ALL topology-related session state (called by both Clear All buttons)."""
     _topo_keys = [
@@ -1081,12 +844,9 @@ def _handle_clear_topology_all() -> None:
     st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
     st.session_state["paste_text_ver"] = st.session_state.get("paste_text_ver", 0) + 1
     st.toast("Cleared")
-
-
 def _handle_topology_analyze() -> None:
     """Callback for 'Analyze & Auto-Populate' button — unified pipeline entry point."""
     from core.ocr_engine import run_local_ocr_pipeline
-
     naming_rules = SSM.get_naming_rules() or load_naming_rules()
     raw_text = st.session_state.get(f"vsphere_paste_text_{st.session_state.get('paste_text_ver', 0)}", "").strip()
     images = st.session_state.get("staged_topology_imgs", [])
@@ -1100,11 +860,9 @@ def _handle_topology_analyze() -> None:
     _unified_presets = _tpp_local
     plat_cfg = _unified_presets.get(target_platform, {}) if isinstance(_unified_presets.get(target_platform), dict) else {}
     platform_tokens = (naming_rules.get("platform_tokens") or {}).get(target_platform, {})
-
     configured_modules = plat_cfg.get("modules")
     if not isinstance(configured_modules, list):
         configured_modules = []
-
     _img_mod_ids = [
         mid for mid in configured_modules
         if mid in PROCESSING_MODULES and PROCESSING_MODULES[mid]["input_kind"] == "image"
@@ -1113,7 +871,6 @@ def _handle_topology_analyze() -> None:
         mid for mid in configured_modules
         if mid in PROCESSING_MODULES and PROCESSING_MODULES[mid]["input_kind"] == "text"
     ]
-
     def _ocr_single_image(img):
         """Run OCR on a single image and return extracted records."""
         if hasattr(img, "seek"):
@@ -1160,7 +917,6 @@ def _handle_topology_analyze() -> None:
         _insp_lines.append("")
         st.session_state["_pending_ocr_raw_lines"] = _insp_lines
         return merged_records
-
     def _ocr_records():
         if not images:
             return []
@@ -1178,14 +934,12 @@ def _handle_topology_analyze() -> None:
                     ocr_cache[_cache_key] = [dict(r) for r in recs]
             all_recs.extend(recs)
         return all_recs
-
     result = run_topology_pipeline(plat_cfg, raw_text, _ocr_records if images else None)
     source = result["source"]
     records_raw = result["records"]
     warnings = result.get("warnings", [])
     gaps = result.get("gaps", [])
     report = result.get("report")
-
     # Store diagnostics in session state
     st.session_state["esxi_analysis"] = {
         "source": source,
@@ -1197,11 +951,9 @@ def _handle_topology_analyze() -> None:
     st.session_state["paste_parse_warnings"] = warnings
     st.session_state["paste_merge_report"] = report
     st.session_state["paste_mode"] = source
-
     if source == "none":
         st.toast(warnings[0] if warnings else "Nothing to analyse.", icon="⚠️")
         return
-
     if source == "ocr":
         reduced = reduce_topology_pipeline(records_raw, plat_cfg, platform_tokens)
         _publish_topology_records(reduced, "ocr")
@@ -1231,17 +983,12 @@ def _handle_topology_analyze() -> None:
     else:
         st.toast(f"Unhandled source: {source}", icon="⚠️")
         return
-
     if result.get("needs_screenshot"):
         gap_msgs = [g.get("message", "") for g in gaps if g.get("ocr_can_help")]
         if gap_msgs:
             st.toast(f"Gap(s) detected in pasted text — upload a screenshot of that switch, then click Analyze again", icon="ℹ️")
-
-
 _GRID_COLS = ["switch", "interface", "type", "ip", "purpose", "vlan", "role", "speed", "source", "is_uncertain", "note"]
 _GRID_TEXT_COLS = [_c for _c in _GRID_COLS if _c != "is_uncertain"]
-
-
 def _is_blank(v) -> bool:
     """True for None / NaN / pd.NA. Strings (even empty) are never 'blank' here."""
     if v is None:
@@ -1252,8 +999,6 @@ def _is_blank(v) -> bool:
         return bool(pd.isna(v))
     except (TypeError, ValueError):
         return False
-
-
 def _as_bool(v) -> bool:
     """Tolerant bool: True/False, numpy bool, 1/0, 'true'/'yes'/'⚠️', None/NaN -> False."""
     if _is_blank(v):
@@ -1261,11 +1006,8 @@ def _as_bool(v) -> bool:
     if isinstance(v, str):
         return v.strip().lower() in ("true", "1", "yes", "y", "\u26a0\ufe0f", "\u26a0")
     return bool(v)
-
-
 def _records_to_grid_df(records: List[Dict[str, Any]]) -> pd.DataFrame:
     """topology_records -> DataFrame for st.data_editor.
-
     Text columns are always object/str, `is_uncertain` is always a real bool (also when there are
     zero rows, where pandas .map() would otherwise keep the wrong dtype), `_check` is derived.
     """
@@ -1275,8 +1017,6 @@ def _records_to_grid_df(records: List[Dict[str, Any]]) -> pd.DataFrame:
     df["is_uncertain"] = pd.Series([_as_bool(v) for v in df["is_uncertain"]], index=df.index, dtype="bool")
     df["_check"] = pd.Series(["OCR \u2013 verify" if u else "" for u in df["is_uncertain"]], index=df.index, dtype="object")
     return df
-
-
 def _grid_df_to_records(df: pd.DataFrame) -> List[Dict[str, Any]]:
     """Edited grid DataFrame -> topology_records (plain str cells, real bool flag, no derived `_check`)."""
     out: List[Dict[str, Any]] = []
@@ -1285,33 +1025,24 @@ def _grid_df_to_records(df: pd.DataFrame) -> List[Dict[str, Any]]:
         rec["is_uncertain"] = _as_bool(row.get("is_uncertain"))
         out.append(rec)
     return out
-
-
 def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model: str):
     """Render the full screenshot OCR/VLM pipeline openly (no expanders hiding the workflow)."""
-
     if "hypervisor_editor_version" not in st.session_state:
         st.session_state["hypervisor_editor_version"] = 0
     if "hypervisor_cascade_mappings" not in st.session_state:
         st.session_state["hypervisor_cascade_mappings"] = []
-
     # Always reload fresh rules from disk/SSM on entry so that any Standards-tab
     # edits that triggered a rerun while this tab was inactive are picked up.
     from config.naming_rules import force_reload_naming_rules
     naming_rules = SSM.get_naming_rules(force_reload_naming_rules())
-
     st.session_state["_hyp_last_naming_rules_ts"] = id(naming_rules)
-
     st.markdown("#### 1️⃣ Platform & Data Ingestion")
-
     with st.container(border=True):
         # Platform selector at the top
         current_rules = SSM.get_naming_rules()
         hyp_presets_naming = current_rules.get("hypervisor_presets") or {}
         parsing_presets_naming = current_rules.get("topology_parsing_presets") or {}
-
         hyp_keys = list(hyp_presets_naming.keys()) if isinstance(hyp_presets_naming, dict) else []
-
         if isinstance(parsing_presets_naming, dict):
             parsing_keys = list(parsing_presets_naming.keys())
         elif isinstance(parsing_presets_naming, list):
@@ -1322,15 +1053,12 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             ]
         else:
             parsing_keys = []
-
         existing_set = set(hyp_keys + parsing_keys)
-
         saved_order = current_rules.get("hypervisor_platform_order") or []
         ordered_plats = [p for p in saved_order if p in parsing_keys]
         for p in parsing_keys:
             if p not in ordered_plats:
                 ordered_plats.append(p)
-
         naming_platform_options = ordered_plats if ordered_plats else parsing_keys[:1]
         if not naming_platform_options:
             st.info("No platforms configured. Add one in Standards.")
@@ -1339,10 +1067,8 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             cur_selected_plat = st.session_state.get("ocr_target_platform", naming_platform_options[0])
             if cur_selected_plat in naming_platform_options:
                 default_idx = naming_platform_options.index(cur_selected_plat)
-
             if st.session_state.get("naming_target_platform") not in naming_platform_options:
                 st.session_state.pop("naming_target_platform", None)
-
             col_plat, col_eng = st.columns([5, 5], vertical_alignment="center")
             with col_plat:
                 target_platform = st.selectbox(
@@ -1353,7 +1079,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     label_visibility="collapsed"
                 )
                 st.session_state["ocr_target_platform"] = target_platform
-
         # Collect text and image modules separately for input rendering
         _selected_preset = parsing_presets_naming.get(target_platform, {}) if isinstance(parsing_presets_naming.get(target_platform), dict) else {}
         _platform_modules = _selected_preset.get("modules")
@@ -1362,11 +1087,9 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         _text_mod_ids = [mid for mid in _platform_modules if mid in PROCESSING_MODULES and PROCESSING_MODULES[mid]["input_kind"] == "text"]
         _img_mod_ids = [mid for mid in _platform_modules if mid in PROCESSING_MODULES and PROCESSING_MODULES[mid]["input_kind"] == "image"]
         _unknown_mod_ids = [mid for mid in _platform_modules if mid not in PROCESSING_MODULES]
-
         with col_eng:
             if _img_mod_ids:
                 st.markdown("**⚡ Instant Local OCR (Deterministic Python Engine)**")
-
         _kind_owners: Dict[str, str] = {}
         for _mid in _platform_modules:
             if _mid not in PROCESSING_MODULES:
@@ -1376,13 +1099,10 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 st.caption(f"⚠️ Duplicate input_kind '{_kind}': both '{_kind_owners[_kind]}' and '{_mid}' are configured.")
             else:
                 _kind_owners[_kind] = _mid
-
         for _unk_mid in _unknown_mod_ids:
             st.caption(f"⚠️ Unknown module '{_unk_mid}' — skipping.")
-
         _screenshot_title = "Screenshot Guidelines"
         _screenshot_md = ""
-
         if _text_mod_ids:
             _text_parser_id = _text_mod_ids[0]
             _tp_meta = PROCESSING_MODULES[_text_parser_id].get("metadata") or {}
@@ -1394,7 +1114,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     st.caption(_paste_help)
                 if _export_js:
                     st.code(_export_js, language="javascript")
-
                 paste_text_key = f"vsphere_paste_text_{st.session_state.get('paste_text_ver', 0)}"
                 _lines = len((st.session_state.get(paste_text_key) or '').strip().splitlines())
                 with st.expander(f"Raw text ({_lines} lines)", expanded=False):
@@ -1405,7 +1124,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         placeholder=f"Paste the copied {_paste_label.lower()} here...",
                         label_visibility="collapsed"
                     )
-
                 _pv = preview_topology_text(_text_parser_id, pasted_vsphere_text)
                 if _pv is not None:
                     _sw_list = _pv.get("switches", [])
@@ -1463,22 +1181,18 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                             st.caption(_mlabel)
         elif not _text_mod_ids and not _img_mod_ids:
             st.caption("This platform has no processing modules configured. Add one in Standards.")
-
         for _mid in (_img_mod_ids + _text_mod_ids):
             _m = PROCESSING_MODULES[_mid].get("metadata") or {}
             if _m.get("screenshot_guidance"):
                 _screenshot_title = _m.get("screenshot_guidance_title", _screenshot_title)
                 _screenshot_md = _m.get("screenshot_guidance", "")
                 break
-
         if _img_mod_ids:
             # Screenshot guidelines (moved from text slot per 4-3.1)
             if _screenshot_md:
                 with st.expander(f"📸 {_screenshot_title}", expanded=False):
                     st.markdown(_screenshot_md)
-            
             col_up1, col_up2 = st.columns([1, 1])
-
             with col_up1:
                 if "topo_uploader_key_ver" not in st.session_state:
                     st.session_state["topo_uploader_key_ver"] = 0
@@ -1492,7 +1206,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 )
                 if "staged_topology_imgs" not in st.session_state:
                     st.session_state["staged_topology_imgs"] = []
-
                 if raw_uploaded:
                     import io as _io
                     existing_names = {(getattr(f, "name", ""), getattr(f, "size", 0)) for f in st.session_state["staged_topology_imgs"]}
@@ -1509,7 +1222,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     if new_files_added:
                         st.session_state["topo_uploader_key_ver"] = st.session_state.get("topo_uploader_key_ver", 0) + 1
                         st.rerun()
-
             with col_up2:
                 st.markdown("**📋 Or Paste Screenshot from Clipboard (Ctrl+V)**")
                 if "paste_input_ver" not in st.session_state:
@@ -1580,11 +1292,8 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     """,
                     unsafe_allow_javascript=True,
                 )
-
         # Ingest clipboard paste inside Step 1 (kept for backward compat; new logic uses on_change)
-
         uploaded_imgs = st.session_state.get("staged_topology_imgs", [])
-
         if uploaded_imgs:
             with st.expander(f"🔍 Preview Staged Screenshots ({len(uploaded_imgs)} file(s))", expanded=True):
                 preview_cols = st.columns(min(len(uploaded_imgs), 4))
@@ -1605,14 +1314,12 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         st.session_state.pop("latest_vault_session", None)
                         st.session_state.pop("hypervisor_cascade_mappings", None)
                     st.rerun()
-
         # Action Bar (Analyze & Clear)
         c_an, c_clr = st.columns([3, 1], vertical_alignment="center")
         with c_an:
             st.button("🚀 Analyze & Auto-Populate", type="primary", width="stretch", on_click=_handle_topology_analyze, disabled=(not _text_mod_ids and not _img_mod_ids))
         with c_clr:
             st.button("🗑️ Clear All", key="btn_clear_topology_all", width="stretch", on_click=_handle_clear_topology_all)
-
     # Raw Text / Warnings Inspector (collapsible)
     staged_imgs = st.session_state.get("staged_topology_imgs", [])
     raw_ocr_text = st.session_state.get("latest_ocr_raw_text", "")
@@ -1661,16 +1368,12 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             st.text_area("Extracted OCR Tokens", value=raw_ocr_text, height=420, disabled=True)
         else:
             st.info("No OCR data available. Upload screenshots and click Analyze & Auto-Populate.")
-
     # Load standards rules for dynamic role options (available to both cards and editor)
     _std_rules = SSM.get_naming_rules() or naming_rules
-
     if "editor_ver" not in st.session_state:
         st.session_state["editor_ver"] = 0
-
     records = st.session_state.get("topology_records", [])
     sw_options = st.session_state.get("discovered_switches", [])
-
     # Dynamic role options from active platform preset
     _tpp_nr = naming_rules.get("topology_parsing_presets") or {}
     _plat_nr_keys = list(_tpp_nr.keys()) if isinstance(_tpp_nr, dict) else []
@@ -1689,7 +1392,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     default_connected_role = plat_cfg.get("default_connected_role") or (role_options[0] if role_options else "")
     default_disconnected_role = plat_cfg.get("default_disconnected_role") or "None"
     sentinel_no_adapter = plat_cfg.get("sentinel_no_adapter") or ""
-
     # Clean Empty State
     if not sw_options and not records:
         if not _text_mod_ids and not _img_mod_ids:
@@ -1702,7 +1404,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         st.caption("Review extracted switch containers, assign uplinks/services, and verify parameters in the grid.")
         st.markdown("##### 🔹 Topology Visual Overview & Card Controls")
         cols = st.columns(min(len(sw_options), 4) if sw_options else 1)
-
         for idx, sw in enumerate(sw_options):
             with cols[idx % len(cols)]:
                 with st.container(border=True):
@@ -1731,10 +1432,8 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                             st.session_state["discovered_switches"] = sw_options
                             st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
                             st.rerun()
-
                     assigned_uplink_indices = [i for i, r in enumerate(records) if r.get("switch") == sw and str(r.get("type", "")).strip().lower() == "uplink" and r.get("interface")]
                     assigned_service_indices = [i for i, r in enumerate(records) if r.get("switch") == sw and str(r.get("type", "")).strip().lower() != "uplink" and (r.get("purpose") or r.get("interface"))]
-
                     st.caption(f"Uplinks ({len(assigned_uplink_indices)}):")
                     if assigned_uplink_indices:
                         for u_idx in assigned_uplink_indices:
@@ -1744,7 +1443,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                 continue
                             u_role = u_row.get("role") or default_connected_role
                             _uncertain_prefix = "🟡 " if str(u_row.get("is_uncertain", False)).lower() in ("true", "1", "yes") else ""
-
                             uc_label, uc_role, uc_del = st.columns([3, 3, 1])
                             with uc_label:
                                  new_u_iface = st.text_input(
@@ -1785,7 +1483,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                     st.rerun()
                     else:
                         st.caption("No uplinks")
-
                     st.caption(f"Services ({len(assigned_service_indices)}):")
                     if assigned_service_indices:
                         for s_idx in assigned_service_indices:
@@ -1840,13 +1537,10 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                     st.rerun()
                     else:
                         st.caption("No services")
-
                     st.divider()
-
                     btn_col1, btn_col2 = st.columns(2)
                     uplink_candidates = st.session_state.get("discovered_uplink_candidates", [])
                     service_candidates = st.session_state.get("discovered_service_candidates", [])
-
                     with btn_col1:
                         with st.popover("➕ Uplink", width="stretch"):
                             st.markdown("**Add Physical Uplink**")
@@ -1874,10 +1568,8 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                 placeholder=f"e.g. {_dynamic_uplink_pfx}0, {_dynamic_uplink_pfx}4",
                                 key=f"pop_up_name_{idx}_{sw}_{_up_choice_slug}"
                             ).strip()
-
                             new_up_role = st.selectbox("Initial Role", options=role_options, index=0, key=f"pop_up_role_{idx}_{sw}")
                             new_up_speed = st.selectbox("Speed (optional)", options=plat_cfg.get("speed_options") or [], index=0, key=f"pop_up_spd_{idx}_{sw}")
-
                             if st.button("Add to Switch", key=f"pop_up_confirm_{idx}_{sw}", width="stretch"):
                                 _is_no_uplink = (selected_up_choice == _no_uplink_display) or (not final_up_name and new_up_role.lower() == "none")
                                 if _is_no_uplink:
@@ -1910,7 +1602,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                     st.session_state["topology_records"] = records
                                     st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
                                     st.rerun()
-
                     with btn_col2:
                         with st.popover("➕ Service", width="stretch"):
                             st.markdown("**Add Port Group / VMkernel**")
@@ -1918,7 +1609,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                             if not isinstance(_disc_svc_map, dict):
                                 _disc_svc_map = {}
                             _ip_candidates = [r["ip"] for r in st.session_state.get("topology_records", []) if r.get("ip")]
-
                             # Format dropdown labels so user sees e.g. "Management Network (vmk0 - 10.27.177.246)" or "VM Network"
                             svc_choice_options = ["➕ Custom / Manual Entry"] + [
                                 c for c in service_candidates
@@ -1930,7 +1620,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                 key=f"pop_svc_sel_{idx}_{sw}"
                             )
                             _svc_choice_slug = re.sub(r"[^a-zA-Z0-9_]", "", selected_svc_choice)
-
                             if selected_svc_choice == "➕ Custom / Manual Entry":
                                 _autofill = {}
                                 _init_name = ""
@@ -1947,21 +1636,18 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                     or selected_svc_choice.lower().startswith(_dynamic_vmk_pfx.lower())
                                     or bool(_init_ip)
                                 )
-
                             final_svc_name = st.text_input(
                                 "✏️ Service / Port Group Name (Editable)",
                                 value=_init_name,
                                 placeholder=f"e.g. Management Network, VM Network, iSCSI",
                                 key=f"pop_svc_name_{idx}_{sw}_{_svc_choice_slug}"
                             ).strip()
-
                             new_svc_type = st.selectbox(
                                 "Type",
                                 options=["Port Group", "VMkernel"],
                                 index=1 if _is_vm else 0,
                                 key=f"pop_svc_type_{idx}_{sw}_{_svc_choice_slug}"
                             )
-
                             # Selectable IP Address Dropdown (with OCR-discovered IPs + Custom option)
                             _ip_options = ["None (No IP)"] + _ip_candidates + ["➕ Custom / Manual IP"]
                             _default_ip_idx = _ip_options.index(_init_ip) if (_init_ip and _init_ip in _ip_options) else 0
@@ -1982,7 +1668,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                 new_svc_ip = ""
                             else:
                                 new_svc_ip = selected_ip_choice.strip()
-
                             if st.button("Add to Switch", key=f"pop_svc_confirm_{idx}_{sw}", width="stretch"):
                                  effective_name = final_svc_name or (selected_svc_choice if selected_svc_choice != "➕ Custom / Manual Entry" else "")
                                  if not effective_name:
@@ -2012,7 +1697,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                      st.session_state["topology_records"] = records
                                      st.session_state["editor_ver"] = st.session_state.get("editor_ver", 0) + 1
                                      st.rerun()
-
     st.markdown("##### \U0001F39B\uFE0F Topology Data Grid")
     st.caption("Edit switch assignments, interface roles, and IPs directly. Changes update NetBox descriptions instantly.")
     df_for_editor = _records_to_grid_df(records)
@@ -2044,13 +1728,10 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     )
     topology_records = _grid_df_to_records(edited_df)
     st.session_state["topology_records"] = topology_records
-
     # ── Zone 3: Live NetBox Output ────────────────────────────────────────────
     st.divider()
     st.markdown("#### 3️⃣ Live NetBox Output & Copy")
-
     _output_bulk_text = "# No parsed topology records. Upload screenshots and click Analyze to generate descriptions.\n"
-
     topology_records = st.session_state.get("topology_records", [])
     _discovered_switches_list = st.session_state.get("discovered_switches", [])
     if topology_records or _discovered_switches_list:
@@ -2061,7 +1742,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         for _tr in topology_records:
             _gparent = str(_tr.get("switch") or "").strip() or "General"
             _groups.setdefault(_gparent, []).append(_tr)
-
         # Load standards for pattern/template rendering
         _std_rules = SSM.get_naming_rules() or naming_rules
         _naming_pats = get_naming_patterns(_std_rules)
@@ -2073,14 +1753,12 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         if _plat_key not in _plat_std_keys:
             _plat_key = _plat_std_keys[0] if _plat_std_keys else None
         _active_hyp_presets = _hyp_presets_map.get(_plat_key, [])
-
         if not _active_hyp_presets:
             st.error(
                 f"❌ Missing template definitions for platform '{_plat_key}' in Standards Tab "
                 f"(Hypervisor > Description Templates). Please configure templates there before generating output."
             )
             st.stop()
-
         _required_codes = {"Switch_Teaming", "Uplink", "PortGroup", "VMkernel"}
         _available_codes = {
             p.get("code", "").strip()
@@ -2096,17 +1774,14 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 f"in the Standards Tab under Hypervisor > Description Templates, then retry."
             )
             st.stop()
-
         _out_lines = [f"# NOTE:\n# Generated from NetBox Hub v{APP_VERSION} (Deterministic Engine).\n"]
         for _gparent in sorted(_groups.keys(), key=_natsort_key):
             _out_lines.append(f"=== {_gparent} ===")
             _sw_uplinks = [r for r in _groups[_gparent] if r.get("type") == "Uplink" and r.get("interface")]
             _sw_services = [r for r in _groups[_gparent] if r.get("type") != "Uplink" and (r.get("interface") or r.get("purpose"))]
             _sw_vmks = [r for r in _groups[_gparent] if r.get("type") == "VMkernel"]
-
             # Dynamic teaming clause
             teaming_str = _build_dynamic_teaming_clause(_sw_uplinks)
-
             # ── Switch Teaming Header (rendered ONCE per switch) ──────────────
             _switch_teaming_tpl = None
             for _ptpl in _active_hyp_presets:
@@ -2118,14 +1793,12 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             _rendered_header = re.sub(r"\s{2,}", " ", _rendered_header).strip()
             if _rendered_header:
                 _out_lines.append(_rendered_header)
-
             # ── Physical Uplinks (rendered per physical adapter) ───────────────
             _uplink_tpl = None
             for _upt in _active_hyp_presets:
                 if _upt.get("code") == "Uplink" and not _upt.get("hidden", False):
                     _uplink_tpl = _upt.get("pattern", "")
                     break
-
             _valid_uplinks = [u for u in _sw_uplinks if str(u.get("interface", "")).strip() not in ("", "No Uplink")]
             for _ug in _valid_uplinks:
                 _ui = str(_ug.get("interface", "")).strip()
@@ -2152,7 +1825,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     st.stop()
                 if _upline:
                     _out_lines.append(_upline)
-
             # ── Port Groups & VMkernel (rendered per service, no teaming dup) ─
             _seen_svc_keys: Set[tuple] = set()
             for _svc in _sw_services:
@@ -2165,7 +1837,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 if _dedup_key in _seen_svc_keys:
                     continue
                 _seen_svc_keys.add(_dedup_key)
-
                 if _svc_type == "VMkernel":
                     _svc_tpl = None
                     for _stpl in _active_hyp_presets:
@@ -2178,7 +1849,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                         if _ptpl.get("code") == "PortGroup" and not _ptpl.get("hidden", False):
                             _svc_tpl = _ptpl.get("pattern", "")
                             break
-
                 _svc_vals = {
                     "purpose": _svc_name,
                     "port_group": _svc_name,
@@ -2199,12 +1869,9 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     st.stop()
                 if _rendered_svc:
                     _out_lines.append(_rendered_svc)
-
         _output_bulk_text = "\n".join(_out_lines).strip()
-
     st.markdown("**NetBox Description Output**")
     st.code(_output_bulk_text, language="text")
-
     st.download_button(
         "📥 Download (.txt)",
         _output_bulk_text.encode("utf-8"),
@@ -2213,4 +1880,3 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
         key="dl_esxi_descriptions_pipe",
         width="stretch",
     )
-

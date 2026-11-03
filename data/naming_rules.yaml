@@ -495,30 +495,35 @@
       "label": "vmnic Name",
       "placeholder": "vmnic",
       "default": "",
+      "optional": false,
       "scope": "hypervisor"
     },
     "v_switch": {
       "label": "vSwitch Name",
       "placeholder": "vSwitch",
       "default": "",
+      "optional": false,
       "scope": "hypervisor"
     },
     "purpose": {
       "label": "Purpose / Service",
       "placeholder": "e.g. Management, vMotion, Storage",
       "default": "",
+      "optional": false,
       "scope": "hypervisor"
     },
     "port_group": {
       "label": "Port Group / vSwitch",
       "placeholder": "e.g. vSwitch0",
       "default": "",
+      "optional": false,
       "scope": "hypervisor"
     },
     "interface": {
       "label": "Interface / Port Group Name",
       "placeholder": "e.g. vmnic0, PG-VMDK",
       "default": "",
+      "optional": false,
       "scope": "hypervisor"
     },
     "slot": {
@@ -546,12 +551,14 @@
       "label": "vmk Name",
       "placeholder": "vmk",
       "default": "",
+      "optional": false,
       "scope": "hypervisor"
     },
     "switch_zone": {
       "label": "Switch Zone / Network Zone",
       "placeholder": "e.g. DMZ, Production, Management",
       "default": "",
+      "optional": false,
       "scope": "hypervisor"
     },
     "uplink_role": {
