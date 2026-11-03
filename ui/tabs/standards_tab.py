@@ -360,7 +360,6 @@ def _render_auto_correction_manager(active_model: str) -> None:
                         st.warning("⚠️ Please describe the correction first.")
 
 
-    _render_site_code_mapping_manager(key_prefix="ac_scm")
 
 
 def _render_ipam_role_mapping_manager(active_model: str) -> None:
@@ -2251,7 +2250,6 @@ def _render_hardware_baseline_editor(rules: dict, active_model: str | None = Non
                         st.toast(f"✅ {display_name} reset to defaults!", icon="🔄")
                         st.rerun()
 
-    _render_azure_mappings_editor(rules)
 
 
 def render_standards_tab(active_model):
@@ -2395,7 +2393,9 @@ def render_standards_tab(active_model):
 
         elif _active_subtab == 2:
             _render_hardware_baseline_editor(current_rules, active_model)
+            _render_azure_mappings_editor(current_rules)
             _render_auto_correction_manager(active_model)
+            _render_site_code_mapping_manager(key_prefix="ac_scm")
 
             with st.expander("⚙️ System Prompt Export & Baseline Management", expanded=False):
                 standards_mgr = StandardsManager()
