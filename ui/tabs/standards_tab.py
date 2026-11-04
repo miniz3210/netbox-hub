@@ -80,6 +80,15 @@ def _clear_session_state_prefixes(*prefixes: str) -> None:
             st.session_state.pop(k, None)
 
 
+def _commit_fresh_rules(rules: dict, fresh: dict) -> None:
+    """Replace rules in place with fresh, persist to session, refresh, and bump the widget nonce."""
+    rules.clear()
+    rules.update(fresh)
+    SSM.set_naming_rules(fresh.copy())
+    SSM.refresh_naming_rules()
+    st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
+
+
 def _wc_rows(name: str, loader) -> list:
     """Working copy of a row table (unsaved, on-screen only). Built once per session from saved rules."""
     k = f"wc_{name}"
@@ -615,12 +624,8 @@ def _persist_auto_corrections(data: dict, category: str = "") -> None:
 def _save_presets(rules: dict, section: str = "presets", section_label: str = "Presets") -> None:
     save_naming_rules(rules, source="Presets Manager")
     fresh = SSM.get_cached_naming_rules() or load_naming_rules()
-    rules.clear()
-    rules.update(fresh)
-    SSM.set_naming_rules(fresh.copy())
-    SSM.refresh_naming_rules()
+    _commit_fresh_rules(rules, fresh)
     st.toast(f"✅ {section_label} saved & applied!", icon="💾")
-    st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
     # Clear all preset widget input keys while safely preserving group selections and system flags
     _clear_session_state_prefixes("device_pre_", "interface_pre_", "host_", "vm_", "esxi_network_pre_",
         "vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_pat_", "vlan_pre_gnpat_", "vlan_pre_gppat_",
@@ -958,13 +963,9 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
             rules_to_save["topology_parsing_presets"] = parsing_presets
             save_naming_rules(rules_to_save, source="Save Hypervisor Platforms")
             fresh = SSM.get_cached_naming_rules() or load_naming_rules()
-            rules.clear()
-            rules.update(fresh)
-            SSM.set_naming_rules(fresh.copy())
-            SSM.refresh_naming_rules()
+            _commit_fresh_rules(rules, fresh)
             _wc_discard("hyp_platforms")
             _clear_session_state_prefixes("wc_hyp_mod_")
-            st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
             st.toast("Hypervisor platforms saved")
             st.rerun()
     with c_reset:
@@ -978,11 +979,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
             rules_to_save["hypervisor_platform_order"] = final_order
             save_naming_rules(rules_to_save, source="Reset Hypervisor Platforms")
             fresh = SSM.get_cached_naming_rules() or load_naming_rules()
-            rules.clear()
-            rules.update(fresh)
-            SSM.set_naming_rules(fresh.copy())
-            SSM.refresh_naming_rules()
-            st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
+            _commit_fresh_rules(rules, fresh)
             st.toast("Hypervisor platforms reset to defaults")
             st.rerun()
 
@@ -1051,11 +1048,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 save_naming_rules(rules, source=f"Save Section 1 for {active_plat}")
                 _wc_discard(name)
                 fresh = SSM.get_cached_naming_rules() or load_naming_rules()
-                rules.clear()
-                rules.update(fresh)
-                SSM.set_naming_rules(fresh.copy())
-                SSM.refresh_naming_rules()
-                st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
+                _commit_fresh_rules(rules, fresh)
                 st.toast(f"✅ Section 1 (Description Templates) for '{active_plat}' saved & applied!", icon="💾")
                 st.rerun()
         with c_r:
@@ -1691,11 +1684,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                     rules["vlan_presets"] = {k: rules["vlan_presets"][k] for k in preset_names}
                     save_naming_rules(rules, source="Reorder VLAN Preset Groups")
                     fresh_rules = SSM.get_cached_naming_rules() or load_naming_rules()
-                    rules.clear()
-                    rules.update(fresh_rules)
-                    SSM.set_naming_rules(fresh_rules.copy())
-                    SSM.refresh_naming_rules()
-                    st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
+                    _commit_fresh_rules(rules, fresh_rules)
                     st.rerun()
 
                 if c_dn.button("⬇️", key="btn_vlan_grp_dn", disabled=(cur_idx == len(preset_names) - 1), help="Move Group Down", width="stretch"):
@@ -1703,11 +1692,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                     rules["vlan_presets"] = {k: rules["vlan_presets"][k] for k in preset_names}
                     save_naming_rules(rules, source="Reorder VLAN Preset Groups")
                     fresh_rules = SSM.get_cached_naming_rules() or load_naming_rules()
-                    rules.clear()
-                    rules.update(fresh_rules)
-                    SSM.set_naming_rules(fresh_rules.copy())
-                    SSM.refresh_naming_rules()
-                    st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
+                    _commit_fresh_rules(rules, fresh_rules)
                     st.rerun()
 
                 if c_del.button("🗑️", key="btn_vlan_grp_del", disabled=(len(preset_names) <= 1 or selected_group == "Custom / Empty Preset"), help=f"Delete preset group '{selected_group}'", width="stretch"):
@@ -2042,11 +2027,7 @@ def _render_hardware_baseline_editor(rules: dict, active_model: str | None = Non
                         rules["hardware_baseline_standards"] = _new_hb
                         save_naming_rules(rules, source=f"Hardware Baseline: {cat_key}")
                         fresh = SSM.get_cached_naming_rules() or load_naming_rules()
-                        rules.clear()
-                        rules.update(fresh)
-                        SSM.set_naming_rules(fresh.copy())
-                        SSM.refresh_naming_rules()
-                        st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
+                        _commit_fresh_rules(rules, fresh)
                         st.toast(f"✅ {display_name} category saved & applied!", icon="💾")
                         st.rerun()
                 with col_r:
@@ -2056,12 +2037,8 @@ def _render_hardware_baseline_editor(rules: dict, active_model: str | None = Non
                         rules["hardware_baseline_standards"] = _new_hb
                         save_naming_rules(rules, source=f"Hardware Baseline: Reset {cat_key}")
                         fresh = SSM.get_cached_naming_rules() or load_naming_rules()
-                        rules.clear()
-                        rules.update(fresh)
-                        SSM.set_naming_rules(fresh.copy())
-                        SSM.refresh_naming_rules()
+                        _commit_fresh_rules(rules, fresh)
                         _clear_session_state_prefixes(f"hb_{cat_key}_")
-                        st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
                         st.toast(f"✅ {display_name} reset to defaults!", icon="🔄")
                         st.rerun()
 
