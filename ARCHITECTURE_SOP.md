@@ -55,8 +55,20 @@ AI 助理專屬模型：gemini/gemini-2.5-flash 或 deepseek/deepseek-chat（非
 - 拓撲解析零 LLM：全程使用確定性 Python 狀態機 + RapidOCR 本地推論，徹底摒棄消耗 ARM 算力的本地 3B 模型。
 - 算力預算自律 (Token & Latency Discipline)：Ollama 呼叫規則（num_predict: 1024、repeat_penalty: 1.1）僅限於 AI 助理選用本機模型時使用。
 - 程式碼極致瘦身：嚴格清除不可達死代碼、無用註解與廢棄文檔，保持鏡像體積最小化。
+  - **⚠️ Session Key 生存警告**：以下 key 屬動態狀態傳遞，絕不可視為「死代碼」刪除：
+    - `pv_pending_delete` (Pattern Variables 刪除確認)
+    - `_pending_ocr_raw_lines` (OCR Inspector 資料傳遞)
+    - `pending_vlan_group` (VLAN group 選擇接力)
+    - `csv_pending_confirmation_{scope_key}` (ui/components.py, CSV 覆蓋確認)
 - 同一件事只有一套寫法：同一類 UI 操作（排序、刪除、新增、儲存、還原）全站使用同一套 pattern（見 6.4），不允許出現兩套行為。
-- 先有重複才抽象：已有多個真實重複才抽 helper（例如 `_commit_rules()`，見 9.3）；不為假想需求預先抽象。
+- 先有重複才抽象：已有多個真實重複才抽 helper（例如 `_commit_fresh_rules()`）；不為假想需求預先抽象。
+
+### 1.4 平台即積木 (Platforms are Lego)
+
+- 平台與模組自由解耦：任何平台均可自由選用處理模組；模組分配絕非硬性綁定特定平台類型。
+- 專屬解析需求：若新平台需要特殊解析邏輯，應建立「新模組」並僅掛載於該平台，不得污染現有模組。
+- 擴充性：新增平台（如 OpenShift）時，嚴禁透過複製 ESXi 模組集來實作。
+- Proxmox 定位：目前僅作為「未來適應力」與「平台無關」的設計原型（Placeholder），證明架構足以承載異質平台。
 
 ---
 
@@ -382,7 +394,7 @@ df -h /
 
 **P1（立即阻斷性修復）**
 - [ ] 確認 Pattern Variables Add 修正已 commit 並驗收。
-- [ ] 清死代碼：`_render_preset_row_actions`、舊 `_pending_*` / swap session key；`find_variable_references` 若仍重複定義則刪除重複（先 grep 確認）。
+- [ ] 清死代碼：舊 `_pending_*` / swap session key；`find_variable_references` 若仍重複定義則刪除重複（先 grep 確認）。
 
 **P2（系統完整度與邏輯一致性）**
 - [ ] Minimal 備份 record_count 統計修復：目前 Minimal 覆蓋後誤顯示為當次 Minimal 筆數，應修正為從 backup_endpoints 統計或合併後有效總筆數。
@@ -397,14 +409,31 @@ df -h /
 - [ ] Module reorder UI（順序即優先級，目前只能移除再新增）。
 - [ ] 版本 drift：`APP_VERSION` 對齊 git tag。
 - [ ] 新 Full 的 CSV 策略目前為保守全清；若要保留「比 Full 更新的 CSV」需另行設計 timestamp-based selective overlay。
-- [ ] Standards 儲存流程重複：`SSM.refresh_naming_rules()` 約 16 處、`rules.clear()/update()` 約 7 處、nonce 遞增約 11 處；抽 `_commit_rules()` helper（先 grep 確認是否已做）。
+- [ ] Standards 儲存流程重複：`SSM.refresh_naming_rules()` 約 16 處、`rules.clear()/update()` 約 7 處、nonce 遞增約 11 處；抽 `_commit_fresh_rules(rules, fresh)` helper（先 grep 確認是否已做）。
+  - [ ] Add ONE new P3 backlog line: "Add normalization" block in standards_tab.py calls SSM.set_naming_rules(rules.copy()) without SSM.refresh_naming_rules(), unlike the other parsing-preset saves. Verify whether this is intentional.
+
+**P2（系統完整度與邏輯一致性）**
+- [ ] Minimal 備份 record_count 統計修復：目前 Minimal 覆蓋後誤顯示為當次 Minimal 筆數，應修正為從 backup_endpoints 統計或合併後有效總筆數。
+- [ ] `clear_backup_records` 徹底清理：補充 DELETE FROM interfaces、DELETE FROM cables、DELETE FROM backup_endpoints，並動態掃描刪除所有 `dynamic_*` 表。
+- [ ] `batch_tab.py` 平行處理容錯：process_row 缺乏 try/except，單行異常會導致整個執行緒池終止。
+- [ ] Excel IPAM 資料庫比對補齊：`_build_backup_index` 填補 IP 集合與 db_record_map。
+- [ ] VLAN preset 的 group 層級（新增 / 刪除 / 排序）仍為舊寫法，尚未統一為暫存副本。
+- [ ] Naming Host 生成器後處理：合併連續 "." 與用第一個 "." 分 hostname / domain 仍寫死在 naming_tab（只在 Host 生成器）。
+- [ ] 平台清單全空時 Naming 的 platform 選單防護（`naming_platform_options[0]` 可能 IndexError）。
+- [ ] 驗證 `_normalize_rules()` 內 `DEFAULT_HYPERVISOR_PRESETS` 是否仍會補回缺失平台：5.1 記為已不補回，但 Handover 曾列為「疑似第二條 auto-heal」；用 grep + 副本 YAML 測試定案後刪除本項或修正。
+- [ ] Platform module history：刪除平台後只記 `platform name -> module IDs`，同名重建時提示 Restore / Start Empty，不得靜默還原。
+- [ ] Module reorder UI（順序即優先級，目前只能移除再新增）。
+- [ ] 版本 drift：`APP_VERSION` 對齊 git tag。
+- [ ] 新 Full 的 CSV 策略目前為保守全清；若要保留「比 Full 更新的 CSV」需另行設計 timestamp-based selective overlay。
+- [ ] Standards 儲存流程重複：`SSM.refresh_naming_rules()` 目前尚復數（見下）；新作 helper `_commit_fresh_rules(rules, fresh)` 處理 Reset 與 nonce 遞增，`clear()` / `update()` 7 處已收斂。
+  - [ ] Add ONE new P3 backlog line: "Add normalization" block in standards_tab.py calls SSM.set_naming_rules(rules.copy()) without SSM.refresh_naming_rules(), unlike the other parsing-preset saves. Verify whether this is intentional.
 
 **P3（長期維護與細節優化）**
 - [ ] Naming 資料處理段殘餘 "No Uplink" / "vmnic" 字面值，改讀 preset / token（違反 1.1）。
-- [ ] `noise_filters` 13 個通用單字品質審查（防止誤殺同名 Port Group）。
 - [ ] `layout_geometry`：讓 Extractor 真正讀取該設定（及 Standards 滑桿連動），否則從 preset 刪除。
+- [ ] `noise_filters` 13 個通用單字品質審查（防止誤殺同名 Port Group）。
 - [ ] 匯出腳本跳過 3 個非資料表 API 端點，並於 UI 標明失敗名稱（需 backup_manager 保存失敗名單；components.py 失敗 endpoint 名單 popover 併入此項）。
-- [ ] OCR Inspector 補信心度（conf）與原始座標方框。
+- [ ] OCR Inspector 補信心度（conf）與座標框。
 - [ ] Raw text / Warnings Inspector 位於 Step 1 之外：收入 Step 1 或明確標示。
 - [ ] Excel IPAM reconciliation script。
 - [ ] Full payload 內重複 endpoint path 目前 first-wins，建議附 warning。
@@ -418,8 +447,8 @@ df -h /
 
 ### 9.4 暫緩 (Deferred)
 
-- Proxmox `/etc/network/interfaces` 文字 parser（由使用者決定時機）：新增 module `proxmox_interfaces`（`input_kind: text`）並登記到 `PROCESSING_MODULES`，由 Standards 指派給 Proxmox；涵蓋 bridge-ports 多成員、bond-slaves 零遺漏、address，無推測值；最多 3 個測試。這是新 module 架構第一個跨平台實證。
 - VM presets 共用一個 template（pattern_key `vm_host`，過渡設計）：若需 per-VM template，host_vm_presets 加 `kind: host|vm`，舊資料由 `vm_host` 推斷，並更新 Standards 約 9 處與 Naming 2 處；不得再新增 `vm_host` 比較。
+- Proxmox `/etc/network/interfaces` 文字 parser（由使用者決定時機）：新增 module `proxmox_interfaces`（`input_kind: text`）並登記到 `PROCESSING_MODULES`，由 Standards 指派給 Proxmox；涵蓋 bridge-ports 多成員、bond-slaves 零遺漏、address，無推測值；最多 3 個測試。這是新 module 架構第一個跨平台實證。
 - Naming text / image slot 骨架統一：上次嘗試因縮排錯誤已 revert（317be36）；重試須一次一個 slot，且不得整段搬位。
 - IPAM `st.tabs` 改 radio + lazy render：目前不安全，切換 view 會丟棄另一 view 的 widget state（Branch、Scope ID、Supernet、表格編輯）；需先把這些值另存為非 widget state。
 

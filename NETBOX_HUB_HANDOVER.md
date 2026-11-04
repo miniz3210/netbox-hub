@@ -30,7 +30,7 @@
 
 ## 3. 暫緩（Deferred）
 
-- VM presets 共用一個 template（pattern_key `vm_host`，過渡設計）。若需 per-VM template：host_vm_presets 加 `kind: host|vm`，舊資料由 `vm_host` 推斷，更新 Standards（9 處）與 Naming（2 處）。不得新增 `vm_host` 比較。
+- VM presets 共用一個 template（pattern_key `vm_host`，過渡設計）：若需 per-VM template，host_vm_presets 加 `kind: host|vm`，舊資料由 `vm_host` 推斷，並更新 Standards 約 9 處與 Naming 2 處；不得再新增 `vm_host` 比較。
 - Naming text/image slot 骨架統一：暫緩。先前嘗試弄壞縮排（已於 317be36 revert）。重試時一次只改一個 slot。
 - IPAM `st.tabs` 改 radio + lazy render：**目前不安全**。切換 view 後另一個 view 的 widget 不再 render，state 會被丟棄（Branch、Scope ID、Supernet、表格編輯）。需先把這些值另存為非 widget state。
 - Proxmox `/etc/network/interfaces` 文字 parser：使用者決定稍後再做（見 P1）。
@@ -52,7 +52,8 @@
 - [ ] Module reorder UI（順序即優先級，目前只能移除再新增）。
 - [ ] 版本 drift：`APP_VERSION` 對齊 git tag。
 - [ ] 新 Full 的 CSV 策略目前為保守全清；若要保留「比 Full 更新的 CSV」需另行設計 timestamp-based selective overlay。
-- [ ] Standards 儲存流程重複：`SSM.refresh_naming_rules()` 約 16 處、`rules.clear()/update()` 約 7 處、nonce 遞增約 11 處；抽 `_commit_rules()`。（待確認 T4 是否已做；以 grep 為準）
+- [ ] Standards 儲存流程重複：`SSM.refresh_naming_rules()` 現已由 17 處減至 7 處；新增 `_commit_fresh_rules(rules, fresh)` 處理 Reset 與 nonce 遞增。
+  - [ ] Add ONE new P3 backlog line: "Add normalization" block in standards_tab.py calls SSM.set_naming_rules(rules.copy()) without SSM.refresh_naming_rules(), unlike the other parsing-preset saves. Verify whether this is intentional.
 
 ### P3
 - [ ] Naming 資料處理段殘餘 "No Uplink" / "vmnic" 字面值，改讀 preset / token。
