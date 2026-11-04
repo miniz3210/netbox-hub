@@ -30,6 +30,7 @@
   "vm_sani": "<country><site><role><seq>",
   "vm_vlab": "<country><site><role><seq>",
   "vm_tst": "<country><site><role><seq>",
+  "vm_vlabtest": "<country><site><role><seq>",
   "device_presets": [
     {
       "code": "SW",
@@ -170,31 +171,31 @@
       "prefix_pattern": "<site> <role> -- VLAN <vid>",
       "items": [
         {
-          "vid": 300,
+          "vid": "300",
           "role": "Corporate WiFi"
         },
         {
-          "vid": 100,
+          "vid": "100",
           "role": "Workstations"
         },
         {
-          "vid": 5,
+          "vid": "5",
           "role": "Management"
         },
         {
-          "vid": 700,
+          "vid": "700",
           "role": "Printers"
         },
         {
-          "vid": 200,
+          "vid": "200",
           "role": "Guests"
         },
         {
-          "vid": 800,
+          "vid": "800",
           "role": "Audio Visual"
         },
         {
-          "vid": 400,
+          "vid": "400",
           "role": "Mobiles"
         }
       ]
@@ -262,7 +263,8 @@
     "vm_afs": "<country><site><role><seq>",
     "vm_sani": "<country><site><role><seq>",
     "vm_vlab": "<country><site><role><seq>",
-    "vm_tst": "<country><site><role><seq>"
+    "vm_tst": "<country><site><role><seq>",
+    "vm_vlabtest": "<country><site><role><seq>"
   },
   "pattern_variables": {
     "site": {
