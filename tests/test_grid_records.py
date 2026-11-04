@@ -1,5 +1,6 @@
 import pandas as pd
 from ui.tabs.naming_tab import _records_to_grid_df, _grid_df_to_records, _GRID_COLS
+from core.naming_dynamic_helper import format_generated_hostname
 
 MIXED = [  # None / True / False / "True" / "" : the same five inputs the old test used
     {"switch": "sw1", "is_uncertain": None, "source": None, "note": None, "vlan": None},
@@ -60,3 +61,41 @@ def test_user_extra_keys_are_dropped_by_design():
     rec = dict(MIXED[1], extra_field="x")
     back = _grid_df_to_records(_records_to_grid_df([rec]))
     assert "extra_field" not in back[0]
+
+
+# ── Tests for format_generated_hostname ────────────────────────────────────
+
+
+def test_format_generated_hostname_basic():
+    result = format_generated_hostname("HOST01.example.COM", "lowercase")
+    assert result == "host01.example.com"
+
+
+def test_format_generated_hostname_double_dot():
+    result = format_generated_hostname("HOST01..example.COM", "lowercase")
+    assert result == "host01.example.com"
+
+
+def test_format_generated_hostname_leading_trailing_dot():
+    result = format_generated_hostname(".HOST01.example.COM.", "lowercase")
+    assert result == "host01.example.com"
+
+
+def test_format_generated_hostname_no_domain():
+    result = format_generated_hostname("HOST01", "lowercase")
+    assert result == "host01"
+
+
+def test_format_generated_hostname_empty():
+    result = format_generated_hostname("", "lowercase")
+    assert result == ""
+
+
+def test_format_generated_hostname_with_uppercase_mode():
+    result = format_generated_hostname("HOST01.example.COM", "UPPERCASE")
+    assert result == "HOST01.example.com"
+
+
+def test_format_generated_hostname_multiple_dots_in_domain():
+    result = format_generated_hostname("HOST01.sub.example.COM", "lowercase")
+    assert result == "host01.sub.example.com"

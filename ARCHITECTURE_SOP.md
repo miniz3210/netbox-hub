@@ -316,10 +316,10 @@ topology_parsing_presets:
 
 ### 8.1 版本號全域同步檢查
 
-發布前確認版本字串一致（以 `config/constants.py` 的 APP_VERSION 為準，並與 git tag 對齊）：
-- `config/constants.py`（APP_VERSION）
-- `data/naming_rules.yaml`
-- `ARCHITECTURE_SOP.md`
+發布前確認版本字串一致（以 `config/constants.py` 的 APP_VERSION 為準，並與 git tag 對齊）。
+- APP_VERSION/tag alignment 為發布時間門控（release-time gate）。
+- 使用者擁有所有 commit/tag/push/version 發布操作。
+- APP_VERSION 目前為 4.8.153，而審查時 git describe 顯示 v4.8.170（本任務切勿更改此二數值）。
 
 ### 8.2 Git 規則（取代舊 Orphan Squash）
 
@@ -362,31 +362,41 @@ df -h /
 - [x] Streamlit 現代化標準相容（全面採用 width='stretch' / 'content'）。
 - [x] ESXi 文字優先 + OCR 缺口補齊 + 純 OCR 三模式調度（esxi_pipeline）。
 - [x] 貼文字與 OCR 雙路徑 VLAN ID 提取修復；OCR Extractor 重複 "vlan" 鍵值覆蓋修復。
-- [x] 靜態代碼守門：Undefined-name 全數清零，AST 導入依賴圖防護生效（226 passed, 1 skipped）。
-- [x] 備份分層合併（Part C）：逐 endpoint 合併、單連線交易 rollback、部分匯出攔截保護。
+- [x] 靜態代碼守門：Undefined-name 全數清零，AST 導入依賴圖防護生效。
+- [x] 備份分層合併：逐 endpoint 合併、單連線交易 rollback、部分匯出攔截保護。
 - [x] DataGrid 型別強制清洗器，根治 _check 欄位型別污染。
 - [x] Naming Live NetBox Output 服務去重鍵改為三元組。
 - [x] Standards IPAM 角色對應 🗑️ 按鈕綁定 `_persist_ipam_role_mappings` 與持久化。
-- [x] Azure Tab：UnboundLocalError (os) 修正；File Uploader 增加 `azure_uploader_key_ver`；死代碼與跳脫字元清理；Role 無值不再於 KQL 填佔位字（由 Standards role_fallback 決定）。
-- [x] Azure：KQL 輸出原始值；importer 經 Standards azure_mappings 對應；Raw_Tags_JSON 為權威來源，所有 tag 成為 NetBox tag。
+- [x] Azure Tab：UnboundLocalError 修正；File Uploader 版本鍵隔離；Role 無值處理；KQL 輸出原始值；Tag 自動化處理。
 - [x] 倉庫冗餘文檔與腳本清理；移除 Flask API 服務、無人呼叫的 spatial anchors editor 與其他死代碼。
 - [x] UI cleanup（Ingest 區重排、Backup contents 單一 dataframe、Reconciliation 表格持久化、Clear Everything 解鎖、Naming 截圖指引歸 image slot、雙 icon / 標題層級統一）。
 - [x] 預設值只播種一次（pattern variables、hypervisor presets、azure_mappings）；Delete 即真刪；移除 tombstone / Restore 清單與 Reset All Variables。
 - [x] Pattern Variables：scope 安全儲存、次序保存、依賴警告（Delete anyway / Cancel）、單 scope Reset。
 - [x] Vault：所有出現位置遮蔽、跨 session 還原、Standards domain 變數生效。
-- [x] `export_rules_as_prompt`：domain 區塊由 Standards 變數動態組成（無寫死名稱、無假預設值）。
+- [x] `export_rules_as_prompt`：domain 區塊由 Standards 變數動態組成。
 - [x] Naming：radio 固定 key、未填 token 警告、Host pattern key 由 preset 決定、無寫死 ESXi 後備。
-- [x] Standards 統一表格寫法（見 6.4）套用至列表式編輯器（VLAN group 層級除外，見 9.3）；Hypervisor editor 即時保存 / 按 Save 行為已統一。
+- [x] Standards 統一表格寫法（除 VLAN preset group 層級外）；Hypervisor editor 即時保存 / 按 Save 行為已統一。
 - [x] IPAM Site / Scope ID / Supernet：Edit Mode（label + 次序）、placeholder 讀取 Standards；`_cached_fetch_toolbar_stats` 已移到共用模組。
-- [x] standards_tab 失效的 data-testid CSS 已刪除（commit 62521ec）；保留 `.action-header`、InputInstructions、stCheckbox / stTooltipIcon 三條。
-- [x] Naming 3 步工作流（已由 Processing Modules 重構取代並多輪驗收）；Strategy Pattern 總機 `run_topology_pipeline()` 已取代寫死的 analyze_esxi 呼叫；平台自由 CRUD 與最後平台保護閘（暫存副本，剩一個平台時 🗑 停用）。
+- [x] standards_tab 失效 data-testid CSS 已刪除；保留 `.action-header`、InputInstructions、stCheckbox / stTooltipIcon 三條。
+- [x] Naming 3 步工作流重構為 Processing Modules 架構；Strategy Pattern 總機 `run_topology_pipeline()` 已取代寫死的 analyze_esxi 呼叫；平台自由 CRUD 與最後平台保護閘（暫存副本，剩一個平台時 🗑 停用）。
+- [x] Per-VM hostname presets（implemented）。
+- [x] Dead-code cleanup：render_multi_edit_mode_ui, DEFAULT_HOST_TYPE_PRESETS, _edit_pending_*, old swap mechanism。
+- [x] Standards save/reset helpers：_commit_fresh_rules, _save_parsing_field；_commit_rules() removed。
+- [x] VLAN Allocation Presets：group-level working copy implemented；Helpers: _vlan_items_name, _vlan_group_skeleton；Custom/Empty Preset normalized。
+- [x] Platform normalization/lifecycle：auto-heal, empty-platform IndexError backlog removed；Processing Modules reorder implemented。
+- [x] Backup clear completeness：clears all tables (backup_records, dynamic_*, etc.)；62 passed。
+- [x] Minimal merged record_count：test verifies merged mapped-endpoint total。
+- [x] Backup skipped/failed/duplicate endpoints：retained/displayed and logged。
+- [x] Batch processing row failing: process_row try/except。
+- [x] IPAM Excel reconciliation backup index：_build_backup_index returns prefixes, IPs, sites, db_record_map。
+- [x] Hostname generation architecture：moved to core.naming_dynamic_helper.format_generated_hostname。
 
 ### 9.2 已確認的設計決定 (Decisions)
 
 - Naming 的 Visual Cards 與 Data Grid 保留兩個都可編輯。
 - Streamlit 刻意不 pin 版本（見文件開頭）。
 - 工廠預設 token_normalizations 的站點名豁免（見 1.1）。
-- VLAN preset GROUP-level operations (reorder, delete, create) now use working copy "vlan_groups" (list of {"name": ...} rows); nothing persisted until Save & Apply Changes. Created/re-created groups carry "fresh": True. Helpers added: `_vlan_items_name(group_name)`, `_vlan_group_skeleton()`. "Custom / Empty Preset" is a real key: get_vlan_presets ensures it exists (NOT virtual).
+- VLAN preset GROUP-level operations (reorder, delete, create) now use working copy "vlan_groups" (list of {"name": ...} rows); nothing persisted until Save & Apply Changes. Created/re-created groups carry "fresh": True.
 - 進行中 [~]：
   - [~] Pattern Variables Add 新行 KeyError '_uid'：修正（新行帶 `_uid` + render loop setdefault）需確認已 commit 並於瀏覽器驗收。
   - [~] VLAN preset 項目暫存副本：已改，未有獨立驗收記錄。
@@ -404,56 +414,43 @@ df -h /
 - [ ] Excel IPAM 資料庫比對補齊：`_build_backup_index` 填補 IP 集合與 db_record_map。
 - [ ] Naming Host 生成器後處理：合併連續 "." 與用第一個 "." 分 hostname / domain 仍寫死在 naming_tab（只在 Host 生成器）。
 - [ ] 平台清單全空時 Naming 的 platform 選單防護（`naming_platform_options[0]` 可能 IndexError）。
-- [ ] 驗證 `_normalize_rules()` 內 `DEFAULT_HYPERVISOR_PRESETS` 是否仍會補回缺失平台：5.1 記為已不補回，但 Handover 曾列為「疑似第二條 auto-heal」；用 grep + 副本 YAML 測試定案後刪除本項或修正。
-- [ ] Platform module history：刪除平台後只記 `platform name -> module IDs`，同名重建時提示 Restore / Start Empty，不得靜默還原。
+- [ ] 驗證 `_normalize_rules()` 內 `DEFAULT_HYPERVISOR_PRESETS` 是否仍會補回缺失平台（疑 auto-heal）。
+- [ ] Platform module history：刪除平台後只記 `platform name -> module IDs`，同名重建時提示 Restore / Start Empty。
 - [ ] Module reorder UI（順序即優先級，目前只能移除再新增）。
 - [ ] 版本 drift：`APP_VERSION` 對齊 git tag。
 - [ ] 新 Full 的 CSV 策略目前為保守全清；若要保留「比 Full 更新的 CSV」需另行設計 timestamp-based selective overlay。
-- [ ] Standards 儲存流程重複：`_commit_fresh_rules(rules, fresh)` helper 現有 6 callers（was 8）；2 VLAN group reorder sites removed；drops VLAN group working copy "wc_vlan_groups" via `_wc_discard("vlan_groups")`。
-  - [ ] Add ONE new P3 backlog line: "Add normalization" block in standards_tab.py calls SSM.set_naming_rules(rules.copy()) without SSM.refresh_naming_rules(), unlike the other parsing-preset saves. Verify whether this is intentional.
-
-**P2（系統完整度與邏輯一致性）**
-- [ ] Minimal 備份 record_count 統計修復：目前 Minimal 覆蓋後誤顯示為當次 Minimal 筆數，應修正為從 backup_endpoints 統計或合併後有效總筆數。
-- [ ] `clear_backup_records` 徹底清理：補充 DELETE FROM interfaces、DELETE FROM cables、DELETE FROM backup_endpoints，並動態掃描刪除所有 `dynamic_*` 表。
-- [ ] `batch_tab.py` 平行處理容錯：process_row 缺乏 try/except，單行異常會導致整個執行緒池終止。
-- [ ] Excel IPAM 資料庫比對補齊：`_build_backup_index` 填補 IP 集合與 db_record_map。
-- [ ] Naming Host 生成器後處理：合併連續 "." 與用第一個 "." 分 hostname / domain 仍寫死在 naming_tab（只在 Host 生成器）。
-- [ ] 平台清單全空時 Naming 的 platform 選單防護（`naming_platform_options[0]` 可能 IndexError）。
-- [ ] 驗證 `_normalize_rules()` 內 `DEFAULT_HYPERVISOR_PRESETS` 是否仍會補回缺失平台：5.1 記為已不補回，但 Handover 曾列為「疑似第二條 auto-heal」；用 grep + 副本 YAML 測試定案後刪除本項或修正。
-- [ ] Platform module history：刪除平台後只記 `platform name -> module IDs`，同名重建時提示 Restore / Start Empty，不得靜默還原。
-- [ ] Module reorder UI（順序即優先級，目前只能移除再新增）。
-- [ ] 版本 drift：`APP_VERSION` 對齊 git tag。
-- [ ] 新 Full 的 CSV 策略目前為保守全清；若要保留「比 Full 更新的 CSV」需另行設計 timestamp-based selective overlay。
-- [ ] Standards 儲存流程重複：`SSM.refresh_naming_rules()` 目前尚復數（見下）；新作 helper `_commit_fresh_rules(rules, fresh)` 處理 Reset 與 nonce 遞增，`clear()` / `update()` 7 處已收斂。
-  - [ ] Add ONE new P3 backlog line: "Add normalization" block in standards_tab.py calls SSM.set_naming_rules(rules.copy()) without SSM.refresh_naming_rules(), unlike the other parsing-preset saves. Verify whether this is intentional.
+- [ ] Standards 儲存流程重複：`SSM.refresh_naming_rules()` 現復數（應收斂）；"Add normalization" block in standards_tab.py calls SSM.set_naming_rules(rules.copy()) without SSM.refresh_naming_rules(), unlike the other parsing-preset saves. Verify whether this is intentional.
 
 **P3（長期維護與細節優化）**
-- [ ] P3: in `_vlan_presets_editor`, Save only writes items and patterns of the SELECTED group; unsaved item edits in another group are lost when user switches group and saves. Structure changes (order, new, deleted groups) apply to all groups.
-- [ ] P3: the `is_custom` branch in the Save block of `_vlan_presets_editor` is dead code (`is_custom` is never true), candidate for removal.
-- [ ] P3: Noise Filters text_area key "txt_noise_filters_{active_plat}" has no nonce, so Reset may show stale text until F5. Status: not confirmed.
-
-- [ ] Naming 資料處理段殘餘 "No Uplink" / "vmnic" 字面值，改讀 preset / token（違反 1.1）。
-- [ ] `layout_geometry`：讓 Extractor 真正讀取該設定（及 Standards 滑桿連動），否則從 preset 刪除。
-- [ ] `noise_filters` 13 個通用單字品質審查（防止誤殺同名 Port Group）。
-- [ ] 匯出腳本跳過 3 個非資料表 API 端點，並於 UI 標明失敗名稱（需 backup_manager 保存失敗名單；components.py 失敗 endpoint 名單 popover 併入此項）。
+- [ ] P3: in `_vlan_presets_editor`, Save only writes items and patterns of the SELECTED group; unsaved item edits in another group are lost when user switches group and saves.
+- [ ] P3: the `is_custom` branch in the Save block of `_vlan_presets_editor` is dead code (never true).
+- [ ] P3: Noise Filters text_area key "txt_noise_filters_{active_plat}" has no nonce.
+- [ ] P3: Module history Restore/Start Empty（design enhancement）。
+- [ ] P3: Duplicate return in `_normalize_rules`（dead-code cleanup）。
+- [ ] P3: `platform_tokens` cleanup/design review.
+- [ ] P3: `clear_backup_records` SQL quoting (normalize to type='table').
+- [ ] P3: `preserve_csv` behavior design review (Full upload vs CSV override).
+- [ ] Naming 資料處理段殘餘 "No Uplink" / "vmnic" 字面值，改讀 preset / token。
+- [ ] `layout_geometry`：讓 Extractor 真正讀取該設定，否則從 preset 刪除。
+- [ ] `noise_filters` 通用單字品質審查。
+- [ ] 匯出腳本跳過非資料表 API 端點並標明失敗名稱。
 - [ ] OCR Inspector 補信心度（conf）與座標框。
-- [ ] Raw text / Warnings Inspector 位於 Step 1 之外：收入 Step 1 或明確標示。
 - [ ] Excel IPAM reconciliation script。
-- [ ] Full payload 內重複 endpoint path 目前 first-wins，建議附 warning。
-- [ ] pyflakes 既有警告（未使用變數 / 無佔位符 f-string）一次清理。
-- [ ] 清走遺留 session key（`switch_deck`、`chips_unassigned`、`chips_session_corrections`），若 Clear All 流程仍引用。
-- [ ] 同 kind 多 module 結果合併 / `execution_mode`（目前刻意不做）。
-- [ ] IPAM site fields：隱藏或新增欄位需先令 `ipam_engine` 函數收 values dict（目前為固定參數）；placeholder / help 尚未可編輯。
-- [ ] Standards 統一 Save / Reset 字眼與欄寬；preset 表格 / count badge HTML 重複約 6-8 次可抽 helper。
+- [ ] Full payload 重複 path 建議附 warning。
+- [ ] pyflakes 既有警告一次清理。
+- [ ] 清走遺留 session key（`switch_deck` 等）。
+- [ ] 同 kind 多 module 結果合併 / `execution_mode`（刻意不做）。
+- [ ] IPAM site fields：hide / add 欄位需 `ipam_engine` 函數收 values dict。
+- [ ] Standards 統一 Save / Reset 字眼；preset 表格 / count badge HTML 重複約 6-8 次可抽 helper。
 - [ ] Azure：NetBox_Tags 欄為舊相容用，穩定後可取消。
-- [ ] Vault：`_reseed_counters` 將 "IP_12" 轉整數（恆為 0，重設計數無效）；`_SWITCH_NAME_RE` / `_PG_NAME_RE` 未被使用（pass 10/11 被繞過）且 `_SWITCH_NAME_RE` 寫死站點字眼（"PR "、"VLab"）。
+- [ ] Vault `_reseed_counters` / `_SWITCH_NAME_RE` 未被使用清理。
 
 ### 9.4 暫緩 (Deferred)
 
-- VM presets 共用一個 template（pattern_key `vm_host`，過渡設計）：若需 per-VM template，host_vm_presets 加 `kind: host|vm`，舊資料由 `vm_host` 推斷，並更新 Standards 約 9 處與 Naming 2 處；不得再新增 `vm_host` 比較。
-- Proxmox `/etc/network/interfaces` 文字 parser（由使用者決定時機）：新增 module `proxmox_interfaces`（`input_kind: text`）並登記到 `PROCESSING_MODULES`，由 Standards 指派給 Proxmox；涵蓋 bridge-ports 多成員、bond-slaves 零遺漏、address，無推測值；最多 3 個測試。這是新 module 架構第一個跨平台實證。
-- Naming text / image slot 骨架統一：上次嘗試因縮排錯誤已 revert（317be36）；重試須一次一個 slot，且不得整段搬位。
-- IPAM `st.tabs` 改 radio + lazy render：目前不安全，切換 view 會丟棄另一 view 的 widget state（Branch、Scope ID、Supernet、表格編輯）；需先把這些值另存為非 widget state。
+- VM presets 共用一個 template。
+- Proxmox `/etc/network/interfaces` 文字 parser。
+- Naming text / image slot 骨架統一。
+- IPAM `st.tabs` 改 radio + lazy render（目前不安全）。
 
 ---
 

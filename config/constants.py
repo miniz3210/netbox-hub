@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "NetBox Hub"
-APP_VERSION = "4.8.153"
+APP_VERSION = "4.9.0"
 PAGE_TITLE = "NetBox Hub"
 PAGE_ICON = "📦"
 

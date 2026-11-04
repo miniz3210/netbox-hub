@@ -5,7 +5,7 @@ import streamlit as st
 from config.constants import APP_VERSION
 import pandas as pd
 logger = logging.getLogger(__name__)
-from utils.formatters import normalize_port_shortname
+from utils.formatters import apply_case, normalize_port_shortname
 from core.naming_engine import verify_and_suggest_with_ai
 from core.db_manager import (
     get_records_by_category,
@@ -14,6 +14,7 @@ from core.db_manager import (
 from core.session_manager import SessionStateManager as SSM
 from ui.components import render_ai_chat, render_backup_uploader
 from core.naming_dynamic_helper import (
+    format_generated_hostname,
     render_dynamic_pattern,
     render_token_widgets,
     render_edit_mode_ui,
@@ -199,8 +200,6 @@ You have DIRECT ACCESS to the complete inventory database. Analyze the user's re
     - Treat it as authoritative for any object type (sites, racks, devices, interfaces, IPs, VMs, clusters, tenants, circuits, VRFs)
     - Use its "total in backup" figures when stating counts
     - Quote the exact records listed rather than generalizing"""
-def apply_case(text: str, mode: str) -> str:
-    return text.upper() if mode == "UPPERCASE" else text.lower()
 def _render_casing_selector():
     """Return the active casing mode ('UPPERCASE'/'lowercase') selected globally."""
     if "naming_case_radio" not in st.session_state:
@@ -496,13 +495,10 @@ def _asset_class_2(case_mode, active_model, naming_rules, naming_patterns, varia
             empty_msg="No host type presets. Add one in Standards.",
         )
         if hst:
-            gen_raw = render_dynamic_pattern(hst["pattern"], hst["values"], variables).strip()
-            gen_raw = re.sub(r"\.+", ".", gen_raw).strip(".")
-            if "." in gen_raw:
-                parts = gen_raw.split(".", 1)
-                gen = f"{apply_case(parts[0], case_mode)}.{parts[1].lower()}"
-            else:
-                gen = apply_case(gen_raw, case_mode)
+            gen = format_generated_hostname(
+                render_dynamic_pattern(hst["pattern"], hst["values"], variables),
+                case_mode,
+            )
             st.caption(f"Generated {hst['label']} Hostname:")
             st.code(gen, language="text")
             if st.button(f"AI Verify {hst['label']} Host", key="ai_chk_hst"):

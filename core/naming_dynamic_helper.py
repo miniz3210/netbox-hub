@@ -12,6 +12,7 @@ from config.naming_rules import extract_tokens, save_naming_rules, load_naming_r
 from core.session_manager import SessionStateManager as SSM
 from utils.formatters import (
     apply_auto_corrections,
+    apply_case,
     normalize_network_name,
 )
 
@@ -74,6 +75,15 @@ def render_dynamic_pattern(pattern: str, values: Dict[str, str], variables: Dict
     result = re.sub(r"\[\s*\]", "", result)
     result = re.sub(r"\s{2,}", " ", result).strip()
     return result
+
+
+def format_generated_hostname(value: str, case_mode: str) -> str:
+    """Normalize a generated hostname while preserving domain semantics."""
+    value = re.sub(r"\.+", ".", str(value or "").strip()).strip(".")
+    if "." not in value:
+        return apply_case(value, case_mode)
+    hostname, domain = value.split(".", 1)
+    return f"{apply_case(hostname, case_mode)}.{domain.lower()}"
 
 
 def _substitute_values(pattern: str, values: Dict[str, str]) -> str:

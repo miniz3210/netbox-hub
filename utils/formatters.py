@@ -395,6 +395,11 @@ def format_role_description(role: str, description: str = "") -> tuple:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
+def apply_case(text: str, mode: str) -> str:
+    """Apply case transformation based on mode."""
+    return text.upper() if mode == "UPPERCASE" else text.lower()
+
+
 def normalize_network_name(name: str) -> str:
     """
     Normalize network/port group names to proper capitalization.
