@@ -266,8 +266,7 @@ def render_esxi_network_inputs(pattern: str, variables: Dict, prefix: str, auto_
 def render_edit_mode_ui(pattern_key: str, pattern_value: str, variables: Dict):
     """In-place Edit Mode: raw pattern textarea + Field Order Configuration."""
     edit_key = f"edit_mode_{pattern_key}"
-    pending_key = f"_edit_pending_{pattern_key}"
-    initial = st.session_state.pop(pending_key, pattern_value or "")
+    initial = pattern_value or ""
 
     edited = st.text_area(
         "Pattern Template",
@@ -360,7 +359,6 @@ def render_edit_mode_ui(pattern_key: str, pattern_value: str, variables: Dict):
         st.session_state[f"edit_toggle_ver_esxi_{pattern_key}"] = (
             st.session_state.get(f"edit_toggle_ver_esxi_{pattern_key}", 0) + 1
         )
-        st.session_state.pop(pending_key, None)
         st.rerun()
 
 

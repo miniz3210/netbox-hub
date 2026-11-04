@@ -627,8 +627,7 @@ def render_hypervisor_edit_mode_ui(pattern_key: str, current_preset: dict, platf
     """Edit mode UI for hypervisor presets, syncing pattern back to hypervisor_presets and persisting."""
     from config.naming_rules import save_naming_rules as _save_naming_rules
     edit_key = f"edit_mode_{pattern_key}"
-    pending_key = f"_edit_pending_{pattern_key}"
-    initial = st.session_state.pop(pending_key, current_preset.get("pattern", "") or "")
+    initial = current_preset.get("pattern", "") or ""
     edited = st.text_area(
         "Pattern Template",
         value=initial,
@@ -694,7 +693,6 @@ def render_hypervisor_edit_mode_ui(pattern_key: str, current_preset: dict, platf
         st.session_state[f"edit_toggle_ver_{pattern_key}"] = (
             st.session_state.get(f"edit_toggle_ver_{pattern_key}", 0) + 1
         )
-        st.session_state.pop(pending_key, None)
         st.rerun()
 def _render_interactive_hypervisor_mode(naming_rules: dict, casing: str, active_model: str):
     """Token-driven dynamic generator displaying default as yellow hint next to label."""
