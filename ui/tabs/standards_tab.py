@@ -908,22 +908,18 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
     st.markdown("**Processing Modules**")
 
     if assigned_ids:
-        for row_start in range(0, len(assigned_ids), 2):
-            row_modules = assigned_ids[row_start:row_start + 2]
-            mod_cols = st.columns(2)
-            for ci, mid in enumerate(row_modules):
-                mi = row_start + ci
-                mod = PROCESSING_MODULES.get(mid, {})
-                lbl = mod.get("display_name", mid)
-                kind = mod.get("input_kind", "unknown")
-                with mod_cols[ci]:
-                    inner_l, inner_r = st.columns([8.5, 1.5], vertical_alignment="center")
-                    with inner_l:
-                        st.markdown(f"**{lbl}** :gray[{kind}]")
-                    with inner_r:
-                        if st.button("✕", key=f"plat_mod_rm_{active_plat}_{mid}", help=f"Remove {lbl}"):
-                            mod_rows.pop(mi)
-                            st.rerun()
+        for mi, mid in enumerate(assigned_ids):
+            mod = PROCESSING_MODULES.get(mid, {})
+            lbl = mod.get("display_name", mid)
+            kind = mod.get("input_kind", "unknown")
+            c_lbl, c_act = st.columns([7, 3], vertical_alignment="center")
+            with c_lbl:
+                st.markdown(f"**{mi + 1}. {lbl}** :gray[{kind}]")
+            with c_act:
+                _wc_row_actions(f"hyp_mod_{san}", mod_rows, mi, min_rows=0)
+
+    if assigned_ids != list(cur_modules):
+        st.caption("⚠️ Unsaved module changes — click Save & Apply Changes to keep them.")
 
     c_add, c_empty = st.columns([2, 8])
     with c_add:
@@ -938,7 +934,15 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
             args=(f"plat_mod_add_{active_plat}", san),
         )
 
-    if names != all_platforms:
+    mods_dirty = False
+    for _p, _cfg in parsing_presets.items():
+        _k = "wc_hyp_mod_" + re.sub(r"[^a-z0-9]+", "_", _p.lower()).strip("_")
+        if _k in st.session_state:
+            _saved = _cfg.get("modules") if isinstance(_cfg, dict) else None
+            if [r["mid"] for r in st.session_state[_k]] != list(_saved or []):
+                mods_dirty = True
+
+    if names != all_platforms or mods_dirty:
         st.caption("⚠️ Unsaved changes — click Save & Apply Changes to keep them.")
 
     c_save, c_reset = st.columns([1, 1])

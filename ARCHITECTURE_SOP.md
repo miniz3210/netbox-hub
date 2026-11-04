@@ -386,6 +386,7 @@ df -h /
 - Naming 的 Visual Cards 與 Data Grid 保留兩個都可編輯。
 - Streamlit 刻意不 pin 版本（見文件開頭）。
 - 工廠預設 token_normalizations 的站點名豁免（見 1.1）。
+- VLAN preset GROUP-level operations (reorder, delete, create) now use working copy "vlan_groups" (list of {"name": ...} rows); nothing persisted until Save & Apply Changes. Created/re-created groups carry "fresh": True. Helpers added: `_vlan_items_name(group_name)`, `_vlan_group_skeleton()`. "Custom / Empty Preset" is a real key: get_vlan_presets ensures it exists (NOT virtual).
 - 進行中 [~]：
   - [~] Pattern Variables Add 新行 KeyError '_uid'：修正（新行帶 `_uid` + render loop setdefault）需確認已 commit 並於瀏覽器驗收。
   - [~] VLAN preset 項目暫存副本：已改，未有獨立驗收記錄。
@@ -401,7 +402,6 @@ df -h /
 - [ ] `clear_backup_records` 徹底清理：補充 DELETE FROM interfaces、DELETE FROM cables、DELETE FROM backup_endpoints，並動態掃描刪除所有 `dynamic_*` 表。
 - [ ] `batch_tab.py` 平行處理容錯：process_row 缺乏 try/except，單行異常會導致整個執行緒池終止。
 - [ ] Excel IPAM 資料庫比對補齊：`_build_backup_index` 填補 IP 集合與 db_record_map。
-- [ ] VLAN preset 的 group 層級（新增 / 刪除 / 排序）仍為舊寫法，尚未統一為暫存副本。
 - [ ] Naming Host 生成器後處理：合併連續 "." 與用第一個 "." 分 hostname / domain 仍寫死在 naming_tab（只在 Host 生成器）。
 - [ ] 平台清單全空時 Naming 的 platform 選單防護（`naming_platform_options[0]` 可能 IndexError）。
 - [ ] 驗證 `_normalize_rules()` 內 `DEFAULT_HYPERVISOR_PRESETS` 是否仍會補回缺失平台：5.1 記為已不補回，但 Handover 曾列為「疑似第二條 auto-heal」；用 grep + 副本 YAML 測試定案後刪除本項或修正。
@@ -409,7 +409,7 @@ df -h /
 - [ ] Module reorder UI（順序即優先級，目前只能移除再新增）。
 - [ ] 版本 drift：`APP_VERSION` 對齊 git tag。
 - [ ] 新 Full 的 CSV 策略目前為保守全清；若要保留「比 Full 更新的 CSV」需另行設計 timestamp-based selective overlay。
-- [ ] Standards 儲存流程重複：`SSM.refresh_naming_rules()` 約 16 處、`rules.clear()/update()` 約 7 處、nonce 遞增約 11 處；抽 `_commit_fresh_rules(rules, fresh)` helper（先 grep 確認是否已做）。
+- [ ] Standards 儲存流程重複：`_commit_fresh_rules(rules, fresh)` helper 現有 6 callers（was 8）；2 VLAN group reorder sites removed；drops VLAN group working copy "wc_vlan_groups" via `_wc_discard("vlan_groups")`。
   - [ ] Add ONE new P3 backlog line: "Add normalization" block in standards_tab.py calls SSM.set_naming_rules(rules.copy()) without SSM.refresh_naming_rules(), unlike the other parsing-preset saves. Verify whether this is intentional.
 
 **P2（系統完整度與邏輯一致性）**
@@ -417,7 +417,6 @@ df -h /
 - [ ] `clear_backup_records` 徹底清理：補充 DELETE FROM interfaces、DELETE FROM cables、DELETE FROM backup_endpoints，並動態掃描刪除所有 `dynamic_*` 表。
 - [ ] `batch_tab.py` 平行處理容錯：process_row 缺乏 try/except，單行異常會導致整個執行緒池終止。
 - [ ] Excel IPAM 資料庫比對補齊：`_build_backup_index` 填補 IP 集合與 db_record_map。
-- [ ] VLAN preset 的 group 層級（新增 / 刪除 / 排序）仍為舊寫法，尚未統一為暫存副本。
 - [ ] Naming Host 生成器後處理：合併連續 "." 與用第一個 "." 分 hostname / domain 仍寫死在 naming_tab（只在 Host 生成器）。
 - [ ] 平台清單全空時 Naming 的 platform 選單防護（`naming_platform_options[0]` 可能 IndexError）。
 - [ ] 驗證 `_normalize_rules()` 內 `DEFAULT_HYPERVISOR_PRESETS` 是否仍會補回缺失平台：5.1 記為已不補回，但 Handover 曾列為「疑似第二條 auto-heal」；用 grep + 副本 YAML 測試定案後刪除本項或修正。
@@ -429,6 +428,10 @@ df -h /
   - [ ] Add ONE new P3 backlog line: "Add normalization" block in standards_tab.py calls SSM.set_naming_rules(rules.copy()) without SSM.refresh_naming_rules(), unlike the other parsing-preset saves. Verify whether this is intentional.
 
 **P3（長期維護與細節優化）**
+- [ ] P3: in `_vlan_presets_editor`, Save only writes items and patterns of the SELECTED group; unsaved item edits in another group are lost when user switches group and saves. Structure changes (order, new, deleted groups) apply to all groups.
+- [ ] P3: the `is_custom` branch in the Save block of `_vlan_presets_editor` is dead code (`is_custom` is never true), candidate for removal.
+- [ ] P3: Noise Filters text_area key "txt_noise_filters_{active_plat}" has no nonce, so Reset may show stale text until F5. Status: not confirmed.
+
 - [ ] Naming 資料處理段殘餘 "No Uplink" / "vmnic" 字面值，改讀 preset / token（違反 1.1）。
 - [ ] `layout_geometry`：讓 Extractor 真正讀取該設定（及 Standards 滑桿連動），否則從 preset 刪除。
 - [ ] `noise_filters` 13 個通用單字品質審查（防止誤殺同名 Port Group）。

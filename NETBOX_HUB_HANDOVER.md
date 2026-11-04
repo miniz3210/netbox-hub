@@ -52,10 +52,15 @@
 - [ ] Module reorder UI（順序即優先級，目前只能移除再新增）。
 - [ ] 版本 drift：`APP_VERSION` 對齊 git tag。
 - [ ] 新 Full 的 CSV 策略目前為保守全清；若要保留「比 Full 更新的 CSV」需另行設計 timestamp-based selective overlay。
-- [ ] Standards 儲存流程重複：`SSM.refresh_naming_rules()` 現已由 17 處減至 7 處；新增 `_commit_fresh_rules(rules, fresh)` 處理 Reset 與 nonce 遞增。
+- [ ] Standards 儲存流程重複：`_commit_fresh_rules(rules, fresh)` 現有 6 callers（was 8）；2 VLAN group reorder sites removed；drops VLAN group working copy "wc_vlan_groups" via `_wc_discard("vlan_groups")`。
   - [ ] Add ONE new P3 backlog line: "Add normalization" block in standards_tab.py calls SSM.set_naming_rules(rules.copy()) without SSM.refresh_naming_rules(), unlike the other parsing-preset saves. Verify whether this is intentional.
+- VLAN preset GROUP-level ops (reorder, delete, create) now use working copy "vlan_groups" (list of {"name": ...}); nothing persisted until Save & Apply Changes; created/re-created groups carry "fresh": True. Helpers: `_vlan_items_name(group_name)`, `_vlan_group_skeleton()`. "Custom / Empty Preset" is a real key ensured by get_vlan_presets (NOT virtual).
 
 ### P3
+- [ ] P3: in `_vlan_presets_editor`, Save only writes items and patterns of the SELECTED group; unsaved item edits in another group are lost when user switches group and saves. Structure changes (order, new, deleted groups) apply to all groups.
+- [ ] P3: the `is_custom` branch in the Save block of `_vlan_presets_editor` is dead code (`is_custom` is never true), candidate for removal.
+- [ ] P3: Noise Filters text_area key "txt_noise_filters_{active_plat}" has no nonce, so Reset may show stale text until F5. Status: not confirmed.
+
 - [ ] Naming 資料處理段殘餘 "No Uplink" / "vmnic" 字面值，改讀 preset / token。
 - [ ] `layout_geometry`：接線 extractor 或從 preset 刪除。
 - [ ] `noise_filters` 13 個通用單字品質審查（防誤殺同名 Port Group）。
