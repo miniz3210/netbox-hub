@@ -695,6 +695,10 @@ def _derive_full_catalogue(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         if not path:
             continue
         if path in seen:
+            logger.warning(
+                "Duplicate endpoint path in Full backup ignored (first occurrence kept): %s",
+                path,
+            )
             continue
         seen.add(path)
         records = ep.get("records")

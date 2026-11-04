@@ -788,7 +788,7 @@ class TestFullEndpointCatalogue:
         paths = [r[0] for r in rows]
         assert "status" in paths, "status must be in catalogue despite structured-ingest skip rule"
 
-    def test_duplicate_path_deduplication(self, tmpdb):
+    def test_duplicate_path_deduplication(self, tmpdb, caplog):
         """(12) Duplicate endpoint paths resolve deterministically: first occurrence wins, no duplicate rows."""
         payload = _build_full_with_endpoints([
             {"path": "dcim/sites", "records": [{"id": 1}], "verified": True, "expected_count": 5},
@@ -802,6 +802,11 @@ class TestFullEndpointCatalogue:
         assert len(site_rows) == 1, "Duplicate path must produce exactly one catalogue row"
         assert site_rows[0][1] == 5, "First occurrence's expected_count must win"
         assert site_rows[0][2] == 1, "First occurrence's verified=True must win"
+
+        duplicate_warnings = [r for r in caplog.records if r.levelno == 30 and "Duplicate endpoint path in Full backup ignored" in r.getMessage()]
+        assert len(duplicate_warnings) == 1, "Exactly one duplicate path warning should be logged"
+        assert "dcim/sites" in duplicate_warnings[0].getMessage()
+        assert "first occurrence kept" in duplicate_warnings[0].getMessage()
 
 
 # ── MINIMAL CATALOGUE MEMBERSHIP & STALE-SKIP TESTS ──────────────────────
@@ -1663,3 +1668,244 @@ class TestClearJsonPreservesCsv:
         assert "dcim/devices" in overrides, "CSV override for dcim/devices must be restored"
         assert overrides["dcim/devices"]["count"] == 1
         assert overrides["dcim/devices"]["source"] == "devices.csv"
+
+class TestClearBackupRecordsComprehensive:
+    """Comprehensive tests for clear_backup_records().
+
+    These tests verify that clear_backup_records() clears all backup-related tables,
+    preserves unrelated tables, and handles the preserve_csv flag correctly.
+    """
+
+    def _seed_all_backup_tables(self, conn):
+        """Insert one row into every table that clear_backup_records() touches,
+        plus unrelated tables (vault, azure_csv_uploads, netbox_schema, sync_metadata)."""
+        cur = conn.cursor()
+        # backup_records
+        cur.execute(
+            "INSERT INTO backup_records (object_type, object_label, object_id, name, site, summary, imported_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("dcim_devices", "Device", 1, "dev-01", "SiteA", "summary", "2026-01-01T00:00:00Z"),
+        )
+        # backup_choice_values
+        cur.execute(
+            "INSERT INTO backup_choice_values (choice_set, field_name, value, label, imported_at) VALUES (?, ?, ?, ?, ?)",
+            ("instance_type", "role", "server", "Server", "2026-01-01T00:00:00Z"),
+        )
+        # backup_metadata (id=1)
+        cur.execute(
+            "INSERT OR REPLACE INTO backup_metadata (id, filename, uploaded_at, record_count, object_counts, enabled, latest_full_backup_completed) VALUES (1, ?, ?, ?, ?, 1, ?)",
+            ("backup.json", "2026-01-01T00:00:00Z", 100, "{}", "2026-01-01T00:00:00Z"),
+        )
+        # sites_records
+        cur.execute(
+            "INSERT OR IGNORE INTO sites_records (id, name, slug) VALUES (1, 'SiteA', 'sitea')",
+        )
+        # inventory_records
+        cur.execute(
+            "INSERT INTO inventory_records (category, name, site) VALUES ('device', 'dev-01', 'SiteA')",
+        )
+        # ipam_records
+        cur.execute(
+            "INSERT INTO ipam_records (prefix_or_subnet, vlan_id, vlan_name, role, site, scope_id, description) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("10.0.0.0/24", 1, "VLAN1", "LAN", "SiteA", 1, "desc"),
+        )
+        # interfaces
+        cur.execute(
+            "INSERT INTO interfaces (id, device_id, device_name, name, site) VALUES (1, 1, 'dev-01', 'eth0', 'SiteA')",
+        )
+        # cables
+        cur.execute(
+            "INSERT INTO cables (id, label) VALUES (1, 'cable-1')",
+        )
+        # backup_endpoints
+        cur.execute(
+            "INSERT OR REPLACE INTO backup_endpoints (path, kind, source_file, exported_at, uploaded_at, record_count, expected_count, verified, content_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("dcim/devices", "full", "backup.json", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", 10, 10, 1, "abc123"),
+        )
+        # full_endpoint_catalogue
+        cur.execute(
+            "INSERT OR REPLACE INTO full_endpoint_catalogue (path, full_exported_at, expected_count, verified) VALUES (?, ?, ?, ?)",
+            ("dcim/devices", "2026-01-01T00:00:00Z", 10, 1),
+        )
+        # Two dynamic_* tables
+        for suffix in ("a", "b"):
+            tbl = f"dynamic_test_{suffix}"
+            cur.execute(f"CREATE TABLE {tbl} (id INTEGER PRIMARY KEY, name TEXT)")
+            cur.execute(f"INSERT INTO {tbl} (name) VALUES ('{suffix}-row-1')")
+
+        # Unrelated tables (vault, azure_csv_uploads, netbox_schema, sync_metadata)
+        # vault_mappings / vault_counters - create if not exist using production schema
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS vault_mappings (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                real_value   TEXT NOT NULL,
+                token        TEXT NOT NULL,
+                category     TEXT NOT NULL,
+                session_id   TEXT,
+                created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS vault_counters (
+                category TEXT PRIMARY KEY,
+                next_id  INTEGER DEFAULT 1
+            )
+        """)
+        cur.execute(
+            "INSERT INTO vault_mappings (real_value, token, category) VALUES ('10.0.0.1', '<SAFE_IP_1>', 'IP')"
+        )
+        cur.execute(
+            "INSERT INTO vault_counters (category, next_id) VALUES ('IP', 2)"
+        )
+        # azure_csv_uploads - create if not exist using production schema
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS azure_csv_uploads (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                filename TEXT,
+                uploaded_at TEXT,
+                csv_data TEXT,
+                row_count INTEGER
+            )
+        """)
+        cur.execute(
+            "INSERT OR REPLACE INTO azure_csv_uploads (id, filename, uploaded_at, csv_data, row_count) VALUES (1, ?, ?, ?, ?)",
+            ("azure.csv", "2026-01-01T00:00:00Z", "col1,col2\nv1,v2", 1),
+        )
+        # netbox_schema - create if not exist using production schema
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS netbox_schema (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                object_type TEXT UNIQUE,
+                field_config TEXT,
+                netbox_version TEXT,
+                is_enabled INTEGER DEFAULT 1,
+                created_at TEXT,
+                updated_at TEXT
+            )
+        """)
+        cur.execute(
+            "INSERT OR REPLACE INTO netbox_schema (object_type, field_config, netbox_version, is_enabled, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)",
+            ("dcim_devices", "{}", "4.6.8", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
+        )
+        # sync_metadata - create if not exist using production schema
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS sync_metadata (
+                module TEXT PRIMARY KEY,
+                source TEXT,
+                updated_at TEXT
+            )
+        """)
+        cur.execute(
+            "INSERT OR REPLACE INTO sync_metadata (module, source, updated_at) VALUES ('some_other_module', 'OtherSource', '2026-01-01T00:00:00Z')"
+        )
+
+        for t in ["backup_records", "backup_choice_values", "backup_metadata", "sites_records", "inventory_records", "ipam_records", "interfaces", "cables", "backup_endpoints", "full_endpoint_catalogue", "azure_csv_uploads", "netbox_schema", "sync_metadata", "vault_mappings", "vault_counters"]:
+            assert conn.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0] >= 1, t
+
+        conn.commit()
+
+    def _count(self, conn, table):
+        cur = conn.cursor()
+        cur.execute(f'SELECT COUNT(*) FROM "{table}"')
+        return cur.fetchone()[0]
+
+    def test_clear_backup_records_clears_all_related_tables(self, tmpdb):
+        """Insert rows into every backup-related table; call clear_backup_records();
+        assert every one of those tables has 0 rows."""
+        conn = sqlite3.connect(tmpdb)
+        self._seed_all_backup_tables(conn)
+        conn.close()
+
+        bm.clear_backup_records()
+
+        conn = sqlite3.connect(tmpdb)
+        for table in ("backup_records", "backup_choice_values", "backup_metadata",
+                      "sites_records", "ipam_records", "inventory_records",
+                      "interfaces", "cables", "backup_endpoints",
+                      "full_endpoint_catalogue"):
+            assert self._count(conn, table) == 0, f"{table} must be empty after clear"
+        for suffix in ("a", "b"):
+            assert self._count(conn, f"dynamic_test_{suffix}") == 0, f"dynamic_test_{suffix} must be empty after clear"
+        conn.close()
+
+    def test_clear_backup_records_preserve_csv_true_keeps_csv_data(self, tmpdb):
+        """With preserve_csv=True, dynamic_* and full_endpoint_catalogue are kept;
+        backup_metadata.latest_full_backup_completed is preserved.
+        JSON tables are cleared. interfaces/cables/backup_endpoints are also cleared
+        (current behavior, intent unconfirmed)."""
+        conn = sqlite3.connect(tmpdb)
+        self._seed_all_backup_tables(conn)
+        conn.close()
+
+        bm.clear_backup_records(preserve_csv=True)
+
+        conn = sqlite3.connect(tmpdb)
+        # JSON tables cleared
+        for table in ("backup_records", "backup_choice_values", "sites_records",
+                      "ipam_records", "inventory_records"):
+            assert self._count(conn, table) == 0, f"{table} must be empty"
+        # interfaces, cables, backup_endpoints: current behavior (cleared unconditionally)
+        for table in ("interfaces", "cables", "backup_endpoints"):
+            assert self._count(conn, table) == 0, f"{table} is cleared even with preserve_csv=True (current behavior)"
+        # CSV preserved
+        for suffix in ("a", "b"):
+            assert self._count(conn, f"dynamic_test_{suffix}") == 1, f"dynamic_test_{suffix} must be preserved"
+        assert self._count(conn, "full_endpoint_catalogue") == 1, "full_endpoint_catalogue must be preserved"
+        # latest_full_backup_completed preserved
+        cur = conn.cursor()
+        cur.execute("SELECT latest_full_backup_completed FROM backup_metadata WHERE id = 1")
+        assert cur.fetchone()[0] == "2026-01-01T00:00:00Z", "latest_full_backup_completed must be unchanged"
+        conn.close()
+
+    def test_clear_backup_records_leaves_unrelated_tables(self, tmpdb):
+        """vault_mappings, vault_counters, azure_csv_uploads, netbox_schema,
+        and unrelated sync_metadata rows survive clear_backup_records()."""
+        conn = sqlite3.connect(tmpdb)
+        self._seed_all_backup_tables(conn)
+        conn.close()
+
+        for preserve in (False, True):
+            bm.clear_backup_records(preserve_csv=preserve)
+
+            conn = sqlite3.connect(tmpdb)
+            assert self._count(conn, "vault_mappings") == 1, \
+                f"vault_mappings must survive (preserve_csv={preserve})"
+            assert self._count(conn, "vault_counters") == 1, \
+                f"vault_counters must survive (preserve_csv={preserve})"
+            assert self._count(conn, "azure_csv_uploads") == 1, \
+                f"azure_csv_uploads must survive (preserve_csv={preserve})"
+            assert self._count(conn, "netbox_schema") == 1, \
+                f"netbox_schema must survive (preserve_csv={preserve})"
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM sync_metadata WHERE module = 'some_other_module'")
+            assert cur.fetchone()[0] == 1, \
+                f"some_other_module sync_metadata must survive (preserve_csv={preserve})"
+            conn.close()
+
+    def test_clear_backup_records_removes_listed_sync_metadata(self, tmpdb):
+        """All 8 listed sync_metadata modules are deleted; unrelated module survives."""
+        conn = sqlite3.connect(tmpdb)
+        self._seed_all_backup_tables(conn)
+        # Insert the listed sync_metadata modules
+        cur = conn.cursor()
+        listed = ['netbox_backup', 'ipam', 'naming', 'netbox_sites',
+                  'netbox_VLANs', 'netbox_prefixes', 'netbox_devices', 'netbox_virtual_machines']
+        for m in listed:
+            cur.execute(
+                "INSERT OR REPLACE INTO sync_metadata (module, source, updated_at) VALUES (?, ?, ?)",
+                (m, "NetBox Backup (JSON)", "2026-01-01T00:00:00Z"),
+            )
+        conn.commit()
+        conn.close()
+
+        bm.clear_backup_records()
+
+        conn = sqlite3.connect(tmpdb)
+        cur = conn.cursor()
+        for m in listed:
+            cur.execute("SELECT COUNT(*) FROM sync_metadata WHERE module = ?", (m,))
+            assert cur.fetchone()[0] == 0, f"sync_metadata '{m}' must be deleted"
+        cur.execute("SELECT COUNT(*) FROM sync_metadata WHERE module = 'some_other_module'")
+        assert cur.fetchone()[0] == 1, "some_other_module must survive"
+        conn.close()
+
