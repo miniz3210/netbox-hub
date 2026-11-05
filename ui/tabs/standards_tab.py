@@ -42,6 +42,10 @@ PRESET_VLAN_COLS = [1.5, 7.3, 1.2]
 VLAN_DESC_MAPPINGS_COLS = [4.0, 5.0, 1.2]
 # Auto-Correction rule columns: Original Pattern, Replacement, Description, Action.
 AUTOCORRECT_COLS = [3.5, 3.0, 4.0, 1.0]
+# Uplink Role Settings columns: Role Option, Up, Down, Delete/Add.
+ROLE_COLS = [8, 0.7, 0.7, 0.9]
+# Defaults row: Connected Default, Disconnected Default, No Adapter Sentinel.
+DEFAULT_COLS = [1, 1, 1]
 
 
 def _normalize_var_name(raw: str) -> str:
@@ -955,18 +959,44 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
 
     st.markdown("**Uplink Role Settings**")
     st.markdown("Role Options")
+    # header
+    _h = st.columns(ROLE_COLS, vertical_alignment="center")
+    with _h[0]:
+        st.markdown("**Role Option**")
+    with _h[1]:
+        st.markdown("**Up**")
+    with _h[2]:
+        st.markdown("**Down**")
+    with _h[3]:
+        st.markdown("**Action**")
+    _name = _role_key.lstrip("wc_")
     for _ri, _rrow in enumerate(list(_role_rows)):
-        _c_text, _c_act = st.columns([7, 3], vertical_alignment="center")
-        with _c_text:
+        _cs = st.columns(ROLE_COLS, vertical_alignment="center")
+        with _cs[0]:
             _rrow["role"] = st.text_input("Role", value=_rrow.get("role", ""), key=f"{_role_key}_{_rrow['_uid']}_role", label_visibility="collapsed")
-        with _c_act:
-            _wc_row_actions(_role_key.lstrip("wc_"), _role_rows, _ri, min_rows=1)
+        with _cs[1]:
+            if st.button("⬆️", key=f"{_role_key}_{_rrow['_uid']}_up", help="Move up", disabled=(_ri == 0), width="stretch"):
+                _role_rows[_ri - 1], _role_rows[_ri] = _role_rows[_ri], _role_rows[_ri - 1]
+                st.rerun()
+        with _cs[2]:
+            if st.button("⬇️", key=f"{_role_key}_{_rrow['_uid']}_dn", help="Move down", disabled=(_ri == len(_role_rows) - 1), width="stretch"):
+                _role_rows[_ri + 1], _role_rows[_ri] = _role_rows[_ri], _role_rows[_ri + 1]
+                st.rerun()
+        with _cs[3]:
+            if st.button("🗑️", key=f"{_role_key}_{_rrow['_uid']}_del", help="Delete", disabled=(len(_role_rows) <= 1), width="stretch"):
+                _role_rows.pop(_ri)
+                st.rerun()
+
     # Add Role
     with st.form(key=f"{_role_key}_addform", clear_on_submit=True):
-        _nc1, _nc2 = st.columns([7, 3], vertical_alignment="center")
-        with _nc1:
+        _acs = st.columns(ROLE_COLS, vertical_alignment="center")
+        with _acs[0]:
             _new_role = st.text_input("Add Role", value="", key=f"{_role_key}_new_role", label_visibility="collapsed", placeholder="New role")
-        with _nc2:
+        with _acs[1]:
+            pass
+        with _acs[2]:
+            pass
+        with _acs[3]:
             _added = st.form_submit_button("➕ Add", width="stretch")
         if _added:
             _nr = _new_role.strip()
@@ -991,10 +1021,15 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
         _disc_default = _role_values[-1]
 
     _conn_idx = _role_values.index(_conn_default) if _conn_default in _role_values else 0
-    _conn_sel = st.selectbox("Connected Default", _role_values, index=_conn_idx, key=f"{_role_key}_conn")
     _disc_idx = _role_values.index(_disc_default) if _disc_default in _role_values else (len(_role_values) - 1 if _role_values else 0)
-    _disc_sel = st.selectbox("Disconnected Default", _role_values, index=_disc_idx, key=f"{_role_key}_disc")
-    _sentinel = st.text_input("No Adapter Sentinel", value=plat_parsing.get("sentinel_no_adapter", ""), key=f"{_role_key}_sentinel")
+
+    _dc = st.columns(DEFAULT_COLS, vertical_alignment="center")
+    with _dc[0]:
+        _conn_sel = st.selectbox("Connected Default", _role_values, index=_conn_idx, key=f"{_role_key}_conn")
+    with _dc[1]:
+        _disc_sel = st.selectbox("Disconnected Default", _role_values, index=_disc_idx, key=f"{_role_key}_disc")
+    with _dc[2]:
+        _sentinel = st.text_input("No Adapter Sentinel", value=plat_parsing.get("sentinel_no_adapter", ""), key=f"{_role_key}_sentinel")
 
     # unsaved check
     _roles_dirty = (
