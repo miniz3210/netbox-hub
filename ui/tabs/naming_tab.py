@@ -1371,10 +1371,13 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
     _dynamic_uplink_pfx = str(_plat_tok.get("uplink_prefix", "vmnic")).strip()
     _dynamic_vmk_pfx = str(_plat_tok.get("vmk_prefix", "vmk")).strip()
     _dynamic_switch_pfx = str(_plat_tok.get("switch_prefix", "vSwitch")).strip()
-    role_options = plat_cfg.get("role_options") or []
-    default_connected_role = plat_cfg.get("default_connected_role") or (role_options[0] if role_options else "")
-    default_disconnected_role = plat_cfg.get("default_disconnected_role") or "None"
-    sentinel_no_adapter = plat_cfg.get("sentinel_no_adapter") or ""
+    role_options = [str(role).strip() for role in (plat_cfg.get("role_options") or []) if str(role).strip()]
+    default_connected_role = str(plat_cfg.get("default_connected_role") or "").strip()
+    default_disconnected_role = str(plat_cfg.get("default_disconnected_role") or "").strip()
+    sentinel_no_adapter = str(plat_cfg.get("sentinel_no_adapter") or "").strip()
+    for configured_role in (default_connected_role, default_disconnected_role):
+        if configured_role and configured_role not in role_options:
+            role_options.append(configured_role)
     # Clean Empty State
     if not sw_options and not records:
         if not _text_mod_ids and not _img_mod_ids:
@@ -1551,10 +1554,18 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                 placeholder=f"e.g. {_dynamic_uplink_pfx}0, {_dynamic_uplink_pfx}4",
                                 key=f"pop_up_name_{idx}_{sw}_{_up_choice_slug}"
                             ).strip()
-                            new_up_role = st.selectbox("Initial Role", options=role_options, index=0, key=f"pop_up_role_{idx}_{sw}")
+                            _new_up_role_idx = role_options.index(default_connected_role) if default_connected_role in role_options else 0
+                            new_up_role = st.selectbox("Initial Role", options=role_options, index=_new_up_role_idx, key=f"pop_up_role_{idx}_{sw}")
                             new_up_speed = st.selectbox("Speed (optional)", options=plat_cfg.get("speed_options") or [], index=0, key=f"pop_up_spd_{idx}_{sw}")
                             if st.button("Add to Switch", key=f"pop_up_confirm_{idx}_{sw}", width="stretch"):
-                                _is_no_uplink = (selected_up_choice == _no_uplink_display) or (not final_up_name and new_up_role.lower() == "none")
+                                _is_no_uplink = (
+                                    selected_up_choice == _no_uplink_display
+                                    or (
+                                        not final_up_name
+                                        and bool(default_disconnected_role)
+                                        and new_up_role == default_disconnected_role
+                                    )
+                                )
                                 if _is_no_uplink:
                                     records.append({
                                         "switch": sw,
@@ -1562,7 +1573,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                         "type": "Uplink",
                                         "ip": "",
                                         "purpose": "",
-                                        "role": "None",
+                                        "role": default_disconnected_role,
                                         "speed": "",
                                         "vlan": ""
                                     })
@@ -1666,7 +1677,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                                          "ip": new_svc_ip,
                                          "purpose": effective_name,
                                          "vlan": str(_autofill.get("vlan", "")).strip(),
-                                         "role": default_connected_role if new_svc_type == "VMkernel" and not _matched_iface else "None",
+                                         "role": default_connected_role if new_svc_type == "VMkernel" and not _matched_iface else default_disconnected_role,
                                          "speed": ""
                                      })
                                      # Sync corrected name back to session state so it replaces the old spelling
