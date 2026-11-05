@@ -2381,38 +2381,135 @@ def render_standards_tab(active_model):
                             rows.pop(idx)
                             st.rerun()
 
-                    show_binding = s_key == "hypervisor" or default_binding != "Manual"
-                    if show_binding:
-                        with st.expander(f"Binding for <{row['name']}> — {row.get('binding_type', default_binding)}", expanded=(row.get("binding_type", default_binding) == "Derived")):
-                            row["binding_type"] = st.selectbox(
-                                "Binding Type",
-                                ["Manual", "Source", "Derived"],
-                                index=["Manual", "Source", "Derived"].index(row.get("binding_type", default_binding)),
-                                key=f"wc_{name}_{uid}_binding_type",
-                                help="Manual values come from normal inputs. Source binds one neutral fact. Derived filters and joins topology records.",
+                # Binding configuration is rendered once below as a compact, module-style list.
+
+                if s_key == "hypervisor":
+                    st.divider()
+                    st.markdown("**Data Bindings**")
+                    st.caption(
+                        "Bindings decide how extracted topology facts populate tokens. "
+                        "Manual tokens use normal input values; Source binds one fact; "
+                        "Derived filters and joins multiple topology records."
+                    )
+
+                    bound_rows = [r for r in rows if str(r.get("binding_type") or "Manual") != "Manual"]
+                    if not bound_rows:
+                        st.caption("No data bindings configured. Add one below when a token should be populated from parsed topology data.")
+
+                    for row in bound_rows:
+                        uid = row["_uid"]
+                        binding_type = str(row.get("binding_type") or "Manual")
+                        if binding_type == "Source":
+                            summary = f"Use `{row.get('source') or '?'}` directly"
+                        else:
+                            summary = (
+                                f"Collect `{row.get('source_field') or '?'}` where "
+                                f"`{row.get('filter_field') or '?'}` = `{row.get('filter_value') or '?'}`; "
+                                f"join with `{row.get('join')}`"
                             )
-                            if row["binding_type"] == "Source":
-                                row["source"] = st.text_input(
-                                    "Source",
-                                    value=row.get("source", ""),
-                                    key=f"wc_{name}_{uid}_source",
-                                    placeholder="e.g. service_name or switch_name",
-                                ).strip()
-                            elif row["binding_type"] == "Derived":
-                                b1, b2, b3, b4 = st.columns([1.2, 1.2, 1.5, 0.8])
-                                with b1:
-                                    row["source_field"] = st.text_input("Source Field", value=row.get("source_field", ""), key=f"wc_{name}_{uid}_source_field", placeholder="interface").strip()
-                                with b2:
-                                    row["filter_field"] = st.text_input("Filter Field", value=row.get("filter_field", ""), key=f"wc_{name}_{uid}_filter_field", placeholder="role").strip()
-                                with b3:
-                                    row["filter_value"] = st.text_input("Filter Value", value=row.get("filter_value", ""), key=f"wc_{name}_{uid}_filter_value", placeholder="Active Uplink").strip()
-                                with b4:
-                                    row["join"] = st.text_input("Join", value=row.get("join", ""), key=f"wc_{name}_{uid}_join", placeholder=", ")
-                                st.caption(
-                                    f"Derived rule: collect `{row.get('source_field') or '?'}` where "
-                                    f"`{row.get('filter_field') or '?'}` equals `{row.get('filter_value') or '?'}`, "
-                                    f"joined with `{row.get('join')}`."
+                        with st.container(border=True):
+                            b_name, b_type, b_summary, b_remove = st.columns([1.5, 1.0, 5.8, 0.7], vertical_alignment="center")
+                            b_name.markdown(f"`<{row['name']}>`")
+                            b_type.markdown(f"**{binding_type}**")
+                            b_summary.caption(summary)
+                            if b_remove.button("✕", key=f"wc_{name}_{uid}_remove_binding", help="Remove binding and return this token to Manual"):
+                                row["binding_type"] = "Manual"
+                                row["type"] = ""
+                                row["source"] = ""
+                                row["source_field"] = ""
+                                row["filter_field"] = ""
+                                row["filter_value"] = ""
+                                row["join"] = ""
+                                st.rerun()
+
+                            with st.expander("Edit binding", expanded=False):
+                                row["binding_type"] = st.selectbox(
+                                    "How should this token get its value?",
+                                    ["Source", "Derived"],
+                                    index=["Source", "Derived"].index(binding_type),
+                                    key=f"wc_{name}_{uid}_binding_type_edit",
+                                    help="Source copies one fact. Derived selects matching records and joins their values.",
                                 )
+                                if row["binding_type"] == "Source":
+                                    row["source"] = st.selectbox(
+                                        "Topology fact",
+                                        ["service_name", "switch_name"],
+                                        index=["service_name", "switch_name"].index(row.get("source")) if row.get("source") in ("service_name", "switch_name") else 0,
+                                        key=f"wc_{name}_{uid}_source_edit",
+                                        help="service_name is the Port Group/VMkernel purpose; switch_name is the parent switch.",
+                                    )
+                                    row["type"] = ""
+                                else:
+                                    row["type"] = "derived"
+                                    row["source"] = ""
+                                    d1, d2, d3, d4 = st.columns([1.2, 1.2, 1.5, 0.8])
+                                    with d1:
+                                        row["source_field"] = st.selectbox(
+                                            "Value to collect",
+                                            ["interface", "purpose", "switch", "role", "vlan", "ip"],
+                                            index=["interface", "purpose", "switch", "role", "vlan", "ip"].index(row.get("source_field")) if row.get("source_field") in ["interface", "purpose", "switch", "role", "vlan", "ip"] else 0,
+                                            key=f"wc_{name}_{uid}_source_field_edit",
+                                        )
+                                    with d2:
+                                        row["filter_field"] = st.selectbox(
+                                            "Field to check",
+                                            ["role", "type", "interface", "purpose", "switch"],
+                                            index=["role", "type", "interface", "purpose", "switch"].index(row.get("filter_field")) if row.get("filter_field") in ["role", "type", "interface", "purpose", "switch"] else 0,
+                                            key=f"wc_{name}_{uid}_filter_field_edit",
+                                        )
+                                    with d3:
+                                        row["filter_value"] = st.text_input(
+                                            "Must equal",
+                                            value=row.get("filter_value", ""),
+                                            key=f"wc_{name}_{uid}_filter_value_edit",
+                                            placeholder="e.g. Active Uplink",
+                                        ).strip()
+                                    with d4:
+                                        row["join"] = st.text_input(
+                                            "Join with",
+                                            value=row.get("join", ""),
+                                            key=f"wc_{name}_{uid}_join_edit",
+                                            placeholder=", ",
+                                        )
+                                    st.caption(
+                                        f"Result: collect `{row.get('source_field') or '?'}` from rows where "
+                                        f"`{row.get('filter_field') or '?'}` equals `{row.get('filter_value') or '?'}`, "
+                                        f"then join matches using `{row.get('join')}`."
+                                    )
+
+                    available_binding_rows = [r for r in rows if str(r.get("binding_type") or "Manual") == "Manual"]
+                    if available_binding_rows:
+                        add_options = [r["name"] for r in available_binding_rows]
+                        add_c1, add_c2, add_c3 = st.columns([5, 2, 1.5], vertical_alignment="bottom")
+                        with add_c1:
+                            add_token = st.selectbox(
+                                "Add binding for token",
+                                add_options,
+                                format_func=lambda token: f"<{token}>",
+                                key=f"wc_{name}_binding_add_token",
+                            )
+                        with add_c2:
+                            add_type = st.selectbox(
+                                "Binding type",
+                                ["Source", "Derived"],
+                                key=f"wc_{name}_binding_add_type",
+                            )
+                        with add_c3:
+                            if st.button("➕ Add Binding", key=f"wc_{name}_binding_add", width="stretch"):
+                                target = next((r for r in rows if r["name"] == add_token), None)
+                                if target is not None:
+                                    target["binding_type"] = add_type
+                                    if add_type == "Source":
+                                        target["source"] = "service_name"
+                                        target["type"] = ""
+                                    else:
+                                        target["type"] = "derived"
+                                        target["source"] = ""
+                                        target["source_field"] = "interface"
+                                        target["filter_field"] = "role"
+                                        target["filter_value"] = ""
+                                        target["join"] = ", "
+                                    st.rerun()
 
                 saved_sig = [_variable_signature(n, m, s_key) for n, m in scope_items.items()]
                 current_sig = []
