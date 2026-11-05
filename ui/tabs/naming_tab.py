@@ -161,6 +161,59 @@ def _is_noise_token(text: str, naming_rules: dict, platform_name: str) -> bool:
         return True
     exact_set, nospace_set = _get_platform_noise_set(naming_rules, platform_name)
     return low in exact_set or re.sub(r"[\s\.]+", "", low) in nospace_set
+
+
+def _bind_sourced_tokens(pattern_vars: dict, facts: dict) -> dict:
+    """Bind neutral extracted facts to Pattern Variables using Standards metadata."""
+    bound = {}
+
+    if not isinstance(pattern_vars, dict) or not isinstance(facts, dict):
+        return bound
+
+    for token, meta in pattern_vars.items():
+        if not isinstance(meta, dict):
+            continue
+
+        source = str(meta.get("source") or "").strip()
+        if not source:
+            continue
+
+        value = ""
+
+        if source == "service_name":
+            value = str(facts.get("service_name") or "").strip()
+
+        elif source == "switch_name":
+            value = str(facts.get("switch_name") or "").strip()
+
+        elif source.startswith("uplinks_by_role:"):
+            role = source.split(":", 1)[1].strip()
+            role_map = facts.get("uplinks_by_role") or {}
+            interfaces = role_map.get(role, []) if isinstance(role_map, dict) else []
+            joiner = str(meta.get("join") if meta.get("join") is not None else ", ")
+
+            if isinstance(interfaces, (list, tuple)):
+                cleaned = []
+                seen = set()
+                for interface in interfaces:
+                    interface_text = str(interface or "").strip()
+                    if not interface_text:
+                        continue
+                    key = interface_text.casefold()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    cleaned.append(interface_text)
+                value = joiner.join(cleaned)
+
+        if value:
+            prefix = str(meta.get("prefix") or "")
+            if prefix and not value.casefold().startswith(prefix.casefold()):
+                value = f"{prefix}{value}"
+
+        bound[str(token)] = value
+
+    return bound
 def build_naming_system_prompt(prompt: str) -> str:
     """Build the grounded naming/inventory system prompt for the AI Assistant."""
     from core.ai_helper import build_comprehensive_naming_context
@@ -1828,6 +1881,20 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 if _upline:
                     _out_lines.append(_upline)
             # ── Port Groups & VMkernel (rendered per service, no teaming dup) ─
+            _uplinks_by_role = {}
+            for _binding_uplink in _sw_uplinks:
+                _binding_iface = str(_binding_uplink.get("interface") or "").strip()
+                _binding_role = str(
+                    _binding_uplink.get("role")
+                    or _binding_uplink.get("uplink_role")
+                    or ""
+                ).strip()
+
+                if not _binding_iface or _binding_iface == "No Uplink" or not _binding_role:
+                    continue
+
+                _uplinks_by_role.setdefault(_binding_role, []).append(_binding_iface)
+
             _seen_svc_keys: Set[tuple] = set()
             for _svc in _sw_services:
                 _svc_name = str(_svc.get("purpose", "")).strip() or str(_svc.get("interface", "")).strip()
@@ -1841,6 +1908,13 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 _seen_svc_keys.add(_dedup_key)
                 _svc_tpl = (find_hypervisor_template(_active_hyp_presets, _svc_type)
                             or find_hypervisor_template(_active_hyp_presets, "PortGroup"))
+
+                _svc_facts = {
+                    "service_name": _svc_name,
+                    "switch_name": _gparent,
+                    "uplinks_by_role": _uplinks_by_role,
+                }
+
                 _svc_vals = {
                     "purpose": _svc_name,
                     "port_group": _svc_name,
@@ -1849,6 +1923,12 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                     "vlan": str(_svc.get("vlan", "")).strip(),
                     "ip": str(_svc.get("ip") or "").strip(),
                 }
+
+                _sourced_values = _bind_sourced_tokens(_pattern_vars, _svc_facts)
+                for _token, _value in _sourced_values.items():
+                    if _token not in _svc_vals or not str(_svc_vals.get(_token) or "").strip():
+                        _svc_vals[_token] = _value
+
                 _rendered_svc = render_dynamic_pattern(_svc_tpl, _svc_vals, _pattern_vars)
                 _rendered_svc = re.sub(r"\s{2,}", " ", _rendered_svc).strip()
                 _unresolved_svc = re.findall(r"<([a-zA-Z0-9_]+)>", _rendered_svc)
