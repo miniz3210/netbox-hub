@@ -2401,20 +2401,6 @@ def render_standards_tab(active_model):
                     if invalid: st.error("Derived variables require Value / Collect, Where and Equals: "+", ".join(invalid))
                     else: _persist_variables(current_rules,built,section_key=s_key); _wc_discard(name)
 
-                with st.form(key=f"wc_{name}_addform", clear_on_submit=True):
-                    ca1,ca2,ca3,ca4,ca5,ca6=st.columns(variable_cols)
-                    with ca1: new_name=_normalize_var_name(st.text_input("New Token",placeholder="e.g. tier",key=f"wc_{name}_new_name",label_visibility="collapsed").strip())
-                    with ca2: new_lbl=st.text_input("New Label",placeholder="e.g. Service Tier",key=f"wc_{name}_new_label",label_visibility="collapsed").strip()
-                    with ca3: new_ph=st.text_input("New Placeholder",placeholder="e.g. Tier-1",key=f"wc_{name}_new_placeholder",label_visibility="collapsed").strip()
-                    with ca4: new_df=st.text_input("Default",key=f"wc_{name}_new_default",label_visibility="collapsed")
-                    with ca5: st.markdown("")
-                    with ca6: add=st.form_submit_button("➕ Add",width="stretch")
-                if add:
-                    if not new_name: st.warning("Enter a token name to add.")
-                    elif new_name in {r["name"] for r in rows}: st.warning("Variable name already exists.")
-                    else:
-                        rows.append({"name":new_name,"label":new_lbl or new_name,"placeholder":new_ph or f"e.g. {new_name}","default":new_df,"optional":False,"scope":s_key,"required":False,"type":"","source":"","source_field":"","filter_field":"","filter_value":"","join":"","binding_type":"Manual","_uid":uuid.uuid4().hex[:8]}); st.rerun()
-
         with st.expander("🧩 Active Patterns", expanded=False):
             if patterns_now:
                 for key, pat in patterns_now.items():
