@@ -942,7 +942,7 @@
         "code": "Switch_Teaming",
         "label": "Switch Teaming Header",
         "pattern": "<v_switch> ([[<active_vmnics> Active]][[ / <standby_vmnics> Standby]])",
-        "hidden": false
+        "hidden": true
       },
       {
         "code": "Uplink",

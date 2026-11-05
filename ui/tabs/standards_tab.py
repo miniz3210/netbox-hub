@@ -114,17 +114,28 @@ def _wc_values(rows: list, fields: tuple) -> list:
 
 
 def _wc_row_actions(name: str, rows: list, idx: int, min_rows: int = 0) -> None:
-    """Up / Down / Delete on the working copy only; saved by Save & Apply Changes."""
+    """Compact inline Up / Down / Delete cell on the working copy; saved by Save & Apply Changes.
+
+    Three fixed slots: Up | Down | Delete. First-row Up and last-row Down are hidden
+    (st.empty() placeholder) rather than disabled, so visible buttons never shift
+    horizontally between rows. Delete always stays in slot 3.
+    """
     uid = rows[idx]["_uid"]
-    c_up, c_dn, c_del = st.columns(PRESET_ACTION_COLS)
+    c_up, c_dn, c_del = st.columns([1, 1, 1], gap="small")
     with c_up:
-        if idx > 0 and st.button("⬆️", key=f"wc_{name}_{uid}_up", help="Move up"):
-            rows[idx - 1], rows[idx] = rows[idx], rows[idx - 1]
-            st.rerun()
+        if idx > 0:
+            if st.button("⬆️", key=f"wc_{name}_{uid}_up", help="Move up"):
+                rows[idx - 1], rows[idx] = rows[idx], rows[idx - 1]
+                st.rerun()
+        else:
+            st.empty()
     with c_dn:
-        if idx < len(rows) - 1 and st.button("⬇️", key=f"wc_{name}_{uid}_dn", help="Move down"):
-            rows[idx + 1], rows[idx] = rows[idx], rows[idx + 1]
-            st.rerun()
+        if idx < len(rows) - 1:
+            if st.button("⬇️", key=f"wc_{name}_{uid}_dn", help="Move down"):
+                rows[idx + 1], rows[idx] = rows[idx], rows[idx + 1]
+                st.rerun()
+        else:
+            st.empty()
     with c_del:
         if st.button("🗑️", key=f"wc_{name}_{uid}_del", help="Delete", disabled=len(rows) <= min_rows):
             rows.pop(idx)
@@ -799,8 +810,8 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
         st.session_state["sel_unified_platform"] = cur_sel
         st.session_state["sel_hypervisor_platform_choice"] = cur_sel
 
-    col_plat_sel, col_plat_actions = st.columns([7.8, 2.2], vertical_alignment="bottom")
-    with col_plat_sel:
+    platform_col, actions_col = st.columns([9, 1])
+    with platform_col:
         sel_choice = st.selectbox(
             "Target Platform",
             dropdown_options,
@@ -809,32 +820,11 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
         )
         st.session_state["sel_unified_platform"] = sel_choice
 
-    with col_plat_actions:
-        c_up, c_dn, c_del = st.columns(ACTION_COLS)
+    with actions_col:
         movable = sel_choice in names and sel_choice != CREATE_OPTION
         cur_idx = names.index(sel_choice) if movable else None
-        if c_up.button("⬆️", key="btn_plat_order_up", disabled=(not movable or cur_idx == 0), help="Move Platform Up"):
-            plat_rows[cur_idx], plat_rows[cur_idx - 1] = plat_rows[cur_idx - 1], plat_rows[cur_idx]
-            st.session_state["pending_hypervisor_platform"] = sel_choice
-            st.session_state.pop(
-                "sel_hypervisor_platform_choice",
-                None,
-            )
-            st.rerun()
-
-        if c_dn.button("⬇️", key="btn_plat_order_dn", disabled=(not movable or cur_idx == len(names) - 1), help="Move Platform Down"):
-            plat_rows[cur_idx], plat_rows[cur_idx + 1] = plat_rows[cur_idx + 1], plat_rows[cur_idx]
-            st.session_state["pending_hypervisor_platform"] = sel_choice
-            st.session_state.pop(
-                "sel_hypervisor_platform_choice",
-                None,
-            )
-            st.rerun()
-
-        if c_del.button("🗑️", key="btn_plat_del", disabled=(not movable or len(plat_rows) <= 1), help=f"Delete platform '{sel_choice}'. At least one platform must remain."):
-            plat_rows.pop(cur_idx)
-            st.session_state["pending_hypervisor_platform"] = plat_rows[0]["name"] if plat_rows else ""
-            st.rerun()
+        if cur_idx is not None:
+            _wc_row_actions("hyp_platforms", plat_rows, cur_idx, min_rows=1)
 
     if sel_choice == CREATE_OPTION:
         st.markdown("##### ➕ Create New Platform Preset")
@@ -920,26 +910,16 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 lbl = mod.get("display_name", mid)
                 kind = mod.get("input_kind", "unknown")
                 uid = mod_rows[mi]["_uid"]
-                c_lbl, c_up, c_dn, c_del = st.columns([5.0] + ACTION_COLS, vertical_alignment="center")
-                with c_lbl:
+                module_col, actions_col = st.columns([8.3, 1.7], vertical_alignment="center")
+                with module_col:
                     st.markdown(f"**{mi + 1}. {lbl}** :gray[{kind}]")
-                with c_up:
-                    if st.button("⬆️", key=f"wc_hyp_mod_{san}_{uid}_up", help="Move up", disabled=(mi == 0)):
-                        mod_rows[mi - 1], mod_rows[mi] = mod_rows[mi], mod_rows[mi - 1]
-                        st.rerun()
-                with c_dn:
-                    if st.button("⬇️", key=f"wc_hyp_mod_{san}_{uid}_dn", help="Move down", disabled=(mi == len(mod_rows) - 1)):
-                        mod_rows[mi + 1], mod_rows[mi] = mod_rows[mi], mod_rows[mi + 1]
-                        st.rerun()
-                with c_del:
-                    if st.button("🗑️", key=f"wc_hyp_mod_{san}_{uid}_del", help="Delete", disabled=(len(mod_rows) <= 0)):
-                        mod_rows.pop(mi)
-                        st.rerun()
+                with actions_col:
+                    _wc_row_actions(f"hyp_mod_{san}", mod_rows, mi, min_rows=0)
 
         if assigned_ids != list(cur_modules):
             st.caption("⚠️ Unsaved module changes — click Save & Apply Changes to keep them.")
 
-        acs = st.columns([5.0] + ACTION_COLS, vertical_alignment="center")
+        acs = st.columns([8.3, 1.7], vertical_alignment="center")
         with acs[0]:
             add_display_names = {PROCESSING_MODULES[mid]["display_name"]: mid for mid in available_ids}
             add_opts = ["Choose a module..."] + list(add_display_names.keys())
@@ -950,10 +930,6 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 key=f"plat_mod_add_{active_plat}",
             )
         with acs[1]:
-            st.empty()
-        with acs[2]:
-            st.empty()
-        with acs[3]:
             if st.button("➕ Add", key=f"plat_mod_add_btn_{san}", help="Add selected module"):
                 _hyp_add_module_cb(f"plat_mod_add_{active_plat}", san)
 
@@ -979,45 +955,21 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
     st.markdown("**Uplink Role Settings**")
     section_col, _spacer = st.columns([7, 3])
     with section_col:
-        # header
-        h_role, h_up, h_dn, h_del = st.columns([5.0] + ACTION_COLS, vertical_alignment="center")
-        with h_role:
-            st.markdown("**Role Option**")
-        with h_up:
-            st.markdown("**Up**")
-        with h_dn:
-            st.markdown("**Down**")
-        with h_del:
-            st.markdown("**Delete**")
         _name = _role_key.lstrip("wc_")
         for _ri, _rrow in enumerate(list(_role_rows)):
             uid = _rrow["_uid"]
-            _cs = st.columns([5.0] + ACTION_COLS, vertical_alignment="center")
-            with _cs[0]:
+            role_col, actions_col = st.columns([8.3, 1.7], vertical_alignment="center")
+            with role_col:
                 _rrow["role"] = st.text_input("Role", value=_rrow.get("role", ""), key=f"{_role_key}_{uid}_role", label_visibility="collapsed")
-            with _cs[1]:
-                if st.button("⬆️", key=f"{_role_key}_{uid}_up", help="Move up", disabled=(_ri == 0)):
-                    _role_rows[_ri - 1], _role_rows[_ri] = _role_rows[_ri], _role_rows[_ri - 1]
-                    st.rerun()
-            with _cs[2]:
-                if st.button("⬇️", key=f"{_role_key}_{uid}_dn", help="Move down", disabled=(_ri == len(_role_rows) - 1)):
-                    _role_rows[_ri + 1], _role_rows[_ri] = _role_rows[_ri], _role_rows[_ri + 1]
-                    st.rerun()
-            with _cs[3]:
-                if st.button("🗑️", key=f"{_role_key}_{uid}_del", help="Delete", disabled=(len(_role_rows) <= 1)):
-                    _role_rows.pop(_ri)
-                    st.rerun()
+            with actions_col:
+                _wc_row_actions(_name, _role_rows, _ri, min_rows=1)
 
         # Add Role
         with st.form(key=f"{_role_key}_addform", clear_on_submit=True):
-            _acs = st.columns([5.0] + ACTION_COLS, vertical_alignment="center")
+            _acs = st.columns([8.3, 1.7], vertical_alignment="center")
             with _acs[0]:
                 _new_role = st.text_input("Add Role", value="", key=f"{_role_key}_new_role", label_visibility="collapsed", placeholder="New role")
             with _acs[1]:
-                st.empty()
-            with _acs[2]:
-                st.empty()
-            with _acs[3]:
                 _added = st.form_submit_button("➕ Add")
             if _added:
                 _nr = _new_role.strip()
@@ -1122,7 +1074,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
         rows = _wc_rows(name, lambda: [{"code": r.get("code",""), "label": r.get("label",""), "pattern": r.get("pattern",""),
                                          "hidden": bool(r.get("hidden", False))} for r in plat_patterns])
         fields = ("code", "label", "pattern", "hidden")
-        HYP_TPL_COLS = [1.2, 2.2, 4.4, 0.8] + ACTION_COLS
+        HYP_TPL_COLS = [1.3, 2.4, 5.0, 0.7, 1.2]
         _have_codes = {str(r.get("code", "")).strip() for r in rows if not r.get("hidden")}
         _lack_codes = [c for c in required_template_codes_for(plat_parsing.get("modules", [])) if c not in _have_codes]
         if _lack_codes:
@@ -1131,7 +1083,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 + ". Naming > Screenshot Batch cannot generate output for this platform until they exist and are not hidden."
             )
 
-        c_h0, c_h1, c_h2, c_h3, c_h4, c_h5, c_h6 = st.columns(HYP_TPL_COLS, vertical_alignment="center")
+        c_h0, c_h1, c_h2, c_h3, c_h4 = st.columns(HYP_TPL_COLS, vertical_alignment="center")
         with c_h0:
             st.markdown("**Code**")
         with c_h1:
@@ -1141,15 +1093,11 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
         with c_h3:
             st.markdown("**Hide**")
         with c_h4:
-            st.markdown("**Up**")
-        with c_h5:
-            st.markdown("**Down**")
-        with c_h6:
-            st.markdown("**Delete**")
+            st.markdown("**Actions**")
 
         for idx, row in enumerate(list(rows)):
             uid = row["_uid"]
-            c0, c1, c2, c3, c_up, c_dn, c_del = st.columns(HYP_TPL_COLS, vertical_alignment="center")
+            c0, c1, c2, c3, c_actions = st.columns(HYP_TPL_COLS, vertical_alignment="center")
             with c0:
                 row["code"] = st.text_input("Code", value=row.get("code", ""), key=f"wc_{name}_{uid}_code", label_visibility="collapsed")
             with c1:
@@ -1159,18 +1107,8 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
             with c3:
                 hidden_val = st.checkbox("Hide", value=bool(row.get("hidden", False)), key=f"wc_{name}_{uid}_hidden", label_visibility="collapsed")
                 row["hidden"] = bool(hidden_val)
-            with c_up:
-                if st.button("⬆️", key=f"wc_{name}_{uid}_up", help="Move up", disabled=(idx == 0)):
-                    rows[idx - 1], rows[idx] = rows[idx], rows[idx - 1]
-                    st.rerun()
-            with c_dn:
-                if st.button("⬇️", key=f"wc_{name}_{uid}_dn", help="Move down", disabled=(idx == len(rows) - 1)):
-                    rows[idx + 1], rows[idx] = rows[idx], rows[idx + 1]
-                    st.rerun()
-            with c_del:
-                if st.button("🗑️", key=f"wc_{name}_{uid}_del", help="Delete"):
-                    rows.pop(idx)
-                    st.rerun()
+            with c_actions:
+                _wc_row_actions(name, rows, idx)
 
         saved_values = [(r.get("code",""), r.get("label",""), r.get("pattern",""), str(bool(r.get("hidden", False)))) for r in plat_patterns]
         if _wc_values(rows, fields) != saved_values:
