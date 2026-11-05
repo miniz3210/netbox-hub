@@ -945,7 +945,7 @@
       {
         "code": "PortGroup",
         "label": "Port Group",
-        "pattern": "<pg_purpose> <v_switch> (<active_vmnics> Active / <standby_vmnics> Standby)",
+        "pattern": "<pg_purpose> <v_switch> ([[<active_vmnics> Active]][[ / <standby_vmnics> Standby]])",
         "hidden": false
       },
       {

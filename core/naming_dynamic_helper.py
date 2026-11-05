@@ -5,7 +5,10 @@ can drive all generator cards from ``pattern_variables`` + ``naming_patterns``.
 """
 import re
 import copy
-import streamlit as st
+try:
+    import streamlit as st
+except ImportError:
+    st = None
 from typing import Dict, List, Optional, Tuple
 
 from config.naming_rules import extract_tokens, save_naming_rules, load_naming_rules, PATTERN_VARIABLES
@@ -57,6 +60,79 @@ def render_dynamic_pattern(pattern: str, values: Dict[str, str], variables: Dict
         return ""
     # Normalize values keys to lowercase for robust case-insensitive lookup
     norm_vals = {str(k).strip().lower(): str(v).strip() for k, v in (values or {}).items() if v is not None}
+
+    # 1. Parse and process [[ ... ]] segments
+    def _process_optional_segments(p: str) -> str:
+        """
+        Process [[ ... ]] optional segments.
+        
+        Rules:
+        1. Process left to right.
+        2. Segments with tokens are DROPPED when all tokens are empty.
+        3. Segments without tokens are emitted as literal with [[ ]] removed.
+        4. Lead (text before first token) is dropped if:
+           - lead contains no letter/digit
+           - AND output so far (from nearest "(" or start) has no non-whitespace
+        5. Token substitution happens later.
+        """
+        result = []
+        last_pos = 0
+        
+        # Find all [[ ]] segments
+        matches = list(re.finditer(r"\[\[(.*?)\]\]", p))
+        
+        for i, match in enumerate(matches):
+            body = match.group(1)
+            tokens = extract_tokens(body)
+            
+            # Check if this segment should be dropped
+            drop_segment = False
+            if tokens:
+                token_vals = [norm_vals.get(t.lower(), "") for t in tokens]
+                if all(not v for v in token_vals):
+                    drop_segment = True
+            
+            if drop_segment:
+                # Segment dropped: DO NOT append text before it
+                # Skip this segment and move to next
+                last_pos = match.end()
+                continue
+            
+            # Segment survives: append text before it (including text between previous kept segment)
+            result.append(p[last_pos:match.start()])
+            
+            # Segment survives (no tokens or has non-empty tokens)
+            if tokens:
+                # Apply lead logic for segments with tokens
+                first_token_match = re.search(r"<[^>]+>", body)
+                if first_token_match:
+                    lead = body[:first_token_match.start()]
+                    if re.search(r"\w", lead) is None:
+                        # Check output so far (from nearest "(" or start)
+                        current_output = "".join(result)
+                        last_open = current_output.rfind("(")
+                        if last_open != -1:
+                            segment_to_check = current_output[last_open+1:]
+                        else:
+                            segment_to_check = current_output
+                        
+                        if not segment_to_check.strip():
+                            # Drop the lead
+                            body = body[len(lead):]
+                
+                # Add the processed body (may have lead dropped)
+                result.append(body)
+            else:
+                # No tokens, emit literal text without [[ ]]
+                result.append(body)
+            
+            last_pos = match.end()
+        
+        # Append remaining text after the last segment
+        result.append(p[last_pos:])
+        return "".join(result)
+
+    pattern = _process_optional_segments(pattern)
 
     # Replace tokens case-insensitively
     def _repl(match):
