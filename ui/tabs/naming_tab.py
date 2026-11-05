@@ -174,6 +174,25 @@ def _bind_sourced_tokens(pattern_vars: dict, facts: dict) -> dict:
         if not isinstance(meta, dict):
             continue
 
+        if meta.get("type") == "derived":
+            source_field = meta.get("source_field")
+            filter_field = meta.get("filter_field")
+            filter_value = meta.get("filter_value")
+            joiner = meta.get("join") or ", "
+            if source_field and filter_field and filter_value is not None and "records" in facts:
+                filtered = []
+                seen = set()
+                for row in facts.get("records", []):
+                    if str(row.get(filter_field)) == str(filter_value):
+                        val = str(row.get(source_field) or "").strip()
+                        if val and val not in ("No Uplink", ""):
+                            key = val.casefold()
+                            if key not in seen:
+                                seen.add(key)
+                                filtered.append(val)
+                value = joiner.join(filtered)
+            continue
+
         source = str(meta.get("source") or "").strip()
         if not source:
             continue
@@ -1896,6 +1915,25 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 _uplinks_by_role.setdefault(_binding_role, []).append(_binding_iface)
 
             _seen_svc_keys: Set[tuple] = set()
+            # Build neutral records for derived variables, preserving original role status
+            _derived_records = []
+            for _binding_uplink in _sw_uplinks:
+                _binding_iface = str(_binding_uplink.get("interface") or "").strip()
+                _binding_role = str(
+                    _binding_uplink.get("role")
+                    or _binding_uplink.get("uplink_role")
+                    or ""
+                ).strip()
+
+                if not _binding_iface or _binding_iface == "No Uplink":
+                    continue
+
+                _derived_records.append({
+                    "source_field": _binding_iface,
+                    "uplink_role": _binding_role,
+                })
+
+            _seen_svc_keys: Set[tuple] = set()
             for _svc in _sw_services:
                 _svc_name = str(_svc.get("purpose", "")).strip() or str(_svc.get("interface", "")).strip()
                 if not _svc_name:
@@ -1912,7 +1950,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 _svc_facts = {
                     "service_name": _svc_name,
                     "switch_name": _gparent,
-                    "uplinks_by_role": _uplinks_by_role,
+                    "records": _derived_records,
                 }
 
                 _svc_vals = {

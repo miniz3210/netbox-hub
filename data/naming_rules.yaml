@@ -594,7 +594,10 @@
       "default": "vmnic",
       "optional": true,
       "scope": "hypervisor",
-      "source": "uplinks_by_role:Active Uplink",
+      "type": "derived",
+      "source_field": "interface",
+      "filter_field": "uplink_role",
+      "filter_value": "Active Uplink",
       "join": ", "
     },
     "standby_vmnics": {
@@ -603,7 +606,10 @@
       "default": "vmnic",
       "optional": true,
       "scope": "hypervisor",
-      "source": "uplinks_by_role:Standby Uplink",
+      "type": "derived",
+      "source_field": "interface",
+      "filter_field": "uplink_role",
+      "filter_value": "Standby Uplink",
       "join": ", "
     },
     "vmk": {
@@ -955,7 +961,7 @@
       {
         "code": "PortGroup",
         "label": "Port Group",
-        "pattern": "[[PG-<purpose>]] <v_switch> ([[<active_vmnics> Active]][[ / <standby_vmnics> Standby]])",
+        "pattern": "PG-<purpose> <v_switch> ([[<active_vmnics> Active]][[ / <standby_vmnics> Standby]])",
         "hidden": false
       },
       {
