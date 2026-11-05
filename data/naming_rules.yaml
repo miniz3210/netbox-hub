@@ -264,7 +264,8 @@
     "vm_sani": "<country><site><role><seq>",
     "vm_vlab": "<country><site><role><seq>",
     "vm_tst": "<country><site><role><seq>",
-    "vm_vlabtest": "<country><site><role><seq>"
+    "vm_vlabtest": "<country><site><role><seq>",
+    "hyp_VMware ESXi_PortGroup": "[[PG-<purpose>]] <v_switch> ([[<active_vmnics> Active]][[ / <standby_vmnics> Standby]])"
   },
   "pattern_variables": {
     "site": {
@@ -555,15 +556,6 @@
       "scope": "hypervisor",
       "source": "service_name",
       "prefix": ""
-    },
-    "pg_purpose": {
-      "label": "Port Group Purpose / Service",
-      "placeholder": "e.g. PG-VM Network, PG-iSCSI",
-      "default": "PG-VM Network",
-      "optional": false,
-      "scope": "hypervisor",
-      "source": "service_name",
-      "prefix": "PG-"
     },
     "port_group": {
       "label": "Port Group / vSwitch",
@@ -953,7 +945,7 @@
       {
         "code": "PortGroup",
         "label": "Port Group",
-        "pattern": "<pg_purpose> <v_switch> ([[<active_vmnics> Active]][[ / <standby_vmnics> Standby]])",
+        "pattern": "[[PG-<purpose>]] <v_switch> ([[<active_vmnics> Active]][[ / <standby_vmnics> Standby]])",
         "hidden": false
       },
       {
