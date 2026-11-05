@@ -175,21 +175,28 @@ def _bind_sourced_tokens(pattern_vars: dict, facts: dict) -> dict:
             continue
 
         if meta.get("type") == "derived":
-            source_field = meta.get("source_field")
-            filter_field = meta.get("filter_field")
+            value = ""
+            source_field = str(meta.get("source_field") or "").strip()
+            filter_field = str(meta.get("filter_field") or "").strip()
             filter_value = meta.get("filter_value")
-            joiner = meta.get("join") or ", "
-            if source_field and filter_field and filter_value is not None and "records" in facts:
+            joiner = str(meta.get("join") if meta.get("join") is not None else ", ")
+            records = facts.get("records")
+            if source_field and filter_field and filter_value is not None and isinstance(records, list):
                 filtered = []
                 seen = set()
-                for row in facts.get("records", []):
-                    if str(row.get(filter_field)) == str(filter_value):
-                        val = str(row.get(source_field) or "").strip()
-                        if val and val not in ("No Uplink", ""):
-                            key = val.casefold()
-                            if key not in seen:
-                                seen.add(key)
-                                filtered.append(val)
+                expected = str(filter_value).strip()
+                for row in records:
+                    if not isinstance(row, dict):
+                        continue
+                    if str(row.get(filter_field) or "").strip() != expected:
+                        continue
+                    val = str(row.get(source_field) or "").strip()
+                    if not val or val == "No Uplink":
+                        continue
+                    key = val.casefold()
+                    if key not in seen:
+                        seen.add(key)
+                        filtered.append(val)
                 value = joiner.join(filtered)
             bound[str(token)] = value
             continue
@@ -1908,39 +1915,6 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 if _upline:
                     _out_lines.append(_upline)
             # ── Port Groups & VMkernel (rendered per service, no teaming dup) ─
-            _uplinks_by_role = {}
-            for _binding_uplink in _sw_uplinks:
-                _binding_iface = str(_binding_uplink.get("interface") or "").strip()
-                _binding_role = str(
-                    _binding_uplink.get("role")
-                    or _binding_uplink.get("uplink_role")
-                    or ""
-                ).strip()
-
-                if not _binding_iface or _binding_iface == "No Uplink" or not _binding_role:
-                    continue
-
-                _uplinks_by_role.setdefault(_binding_role, []).append(_binding_iface)
-
-            _seen_svc_keys: Set[tuple] = set()
-            # Build neutral records for derived variables, preserving original role status
-            _derived_records = []
-            for _binding_uplink in _sw_uplinks:
-                _binding_iface = str(_binding_uplink.get("interface") or "").strip()
-                _binding_role = str(
-                    _binding_uplink.get("role")
-                    or _binding_uplink.get("uplink_role")
-                    or ""
-                ).strip()
-
-                if not _binding_iface or _binding_iface == "No Uplink":
-                    continue
-
-                _derived_records.append({
-                    "source_field": _binding_iface,
-                    "uplink_role": _binding_role,
-                })
-
             _seen_svc_keys: Set[tuple] = set()
             for _svc in _sw_services:
                 _svc_name = str(_svc.get("purpose", "")).strip() or str(_svc.get("interface", "")).strip()
@@ -1958,7 +1932,7 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
                 _svc_facts = {
                     "service_name": _svc_name,
                     "switch_name": _gparent,
-                    "records": _derived_records,
+                    "records": _sw_uplinks,
                 }
 
                 _svc_vals = {
