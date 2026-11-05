@@ -400,7 +400,7 @@ LEGACY_PATTERN_KEYS = list(DEFAULT_NAMING_PATTERNS.keys())
 # Factory-default hypervisor description templates.  These live here so that
 # _normalize_rules can deep-copy them when the on-disk file is missing or empty,
 # and so the Standards tab can import them as a single source of truth.
-REQUIRED_HYPERVISOR_TEMPLATE_CODES = ("Switch_Teaming", "Uplink", "PortGroup", "VMkernel")
+REQUIRED_HYPERVISOR_TEMPLATE_CODES = ("Uplink", "PortGroup", "VMkernel")
 
 def find_hypervisor_template(presets, type_name):
     """Return the pattern of the first non-hidden preset whose code matches type_name.

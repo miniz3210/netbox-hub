@@ -31,7 +31,7 @@
   "vm_vlab": "<country><site><role><seq>",
   "vm_tst": "<country><site><role><seq>",
   "vm_vlabtest": "<country><site><role><seq>",
-  "hyp_VMware ESXi_PortGroup": "[[PG-<purpose>]] <v_switch> ([[<active_vmnics> Active]][[ / <standby_vmnics> Standby]])",
+  "hyp_VMware ESXi_PortGroup": "PG-<purpose> <v_switch> ([[<active_vmnics> Active]][[ / <standby_vmnics> Standby]])",
   "hyp_VMware ESXi_Switch_Teaming": "<v_switch> ([[<active_vmnics> Active]][[ / <standby_vmnics> Standby]])",
   "device_presets": [
     {
@@ -267,7 +267,7 @@
     "vm_vlab": "<country><site><role><seq>",
     "vm_tst": "<country><site><role><seq>",
     "vm_vlabtest": "<country><site><role><seq>",
-    "hyp_VMware ESXi_PortGroup": "[[PG-<purpose>]] <v_switch> ([[<active_vmnics> Active]][[ / <standby_vmnics> Standby]])",
+    "hyp_VMware ESXi_PortGroup": "PG-<purpose> <v_switch> ([[<active_vmnics> Active]][[ / <standby_vmnics> Standby]])",
     "hyp_VMware ESXi_Switch_Teaming": "<v_switch> ([[<active_vmnics> Active]][[ / <standby_vmnics> Standby]])"
   },
   "pattern_variables": {
@@ -566,7 +566,6 @@
       "optional": false,
       "scope": "hypervisor"
     },
-    
     "interface": {
       "label": "Interface / Port Group Name",
       "placeholder": "e.g. vmnic0, PG-VMDK",
@@ -943,7 +942,7 @@
         "code": "Switch_Teaming",
         "label": "Switch Teaming Header",
         "pattern": "<v_switch> ([[<active_vmnics> Active]][[ / <standby_vmnics> Standby]])",
-        "hidden": false
+        "hidden": true
       },
       {
         "code": "Uplink",
@@ -954,7 +953,7 @@
       {
         "code": "PortGroup",
         "label": "Port Group",
-        "pattern": "PG-<purpose> <v_switch> ([[<active_vmnics> Active]][[ / <standby_vmnics> Standby]])",
+        "pattern": "AC-<purpose> <v_switch> ([[<active_vmnics> Active]][[ / <standby_vmnics> Standby]])",
         "hidden": false
       },
       {
