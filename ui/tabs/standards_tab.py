@@ -942,7 +942,69 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
             if [r["mid"] for r in st.session_state[_k]] != list(_saved or []):
                 mods_dirty = True
 
-    if names != all_platforms or mods_dirty:
+    # ── Uplink Role Settings (working copy) ────────────────────────────────
+    _role_key = f"wc_hyp_roles_{san}"
+    _saved_roles = plat_parsing.get("role_options")
+    if not isinstance(_saved_roles, list):
+        _saved_roles = []
+    _role_rows = _wc_rows(_role_key.lstrip("wc_"), lambda: [{"role": r} for r in _saved_roles])
+    # normalize storage shape: list of dicts with 'role'
+    if not _role_rows and _saved_roles:
+        _role_rows = [{"role": r, "_uid": uuid.uuid4().hex[:8]} for r in _saved_roles]
+        st.session_state[_role_key] = _role_rows
+
+    st.markdown("**Uplink Role Settings**")
+    st.markdown("Role Options")
+    for _ri, _rrow in enumerate(list(_role_rows)):
+        _c_text, _c_act = st.columns([7, 3], vertical_alignment="center")
+        with _c_text:
+            _rrow["role"] = st.text_input("Role", value=_rrow.get("role", ""), key=f"{_role_key}_{_rrow['_uid']}_role", label_visibility="collapsed")
+        with _c_act:
+            _wc_row_actions(_role_key.lstrip("wc_"), _role_rows, _ri, min_rows=1)
+    # Add Role
+    with st.form(key=f"{_role_key}_addform", clear_on_submit=True):
+        _nc1, _nc2 = st.columns([7, 3], vertical_alignment="center")
+        with _nc1:
+            _new_role = st.text_input("Add Role", value="", key=f"{_role_key}_new_role", label_visibility="collapsed", placeholder="New role")
+        with _nc2:
+            _added = st.form_submit_button("➕ Add", width="stretch")
+        if _added:
+            _nr = _new_role.strip()
+            if not _nr:
+                st.warning("⚠️ Role cannot be blank.")
+            else:
+                _existing = [str(x.get("role", "")).strip().lower() for x in _role_rows]
+                if _nr.lower() in _existing:
+                    st.warning("⚠️ Duplicate role (case-insensitive).")
+                else:
+                    _role_rows.append({"role": _nr, "_uid": uuid.uuid4().hex[:8]})
+                    st.session_state[_role_key] = _role_rows
+                    st.rerun()
+
+    _role_values = [str(r.get("role", "")).strip() for r in _role_rows if str(r.get("role", "")).strip()]
+    # handle deleted defaults
+    _conn_default = plat_parsing.get("default_connected_role")
+    _disc_default = plat_parsing.get("default_disconnected_role")
+    if _conn_default not in _role_values and _role_values:
+        _conn_default = _role_values[0]
+    if _disc_default not in _role_values and _role_values:
+        _disc_default = _role_values[-1]
+
+    _conn_idx = _role_values.index(_conn_default) if _conn_default in _role_values else 0
+    _conn_sel = st.selectbox("Connected Default", _role_values, index=_conn_idx, key=f"{_role_key}_conn")
+    _disc_idx = _role_values.index(_disc_default) if _disc_default in _role_values else (len(_role_values) - 1 if _role_values else 0)
+    _disc_sel = st.selectbox("Disconnected Default", _role_values, index=_disc_idx, key=f"{_role_key}_disc")
+    _sentinel = st.text_input("No Adapter Sentinel", value=plat_parsing.get("sentinel_no_adapter", ""), key=f"{_role_key}_sentinel")
+
+    # unsaved check
+    _roles_dirty = (
+        [str(r.get("role", "")).strip() for r in _role_rows] != list(_saved_roles)
+        or _conn_sel != plat_parsing.get("default_connected_role")
+        or _disc_sel != plat_parsing.get("default_disconnected_role")
+        or _sentinel != plat_parsing.get("sentinel_no_adapter", "")
+    )
+
+    if names != all_platforms or mods_dirty or _roles_dirty:
         st.caption("⚠️ Unsaved changes — click Save & Apply Changes to keep them.")
 
     c_save, c_reset = st.columns([1, 1])
@@ -959,23 +1021,31 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                     parsing_presets.pop(plat, None)
             for plat in list(parsing_presets.keys()):
                 if plat in new_order:
-                    plat_san = re.sub(r"[^a-z0-9]+", "_", plat.lower()).strip("_")
-                    wc_key = f"wc_hyp_mod_{plat_san}"
-                    if wc_key in st.session_state:
-                        parsing_presets.setdefault(plat, {})["modules"] = [r["mid"] for r in st.session_state[wc_key]]
+                     plat_san = re.sub(r"[^a-z0-9]+", "_", plat.lower()).strip("_")
+                     wc_key = f"wc_hyp_mod_{plat_san}"
+                     if wc_key in st.session_state:
+                         parsing_presets.setdefault(plat, {})["modules"] = [r["mid"] for r in st.session_state[wc_key]]
+                     # persist uplink role settings
+                     rwc = f"wc_hyp_roles_{plat_san}"
+                     if rwc in st.session_state:
+                         _roles = [str(r.get("role", "")).strip() for r in st.session_state[rwc] if str(r.get("role", "")).strip()]
+                         parsing_presets.setdefault(plat, {})["role_options"] = _roles
+                     parsing_presets.setdefault(plat, {})["default_connected_role"] = st.session_state.get(f"{rwc}_conn", parsing_presets.get(plat, {}).get("default_connected_role"))
+                     parsing_presets.setdefault(plat, {})["default_disconnected_role"] = st.session_state.get(f"{rwc}_disc", parsing_presets.get(plat, {}).get("default_disconnected_role"))
+                     parsing_presets.setdefault(plat, {})["sentinel_no_adapter"] = st.session_state.get(f"{rwc}_sentinel", parsing_presets.get(plat, {}).get("sentinel_no_adapter", ""))
             rules_to_save["hypervisor_presets"] = hyp_presets
             rules_to_save["topology_parsing_presets"] = parsing_presets
             save_naming_rules(rules_to_save, source="Save Hypervisor Platforms")
             fresh = SSM.get_cached_naming_rules() or load_naming_rules()
             _commit_fresh_rules(rules, fresh)
             _wc_discard("hyp_platforms")
-            _clear_session_state_prefixes("wc_hyp_mod_")
+            _clear_session_state_prefixes("wc_hyp_mod_", "wc_hyp_roles_")
             st.toast("Hypervisor platforms saved")
             st.rerun()
     with c_reset:
         if st.button("🔄 Reset to Defaults", key="hyp_plat_reset", width="stretch"):
             _wc_discard("hyp_platforms")
-            _clear_session_state_prefixes("wc_hyp_mod_")
+            _clear_session_state_prefixes("wc_hyp_mod_", "wc_hyp_roles_")
             default_platforms = [p for p in list(DEFAULT_HYPERVISOR_PRESETS.keys()) if p in parsing_key_set]
             remaining = [p for p in ordered_platforms if p not in default_platforms]
             final_order = default_platforms + remaining
