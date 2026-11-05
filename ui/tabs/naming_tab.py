@@ -1854,15 +1854,22 @@ def _render_screenshot_batch_mode(naming_rules: dict, casing: str, active_model:
             _out_lines.append(f"=== {_gparent} ===")
             _sw_uplinks = [r for r in _groups[_gparent] if r.get("type") == "Uplink" and r.get("interface")]
             _sw_services = [r for r in _groups[_gparent] if r.get("type") != "Uplink" and (r.get("interface") or r.get("purpose"))]
-            # Dynamic teaming clause
-            teaming_str = _build_dynamic_teaming_clause(_sw_uplinks)
             # ── Switch Teaming Header (rendered ONCE per switch) ──────────────
             _switch_teaming_tpl = None
             for _ptpl in _active_hyp_presets:
                 if _ptpl.get("code") == "Switch_Teaming" and not _ptpl.get("hidden", False):
                     _switch_teaming_tpl = _ptpl.get("pattern", "")
                     break
-            _sw_vals = {"v_switch": _gparent, "teaming": teaming_str}
+            _sw_uplinks = [r for r in _groups[_gparent] if r.get("type") == "Uplink" and r.get("interface")]
+            # Build neutral facts (same as PortGroup) — use _sw_uplinks as neutral source records
+            _switch_facts = {
+                "switch_name": _gparent,
+                "records": _sw_uplinks,
+            }
+            # Call the existing generic derived-variable binder (Standards-driven)
+            _switch_derived = _bind_sourced_tokens(_pattern_vars, _switch_facts)
+            # Build _sw_vals with v_switch and derived values
+            _sw_vals = {"v_switch": _gparent, **_switch_derived}
             _rendered_header = render_dynamic_pattern(_switch_teaming_tpl, _sw_vals, _pattern_vars)
             _rendered_header = re.sub(r"\s{2,}", " ", _rendered_header).strip()
             if _rendered_header:
