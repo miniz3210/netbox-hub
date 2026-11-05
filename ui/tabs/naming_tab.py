@@ -213,11 +213,6 @@ def _bind_sourced_tokens(pattern_vars: dict, facts: dict) -> dict:
         elif source == "switch_name":
             value = str(facts.get("switch_name") or "").strip()
 
-        if value:
-            prefix = str(meta.get("prefix") or "")
-            if prefix and not value.casefold().startswith(prefix.casefold()):
-                value = f"{prefix}{value}"
-
         bound[str(token)] = value
 
     return bound
@@ -607,67 +602,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = ""):
         _render_interactive_hypervisor_mode(naming_rules, casing, active_model)
     else:
         _render_screenshot_batch_mode(naming_rules, casing, active_model)
-def _build_dynamic_teaming_clause(uplinks: list) -> str:
-    """Dynamically synthesize teaming description string without hardcoded assumptions.
-    Reads empty_role_token and no_uplink_display from Standards (topology_parsing_presets +
-    pattern_variables.uplink_role).  If uplinks is empty (or all are "No physical network
-    adapters" state), returns the standards-driven no_uplink_text instead of an empty string.
-    Speed-only or junk tokens are silently dropped so they never enter the clause.
-    Uses pure Standards-driven dictionary mapping — zero Python regex stripping.
-    """
-    if not uplinks:
-        _rules = SSM.get_naming_rules() or {}
-        _tpp = _rules.get("topology_parsing_presets") or {}
-        _plat_keys = list(_tpp.keys()) if isinstance(_tpp, dict) else []
-        _active = st.session_state.get("naming_target_platform")
-        if _active not in _plat_keys:
-            _active = _plat_keys[0] if _plat_keys else None
-        _plat_cfg = _tpp.get(_active, {}) if isinstance(_tpp.get(_active), dict) else {}
-        _teaming = _plat_cfg.get("teaming_rules") or {}
-        if isinstance(_teaming, dict):
-            _v = _teaming.get("no_uplink_display")
-            if _v and str(_v).strip():
-                return str(_v).strip()
-        _nlu = _plat_cfg.get("no_uplink_label")
-        if _nlu and str(_nlu).strip():
-            return str(_nlu).strip()
-        _ur_cfg = (_rules.get("pattern_variables") or {}).get("uplink_role") or {}
-        return str(_ur_cfg.get("no_uplink_fallback") or "").strip()
-    def _is_junk_or_speed(text: str) -> bool:
-        t = text.strip()
-        if not t:
-            return True
-        if _is_junk_token(t, None):
-            return True
-        return bool(re.search(r"\b\d+\s*(?:Gbit/s|Mbit/s|Kbit/s|Full|Half)\b", t, re.I))
-    # Load teaming rules once at function scope
-    _rules = SSM.get_naming_rules() or {}
-    _tpp = _rules.get("topology_parsing_presets") or {}
-    _plat_keys = list(_tpp.keys()) if isinstance(_tpp, dict) else []
-    _active = st.session_state.get("naming_target_platform")
-    if _active not in _plat_keys:
-        _active = _plat_keys[0] if _plat_keys else None
-    _plat_cfg = _tpp.get(_active, {}) if isinstance(_tpp.get(_active), dict) else {}
-    _teaming = _plat_cfg.get("teaming_rules") or {}
-    if not isinstance(_teaming, dict):
-        _teaming = {}
-    _mapping = _teaming.get("uplink_to_teaming_mapping") or {}
-    _empty_role_token = str(_teaming.get("empty_role_token")
-        or ((_rules.get("pattern_variables") or {}).get("uplink_role") or {}).get("empty_role_token")
-        or "None").strip().lower()
-    parts = []
-    for u in uplinks:
-        iface = str(u.get("interface", "")).strip()
-        if not iface or _is_junk_or_speed(iface):
-            continue
-        role_raw = str(u.get("role") or u.get("uplink_role") or "").strip()
-        # Pure Standards-driven dictionary mapping — no regex stripping
-        teaming_status = _mapping.get(role_raw, role_raw)
-        if role_raw.lower() == _empty_role_token or not teaming_status:
-            parts.append(iface)
-        else:
-            parts.append(f"{iface} {teaming_status}")
-    return " / ".join(parts)
 def _clean_rendered_clause(rendered: str) -> str:
     """Removes dangling slashes, empty parens, and orphan active/standby markers."""
     rendered = re.sub(r"\(\s*/\s*\)", "", rendered)

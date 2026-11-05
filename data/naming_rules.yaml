@@ -590,7 +590,7 @@
       "source_field": "interface",
       "filter_field": "role",
       "filter_value": "Active Uplink",
-      "join": ","
+      "join": ", "
     },
     "standby_vmnics": {
       "label": "Standby vmnics (Optional)",
@@ -602,7 +602,7 @@
       "source_field": "interface",
       "filter_field": "role",
       "filter_value": "Standby Uplink",
-      "join": ","
+      "join": ", "
     },
     "vmk": {
       "label": "vmk Name",
@@ -942,7 +942,7 @@
         "code": "Switch_Teaming",
         "label": "Switch Teaming Header",
         "pattern": "<v_switch> ([[<active_vmnics> Active]][[ / <standby_vmnics> Standby]])",
-        "hidden": true
+        "hidden": false
       },
       {
         "code": "Uplink",
@@ -953,7 +953,7 @@
       {
         "code": "PortGroup",
         "label": "Port Group",
-        "pattern": "PG-<purpose> <v_switch> ([[<active_vmnics> Active]][[ / <standby_vmnics> Standby]])",
+        "pattern": "<purpose> <v_switch> ([[<active_vmnics> Active]][[ / <standby_vmnics> Standby]])",
         "hidden": false
       },
       {
