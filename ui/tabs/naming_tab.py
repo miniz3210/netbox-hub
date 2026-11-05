@@ -191,6 +191,7 @@ def _bind_sourced_tokens(pattern_vars: dict, facts: dict) -> dict:
                                 seen.add(key)
                                 filtered.append(val)
                 value = joiner.join(filtered)
+            bound[str(token)] = value
             continue
 
         source = str(meta.get("source") or "").strip()
