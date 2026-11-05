@@ -213,26 +213,6 @@ def _bind_sourced_tokens(pattern_vars: dict, facts: dict) -> dict:
         elif source == "switch_name":
             value = str(facts.get("switch_name") or "").strip()
 
-        elif source.startswith("uplinks_by_role:"):
-            role = source.split(":", 1)[1].strip()
-            role_map = facts.get("uplinks_by_role") or {}
-            interfaces = role_map.get(role, []) if isinstance(role_map, dict) else []
-            joiner = str(meta.get("join") if meta.get("join") is not None else ", ")
-
-            if isinstance(interfaces, (list, tuple)):
-                cleaned = []
-                seen = set()
-                for interface in interfaces:
-                    interface_text = str(interface or "").strip()
-                    if not interface_text:
-                        continue
-                    key = interface_text.casefold()
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    cleaned.append(interface_text)
-                value = joiner.join(cleaned)
-
         if value:
             prefix = str(meta.get("prefix") or "")
             if prefix and not value.casefold().startswith(prefix.casefold()):

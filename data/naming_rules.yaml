@@ -557,8 +557,7 @@
       "default": "Management Network",
       "optional": false,
       "scope": "hypervisor",
-      "source": "service_name",
-      "prefix": ""
+      "source": "service_name"
     },
     "port_group": {
       "label": "Port Group / vSwitch",
@@ -567,15 +566,7 @@
       "optional": false,
       "scope": "hypervisor"
     },
-    "pg_purpose": {
-      "label": "PG Purpose",
-      "placeholder": "e.g. Management",
-      "default": "",
-      "optional": true,
-      "scope": "hypervisor",
-      "source": "service_name",
-      "prefix": "PG-"
-    },
+    
     "interface": {
       "label": "Interface / Port Group Name",
       "placeholder": "e.g. vmnic0, PG-VMDK",
