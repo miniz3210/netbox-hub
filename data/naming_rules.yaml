@@ -31,6 +31,7 @@
   "vm_vlab": "<country><site><role><seq>",
   "vm_tst": "<country><site><role><seq>",
   "vm_vlabtest": "<country><site><role><seq>",
+  "hyp_VMware ESXi_PortGroup": "[[PG-<purpose>]] <v_switch> ([[<active_vmnics> Active]][[ / <standby_vmnics> Standby]])",
   "device_presets": [
     {
       "code": "SW",
@@ -564,6 +565,15 @@
       "optional": false,
       "scope": "hypervisor"
     },
+    "pg_purpose": {
+      "label": "PG Purpose",
+      "placeholder": "e.g. Management",
+      "default": "",
+      "optional": true,
+      "scope": "hypervisor",
+      "source": "service_name",
+      "prefix": "PG-"
+    },
     "interface": {
       "label": "Interface / Port Group Name",
       "placeholder": "e.g. vmnic0, PG-VMDK",
@@ -1001,6 +1011,12 @@
     "switch_uplink_desc": [
       "remote_device",
       "remote_port"
+    ],
+    "hyp_VMware ESXi_PortGroup": [
+      "purpose",
+      "v_switch",
+      "active_vmnics",
+      "standby_vmnics"
     ]
   }
 }
