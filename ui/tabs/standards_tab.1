@@ -2257,6 +2257,58 @@ def render_standards_tab(active_model):
 
         VARIABLE_COLS_OPTIMIZED = [1.5, 2.8, 3.2, 1.2, 0.8, 0.8]
 
+        def _variable_row(name: str, meta: dict, scope: str) -> dict:
+            """Return a working-copy row without dropping binding metadata."""
+            meta = meta if isinstance(meta, dict) else {}
+            return {
+                "name": name,
+                "label": meta.get("label", name),
+                "placeholder": meta.get("placeholder", ""),
+                "default": meta.get("default", ""),
+                "optional": bool(meta.get("optional", False)),
+                "scope": scope,
+                "required": bool(meta.get("required", False)),
+                "type": str(meta.get("type") or "").strip(),
+                "source": str(meta.get("source") or "").strip(),
+                "source_field": str(meta.get("source_field") or "").strip(),
+                "filter_field": str(meta.get("filter_field") or "").strip(),
+                "filter_value": str(meta.get("filter_value") or "").strip(),
+                "join": str(meta.get("join") if meta.get("join") is not None else ""),
+            }
+
+        def _variable_meta(row: dict, scope: str) -> dict:
+            """Build persisted Pattern Variable metadata from one editor row."""
+            meta = {
+                "label": row.get("label") or row["name"],
+                "placeholder": row.get("placeholder") or f"e.g. {row['name']}",
+                "default": row.get("default", ""),
+                "optional": bool(row.get("optional", False)),
+                "scope": scope,
+            }
+            if row.get("required"):
+                meta["required"] = True
+            binding_type = str(row.get("binding_type") or "Manual")
+            if binding_type == "Source":
+                source = str(row.get("source") or "").strip()
+                if source:
+                    meta["source"] = source
+            elif binding_type == "Derived":
+                meta["type"] = "derived"
+                meta["source_field"] = str(row.get("source_field") or "").strip()
+                meta["filter_field"] = str(row.get("filter_field") or "").strip()
+                meta["filter_value"] = str(row.get("filter_value") or "").strip()
+                meta["join"] = str(row.get("join") if row.get("join") is not None else "")
+            return meta
+
+        def _variable_signature(name: str, meta: dict, scope: str) -> tuple:
+            row = _variable_row(name, meta, scope)
+            binding_type = "Derived" if row.get("type") == "derived" else ("Source" if row.get("source") else "Manual")
+            return (
+                row["name"], row["label"], row["placeholder"], row["default"], row["optional"],
+                binding_type, row["source"], row["source_field"], row["filter_field"],
+                row["filter_value"], row["join"], row["required"],
+            )
+
         for scope_code, title, desc, s_key in scope_meta:
             scope_items = grouped_vars.get(s_key, {})
             with st.expander(f"{title} ({len(scope_items)} variables)", expanded=False):
@@ -2267,11 +2319,8 @@ def render_standards_tab(active_model):
                     st.markdown(f"<div style='text-align: right;'><span style='background-color: #2b313e; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;'>{len(scope_items)} variables</span></div>", unsafe_allow_html=True)
                 st.caption(desc)
 
-                scope_edited_vars = {}
                 name = f"vars_{s_key}"
-                rows = _wc_rows(name, lambda: [{"name": n, "label": m.get("label", n), "placeholder": m.get("placeholder", ""),
-                    "default": m.get("default", ""), "optional": bool(m.get("optional", False)), "scope": s_key,
-                    **({"required": True} if m.get("required") else {})} for n, m in scope_items.items()])
+                rows = _wc_rows(name, lambda: [_variable_row(n, m, s_key) for n, m in scope_items.items()])
                 pending_name = st.session_state.get("pv_pending_delete")
                 if pending_name and any(r["name"] == pending_name for r in rows):
                     required_suffix = " (marked required)" if any(r.get("required") for r in rows if r["name"] == pending_name) else ""
@@ -2286,28 +2335,28 @@ def render_standards_tab(active_model):
                         st.rerun()
 
                 c_h1, c_h2, c_h3, c_h4, c_h5, c_h6 = st.columns(VARIABLE_COLS_OPTIMIZED, vertical_alignment="center")
-                with c_h1:
-                    st.markdown("**Token**")
-                with c_h2:
-                    st.markdown("**Label**")
-                with c_h3:
-                    st.markdown("**Placeholder**")
-                with c_h4:
-                    st.markdown("**Default**")
-                with c_h5:
-                    st.markdown("**Optional**")
-                with c_h6:
-                    st.markdown("<span class='action-header'>**Action**</span>", unsafe_allow_html=True)
+                c_h1.markdown("**Token**")
+                c_h2.markdown("**Label**")
+                c_h3.markdown("**Placeholder**")
+                c_h4.markdown("**Default**")
+                c_h5.markdown("**Optional**")
+                c_h6.markdown("<span class='action-header'>**Action**</span>", unsafe_allow_html=True)
 
                 for idx, row in enumerate(list(rows)):
                     row.setdefault("_uid", uuid.uuid4().hex[:8])
+                    row.setdefault("type", "")
+                    row.setdefault("source", "")
+                    row.setdefault("source_field", "")
+                    row.setdefault("filter_field", "")
+                    row.setdefault("filter_value", "")
+                    row.setdefault("join", "")
                     uid = row["_uid"]
+                    default_binding = "Derived" if row.get("type") == "derived" else ("Source" if row.get("source") else "Manual")
+                    row.setdefault("binding_type", default_binding)
+
                     c1, c2, c3, c4, c5, c6 = st.columns(VARIABLE_COLS_OPTIMIZED, vertical_alignment="center")
                     with c1:
-                        st.markdown(
-                            f"<div style='height:38px;display:flex;align-items:center;'><code>&lt;{row['name']}&gt;</code></div>",
-                            unsafe_allow_html=True,
-                        )
+                        st.markdown(f"<div style='height:38px;display:flex;align-items:center;'><code>&lt;{row['name']}&gt;</code></div>", unsafe_allow_html=True)
                     with c2:
                         row["label"] = st.text_input("Label", value=row.get("label", ""), key=f"wc_{name}_{uid}_label", label_visibility="collapsed").strip()
                     with c3:
@@ -2318,35 +2367,69 @@ def render_standards_tab(active_model):
                         row["optional"] = st.checkbox("Optional", value=bool(row.get("optional", False)), key=f"wc_{name}_{uid}_optional", label_visibility="collapsed")
                     with c6:
                         c_up, c_dn, c_del = st.columns([1, 1, 1])
-                        with c_up:
-                            if idx > 0 and st.button("⬆️", key=f"wc_{name}_{uid}_up", help="Move up"):
-                                rows[idx - 1], rows[idx] = rows[idx], rows[idx - 1]
+                        if idx > 0 and c_up.button("⬆️", key=f"wc_{name}_{uid}_up", help="Move up"):
+                            rows[idx - 1], rows[idx] = rows[idx], rows[idx - 1]
+                            st.rerun()
+                        if idx < len(rows) - 1 and c_dn.button("⬇️", key=f"wc_{name}_{uid}_dn", help="Move down"):
+                            rows[idx + 1], rows[idx] = rows[idx], rows[idx + 1]
+                            st.rerun()
+                        if c_del.button("🗑️", key=f"wc_{name}_{uid}_del", help="Delete", disabled=len(rows) <= 0):
+                            refs = find_variable_references(current_rules, row["name"])
+                            if refs:
+                                st.session_state["pv_pending_delete"] = row["name"]
                                 st.rerun()
-                        with c_dn:
-                            if idx < len(rows) - 1 and st.button("⬇️", key=f"wc_{name}_{uid}_dn", help="Move down"):
-                                rows[idx + 1], rows[idx] = rows[idx], rows[idx + 1]
-                                st.rerun()
-                        with c_del:
-                            if st.button("🗑️", key=f"wc_{name}_{uid}_del", help="Delete", disabled=len(rows) <= 0):
-                                refs = find_variable_references(current_rules, row["name"])
-                                if refs:
-                                    st.session_state["pv_pending_delete"] = row["name"]
-                                    st.rerun()
-                                else:
-                                    rows.pop(idx)
-                                    st.rerun()
+                            rows.pop(idx)
+                            st.rerun()
 
-                _saved_sig = [(n, m.get("label", n), m.get("placeholder", ""), m.get("default", ""), bool(m.get("optional", False))) for n, m in scope_items.items()]
-                _cur_sig = [(r["name"], r.get("label", ""), r.get("placeholder", ""), r.get("default", ""), bool(r.get("optional", False))) for r in rows]
-                if _saved_sig != _cur_sig:
+                    show_binding = s_key == "hypervisor" or default_binding != "Manual"
+                    if show_binding:
+                        with st.expander(f"Binding for <{row['name']}> — {row.get('binding_type', default_binding)}", expanded=(row.get("binding_type", default_binding) == "Derived")):
+                            row["binding_type"] = st.selectbox(
+                                "Binding Type",
+                                ["Manual", "Source", "Derived"],
+                                index=["Manual", "Source", "Derived"].index(row.get("binding_type", default_binding)),
+                                key=f"wc_{name}_{uid}_binding_type",
+                                help="Manual values come from normal inputs. Source binds one neutral fact. Derived filters and joins topology records.",
+                            )
+                            if row["binding_type"] == "Source":
+                                row["source"] = st.text_input(
+                                    "Source",
+                                    value=row.get("source", ""),
+                                    key=f"wc_{name}_{uid}_source",
+                                    placeholder="e.g. service_name or switch_name",
+                                ).strip()
+                            elif row["binding_type"] == "Derived":
+                                b1, b2, b3, b4 = st.columns([1.2, 1.2, 1.5, 0.8])
+                                with b1:
+                                    row["source_field"] = st.text_input("Source Field", value=row.get("source_field", ""), key=f"wc_{name}_{uid}_source_field", placeholder="interface").strip()
+                                with b2:
+                                    row["filter_field"] = st.text_input("Filter Field", value=row.get("filter_field", ""), key=f"wc_{name}_{uid}_filter_field", placeholder="role").strip()
+                                with b3:
+                                    row["filter_value"] = st.text_input("Filter Value", value=row.get("filter_value", ""), key=f"wc_{name}_{uid}_filter_value", placeholder="Active Uplink").strip()
+                                with b4:
+                                    row["join"] = st.text_input("Join", value=row.get("join", ""), key=f"wc_{name}_{uid}_join", placeholder=", ")
+                                st.caption(
+                                    f"Derived rule: collect `{row.get('source_field') or '?'}` where "
+                                    f"`{row.get('filter_field') or '?'}` equals `{row.get('filter_value') or '?'}`, "
+                                    f"joined with `{row.get('join')}`."
+                                )
+
+                saved_sig = [_variable_signature(n, m, s_key) for n, m in scope_items.items()]
+                current_sig = []
+                for row in rows:
+                    current_sig.append((
+                        row["name"], row.get("label", ""), row.get("placeholder", ""), row.get("default", ""),
+                        bool(row.get("optional", False)), row.get("binding_type", "Manual"), row.get("source", ""),
+                        row.get("source_field", ""), row.get("filter_field", ""), row.get("filter_value", ""),
+                        row.get("join", ""), bool(row.get("required", False)),
+                    ))
+                if saved_sig != current_sig:
                     st.caption("⚠️ Unsaved changes — click Save & Apply Changes to keep them.")
 
                 built = {}
-                for r in rows:
-                    if str(r.get("name", "")).strip():
-                        built[r["name"]] = {"label": r.get("label") or r["name"], "placeholder": r.get("placeholder") or f"e.g. {r['name']}",
-                                            "default": r.get("default", ""), "optional": bool(r.get("optional", False)), "scope": s_key,
-                                            **({"required": True} if r.get("required") else {})}
+                for row in rows:
+                    if str(row.get("name", "")).strip():
+                        built[row["name"]] = _variable_meta(row, s_key)
 
                 col_save, col_rst = st.columns([4, 1])
                 with col_save:
@@ -2356,16 +2439,24 @@ def render_standards_tab(active_model):
                         _wc_discard(name)
                         from config.naming_rules import PATTERN_VARIABLES
                         _persist_variables(current_rules, {k: copy.deepcopy(v) for k, v in PATTERN_VARIABLES.items() if (v.get("scope") or "shared") == s_key}, section_key=s_key)
-
                 if saved_vars:
-                    _persist_variables(current_rules, built, section_key=s_key)
-                    _wc_discard(name)
+                    invalid_derived = [
+                        f"<{row['name']}>" for row in rows
+                        if row.get("binding_type") == "Derived"
+                        and (not str(row.get("source_field") or "").strip()
+                             or not str(row.get("filter_field") or "").strip()
+                             or not str(row.get("filter_value") or "").strip())
+                    ]
+                    if invalid_derived:
+                        st.error("Derived variables require Source Field, Filter Field and Filter Value: " + ", ".join(invalid_derived))
+                    else:
+                        _persist_variables(current_rules, built, section_key=s_key)
+                        _wc_discard(name)
 
                 with st.form(key=f"wc_{name}_addform", clear_on_submit=True):
                     ca1, ca2, ca3, ca4, ca5, ca6 = st.columns(VARIABLE_COLS_OPTIMIZED, vertical_alignment="center")
                     with ca1:
-                        new_name = st.text_input("New Token", value="", placeholder="e.g. tier", key=f"wc_{name}_new_name", label_visibility="collapsed").strip()
-                        new_name = _normalize_var_name(new_name)
+                        new_name = _normalize_var_name(st.text_input("New Token", value="", placeholder="e.g. tier", key=f"wc_{name}_new_name", label_visibility="collapsed").strip())
                     with ca2:
                         new_lbl = st.text_input("New Label", value="", placeholder="e.g. Service Tier", key=f"wc_{name}_new_label", label_visibility="collapsed").strip()
                     with ca3:
@@ -2375,21 +2466,35 @@ def render_standards_tab(active_model):
                     with ca5:
                         st.markdown("")
                     with ca6:
-                        add_tok = st.form_submit_button("➕ Add", width='stretch')
-
+                        add_tok = st.form_submit_button("➕ Add", width="stretch")
                 if add_tok:
-                    if new_name:
+                    if not new_name:
+                        st.warning("Enter a token name to add.")
+                    else:
                         all_vars = current_rules.get("pattern_variables", {})
                         saved_names = set(all_vars.keys())
-                        wc_names = set(r["name"] for r in rows if r.get("name"))
+                        wc_names = {r["name"] for r in rows if r.get("name")}
                         if new_name in saved_names or new_name in wc_names:
                             st.warning("Variable name already exists.")
                         else:
-                            rows.append({"name": new_name, "label": new_lbl or new_name, "placeholder": new_ph or f"e.g. {new_name}",
-                                "default": new_df, "optional": False, "scope": s_key, "_uid": uuid.uuid4().hex[:8]})
+                            rows.append({
+                                "name": new_name,
+                                "label": new_lbl or new_name,
+                                "placeholder": new_ph or f"e.g. {new_name}",
+                                "default": new_df,
+                                "optional": False,
+                                "scope": s_key,
+                                "required": False,
+                                "type": "",
+                                "source": "",
+                                "source_field": "",
+                                "filter_field": "",
+                                "filter_value": "",
+                                "join": "",
+                                "binding_type": "Manual",
+                                "_uid": uuid.uuid4().hex[:8],
+                            })
                             st.rerun()
-                    else:
-                        st.warning("Enter a token name to add.")
 
                 for row in rows:
                     row.setdefault("optional", False)
