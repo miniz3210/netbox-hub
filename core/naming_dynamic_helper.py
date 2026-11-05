@@ -93,8 +93,8 @@ def render_dynamic_pattern(pattern: str, values: Dict[str, str], variables: Dict
                     drop_segment = True
             
             if drop_segment:
-                # Segment dropped: DO NOT append text before it
-                # Skip this segment and move to next
+                # Segment dropped: still append text before it (literal text outside segments)
+                result.append(p[last_pos:match.start()])
                 last_pos = match.end()
                 continue
             
