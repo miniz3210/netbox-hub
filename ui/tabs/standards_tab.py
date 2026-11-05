@@ -930,8 +930,14 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 key=f"plat_mod_add_{active_plat}",
             )
         with acs[1]:
-            if st.button("➕ Add", key=f"plat_mod_add_btn_{san}", help="Add selected module"):
-                _hyp_add_module_cb(f"plat_mod_add_{active_plat}", san)
+            _add_up, _add_down, _add_action = st.columns([1, 1, 1], gap="small")
+            with _add_up:
+                st.empty()
+            with _add_down:
+                st.empty()
+            with _add_action:
+                if st.button("➕", key=f"plat_mod_add_btn_{san}", help="Add selected module"):
+                    _hyp_add_module_cb(f"plat_mod_add_{active_plat}", san)
 
     mods_dirty = False
     for _p, _cfg in parsing_presets.items():
@@ -970,7 +976,13 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
             with _acs[0]:
                 _new_role = st.text_input("Add Role", value="", key=f"{_role_key}_new_role", label_visibility="collapsed", placeholder="New role")
             with _acs[1]:
-                _added = st.form_submit_button("➕ Add")
+                _add_up, _add_down, _add_action = st.columns([1, 1, 1], gap="small")
+                with _add_up:
+                    st.empty()
+                with _add_down:
+                    st.empty()
+                with _add_action:
+                    _added = st.form_submit_button("➕", help="Add role")
             if _added:
                 _nr = _new_role.strip()
                 if not _nr:
