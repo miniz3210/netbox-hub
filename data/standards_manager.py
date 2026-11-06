@@ -215,24 +215,27 @@ class StandardsManager:
             pass
         return "Factory Default"
 
-    def restore_from_baseline(self) -> bool:
+    def restore_from_baseline(self) -> dict:
+        """Restore the complete Global Baseline into Current Rules.
+
+        Loads through load_baseline(). Returns {} and leaves Current Rules
+        unchanged when the Baseline is missing or invalid. Otherwise writes
+        the exact Baseline to Current Rules and returns a deep copy of the
+        restored Baseline dict. Does not merge DEFAULT_* content or reuse
+        stale Current Rules.
+        """
+        baseline = self.load_baseline()
+        if not baseline:
+            return {}
         try:
-            if os.path.exists(BASELINE_RULES_FILE):
-                with open(BASELINE_RULES_FILE, "r", encoding="utf-8") as f:
-                    baseline_data = json.load(f)
-            else:
-                baseline_data = {}
-            if not isinstance(baseline_data, dict):
-                return False
+            os.makedirs(os.path.dirname(RULES_FILE), exist_ok=True)
             with open(RULES_FILE, "w", encoding="utf-8") as f:
-                json.dump(baseline_data, f, indent=2, ensure_ascii=False)
+                json.dump(baseline, f, indent=2, ensure_ascii=False)
                 f.flush()
                 os.fsync(f.fileno())
-            SSM.set_naming_rules(baseline_data)
-            SSM.refresh_naming_rules()
-            return True
+            return copy.deepcopy(baseline)
         except Exception:
-            return False
+            return {}
 
     def restore_section_from_baseline(self, section: str) -> bool:
         """Restore only ``section`` from Global Baseline into Current Rules.
@@ -265,6 +268,73 @@ class StandardsManager:
             return True
         except Exception:
             return False
+
+    def restore_path_from_baseline(self, path: str, wc_prefixes: tuple = ()) -> dict:
+        """Restore a single Baseline path into Current Rules.
+
+        ``path`` may be a top-level rules key (e.g. ``"device_presets"``) or a
+        dotted nested path (e.g. ``"hardware_baseline_standards.server"``).
+
+        Returns:
+            {"ok": True, "value": <deepcopy of baseline value>}
+                Path present in Baseline (even when the value is an empty
+                list/dict). Current Rules updated, persisted, session cache
+                refreshed, standards_nonce bumped, working copies cleared.
+            {"ok": False, "missing": True}
+                Path absent from Baseline. No change; no factory fallback.
+
+        The caller is responsible for showing any warning/toast and for calling
+        ``st.rerun()``.
+        """
+        from config.naming_rules import load_naming_rules, save_naming_rules
+        import streamlit as st
+
+        baseline = self.load_baseline()
+
+        parts = path.split(".")
+        cursor = baseline
+        for part in parts:
+            if not isinstance(cursor, dict) or part not in cursor:
+                return {"ok": False, "missing": True}
+            cursor = cursor[part]
+        value = copy.deepcopy(cursor)
+
+        current = {}
+        if os.path.exists(RULES_FILE):
+            try:
+                with open(RULES_FILE, "r", encoding="utf-8") as f:
+                    current = json.load(f)
+            except Exception:
+                current = {}
+        if not isinstance(current, dict):
+            current = {}
+
+        if len(parts) == 1:
+            current[path] = value
+        else:
+            parent = current
+            for part in parts[:-1]:
+                parent = parent.setdefault(part, {})
+            parent[parts[-1]] = value
+
+        os.makedirs(os.path.dirname(RULES_FILE), exist_ok=True)
+        with open(RULES_FILE, "w", encoding="utf-8") as f:
+            json.dump(current, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+
+        SSM.set_naming_rules(current.copy())
+        SSM.refresh_naming_rules()
+        st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
+
+        for prefix in wc_prefixes:
+            st.session_state.pop(f"wc_{prefix}", None)
+            for k in list(st.session_state.keys()):
+                sk = str(k)
+                if sk.startswith(f"wc_{prefix}_"):
+                    st.session_state.pop(k, None)
+
+        return {"ok": True, "value": value}
 
     def compile_full_system_prompt(self) -> str:
         try:

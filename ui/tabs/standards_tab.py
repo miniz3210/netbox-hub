@@ -96,6 +96,25 @@ def _commit_fresh_rules(rules: dict, fresh: dict) -> None:
     st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
 
 
+def _restore_from_baseline(path: str, label: str, wc_prefixes: tuple = ()) -> None:
+    """Restore a single Baseline path into Current Rules, then toast and rerun.
+
+    Loads the Global Baseline through StandardsManager.load_baseline(),
+    deep-copies only the requested path, replaces only that path in Current
+    Rules while preserving everything else, saves, refreshes SessionStateManager,
+    clears working copies, bumps standards_nonce, and reruns.
+    Missing Baseline path: warning, no change, no factory fallback.
+    """
+    mgr = StandardsManager()
+    result = mgr.restore_path_from_baseline(path, wc_prefixes=wc_prefixes)
+    if not result["ok"]:
+        if result.get("missing"):
+            st.warning(f"No Baseline value for '{label}'; Current Rules were not changed.")
+        return
+    st.toast(f"✅ {label} restored from Global Baseline.", icon="⬅️")
+    st.rerun()
+
+
 def _wc_rows(name: str, loader) -> list:
     """Working copy of a row table (unsaved, on-screen only). Built once per session from saved rules."""
     k = f"wc_{name}"
@@ -443,9 +462,10 @@ def _render_ipam_role_mapping_manager(active_model: str) -> None:
                 _wc_discard(name)
                 _persist_ipam_role_mappings(new_rules)
         with c_r:
-            if st.button("🔄 Reset to Defaults", key=f"{name}_reset", width="stretch"):
+            if st.button("🔄 Restore from Baseline", key=f"{name}_reset", width="stretch"):
                 _wc_discard(name)
-                _reset_ipam_role_mappings()
+                _restore_from_baseline("ipam_role_mappings", "IPAM Role Mapping Rules",
+                                       wc_prefixes=("ipamrole_",))
 
         _wc_add_row(name, rows, [("pattern", r"(?i)^cctv|ip[\s\-]?cam$"), ("replacement", "Surveillance"), ("description", "Normalize CCTV variations")], COLS)
 
@@ -554,9 +574,10 @@ def _render_site_code_mapping_manager(key_prefix: str = "std_scm") -> None:
                 _wc_discard(name)
                 _persist_site_code_mappings(new_rules)
         with c_r:
-            if st.button("🔄 Reset to Defaults", key=f"{name}_reset", width="stretch"):
+            if st.button("🔄 Restore from Baseline", key=f"{name}_reset", width="stretch"):
                 _wc_discard(name)
-                _reset_site_code_mappings()
+                _restore_from_baseline("site_code_rules", "Site Code Mapping Rules",
+                                       wc_prefixes=("sitecode_", "ac_scm_sitecode_"))
         _wc_add_row(name, rows, [("p", "e.g. bristol"), ("r", "e.g. BRI")], COLS)
 
 
@@ -660,13 +681,8 @@ def _save_csv_schemas(rules: dict) -> None:
     st.rerun()
 
 def _reset_csv_schemas(rules: dict) -> None:
-    from config.naming_rules import DEFAULT_CSV_SCHEMAS
-    rules["csv_schemas"] = copy.deepcopy(DEFAULT_CSV_SCHEMAS)
-    save_naming_rules(rules, source="CSV Schemas Reset")
-    SSM.set_naming_rules(rules.copy())
-    st.toast("✅ NetBox Bulk Import CSV Schemas reset to defaults!", icon="🔄")
-    _clear_session_state_prefixes("csv_sch_")
-    st.rerun()
+    _restore_from_baseline("csv_schemas", "NetBox Bulk Import CSV Schemas",
+                           wc_prefixes=("csv_sch_",))
 
 def _render_csv_schemas_editor(rules: dict) -> None:
     from config.naming_rules import get_csv_schemas
@@ -733,7 +749,7 @@ def _render_csv_schemas_editor(rules: dict) -> None:
                 rules["csv_schemas"] = edited_schemas
                 _save_csv_schemas(rules)
         with col_reset:
-            if st.button("🔄 Reset to Defaults", key="csv_schemas_reset", width="stretch"):
+            if st.button("🔄 Restore from Baseline", key="csv_schemas_reset", width="stretch"):
                 _reset_csv_schemas(rules)
 
 def _save_vlan_desc_mappings(rules: dict, section: str = "vlan_desc_mappings", section_label: str = "VLAN Description Mappings") -> None:
@@ -1124,19 +1140,9 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
             st.toast("Hypervisor platforms saved")
             st.rerun()
     with c_reset:
-        if st.button("🔄 Reset to Defaults", key="hyp_plat_reset", width="stretch"):
-            _wc_discard("hyp_platforms")
-            _clear_session_state_prefixes("wc_hyp_mod_", "wc_hyp_roles_")
-            default_platforms = [p for p in list(DEFAULT_HYPERVISOR_PRESETS.keys()) if p in parsing_key_set]
-            remaining = [p for p in ordered_platforms if p not in default_platforms]
-            final_order = default_platforms + remaining
-            rules_to_save = dict(rules)
-            rules_to_save["hypervisor_platform_order"] = final_order
-            save_naming_rules(rules_to_save, source="Reset Hypervisor Platforms")
-            fresh = SSM.get_cached_naming_rules() or load_naming_rules()
-            _commit_fresh_rules(rules, fresh)
-            st.toast("Hypervisor platforms reset to defaults")
-            st.rerun()
+        if st.button("🔄 Restore from Baseline", key="hyp_plat_reset", width="stretch"):
+            _restore_from_baseline("hypervisor_platform_order", "Hypervisor platform order",
+                                   wc_prefixes=("hyp_platforms", "hyp_mod_", "hyp_roles_"))
 
     st.caption("Platform order, removal and processing modules apply after Save & Apply Changes.")
 
@@ -1208,15 +1214,10 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 st.toast(f"✅ Section 1 (Description Templates) for '{active_plat}' saved & applied!", icon="💾")
                 st.rerun()
         with c_r:
-            if st.button("🔄 Reset to Defaults", key=f"btn_reset_s1_{active_plat}", width="stretch"):
-                default_hyp = DEFAULT_HYPERVISOR_PRESETS.get(active_plat)
-                hyp_presets[active_plat] = [dict(t) for t in (default_hyp if default_hyp is not None else plat_patterns)]
-                rules["hypervisor_presets"] = hyp_presets
-                save_naming_rules(rules, source=f"Reset Section 1 for {active_plat}")
-                _wc_discard(name)
-                SSM.set_naming_rules(SSM.get_cached_naming_rules() or load_naming_rules())
-                st.toast(f"✅ Section 1 reset to defaults for '{active_plat}'!", icon="🔄")
-                st.rerun()
+            if st.button("🔄 Restore from Baseline", key=f"btn_reset_s1_{active_plat}", width="stretch"):
+                _restore_from_baseline(f"hypervisor_presets.{active_plat}",
+                                       f"Description Templates for '{active_plat}'",
+                                       wc_prefixes=(f"hyp_tpl_{re.sub(r'[^a-z0-9]+', '_', active_plat.lower()).strip('_')}",))
 
         _wc_add_row(name, rows, [("code","e.g. Trunk"),("label","e.g. Trunk Adapter"),("pattern","<interface> (<vlan> VLAN)")], HYP_TPL_COLS)
 
@@ -1286,19 +1287,9 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 st.toast(f"✅ Normalizations for {active_plat} saved!", icon="💾")
                 st.rerun()
         with col_r2:
-            if st.button("🔄 Reset to Default Normalizations", key=f"btn_reset_norms_{active_plat}", width="stretch"):
-                _default_norms = copy.deepcopy(DEFAULT_UNIFIED_PLATFORM_PRESETS.get(active_plat, {}).get("token_normalizations"))
-                if not _default_norms:
-                    st.warning(f"No factory normalizations are defined for {active_plat}; current normalizations were not changed.")
-                else:
-                    plat_parsing["token_normalizations"] = _default_norms
-                    parsing_presets[active_plat] = plat_parsing
-                    rules["topology_parsing_presets"] = parsing_presets
-                    save_naming_rules(rules, source=f"Reset Normalizations for {active_plat}")
-                    SSM.refresh_naming_rules()
-                    st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
-                    st.toast(f"✅ Normalizations reset for {active_plat} ({len(_default_norms)} defaults).", icon="🔄")
-                    st.rerun()
+            if st.button("🔄 Restore from Baseline", key=f"btn_reset_norms_{active_plat}", width="stretch"):
+                _restore_from_baseline(f"topology_parsing_presets.{active_plat}.token_normalizations",
+                                       f"Token Normalizations for '{active_plat}'")
 
     # ──────────────────────────────────────────────────────────────────────
     # Section 3: Topology Noise Filters (True noise_filters Binding)
@@ -1347,27 +1338,9 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 st.toast(f"✅ Unsaved noise filter changes discarded for {active_plat}.", icon="🔄")
                 st.rerun()
         with col_b3:
-            if st.button("⬅️ Restore from Baseline", key=f"btn_restore_noise_{active_plat}", width="stretch"):
-                baseline = StandardsManager().load_baseline()
-                baseline_parsing = {}
-                if isinstance(baseline, dict):
-                    baseline_parsing = baseline.get("topology_parsing_presets", {}) or {}
-                baseline_noise = []
-                if isinstance(baseline_parsing, dict):
-                    baseline_noise = baseline_parsing.get(active_plat, {}).get("noise_filters", [])
-                if not isinstance(baseline_noise, list):
-                    baseline_noise = []
-                if not baseline_noise:
-                    st.warning(f"No baseline noise filters found for {active_plat}; current filters were not changed.")
-                else:
-                    plat_parsing["noise_filters"] = list(baseline_noise)
-                    parsing_presets[active_plat] = plat_parsing
-                    rules["topology_parsing_presets"] = parsing_presets
-                    save_naming_rules(rules, source=f"Restore Noise Filters from Baseline for {active_plat}")
-                    SSM.refresh_naming_rules()
-                    st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
-                    st.toast(f"✅ Noise filters for {active_plat} restored from baseline ({len(baseline_noise)}).", icon="⬅️")
-                    st.rerun()
+            if st.button("🔄 Restore from Baseline", key=f"btn_restore_noise_{active_plat}", width="stretch"):
+                _restore_from_baseline(f"topology_parsing_presets.{active_plat}.noise_filters",
+                                       f"Noise Filters for '{active_plat}'")
 
 def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card_title: str, card_caption: str,
                           section: str = "presets", section_label: str = "Presets", expanded: bool = False,
@@ -1441,7 +1414,7 @@ def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card
         with c_save:
             saved_presets = st.button("💾 Save & Apply Changes", key=f"{name}_save", type="primary", width="stretch")
         with c_reset:
-            reset_presets = st.button("🔄 Reset to Defaults", key=f"{name}_reset", width="stretch")
+            reset_presets = st.button("🔄 Restore from Baseline", key=f"{name}_reset", width="stretch")
 
         _wc_add_row(name, rows, [
             ("code", "e.g. DSwitch"),
@@ -1485,16 +1458,7 @@ def _reset_presets(kind: str, rules: dict, section: str = "presets", section_lab
     key_field = DEFAULT_PRESET_KEY_FIELD.get(kind)
     if not key_field:
         return
-    defaults = default_presets_for(kind)
-    default_patterns = dict(DEFAULT_NAMING_PATTERNS)
-    patterns = dict(rules.get("naming_patterns") or {})
-    for p in defaults:
-        pkey = p.get("pattern_key", "")
-        if pkey in default_patterns:
-            patterns[pkey] = default_patterns[pkey]
-    rules["naming_patterns"] = patterns
-    rules[key_field] = defaults
-    _save_presets(rules, section=section, section_label=section_label)
+    _restore_from_baseline(key_field, f"{section_label}", wc_prefixes=(f"preset_{kind}",))
 
 
 def _fmt_delta_val(value) -> str:
@@ -1595,24 +1559,14 @@ def _host_editor(rules: dict) -> None:
     with c_save:
         saved = st.button("💾 Save & Apply Changes", key=f"{name}_save", type="primary", width='stretch')
     with c_reset:
-        reset = st.button("🔄 Reset to Defaults", key=f"{name}_reset", width='stretch')
+        reset = st.button("🔄 Restore from Baseline", key=f"{name}_reset", width='stretch')
 
     _wc_add_row(name, rows, [("code", "e.g. HYPV"), ("label", "e.g. Hyper-V Host"), ("tpl", "e.g. <site_prefix>hyp<seq>.<domain>")], PRESET_COLS)
 
     if reset:
         _wc_discard(name)
-        new_rules = load_naming_rules()
-        new_patterns = dict(new_rules.get("naming_patterns") or {})
-        keep_vm = [copy.deepcopy(p) for p in get_host_vm_presets(new_rules) if is_vm_preset_key(p.get("pattern_key"))]
-        reset_hosts = [copy.deepcopy(p) for p in default_presets_for("host_vm") if not is_vm_preset_key(p.get("pattern_key"))]
-        for p in reset_hosts:
-            pk = p.get("pattern_key", "")
-            if pk in DEFAULT_NAMING_PATTERNS:
-                new_patterns[pk] = DEFAULT_NAMING_PATTERNS[pk]
-        new_rules["naming_patterns"] = new_patterns
-        new_rules["host_vm_presets"] = reset_hosts + keep_vm
-        _save_presets(new_rules, section="hosts", section_label="Hosts Type Presets")
-        return
+        _restore_from_baseline("host_vm_presets", "Host Type Presets",
+                               wc_prefixes=("host_presets",))
 
     if saved:
         _missing = [str(r.get("code", "")).strip() or str(r.get("label", "")).strip() or "(blank)"
@@ -1741,22 +1695,10 @@ def _vm_editor(rules: dict) -> None:
             _save_presets(new_rules, section="vm_roles", section_label="VM Role Presets")
             return
     with c_r:
-        if st.button("🔄 Reset to Defaults", key=f"{name}_reset", width="stretch"):
+        if st.button("🔄 Restore from Baseline", key=f"{name}_reset", width="stretch"):
             _wc_discard(name)
-            from config.naming_rules import DEFAULT_VM_PRESETS
-            new_rules = load_naming_rules()
-            new_patterns = dict(new_rules.get("naming_patterns") or {})
-            keep_hosts = [p for p in get_host_vm_presets(new_rules) if not is_vm_preset_key(p.get("pattern_key"))]
-            shared_tpl = str(DEFAULT_NAMING_PATTERNS.get("vm_host", ""))
-            reset_vm = []
-            for p in DEFAULT_VM_PRESETS:
-                pk = "vm_" + (re.sub(r"[^a-z0-9]+", "_", str(p.get("code", "")).lower()).strip("_") or "role")
-                new_patterns[pk] = shared_tpl
-                reset_vm.append(dict(p, pattern_key=pk))
-            new_rules["naming_patterns"] = new_patterns
-            new_rules["host_vm_presets"] = keep_hosts + reset_vm
-            _save_presets(new_rules, section="vm_roles", section_label="VM Role Presets")
-            return
+            _restore_from_baseline("host_vm_presets", "VM Role Presets",
+                                   wc_prefixes=("vm_presets",))
 
     _wc_add_row(name, rows, [
         ("code", "e.g. cvi"),
@@ -1811,11 +1753,10 @@ def _render_vlan_description_mappings_editor(rules: dict) -> None:
                     _wc_discard(name)
                     _save_vlan_desc_mappings(new_rules)
         with c_r:
-            if st.button("🔄 Reset to Defaults", key=f"{name}_reset", width="stretch"):
+            if st.button("🔄 Restore from Baseline", key=f"{name}_reset", width="stretch"):
                 _wc_discard(name)
-                rules = dict(rules)
-                rules["vlan_description_mappings"] = dict(DEFAULT_VLAN_DESCRIPTION_MAPPINGS)
-                _save_vlan_desc_mappings(rules)
+                _restore_from_baseline("vlan_description_mappings", "VLAN Description Mappings",
+                                       wc_prefixes=("vlandesc_",))
 
         _wc_add_row(name, rows, [("role", "e.g. Corporate WiFi"), ("desc", "e.g. VIN_Corp")], COLS)
 
@@ -2009,7 +1950,7 @@ def _vlan_presets_editor(rules: dict) -> None:
         with col_save:
             saved_presets = st.button("💾 Save & Apply Changes", key="vlan_pre_save", type="primary", width='stretch')
         with col_reset:
-            reset_presets = st.button("🔄 Reset to Defaults", key="vlan_pre_reset", width='stretch')
+            reset_presets = st.button("🔄 Restore from Baseline", key="vlan_pre_reset", width='stretch')
 
     # Collect group-level pattern values when not custom
     gnpat = group.get("vlan_name_pattern", "<role>")
@@ -2022,9 +1963,8 @@ def _vlan_presets_editor(rules: dict) -> None:
         if group_name is not None:
             _wc_discard(items_name)
         _clear_session_state_prefixes("vlan_pre")
-        rules["vlan_presets"] = copy.deepcopy(dict(DEFAULT_VLAN_PRESETS))
-        _save_presets(rules, section="vlan_presets", section_label="VLAN Allocation Presets")
-        return
+        _restore_from_baseline("vlan_presets", "VLAN Allocation Presets",
+                               wc_prefixes=("vlan_pre", "vlan_items_"))
 
     if saved_presets:
         if group_name is not None:
@@ -2120,11 +2060,10 @@ def _render_azure_mappings_editor(rules: dict):
                 save_naming_rules(new_rules, source="Azure Mappings")
                 _done("Azure mappings saved")
         with c_r:
-            if st.button("🔄 Reset to Defaults", key="azure_map_reset", width="stretch"):
-                new_rules = load_naming_rules()
-                new_rules["azure_mappings"] = copy.deepcopy(DEFAULT_AZURE_MAPPINGS)
-                save_naming_rules(new_rules, source="Azure Mappings Reset")
-                _done("Azure mappings reset")
+            if st.button("🔄 Restore from Baseline", key="azure_map_reset", width="stretch"):
+                _restore_from_baseline("azure_mappings", "Azure Import Mappings",
+                                       wc_prefixes=("azure_region", "azure_platform"))
+                st.session_state.pop("wc_azure_role_fallback", None)
 
 
 def _render_hardware_baseline_editor(rules: dict, active_model: str | None = None):
@@ -2244,16 +2183,10 @@ def _render_hardware_baseline_editor(rules: dict, active_model: str | None = Non
                         st.toast(f"✅ {display_name} category saved & applied!", icon="💾")
                         st.rerun()
                 with col_r:
-                    if st.button("🔄 Reset to Defaults", key=f"hb_reset_{cat_key}", width="stretch"):
-                        _new_hb = copy.deepcopy(get_hardware_baseline_standards(rules))
-                        _new_hb[cat_key] = copy.deepcopy(DEFAULT_HARDWARE_BASELINE_STANDARDS[cat_key])
-                        rules["hardware_baseline_standards"] = _new_hb
-                        save_naming_rules(rules, source=f"Hardware Baseline: Reset {cat_key}")
-                        fresh = SSM.get_cached_naming_rules() or load_naming_rules()
-                        _commit_fresh_rules(rules, fresh)
-                        _clear_session_state_prefixes(f"hb_{cat_key}_")
-                        st.toast(f"✅ {display_name} reset to defaults!", icon="🔄")
-                        st.rerun()
+                    if st.button("🔄 Restore from Baseline", key=f"hb_reset_{cat_key}", width="stretch"):
+                        _restore_from_baseline(f"hardware_baseline_standards.{cat_key}",
+                                               f"{display_name} hardware category",
+                                               wc_prefixes=(f"hb_{cat_key}_",))
 
 
 def render_standards_tab(active_model):
@@ -2416,9 +2349,33 @@ def render_standards_tab(active_model):
                         st.rerun()
                 with col_b2:
                     if st.button("🔄 Restore All Standards to Baseline", width="stretch"):
-                        standards_mgr.restore_from_baseline()
-                        st.toast("All standards restored to baseline snapshot.", icon="⚠️")
-                        st.rerun()
+                        restored = standards_mgr.restore_from_baseline()
+                        if not restored:
+                            st.warning(
+                                "No valid Global Baseline is available; "
+                                "Current Rules were not changed."
+                            )
+                        else:
+                            SSM.refresh_naming_rules()
+                            st.session_state["_cached_naming_rules"] = (
+                                SSM.get_cached_naming_rules()
+                                or load_naming_rules()
+                            )
+                            _clear_session_state_prefixes("wc_")
+                            _clear_session_state_prefixes(
+                                "device_pre_", "interface_pre_", "host_", "vm_",
+                                "esxi_network_pre_", "vlan_pre_", "csv_sch_",
+                                "vlandesc_", "ipamrole_", "sitecode_",
+                                "ac_scm_sitecode_", "autocorr_", "hb_",
+                            )
+                            st.session_state["standards_nonce"] = (
+                                st.session_state.get("standards_nonce", 0) + 1
+                            )
+                            st.toast(
+                                "All standards restored from the Global Baseline.",
+                                icon="✅",
+                            )
+                            st.rerun()
 
                 st.divider()
                 st.markdown("#### 📋 Full System Prompt for External AI")
@@ -2580,8 +2537,28 @@ def render_standards_tab(active_model):
                 save_col,reset_col=st.columns([4,1])
                 with save_col: save=st.button("Save & Apply Changes",key=f"vars_save_{s_key}",type="primary",width="stretch")
                 with reset_col:
-                    if st.button("🔄 Reset to Defaults",key=f"reset_scope_{s_key}",type="secondary",width="stretch"):
-                        _wc_discard(name); _persist_variables(current_rules,{k:copy.deepcopy(v) for k,v in PATTERN_VARIABLES.items() if (v.get("scope") or "shared")==s_key},section_key=s_key)
+                    if st.button("🔄 Restore from Baseline", key=f"reset_scope_{s_key}", type="secondary", width="stretch"):
+                        _wc_discard(name)
+                        mgr = StandardsManager()
+                        baseline = mgr.load_baseline()
+                        baseline_vars = baseline.get("pattern_variables")
+                        if not isinstance(baseline_vars, dict):
+                            st.warning(f"No Baseline pattern variables found for scope '{s_key}'; Current Rules were not changed.")
+                        else:
+                            current = load_naming_rules()
+                            current_vars = dict(current.get("pattern_variables") or {})
+                            kept = {n: m for n, m in current_vars.items()
+                                    if ((m or {}).get("scope") or "shared") != s_key}
+                            restored = {n: copy.deepcopy(m) for n, m in baseline_vars.items()
+                                        if ((m or {}).get("scope") or "shared") == s_key}
+                            new_rules = dict(current)
+                            new_rules["pattern_variables"] = {**kept, **restored}
+                            save_naming_rules(new_rules, source=f"Pattern Variables: Restore {s_key} from Baseline")
+                            SSM.set_naming_rules(new_rules.copy())
+                            SSM.refresh_naming_rules()
+                            st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
+                            st.toast(f"✅ Pattern Variables ({s_key}) restored from Global Baseline.", icon="⬅️")
+                            st.rerun()
                 if save:
                     invalid=[f"<{r['name']}>" for r in rows if r.get("binding_type")=="Derived" and not all(str(r.get(k) or "").strip() for k in ("source_field","filter_field","filter_value"))]
                     if invalid: st.error("Derived variables require Value / Collect, Where and Equals: "+", ".join(invalid))
