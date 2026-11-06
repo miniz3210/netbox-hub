@@ -969,7 +969,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
     add_opts = ["Choose a module..."] + list(add_display_names.keys())
 
     with st.container(border=True):
-        content_col, actions_col = st.columns([9.0, 1.0], vertical_alignment="center")
+        content_col, add_col = st.columns([8.5, 1.5], vertical_alignment="center")
         with content_col:
             sel_add = st.selectbox(
                 "Add Module",
@@ -977,14 +977,8 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 label_visibility="collapsed",
                 key=select_key,
             )
-        with actions_col:
-            up_col, down_col, add_col = st.columns([1, 1, 1], gap="small")
-            with up_col:
-                st.empty()
-            with down_col:
-                st.empty()
-            with add_col:
-                if st.button("➕ Add", key=f"plat_mod_add_btn_{san}"):
+        with add_col:
+            if st.button("➕ Add", key=f"plat_mod_add_btn_{san}", width="stretch"):
                     if sel_add and sel_add != "Choose a module...":
                         target_id = add_display_names.get(sel_add)
                         if target_id:
@@ -1046,17 +1040,11 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
 
     # Add Role
     with st.container(border=True):
-        _acs = st.columns([9.0, 1.0], vertical_alignment="center")
-        with _acs[0]:
+        content_col, add_col = st.columns([8.5, 1.5], vertical_alignment="center")
+        with content_col:
             _new_role = st.text_input("Add Role", value="", key=f"{_role_key}_new_role", label_visibility="collapsed", placeholder="New role")
-        with _acs[1]:
-            _add_up, _add_down, _add_action = st.columns([1, 1, 1], gap="small")
-            with _add_up:
-                st.empty()
-            with _add_down:
-                st.empty()
-            with _add_action:
-                if st.button("➕ Add", key=f"{_role_key}_add_btn"):
+        with add_col:
+            if st.button("➕ Add", key=f"{_role_key}_add_btn", width="stretch"):
                     _nr = _new_role.strip()
                     if not _nr:
                         st.warning("⚠️ Role cannot be blank.")
