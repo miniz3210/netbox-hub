@@ -1338,8 +1338,8 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
 
         parsed_noise = [t.strip() for t in edited_noise.split("\n") if t.strip()]
 
-        col_s3, col_r3, col_b3 = st.columns(3)
-        with col_s3:
+        save_col, restore_col = st.columns(2)
+        with save_col:
             if st.button("💾 Save & Apply Noise Filters", key=f"btn_save_noise_{active_plat}", type="primary", width="stretch"):
                 plat_parsing["noise_filters"] = parsed_noise
                 parsing_presets[active_plat] = plat_parsing
@@ -1348,22 +1348,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 SSM.refresh_naming_rules()
                 st.toast(f"✅ Noise filters for {active_plat} saved!", icon="💾")
                 st.rerun()
-        with col_r3:
-            if st.button("🔄 Reset Unsaved Changes", key=f"btn_reset_noise_{active_plat}", width="stretch"):
-                # Reload latest saved Current Rules for the selected platform (no persist).
-                fresh_rules = load_naming_rules()
-                fresh_parsing = (fresh_rules.get("topology_parsing_presets") or {}).get(active_plat, {})
-                saved_noise = fresh_parsing.get("noise_filters", [])
-                if not isinstance(saved_noise, list):
-                    saved_noise = []
-                plat_parsing["noise_filters"] = list(saved_noise)
-                parsing_presets[active_plat] = plat_parsing
-                rules["topology_parsing_presets"] = parsing_presets
-                SSM.set_naming_rules(rules.copy())
-                st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
-                st.toast(f"✅ Unsaved noise filter changes discarded for {active_plat}.", icon="🔄")
-                st.rerun()
-        with col_b3:
+        with restore_col:
             if st.button("🔄 Restore from Baseline", key=f"btn_restore_noise_{active_plat}", width="stretch"):
                 # C. Clear the current Noise Filters text-area widget key if it exists.
                 st.session_state.pop(f"txt_noise_filters_{st.session_state.get('standards_nonce', 0)}_{active_plat}", None)
