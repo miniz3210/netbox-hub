@@ -19,7 +19,8 @@ from config.naming_rules import (
     DEFAULT_VLAN_PRESETS, DEFAULT_VLAN_DESCRIPTION_MAPPINGS,
     get_ipam_role_mappings, DEFAULT_IPAM_ROLE_MAPPINGS,
     get_hardware_baseline_standards, DEFAULT_HARDWARE_BASELINE_STANDARDS,
-    DEFAULT_HYPERVISOR_PRESETS, get_azure_mappings, DEFAULT_AZURE_MAPPINGS,
+    DEFAULT_HYPERVISOR_PRESETS, DEFAULT_UNIFIED_PLATFORM_PRESETS,
+    get_azure_mappings, DEFAULT_AZURE_MAPPINGS,
     )
 from core.extractors import PROCESSING_MODULES, required_template_codes_for
 PROCESSING_MODULES_MAP = {m["display_name"]: mid for mid, m in PROCESSING_MODULES.items()}
@@ -1295,13 +1296,18 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 st.rerun()
         with col_r2:
             if st.button("🔄 Reset to Default Normalizations", key=f"btn_reset_norms_{active_plat}", width="stretch"):
-                plat_parsing["token_normalizations"] = DEFAULT_PARSING_PRESETS.get(active_plat, {}).get("token_normalizations", [])
-                parsing_presets[active_plat] = plat_parsing
-                rules["topology_parsing_presets"] = parsing_presets
-                save_naming_rules(rules, source=f"Reset Normalizations for {active_plat}")
-                SSM.refresh_naming_rules()
-                st.toast(f"✅ Normalizations reset for {active_plat}!", icon="🔄")
-                st.rerun()
+                _default_norms = copy.deepcopy(DEFAULT_UNIFIED_PLATFORM_PRESETS.get(active_plat, {}).get("token_normalizations"))
+                if not _default_norms:
+                    st.warning(f"No factory normalizations are defined for {active_plat}; current normalizations were not changed.")
+                else:
+                    plat_parsing["token_normalizations"] = _default_norms
+                    parsing_presets[active_plat] = plat_parsing
+                    rules["topology_parsing_presets"] = parsing_presets
+                    save_naming_rules(rules, source=f"Reset Normalizations for {active_plat}")
+                    SSM.refresh_naming_rules()
+                    st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
+                    st.toast(f"✅ Normalizations reset for {active_plat} ({len(_default_norms)} defaults).", icon="🔄")
+                    st.rerun()
 
     # ──────────────────────────────────────────────────────────────────────
     # Section 3: Topology Noise Filters (True noise_filters Binding)
@@ -1336,14 +1342,18 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 st.rerun()
         with col_r3:
             if st.button("🔄 Reset Noise Filters", key=f"btn_reset_noise_{active_plat}", width="stretch"):
-                plat_parsing["noise_filters"] = DEFAULT_PARSING_PRESETS.get(active_plat, {}).get("noise_filters", [])
-                parsing_presets[active_plat] = plat_parsing
-                rules["topology_parsing_presets"] = parsing_presets
-                save_naming_rules(rules, source=f"Reset Noise Filters for {active_plat}")
-                SSM.refresh_naming_rules()
-                st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
-                st.toast(f"✅ Noise filters reset for {active_plat}!", icon="🔄")
-                st.rerun()
+                _default_noise = copy.deepcopy(DEFAULT_UNIFIED_PLATFORM_PRESETS.get(active_plat, {}).get("noise_filters"))
+                if not _default_noise:
+                    st.warning(f"No factory noise filters are defined for {active_plat}; current filters were not changed.")
+                else:
+                    plat_parsing["noise_filters"] = _default_noise
+                    parsing_presets[active_plat] = plat_parsing
+                    rules["topology_parsing_presets"] = parsing_presets
+                    save_naming_rules(rules, source=f"Reset Noise Filters for {active_plat}")
+                    SSM.refresh_naming_rules()
+                    st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
+                    st.toast(f"✅ Noise filters reset for {active_plat} ({len(_default_noise)} defaults).", icon="🔄")
+                    st.rerun()
 
 def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card_title: str, card_caption: str,
                           section: str = "presets", section_label: str = "Presets", expanded: bool = False,
