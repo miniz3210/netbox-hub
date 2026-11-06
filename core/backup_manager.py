@@ -2710,7 +2710,7 @@ def clear_backup_records(preserve_csv: bool = False) -> int:
         # Delete from interfaces, cables, backup_endpoints if they exist
         for tbl in ("interfaces", "cables", "backup_endpoints"):
             cursor.execute(
-                'SELECT name FROM sqlite_master WHERE type="table" AND name=?', (tbl,)
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (tbl,)
             )
             if cursor.fetchone():
                 cursor.execute(f'DELETE FROM "{tbl}"')
@@ -2718,7 +2718,7 @@ def clear_backup_records(preserve_csv: bool = False) -> int:
         if not preserve_csv:
             # Delete full_endpoint_catalogue rows when not preserving CSV
             cursor.execute(
-                'SELECT name FROM sqlite_master WHERE type="table" AND name=?',
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
                 ("full_endpoint_catalogue",),
             )
             if cursor.fetchone():

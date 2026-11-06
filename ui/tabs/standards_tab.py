@@ -1100,6 +1100,14 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
             for plat in list(parsing_presets.keys()):
                 if plat not in new_order:
                     parsing_presets.pop(plat, None)
+            # Prune stale platform_tokens entries for deleted platforms only;
+            # preserve all other entries and never drop the whole dictionary.
+            _platform_tokens = rules_to_save.get("platform_tokens")
+            if isinstance(_platform_tokens, dict):
+                for _plat in list(_platform_tokens.keys()):
+                    if _plat not in new_order:
+                        _platform_tokens.pop(_plat, None)
+                rules_to_save["platform_tokens"] = _platform_tokens
             for plat in list(parsing_presets.keys()):
                 if plat in new_order:
                      plat_san = re.sub(r"[^a-z0-9]+", "_", plat.lower()).strip("_")
@@ -1270,7 +1278,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 parsing_presets[active_plat] = plat_parsing
                 rules["topology_parsing_presets"] = parsing_presets
                 save_naming_rules(rules, source=f"Add normalization to {active_plat}")
-                SSM.set_naming_rules(rules.copy())
+                SSM.refresh_naming_rules()
                 st.toast("✅ Normalization rule added!", icon="💾")
                 st.rerun()
 
@@ -1305,11 +1313,12 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
     with st.expander(f"🔇 3. Topology Noise Filters ({len(noise_filters)})", expanded=False):
         st.caption("Tokens or regex patterns matching unwanted UI chrome, button labels, and icon artifacts to silently discard.")
         noise_text = "\n".join(str(t).strip() for t in noise_filters if str(t).strip())
+        nonce = st.session_state.get("standards_nonce", 0)
         edited_noise = st.text_area(
             "Noise Tokens / Patterns (one per line)",
             value=noise_text,
             height=200,
-            key=f"txt_noise_filters_{active_plat}",
+            key=f"txt_noise_filters_{nonce}_{active_plat}",
             help="One token or regex per line. Directly used by core/extractors during spatial reduction."
         )
 
@@ -1332,6 +1341,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 rules["topology_parsing_presets"] = parsing_presets
                 save_naming_rules(rules, source=f"Reset Noise Filters for {active_plat}")
                 SSM.refresh_naming_rules()
+                st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
                 st.toast(f"✅ Noise filters reset for {active_plat}!", icon="🔄")
                 st.rerun()
 

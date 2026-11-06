@@ -1062,7 +1062,6 @@ def _normalize_rules(raw: dict) -> dict:
     # hypervisor variables when they are absent.
     ensure_hypervisor_variables(merged)
     return merged
-    return merged
 
 
 def _ensure_unified_parsing_defaults(rules: dict) -> None:

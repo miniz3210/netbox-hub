@@ -602,17 +602,6 @@ def _asset_class_3(naming_rules: dict, casing: str, active_model: str = ""):
         _render_interactive_hypervisor_mode(naming_rules, casing, active_model)
     else:
         _render_screenshot_batch_mode(naming_rules, casing, active_model)
-def _clean_rendered_clause(rendered: str) -> str:
-    """Removes dangling slashes, empty parens, and orphan active/standby markers."""
-    rendered = re.sub(r"\(\s*/\s*\)", "", rendered)
-    rendered = re.sub(r"/\s*\)", ")", rendered)
-    rendered = re.sub(r"\(\s*/", "(", rendered)
-    rendered = re.sub(r"\(\s*Active\s*/\s*Standby\s*\)", "", rendered)
-    rendered = re.sub(r"\(\s*Active\s*/\s*\)", "(Active)", rendered)
-    rendered = re.sub(r"\(\s*/\s*Standby\s*\)", "(Standby)", rendered)
-    rendered = re.sub(r"\(\s*\)", "", rendered)
-    rendered = re.sub(r"\s{2,}", " ", rendered)
-    return rendered.strip()
 def render_hypervisor_edit_mode_ui(pattern_key: str, current_preset: dict, platform: str, naming_rules: dict):
     """Edit mode UI for hypervisor presets, syncing pattern back to hypervisor_presets and persisting."""
     from config.naming_rules import save_naming_rules as _save_naming_rules
@@ -763,20 +752,14 @@ def _render_interactive_hypervisor_mode(naming_rules: dict, casing: str, active_
                         key=f"dyn_tok_val_{sel_platform}_{token}",
                         placeholder=ph
                     ).strip()
-        rendered = pattern
-        for token, val in input_values.items():
-            if val:
-                rendered = rendered.replace(f"<{token}>", val)
-            else:
-                rendered = rendered.replace(f"<{token}>", "")
-        cleaned_output = _clean_rendered_clause(rendered)
+        rendered = render_dynamic_pattern(pattern, input_values, all_vars)
         # Apply Auto-Correction if enabled globally
         if st.session_state.get("auto_correct", True):
             from utils.formatters import apply_auto_corrections
-            cleaned_output = apply_auto_corrections(cleaned_output, "ocr_cleaning")
-            cleaned_output = apply_auto_corrections(cleaned_output, "vmware")
+            rendered = apply_auto_corrections(rendered, "ocr_cleaning")
+            rendered = apply_auto_corrections(rendered, "vmware")
         st.caption("Generated NetBox Description:")
-        st.code(cleaned_output, language="text")
+        st.code(rendered, language="text")
 # ---------------------------------------------------------------------------
 # Unified topology analysis helpers (Session-callback friendly)
 # ---------------------------------------------------------------------------
