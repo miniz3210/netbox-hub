@@ -29,7 +29,7 @@ from core.session_manager import SessionStateManager as SSM
 from utils.formatters import (
     load_auto_corrections, save_auto_corrections, reset_auto_corrections,
 )
-from data.standards_manager import StandardsManager, DEFAULT_PARSING_PRESETS
+from data.standards_manager import StandardsManager
 
 # Shared column width ratios enforced across preset table headers, all data rows,
 # and the inline "add" row so every preset table lines up identically.
@@ -905,17 +905,8 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
     if "aliases" not in plat_parsing or not isinstance(plat_parsing.get("aliases"), dict):
         plat_parsing["aliases"] = {}
 
-    default_fallback = DEFAULT_PARSING_PRESETS.get(active_plat, {})
-    # Only seed missing keys when the user has NOT explicitly saved a value
-    # (empty string is a valid intentional choice).  Check session-state flags
-    # written by save handlers to distinguish "first render" from "user cleared".
-    _seeded_key = f"_plat_parsing_seeded_{active_plat}"
-    if not st.session_state.get(_seeded_key, False):
-        if not plat_parsing.get("instructions") and default_fallback.get("instructions"):
-            plat_parsing["instructions"] = default_fallback["instructions"]
-        if not plat_parsing.get("export_prompt") and default_fallback.get("export_prompt"):
-            plat_parsing["export_prompt"] = default_fallback["export_prompt"]
-        st.session_state[_seeded_key] = True
+    # No factory instructions/export_prompt seeding: empty sections stay empty
+    # (Section 5). Trust the user's explicitly saved values.
 
     # ──────────────────────────────────────────────────────────────────────
     san = re.sub(r"[^a-z0-9]+", "_", active_plat.lower()).strip("_")
@@ -1330,7 +1321,7 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
 
         parsed_noise = [t.strip() for t in edited_noise.split("\n") if t.strip()]
 
-        col_s3, col_r3 = st.columns(2)
+        col_s3, col_r3, col_b3 = st.columns(3)
         with col_s3:
             if st.button("💾 Save & Apply Noise Filters", key=f"btn_save_noise_{active_plat}", type="primary", width="stretch"):
                 plat_parsing["noise_filters"] = parsed_noise
@@ -1341,18 +1332,41 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 st.toast(f"✅ Noise filters for {active_plat} saved!", icon="💾")
                 st.rerun()
         with col_r3:
-            if st.button("🔄 Reset Noise Filters", key=f"btn_reset_noise_{active_plat}", width="stretch"):
-                _default_noise = copy.deepcopy(DEFAULT_UNIFIED_PLATFORM_PRESETS.get(active_plat, {}).get("noise_filters"))
-                if not _default_noise:
-                    st.warning(f"No factory noise filters are defined for {active_plat}; current filters were not changed.")
+            if st.button("🔄 Reset Unsaved Changes", key=f"btn_reset_noise_{active_plat}", width="stretch"):
+                # Reload latest saved Current Rules for the selected platform (no persist).
+                fresh_rules = load_naming_rules()
+                fresh_parsing = (fresh_rules.get("topology_parsing_presets") or {}).get(active_plat, {})
+                saved_noise = fresh_parsing.get("noise_filters", [])
+                if not isinstance(saved_noise, list):
+                    saved_noise = []
+                plat_parsing["noise_filters"] = list(saved_noise)
+                parsing_presets[active_plat] = plat_parsing
+                rules["topology_parsing_presets"] = parsing_presets
+                SSM.set_naming_rules(rules.copy())
+                st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
+                st.toast(f"✅ Unsaved noise filter changes discarded for {active_plat}.", icon="🔄")
+                st.rerun()
+        with col_b3:
+            if st.button("⬅️ Restore from Baseline", key=f"btn_restore_noise_{active_plat}", width="stretch"):
+                baseline = StandardsManager().load_baseline()
+                baseline_parsing = {}
+                if isinstance(baseline, dict):
+                    baseline_parsing = baseline.get("topology_parsing_presets", {}) or {}
+                baseline_noise = []
+                if isinstance(baseline_parsing, dict):
+                    baseline_noise = baseline_parsing.get(active_plat, {}).get("noise_filters", [])
+                if not isinstance(baseline_noise, list):
+                    baseline_noise = []
+                if not baseline_noise:
+                    st.warning(f"No baseline noise filters found for {active_plat}; current filters were not changed.")
                 else:
-                    plat_parsing["noise_filters"] = _default_noise
+                    plat_parsing["noise_filters"] = list(baseline_noise)
                     parsing_presets[active_plat] = plat_parsing
                     rules["topology_parsing_presets"] = parsing_presets
-                    save_naming_rules(rules, source=f"Reset Noise Filters for {active_plat}")
+                    save_naming_rules(rules, source=f"Restore Noise Filters from Baseline for {active_plat}")
                     SSM.refresh_naming_rules()
                     st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
-                    st.toast(f"✅ Noise filters reset for {active_plat} ({len(_default_noise)} defaults).", icon="🔄")
+                    st.toast(f"✅ Noise filters for {active_plat} restored from baseline ({len(baseline_noise)}).", icon="⬅️")
                     st.rerun()
 
 def _preset_type_editor(kind: str, presets: list, rules: dict, prefix: str, card_title: str, card_caption: str,

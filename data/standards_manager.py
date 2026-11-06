@@ -1,5 +1,6 @@
 import json
 import os
+import copy
 from datetime import datetime
 from config.constants import RULES_FILE
 from core.session_manager import SessionStateManager as SSM
@@ -95,6 +96,21 @@ class StandardsManager:
             pass
         return {}
 
+    def load_baseline(self) -> dict:
+        """Return the Global Baseline as a dictionary.
+
+        Reads the same Baseline file used by solidify/restore (BASELINE_RULES_FILE).
+        Safely returns ``{}`` when missing or invalid. Does not mutate Current Rules.
+        """
+        try:
+            if os.path.exists(BASELINE_RULES_FILE):
+                with open(BASELINE_RULES_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                return data if isinstance(data, dict) else {}
+        except Exception:
+            pass
+        return {}
+
     def save_standards(self) -> bool:
         try:
             os.makedirs(os.path.dirname(self.rules_file), exist_ok=True)
@@ -114,7 +130,14 @@ class StandardsManager:
         presets = self.standards.get("parsing_presets")
         if isinstance(presets, list) and presets:
             return presets
-        return DEFAULT_PARSING_PRESETS.copy()
+        return {}
+
+    def get_parsing_preset_for_platform(self, platform: str) -> dict:
+        """Return the parsing preset dict for a single platform from Current Rules."""
+        presets = self.standards.get("topology_parsing_presets")
+        if isinstance(presets, dict):
+            return presets.get(platform, {})
+        return {}
 
     def save_parsing_presets(self, presets: list) -> bool:
         self.standards["parsing_presets"] = presets
@@ -199,11 +222,45 @@ class StandardsManager:
                     baseline_data = json.load(f)
             else:
                 baseline_data = {}
+            if not isinstance(baseline_data, dict):
+                return False
             with open(RULES_FILE, "w", encoding="utf-8") as f:
                 json.dump(baseline_data, f, indent=2, ensure_ascii=False)
                 f.flush()
                 os.fsync(f.fileno())
             SSM.set_naming_rules(baseline_data)
+            SSM.refresh_naming_rules()
+            return True
+        except Exception:
+            return False
+
+    def restore_section_from_baseline(self, section: str) -> bool:
+        """Restore only ``section`` from Global Baseline into Current Rules.
+
+        Preserves all unrelated Current Rules sections, persists Current Rules,
+        and refreshes the session cache. Returns False (no change) when the
+        Baseline or section is unavailable.
+        """
+        try:
+            baseline = self.load_baseline()
+            if not baseline or section not in baseline:
+                return False
+            current = {}
+            if os.path.exists(RULES_FILE):
+                try:
+                    with open(RULES_FILE, "r", encoding="utf-8") as f:
+                        current = json.load(f)
+                except Exception:
+                    current = {}
+            if not isinstance(current, dict):
+                current = {}
+            current[section] = copy.deepcopy(baseline[section])
+            os.makedirs(os.path.dirname(RULES_FILE), exist_ok=True)
+            with open(RULES_FILE, "w", encoding="utf-8") as f:
+                json.dump(current, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            SSM.set_naming_rules(current)
             SSM.refresh_naming_rules()
             return True
         except Exception:

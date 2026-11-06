@@ -67,51 +67,6 @@ HYPERVISOR_VARIABLE_NAMES = [
     "active_vmnics", "standby_vmnics", "vmk", "switch_zone", "slot", "uplink_role",
 ]
 
-def ensure_hypervisor_variables(rules: dict) -> None:
-    """Ensure the 9 canonical hypervisor-scoped pattern variables exist.
-
-    - Variables from older files still keyed under ``scope == 'esxi'`` are
-      migrated to ``'hypervisor'`` so the standards UI buckets stay consistent.
-    - Any of the canonical 9 tokens missing from the registry is backfilled
-      with its factory-default metadata from ``PATTERN_VARIABLES`` (label,
-      placeholder, optional flag). Existing user values that don't conflict
-      (default / placeholder) are preserved.
-    """
-    variables = rules.get("pattern_variables")
-    if not isinstance(variables, dict):
-        return
-    # 1) Migrate legacy 'esxi' scope entries to 'hypervisor'.
-    for meta in variables.values():
-        if isinstance(meta, dict) and meta.get("scope") == "esxi":
-            meta["scope"] = "hypervisor"
-    # 2) Ensure every canonical hypervisor token is present & scoped.
-    for name in HYPERVISOR_VARIABLE_NAMES:
-        default = PATTERN_VARIABLES.get(name)
-        if default is None:
-            continue
-        existing = variables.get(name)
-        if not isinstance(existing, dict):
-            variables[name] = dict(default)
-            continue
-        existing["scope"] = "hypervisor"
-        for key, val in default.items():
-            if key not in existing or not existing[key]:
-                existing[key] = val
-
-
-def _needs_hypervisor_migration(raw: dict) -> bool:
-    """Detect whether the on-disk rule set needs an automatic scope migration."""
-    pvars = raw.get("pattern_variables")
-    if not isinstance(pvars, dict):
-        return False
-    for meta in pvars.values():
-        if isinstance(meta, dict) and meta.get("scope") == "esxi":
-            return True
-    for name in HYPERVISOR_VARIABLE_NAMES:
-        if name not in pvars:
-            return True
-    return False
-
 
 PATTERN_VARIABLES = {
     # 1. Global & Shared Scope
@@ -862,6 +817,39 @@ DEFAULT_UNIFIED_PLATFORM_PRESETS = {
 
 
 
+def empty_safe_schema() -> dict:
+    """Return a safe empty rules structure with canonical empty containers.
+
+    Contains no business/domain content. Used when neither Current Rules
+    nor a Global Baseline exists. An empty initial configuration is valid.
+    """
+    return {
+        "naming_patterns": {},
+        "pattern_variables": {},
+        "topology_parsing_presets": {},
+        "hypervisor_presets": {},
+        "device_presets": [],
+        "interface_presets": [],
+        "host_vm_presets": [],
+        "vlan_presets": {},
+        "token_order": {},
+        "platform_tokens": {},
+    }
+
+
+def _load_baseline() -> dict:
+    """Load the Global Baseline through the shared StandardsManager API.
+
+    Returns a dictionary, safely ``{}`` when missing or invalid. Does not
+    mutate Current Rules and does not introduce a second Baseline file.
+    """
+    try:
+        from data.standards_manager import StandardsManager
+        return StandardsManager().load_baseline()
+    except Exception:
+        return {}
+
+
 def _normalize_rules(raw: dict) -> dict:
     """Upgrade any rule dict to the merged schema used by the app.
 
@@ -878,11 +866,6 @@ def _normalize_rules(raw: dict) -> dict:
     # topology_parsing_presets structure.  Must run here on `raw` BEFORE it is
     # destructively rebuilt into `merged` below, otherwise platform_presets is lost.
     raw = _migrate_platform_presets_to_unified(raw)
-
-    # Ensure every platform in topology_parsing_presets has the canonical
-    # default instructions / export_prompt when it was created via the old
-    # defaults path (DEFAULT_PARSING_PRESETS from standards_manager).
-    _ensure_unified_parsing_defaults(raw)
 
     raw_patterns = raw.get("naming_patterns")
     if not isinstance(raw_patterns, dict):
@@ -913,15 +896,15 @@ def _normalize_rules(raw: dict) -> dict:
     if isinstance(custom, list):
         merged["custom_patterns"] = [{"label": str(c.get("label", "")), "key": str(c.get("key", "")), "pattern": str(c.get("pattern", ""))} for c in custom if isinstance(c, dict)]
 
-    merged["device_presets"] = _normalize_presets(raw.get("device_presets"), DEVICE_PRESETS)
-    merged["interface_presets"] = _normalize_presets(raw.get("interface_presets"), INTERFACE_PRESETS)
-    merged["host_vm_presets"] = _normalize_presets(raw.get("host_vm_presets"), HOST_VM_PRESETS)
-    merged["esxi_network_presets"] = _normalize_presets(raw.get("esxi_network_presets"), ESXI_NETWORK_PRESETS)
+    merged["device_presets"] = _normalize_presets(raw.get("device_presets"))
+    merged["interface_presets"] = _normalize_presets(raw.get("interface_presets"))
+    merged["host_vm_presets"] = _normalize_presets(raw.get("host_vm_presets"))
+    merged["esxi_network_presets"] = _normalize_presets(raw.get("esxi_network_presets"))
     merged["vlan_presets"] = get_vlan_presets(raw)
 
     variables = raw.get("pattern_variables")
     if variables is None or not isinstance(variables, dict):
-        variables = copy.deepcopy(PATTERN_VARIABLES)
+        variables = {}
     else:
         merged_vars = {}
         for k, v in variables.items():
@@ -962,25 +945,13 @@ def _normalize_rules(raw: dict) -> dict:
 
     merged["csv_schemas"] = get_csv_schemas(raw)
 
-
-    # ── Hardware Baseline Standards (structured, per-category) ────────────────
-    merged["hardware_baseline_standards"] = _normalize_hardware_baseline(raw)
-    # Back-fill legacy ``netbox_server_yaml`` from the "server" category for
-    # callers that still read the old flat key.
-    _hb = merged.get("hardware_baseline_standards", {})
-    _server_cfg = _hb.get("server") if isinstance(_hb, dict) else {}
-    if isinstance(_server_cfg, dict):
-        server_parts = []
-        for _k in ("console_ports", "module_bays", "interfaces"):
-            _v = _server_cfg.get(_k)
-            if isinstance(_v, str) and _v.strip():
-                # Normalise the key to the legacy hyphenated form on output.
-                _lk = _k.replace("_", "-")
-                server_parts.append(f"{_lk}: {_v}")
-        merged.setdefault("netbox_server_yaml", "; ".join(server_parts))
-
+    if isinstance(raw.get("hardware_baseline_standards"), dict):
+        merged["hardware_baseline_standards"] = raw["hardware_baseline_standards"]
+    else:
+        merged["hardware_baseline_standards"] = {}
     # Normalize topology_parsing_presets: historically stored as list in some
     # YAML/disk files; always coerce to canonical dict keyed by platform name.
+    # Never inject factory platforms into an empty dict.
     _raw_tpp = raw.get("topology_parsing_presets")
     if isinstance(_raw_tpp, list):
         _norm_tpp = {}
@@ -991,14 +962,13 @@ def _normalize_rules(raw: dict) -> dict:
                     _norm_tpp[str(_pname)] = _item
         raw["topology_parsing_presets"] = _norm_tpp
         _raw_tpp = _norm_tpp
-    if isinstance(_raw_tpp, dict) and _raw_tpp:
+    if isinstance(_raw_tpp, dict):
         merged["topology_parsing_presets"] = _raw_tpp
     else:
         merged["topology_parsing_presets"] = {}
 
     # Defensive normalization for hypervisor_presets.
-    # Seed once from factory defaults only when key is missing or None.
-    # Otherwise, trust the Standards YAML completely.
+    # Normalize list->dict but never seed factory presets into an empty dict.
     _raw_hyp = raw.get("hypervisor_presets")
     if isinstance(_raw_hyp, list):
         _norm_hyp = {}
@@ -1014,7 +984,7 @@ def _normalize_rules(raw: dict) -> dict:
     if isinstance(_raw_hyp, dict):
         merged["hypervisor_presets"] = _raw_hyp
     else:
-        merged["hypervisor_presets"] = copy.deepcopy(DEFAULT_HYPERVISOR_PRESETS)
+        merged["hypervisor_presets"] = {}
 
     # Preserve user-defined hypervisor platform order as a clean list of
     # non-empty strings; never auto-populate, reorder or deduplicate it.
@@ -1058,54 +1028,18 @@ def _normalize_rules(raw: dict) -> dict:
         if normalized_to:
             merged["token_order"] = normalized_to
 
-    # Auto-migrate legacy 'esxi' scope → 'hypervisor' and seed the 9 canonical
-    # hypervisor variables when they are absent.
-    ensure_hypervisor_variables(merged)
     return merged
 
 
-def _ensure_unified_parsing_defaults(rules: dict) -> None:
-    """Canonicalise per-platform keys in ``topology_parsing_presets``.
+def _normalize_presets(raw_presets, defaults=None):
+    """Validate and normalise a device/interface presets list.
 
-    Factory default platforms are injected ONLY when the dict is missing or
-    empty. When non-empty, never add, re-add or restore any platform — only
-    canonical per-platform keys are normalised for platforms already present,
-    so a user-deleted platform is never resurrected.
+    Never injects factory defaults into an empty or missing section — an
+    explicit empty section stays empty (Section 5).  ``defaults`` is only a
+    schema reference for type/shape, not a content source.
     """
-    existing = rules.get("topology_parsing_presets")
-    if not existing:
-        rules["topology_parsing_presets"] = copy.deepcopy(DEFAULT_UNIFIED_PLATFORM_PRESETS)
-        return
-    if not isinstance(existing, dict):
-        # Non-dict (e.g. legacy list): leave untouched for later list->dict
-        # normalisation; do not inject factory platforms over user data.
-        return
-
-    for display_name, defaults in DEFAULT_UNIFIED_PLATFORM_PRESETS.items():
-        plat = existing.get(display_name)
-        if not isinstance(plat, dict):
-            continue
-        for key, default_val in defaults.items():
-            if key not in plat or plat[key] in (None, ""):
-                plat[key] = default_val
-            elif key == "modules" and isinstance(default_val, list) and isinstance(plat[key], list):
-                # Preserve user-declared modules; do not overwrite with factory defaults.
-                pass
-            elif key == "aliases" and isinstance(default_val, dict) and isinstance(plat[key], dict):
-                # Merge: start with legacy/user aliases, then overlay defaults
-                # so no default alias is lost.
-                merged_aliases = dict(plat[key])
-                for canon, alias_list in default_val.items():
-                    if isinstance(alias_list, list):
-                        curr = merged_aliases.get(canon, [])
-                        merged_aliases[canon] = list(dict.fromkeys(curr + alias_list))
-                plat[key] = merged_aliases
-
-
-def _normalize_presets(raw_presets, defaults):
-    """Validate and normalise a device/interface presets list; falls back to defaults."""
     if not isinstance(raw_presets, list):
-        return list(defaults)
+        return []
     normalized = []
     for p in raw_presets:
         if not isinstance(p, dict):
@@ -1120,25 +1054,25 @@ def _normalize_presets(raw_presets, defaults):
                 "pattern_key": pattern_key,
                 "description": str(p.get("description", "")).strip(),
             })
-    return normalized or list(defaults)
+    return normalized
 
 
 def get_device_presets(rules: dict) -> list:
-    """Return the device presets list from a rules dict (defaults if missing)."""
+    """Return the device presets list from a rules dict (empty if missing)."""
     raw = rules.get("device_presets")
-    return _normalize_presets(raw, DEVICE_PRESETS)
+    return _normalize_presets(raw)
 
 
 def get_interface_presets(rules: dict) -> list:
-    """Return the interface presets list from a rules dict (defaults if missing)."""
+    """Return the interface presets list from a rules dict (empty if missing)."""
     raw = rules.get("interface_presets")
-    return _normalize_presets(raw, INTERFACE_PRESETS)
+    return _normalize_presets(raw)
 
 
 def get_host_vm_presets(rules: dict) -> list:
     """Return the host/virtual-machine presets list from a rules dict."""
     raw = rules.get("host_vm_presets")
-    return _normalize_presets(raw, HOST_VM_PRESETS)
+    return _normalize_presets(raw)
 
 
 # A host/VM preset is a VM when its pattern_key starts with this prefix ("vm_host" = legacy shared key).
@@ -1153,7 +1087,7 @@ def is_vm_preset_key(pattern_key) -> bool:
 def get_esxi_network_presets(rules: dict) -> list:
     """Return the ESXi network description presets list from a rules dict."""
     raw = rules.get("esxi_network_presets")
-    return _normalize_presets(raw, ESXI_NETWORK_PRESETS)
+    return _normalize_presets(raw)
 
 
 def _normalize_hardware_baseline(raw: dict) -> dict:
@@ -1482,15 +1416,20 @@ def load_naming_rules() -> Dict[str, str]:
 
     _migrate_and_persist()
     rules = _load_rules_dict_from_file()
-    normalized = _normalize_rules(rules if rules else DEFAULT_NAMING_PATTERNS.copy())
 
-    # Auto-persist scope migrations so legacy 'esxi' scopes and missing
-    # hypervisor defaults land on disk on first load.
-    if rules and _needs_hypervisor_migration(rules):
-        try:
-            save_naming_rules(normalized, source="Hypervisor scope migration")
-        except Exception:
-            pass
+    # Required load priority (Section 4):
+    # 1. Latest saved Current Rules
+    # 2. If Current Rules missing/unreadable -> saved Global Baseline (recovery)
+    # 3. If neither exists -> empty safe schema (no factory defaults)
+    if isinstance(rules, dict) and rules:
+        normalized = _normalize_rules(rules)
+    else:
+        baseline = _load_baseline()
+        if isinstance(baseline, dict) and baseline:
+            print("[naming_rules] Current Rules missing/unreadable; recovering from Global Baseline")
+            normalized = _normalize_rules(baseline)
+        else:
+            normalized = empty_safe_schema()
 
     if hasattr(st, "session_state"):
         st.session_state["_cached_naming_rules"] = normalized
