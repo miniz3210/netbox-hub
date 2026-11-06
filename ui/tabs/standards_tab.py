@@ -96,6 +96,29 @@ def _commit_fresh_rules(rules: dict, fresh: dict) -> None:
     st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
 
 
+def _refresh_after_baseline_restore(restored_rules: dict) -> None:
+    """Post-baseline-restore refresh so the current rerun immediately renders the
+    restored Current Rules (no browser F5, no stale rules object reused).
+
+    Sequence:
+      A. Invalidate the cached rules loader (_cached_naming_rules).
+      B. Replace all rules-related session cache entries with the restored rules.
+      C/D. Bump the widget nonce and rerun.
+    """
+    # A. Invalidate the cached rules loader.
+    #    load_naming_rules() is not st.cache_data decorated (no .clear()); it
+    #    serves _cached_naming_rules from session_state, so popping it is the
+    #    repository's real invalidation path.
+    st.session_state.pop("_cached_naming_rules", None)
+    # B. Replace all rules-related session cache entries with the restored rules.
+    fresh = copy.deepcopy(restored_rules)
+    SSM.set_naming_rules(fresh)
+    st.session_state["_cached_naming_rules"] = copy.deepcopy(restored_rules)
+    # C/D. Bump the widget nonce so editors rebuild, then rerun immediately.
+    st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
+    st.rerun()
+
+
 def _restore_from_baseline(path: str, label: str, wc_prefixes: tuple = ()) -> None:
     """Restore a single Baseline path into Current Rules, then toast and rerun.
 
@@ -111,8 +134,11 @@ def _restore_from_baseline(path: str, label: str, wc_prefixes: tuple = ()) -> No
         if result.get("missing"):
             st.warning(f"No Baseline value for '{label}'; Current Rules were not changed.")
         return
+    # Obtain the exact fresh Current Rules dict now persisted to disk.
+    st.session_state.pop("_cached_naming_rules", None)
+    fresh_rules = load_naming_rules()
     st.toast(f"✅ {label} restored from Global Baseline.", icon="⬅️")
-    st.rerun()
+    _refresh_after_baseline_restore(fresh_rules)
 
 
 def _wc_rows(name: str, loader) -> list:
@@ -1339,6 +1365,8 @@ def _render_hypervisor_platform_presets_editor(rules: dict, active_model: str | 
                 st.rerun()
         with col_b3:
             if st.button("🔄 Restore from Baseline", key=f"btn_restore_noise_{active_plat}", width="stretch"):
+                # C. Clear the current Noise Filters text-area widget key if it exists.
+                st.session_state.pop(f"txt_noise_filters_{st.session_state.get('standards_nonce', 0)}_{active_plat}", None)
                 _restore_from_baseline(f"topology_parsing_presets.{active_plat}.noise_filters",
                                        f"Noise Filters for '{active_plat}'")
 
@@ -2356,11 +2384,7 @@ def render_standards_tab(active_model):
                                 "Current Rules were not changed."
                             )
                         else:
-                            SSM.refresh_naming_rules()
-                            st.session_state["_cached_naming_rules"] = (
-                                SSM.get_cached_naming_rules()
-                                or load_naming_rules()
-                            )
+                            # Clear all Standards working-copy/widget state using existing helpers.
                             _clear_session_state_prefixes("wc_")
                             _clear_session_state_prefixes(
                                 "device_pre_", "interface_pre_", "host_", "vm_",
@@ -2368,14 +2392,11 @@ def render_standards_tab(active_model):
                                 "vlandesc_", "ipamrole_", "sitecode_",
                                 "ac_scm_sitecode_", "autocorr_", "hb_",
                             )
-                            st.session_state["standards_nonce"] = (
-                                st.session_state.get("standards_nonce", 0) + 1
-                            )
                             st.toast(
                                 "All standards restored from the Global Baseline.",
                                 icon="✅",
                             )
-                            st.rerun()
+                            _refresh_after_baseline_restore(restored)
 
                 st.divider()
                 st.markdown("#### 📋 Full System Prompt for External AI")
