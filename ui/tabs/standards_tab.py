@@ -91,7 +91,7 @@ def _commit_fresh_rules(rules: dict, fresh: dict) -> None:
     """Replace rules in place with fresh, persist to session, refresh, and bump the widget nonce."""
     rules.clear()
     rules.update(fresh)
-    SSM.set_naming_rules(fresh.copy() tarjeta
+    SSM.set_naming_rules(fresh.copy())
     SSM.refresh_naming_rules()
     st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
 
