@@ -1966,22 +1966,38 @@ def _vlan_presets_editor(rules: dict) -> None:
         preset_names = list(wc_names)
         if "Custom / Empty Preset" not in preset_names:
             preset_names.append("Custom / Empty Preset")
-        if "pending_vlan_group" in st.session_state:
-            selected_group = st.session_state.pop("pending_vlan_group")
-            # Handle one-shot pending selection from post-save
-            if "vlan_pre_pending_selected_group" in st.session_state:
-                selected_group = st.session_state.pop("vlan_pre_pending_selected_group")
-            st.session_state["vlan_pre_selected_group"] = selected_group
-        selected_group = st.session_state.get("vlan_pre_selected_group", None)
-        if selected_group is None or selected_group not in preset_names:
-            selected_group = preset_names[0] if preset_names else None
-        if selected_group is None or selected_group not in preset_names:
-            selected_group = preset_names[0] if preset_names else None
+
+        # 1. RESOLVE SELECTION BEFORE ITEM INITIALIZATION
+        # A. Initialize wc_vlan_editor from fresh Current Rules (already done by _wc_vlan_editor_init)
+        
+        # B. Read and remove the one-shot pending selections
+        pending_group = st.session_state.pop("vlan_pre_pending_selected_group", None)
+        pending_create = st.session_state.pop("pending_vlan_group", None)
+
+        # C. Resolve final_selected_group
+        # 1. pending_group (post-save one-shot selection takes priority over create pending)
+        # 2. current selector/session value, if it exists in wc_vlan_editor
+        # 3. first group in wc_vlan_editor
+        # 4. None when the editor is empty
+        final_selected_group = None
+        if pending_group and _vlan_group_in_wc(wc_vlan_editor, pending_group):
+            final_selected_group = pending_group
+        elif pending_create and _vlan_group_in_wc(wc_vlan_editor, pending_create):
+            final_selected_group = pending_create
+        elif "vlan_pre_selected_group" in st.session_state and st.session_state["vlan_pre_selected_group"] in preset_names:
+            final_selected_group = st.session_state["vlan_pre_selected_group"]
+        elif preset_names:
+            final_selected_group = preset_names[0]
+
+        # D. Set the selector state
+        st.session_state["vlan_pre_selected_group"] = final_selected_group
+        selected_group = final_selected_group
 
         # Capture current group to wc_vlan_editor before switching groups
         previous_group = st.session_state.get("vlan_pre_previous_group")
         if previous_group is not None and previous_group != "+ Create New Preset Group" and previous_group in preset_names:
-            _capture_vlan_group_into_wc(previous_group, wc_vlan_editor)
+            if previous_group != selected_group:
+                _capture_vlan_group_into_wc(previous_group, wc_vlan_editor)
         # Reset previous_group tracking to avoid double capture on rerun
         if previous_group == selected_group:
             st.session_state.pop("vlan_pre_previous_group", None)
@@ -2105,7 +2121,7 @@ def _vlan_presets_editor(rules: dict) -> None:
         group = {"vlan_name_pattern": "<role>", "prefix_pattern": "", "items": []}
         items = []
         if not is_custom:
-            group_name = sel
+            group_name = selected_group
             if group_name in fresh_names:
                 group = dict(_vlan_group_skeleton())
             elif group_name in wc_names and group_name not in vlan_presets:
@@ -2122,10 +2138,17 @@ def _vlan_presets_editor(rules: dict) -> None:
                     group = dict(vlan_presets.get(group_name, {"vlan_name_pattern": "<role>", "prefix_pattern": "", "items": []}))
             items = list(group.get("items", []))
 
-        new_group_name = None
-
+        # 3. ITEM ADAPTER INITIALIZATION
         if group_name is not None:
-            items_name = f"vlan_items_{group_name.lower().replace(' ', '_').replace('/', '_').replace('-', '_')}"
+            items_name = _vlan_items_name(group_name)
+            
+            # Defensive assertion/guard: check owner marker
+            owner_key = f"vlan_items_owner_{items_name}"
+            if st.session_state.get(owner_key) != group_name:
+                # Mismatch - discard/reinitialize
+                _wc_discard(items_name)
+                st.session_state[owner_key] = group_name
+                
             items_wc = _wc_rows(items_name, lambda: [dict(r, _uid=uuid.uuid4().hex[:8]) for r in items])
             fields = ("vid", "role")
             cols = PRESET_VLAN_COLS
@@ -2139,10 +2162,12 @@ def _vlan_presets_editor(rules: dict) -> None:
             for idx, row in enumerate(list(items_wc)):
                 with st.container():
                     c1, c2, c3 = st.columns(cols, vertical_alignment="center")
+                    # Widget keys: vlan_item_<group-id>_<row-uid>_vid
+                    group_id = _normalize_var_name(group_name)
                     with c1:
-                        row["vid"] = st.text_input("VID", value=str(row.get("vid", "")) if row.get("vid", "") not in (None, "") else "", key=f"wc_{items_name}_{row['_uid']}_vid", label_visibility="collapsed").strip()
+                        row["vid"] = st.text_input("VID", value=str(row.get("vid", "")) if row.get("vid", "") not in (None, "") else "", key=f"vlan_item_{group_id}_{row['_uid']}_vid", label_visibility="collapsed").strip()
                     with c2:
-                        row["role"] = st.text_input("Role", value=str(row.get("role", "")), key=f"wc_{items_name}_{row['_uid']}_role", label_visibility="collapsed").strip()
+                        row["role"] = st.text_input("Role", value=str(row.get("role", "")), key=f"vlan_item_{group_id}_{row['_uid']}_role", label_visibility="collapsed").strip()
                     with c3:
                         _wc_row_actions(items_name, items_wc, idx)
             _wc_add_row(items_name, items_wc, [("vid", "900"), ("role", "e.g. Surveillance / CCTV")], cols)

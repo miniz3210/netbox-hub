@@ -252,6 +252,10 @@
         {
           "vid": "444",
           "role": "test role4"
+        },
+        {
+          "vid": "555",
+          "role": "test role5"
         }
       ]
     }
