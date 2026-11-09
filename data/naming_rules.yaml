@@ -248,6 +248,10 @@
         {
           "vid": "500",
           "role": "test role3"
+        },
+        {
+          "vid": "444",
+          "role": "test role4"
         }
       ]
     }

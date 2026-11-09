@@ -149,10 +149,85 @@ def _wc_rows(name: str, loader) -> list:
     return st.session_state[k]
 
 
-def _wc_discard(name: str) -> None:
-    """Drop the working copy and its widget values (after Save / Reset)."""
+def _wc_discard(name: str, *, preserve_group_state: bool = False) -> None:
+    """Drop the working copy and its widget values (after Save / Reset).
+    
+    preserve_group_state: If True, preserve the group's wc_vlan_editor state
+    and selected group, but clear all widget inputs and per-group working copies.
+    """
     st.session_state.pop(f"wc_{name}", None)
-    _clear_session_state_prefixes(f"wc_{name}_")
+    # Clear all widget inputs but preserve group-level state if requested
+    if preserve_group_state:
+        # Keep only the group-level container, clear all nested widgets
+        if "wc_vlan_editor" in st.session_state:
+            wc_vlan_editor = st.session_state["wc_vlan_editor"]
+            # Rebuild wc_vlan_editor with only fresh groups from saved rules
+            from config.naming_rules import get_vlan_presets
+            fresh = get_vlan_presets(SSM.get_cached_naming_rules() or load_naming_rules())
+            preserved = []
+            for entry in wc_vlan_editor:
+                label = entry.get("label")
+                if label in fresh:
+                    preserved.append({
+                        "label": label,
+                        "vlan_name_pattern": fresh[label].get("vlan_name_pattern", "<role>"),
+                        "prefix_pattern": fresh[label].get("prefix_pattern", ""),
+                        "items": fresh[label].get("items", [])
+                    })
+            st.session_state["wc_vlan_editor"] = preserved
+        _clear_session_state_prefixes("vlan_pre_", "vlan_items_")
+    else:
+        _clear_session_state_prefixes(f"wc_{name}_")
+
+
+def _clear_vlan_editor_session_state(*, preserve_selected_group: str | None = None) -> None:
+    """Clear all VLAN editor session state, with option to preserve selected group.
+    
+    Clears:
+    - wc_vlan_editor
+    - wc_vlan_groups  
+    - every key beginning with wc_vlan_items_
+    - vlan_pre_previous_group
+    - all rendered item-row/editor widget keys for VLAN presets
+    - all per-group pattern widget keys
+    - stale add-item input keys where necessary
+    - any VLAN group selector backing key that may carry stale widget state
+    
+    If preserve_selected_group is supplied:
+    - store the name separately before clearing
+    - do not retain the stale selectbox widget value itself
+    """
+    # Store selected group before clearing if requested
+    stored_group = None
+    if preserve_selected_group is not None:
+        stored_group = preserve_selected_group
+        # Clear the selectbox widget value to avoid stale state
+        st.session_state.pop("vlan_pre_selected_group", None)
+    
+    # Clear all working copy containers
+    st.session_state.pop("wc_vlan_editor", None)
+    st.session_state.pop("wc_vlan_groups", None)
+    
+    # Remove all vlan_items_* keys
+    for k in list(st.session_state.keys()):
+        sk = str(k)
+        if sk.startswith("wc_vlan_items_"):
+            st.session_state.pop(k, None)
+    
+    # Clear all vlan_pre_* widget keys
+    for k in list(st.session_state.keys()):
+        sk = str(k)
+        if sk.startswith("vlan_pre_"):
+            st.session_state.pop(k, None)
+    
+    # Clear any pending group states
+    st.session_state.pop("pending_vlan_group", None)
+    st.session_state.pop("vlan_pre_group_created", None)
+    st.session_state.pop("vlan_pre_previous_group", None)
+    
+    # Restore preserved selected group if provided
+    if stored_group is not None:
+        st.session_state["vlan_pre_pending_selected_group"] = stored_group
 
 
 def _wc_values(rows: list, fields: tuple) -> list:
@@ -686,7 +761,7 @@ def _persist_auto_corrections(data: dict, category: str = "") -> None:
     st.rerun()
 
 
-def _save_presets(rules: dict, section: str = "presets", section_label: str = "Presets", cleanup_prefixes: tuple = ()) -> None:
+def _save_presets(rules: dict, section: str = "presets", section_label: str = "Presets", cleanup_prefixes: tuple = (), rerun: bool = True) -> None:
     save_naming_rules(rules, source="Presets Manager")
     fresh = SSM.get_cached_naming_rules() or load_naming_rules()
     _commit_fresh_rules(rules, fresh)
@@ -698,7 +773,8 @@ def _save_presets(rules: dict, section: str = "presets", section_label: str = "P
     )
     if cleanup_prefixes:
         _clear_session_state_prefixes(*cleanup_prefixes)
-    st.rerun()
+    if rerun:
+        st.rerun()
 
 
 def _save_csv_schemas(rules: dict) -> None:
@@ -1877,7 +1953,7 @@ def _vlan_presets_editor(rules: dict) -> None:
             st.markdown(
                 f"<div style='text-align:right;color:#94a3b8;font-size:0.85rem;padding-top:2px;'>"
                 f"{total_count} presets</div>",
-                unsafe_allow_html=True
+                unsafe_allow_html=True,
             )
 
         _inject_preset_table_style()
@@ -1892,8 +1968,13 @@ def _vlan_presets_editor(rules: dict) -> None:
             preset_names.append("Custom / Empty Preset")
         if "pending_vlan_group" in st.session_state:
             selected_group = st.session_state.pop("pending_vlan_group")
+            # Handle one-shot pending selection from post-save
+            if "vlan_pre_pending_selected_group" in st.session_state:
+                selected_group = st.session_state.pop("vlan_pre_pending_selected_group")
             st.session_state["vlan_pre_selected_group"] = selected_group
         selected_group = st.session_state.get("vlan_pre_selected_group", None)
+        if selected_group is None or selected_group not in preset_names:
+            selected_group = preset_names[0] if preset_names else None
         if selected_group is None or selected_group not in preset_names:
             selected_group = preset_names[0] if preset_names else None
 
@@ -1901,7 +1982,11 @@ def _vlan_presets_editor(rules: dict) -> None:
         previous_group = st.session_state.get("vlan_pre_previous_group")
         if previous_group is not None and previous_group != "+ Create New Preset Group" and previous_group in preset_names:
             _capture_vlan_group_into_wc(previous_group, wc_vlan_editor)
-        st.session_state["vlan_pre_previous_group"] = selected_group
+        # Reset previous_group tracking to avoid double capture on rerun
+        if previous_group == selected_group:
+            st.session_state.pop("vlan_pre_previous_group", None)
+        else:
+            st.session_state["vlan_pre_previous_group"] = selected_group
 
         is_custom = selected_group == "+ Create New Preset Group"
 
@@ -2114,9 +2199,17 @@ def _vlan_presets_editor(rules: dict) -> None:
         _restore_from_baseline("vlan_presets", "VLAN Allocation Presets",
                                wc_prefixes=("vlan_pre", "vlan_items_"))
 
-    if saved_presets:
+        if saved_presets:
         if group_name is not None:
             _wc_discard(items_name)
+        
+        # Preserve the selected group before clearing its working copy
+        selected_after_save = selected_group
+        
+        # Capture current group to wc_vlan_editor
+        _capture_vlan_group_into_wc(selected_after_save, wc_vlan_editor)
+
+        # Step 3: Build and persist the complete VLAN preset payload
         if is_custom:
             if not new_group_name or not new_group_name.strip():
                 st.error("⚠️ Provide a name for the new preset group.")
@@ -2135,37 +2228,37 @@ def _vlan_presets_editor(rules: dict) -> None:
             current_items_wc = {}
             for r in group_wc:
                 n = r["name"]
-                items_name = _vlan_items_name(n)
-                current_items_wc[n] = st.session_state.get(f"wc_{items_name}", [])
+                items_name_iter = _vlan_items_name(n)
+                current_items_wc[n] = st.session_state.get(f"wc_{items_name_iter}", [])
             
             items_list = [{k: v for k, v in r.items() if k != "_uid"} for r in items_wc if r.get("vid", "") or r.get("role", "")]
             final_group = dict(group)
             final_group["items"] = items_list
             final_group["vlan_name_pattern"] = gnpat
             final_group["prefix_pattern"] = gppat
+            
             # Normalize all groups in wc_vlan_editor
             new_presets = {}
             for r in group_wc:
                 n = r["name"]
                 entry = _vlan_group_in_wc(wc_vlan_editor, n)
                 if entry:
-                    # Update entry with current UI values
                     items_name_current = _vlan_items_name(n)
                     items_wc_current = current_items_wc.get(n, [])
                     items_list_current = [
-                        {"vid": r.get("vid", ""), "role": r.get("role", "")}
-                        for r in items_wc_current
-                        if r.get("vid", "") or r.get("role", "")
+                        {"vid": row.get("vid", ""), "role": row.get("role", "")}
+                        for row in items_wc_current
+                        if row.get("vid", "") or row.get("role", "")
                     ]
                     gnpat_current = st.session_state.get(f"vlan_pre_gnpat_{n}", "").strip()
                     gppat_current = st.session_state.get(f"vlan_pre_gppat_{n}", "").strip()
                     entry["items"] = items_list_current
-                    # Update pattern fields - preserve existing if UI has no content
+                    
                     adapter_key = f"wc_{items_name_current}_vid_0" if items_wc_current else None
                     if adapter_key and st.session_state.get(adapter_key, ""):
                         entry["vlan_name_pattern"] = gnpat_current
                         entry["prefix_pattern"] = gppat_current
-                    # else: preserve existing values from wc_vlan_editor entry
+                
                 if n == group_name:
                     new_presets[n] = final_group
                 elif n in fresh_names:
@@ -2174,13 +2267,35 @@ def _vlan_presets_editor(rules: dict) -> None:
                     new_presets[n] = copy.deepcopy(vlan_presets[n])
                 else:
                     new_presets[n] = _vlan_group_skeleton()
+            
             if group_name not in new_presets:
                 new_presets[group_name] = final_group
             vlan_presets = new_presets
+        
         rules["vlan_presets"] = vlan_presets
-        if is_custom:
-            st.session_state["pending_vlan_group"] = new_group_name.strip() if new_group_name and new_group_name.strip() else st.session_state.get("vlan_pre_selected_group")
-        _save_presets(rules, section="vlan_presets", section_label="VLAN Allocation Presets", cleanup_prefixes=("vlan_pre", "vlan_items_"))
+        
+        # Save presets to disk (without immediate rerun)
+        _save_presets(rules, section="vlan_presets", section_label="VLAN Allocation Presets", 
+                      cleanup_prefixes=("vlan_pre", "vlan_items_"), rerun=False)
+
+        # Step 4: Refresh Current Rules from the newly written disk state
+        from config.naming_rules import load_naming_rules
+        fresh_rules = load_naming_rules()
+        
+        # Step 5: Clear all VLAN editor working-copy and widget state through the helper
+        _clear_vlan_editor_session_state(preserve_selected_group=selected_after_save)
+        
+        # Step 6: Store a one-shot pending selection key
+        st.session_state["vlan_pre_pending_selected_group"] = selected_after_save
+        
+        # Step 7: Increment standards_nonce
+        st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
+        
+        # Step 8: Call st.rerun()
+        st.rerun()
+        
+        # Step 9: Do not continue rendering the old run
+        return
 
 
 def _render_azure_mappings_editor(rules: dict):
