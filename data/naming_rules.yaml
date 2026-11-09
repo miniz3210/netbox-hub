@@ -207,23 +207,23 @@
       "prefix_pattern": "<site> <role> -- VLAN <vid>",
       "items": [
         {
-          "vid": 10,
+          "vid": "10",
           "role": "Server Management"
         },
         {
-          "vid": 20,
+          "vid": "20",
           "role": "Production App"
         },
         {
-          "vid": 30,
+          "vid": "30",
           "role": "Database"
         },
         {
-          "vid": 40,
+          "vid": "40",
           "role": "DMZ"
         },
         {
-          "vid": 50,
+          "vid": "50",
           "role": "Storage / vSAN"
         }
       ]

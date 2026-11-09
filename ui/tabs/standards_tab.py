@@ -1837,12 +1837,10 @@ def _capture_vlan_group_into_wc(group_name: str, wc_vlan_editor: list) -> None:
 
 
 def _vlan_presets_editor(rules: dict) -> None:
-    vlan_presets = get_vlan_presets(rules)
-
-    # Editor-level working copy: source of truth when switching groups.
+    # Authoritative working copy for VLAN presets editing
     wc_vlan_editor = _wc_vlan_editor_init(rules)
 
-    total_count = sum(len(g.get("items", [])) for g in vlan_presets.values())
+    total_count = sum(len(g.get("items", [])) for g in get_vlan_presets(rules).values())
 
     with st.expander("🌐 VLAN Allocation Presets", expanded=True):
         c_hdr_left, c_hdr_right = st.columns([0.82, 0.18])
@@ -1857,6 +1855,8 @@ def _vlan_presets_editor(rules: dict) -> None:
 
         _inject_preset_table_style()
 
+        # Legacy working copies: maintain for UI adapter compatibility only
+        vlan_presets = get_vlan_presets(rules)
         group_wc = _wc_rows("vlan_groups", lambda: [{"name": k} for k in vlan_presets.keys()])
         wc_names = [r["name"] for r in group_wc]
         fresh_names = {r["name"] for r in group_wc if r.get("fresh")}
@@ -1870,7 +1870,7 @@ def _vlan_presets_editor(rules: dict) -> None:
         if selected_group is None or selected_group not in preset_names:
             selected_group = preset_names[0] if preset_names else None
 
-        # Capture previously rendered group into wc_vlan_editor before switching.
+        # Capture current group to wc_vlan_editor before switching groups
         previous_group = st.session_state.get("vlan_pre_previous_group")
         if previous_group is not None and previous_group != "+ Create New Preset Group" and previous_group in preset_names:
             _capture_vlan_group_into_wc(previous_group, wc_vlan_editor)
@@ -1899,6 +1899,18 @@ def _vlan_presets_editor(rules: dict) -> None:
                 cur_idx = preset_names.index(selected_group)
                 if c_up.button("⬆️", key="btn_vlan_grp_up", disabled=(cur_idx == 0), help="Move Group Up", width="stretch"):
                     preset_names[cur_idx - 1], preset_names[cur_idx] = preset_names[cur_idx], preset_names[cur_idx - 1]
+                    # Reorder wc_vlan_editor groups
+                    group_to_move = None
+                    for i, entry in enumerate(wc_vlan_editor):
+                        if entry["label"] == selected_group:
+                            group_to_move = entry
+                            del wc_vlan_editor[i]
+                            break
+                    if group_to_move:
+                        # Insert at new position
+                        insert_idx = cur_idx - 1
+                        wc_vlan_editor.insert(insert_idx, group_to_move)
+                    # Reorder rules and save
                     rules["vlan_presets"] = {k: rules["vlan_presets"][k] for k in preset_names}
                     save_naming_rules(rules, source="Reorder VLAN Preset Groups")
                     fresh_rules = SSM.get_cached_naming_rules() or load_naming_rules()
@@ -1907,6 +1919,17 @@ def _vlan_presets_editor(rules: dict) -> None:
 
                 if c_dn.button("⬇️", key="btn_vlan_grp_dn", disabled=(cur_idx == len(preset_names) - 1), help="Move Group Down", width="stretch"):
                     preset_names[cur_idx + 1], preset_names[cur_idx] = preset_names[cur_idx], preset_names[cur_idx + 1]
+                    # Reorder wc_vlan_editor groups
+                    group_to_move = None
+                    for i, entry in enumerate(wc_vlan_editor):
+                        if entry["label"] == selected_group:
+                            group_to_move = entry
+                            del wc_vlan_editor[i]
+                            break
+                    if group_to_move:
+                        insert_idx = cur_idx
+                        wc_vlan_editor.insert(insert_idx, group_to_move)
+                    # Reorder rules and save
                     rules["vlan_presets"] = {k: rules["vlan_presets"][k] for k in preset_names}
                     save_naming_rules(rules, source="Reorder VLAN Preset Groups")
                     fresh_rules = SSM.get_cached_naming_rules() or load_naming_rules()
@@ -1917,6 +1940,11 @@ def _vlan_presets_editor(rules: dict) -> None:
                     cur_idx = wc_names.index(selected_group)
                     group_wc.pop(cur_idx)
                     _wc_discard(_vlan_items_name(selected_group))
+                    # Capture current group before deletion
+                    if selected_group not in ("+ Create New Preset Group", "Custom / Empty Preset"):
+                        _capture_vlan_group_into_wc(selected_group, wc_vlan_editor)
+                    # Remove group from wc_vlan_editor
+                    wc_vlan_editor = [entry for entry in wc_vlan_editor if entry["label"] != selected_group]
                     remaining = [p for p in preset_names if p != selected_group]
                     st.session_state["pending_vlan_group"] = remaining[0] if remaining else "+ Create New Preset Group"
                     _clear_session_state_prefixes("vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_pat_", "vlan_pre_gnpat_", "vlan_pre_gppat_")
@@ -1940,6 +1968,16 @@ def _vlan_presets_editor(rules: dict) -> None:
                     else:
                         group_wc.append({"name": new_grp_name, "_uid": uuid.uuid4().hex[:8], "fresh": True})
                         _wc_discard(_vlan_items_name(new_grp_name))
+                        # Capture current group and create new entry in wc_vlan_editor
+                        if selected_group not in ("+ Create New Preset Group", "Custom / Empty Preset"):
+                            _capture_vlan_group_into_wc(selected_group, wc_vlan_editor)
+                        # Create new group entry using skeleton
+                        new_entry = {"label": new_grp_name, "pattern": dict(_vlan_group_skeleton()), "items": []}
+                        new_entry["pattern"] = {
+                            "vlan_name_pattern": "<role>",
+                            "prefix_pattern": "<site> <role> -- VLAN <vid>",
+                        }
+                        wc_vlan_editor.append(new_entry)
                         st.session_state["pending_vlan_group"] = new_grp_name
                         st.toast(f"VLAN Group '{new_grp_name}' added (unsaved). Click Save & Apply Changes to keep it.", icon="📝")
                         st.rerun()
@@ -2029,7 +2067,6 @@ def _vlan_presets_editor(rules: dict) -> None:
                         help="Default template for Prefix Description across all items in this group.",
                     )
 
-
         col_save, col_reset = st.columns(2, vertical_alignment="center")
         with col_save:
             saved_presets = st.button("💾 Save & Apply Changes", key="vlan_pre_save", type="primary", width='stretch')
@@ -2072,9 +2109,27 @@ def _vlan_presets_editor(rules: dict) -> None:
             final_group["items"] = items_list
             final_group["vlan_name_pattern"] = gnpat
             final_group["prefix_pattern"] = gppat
+            # Normalize all groups in wc_vlan_editor
             new_presets = {}
             for r in group_wc:
                 n = r["name"]
+                entry = _vlan_group_in_wc(wc_vlan_editor, n)
+                if entry:
+                    # Update entry with current UI values
+                    items_name_current = _vlan_items_name(n)
+                    items_wc_current = st.session_state.get(f"wc_{items_name_current}", [])
+                    items_list_current = [
+                        {"vid": r.get("vid", ""), "role": r.get("role", "")}
+                        for r in items_wc_current
+                        if r.get("vid", "") or r.get("role", "")
+                    ]
+                    gnpat_current = st.session_state.get(f"vlan_pre_gnpat_{n}", "").strip()
+                    gppat_current = st.session_state.get(f"vlan_pre_gppat_{n}", "").strip()
+                    entry["items"] = items_list_current
+                    entry["pattern"] = {
+                        "vlan_name_pattern": gnpat_current,
+                        "prefix_pattern": gppat_current,
+                    }
                 if n == group_name:
                     new_presets[n] = final_group
                 elif n in fresh_names:
