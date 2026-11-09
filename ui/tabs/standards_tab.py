@@ -1786,7 +1786,7 @@ def _wc_vlan_editor_init(rules: dict) -> list:
     """Initialize the editor-level VLAN working copy once from saved presets.
 
     Mirrors the VLAN preset schema: every existing group is represented with
-    ``label``, ``pattern`` (vlan_name_pattern + prefix_pattern), ``items``, and
+    ``label``, ``vlan_name_pattern``, ``prefix_pattern``, ``items``, and
     group order (list order). Transient ``_uid`` values live only inside the
     working copy / UI.
     """
@@ -1797,10 +1797,8 @@ def _wc_vlan_editor_init(rules: dict) -> list:
         for name, g in presets.items():
             groups.append({
                 "label": name,
-                "pattern": {
-                    "vlan_name_pattern": g.get("vlan_name_pattern", "<role>"),
-                    "prefix_pattern": g.get("prefix_pattern", ""),
-                },
+                "vlan_name_pattern": g.get("vlan_name_pattern", "<role>"),
+                "prefix_pattern": g.get("prefix_pattern", ""),
                 "items": copy.deepcopy(g.get("items", [])),
             })
         st.session_state[k] = groups
@@ -1818,22 +1816,49 @@ def _capture_vlan_group_into_wc(group_name: str, wc_vlan_editor: list) -> None:
     """Capture the currently edited values of *group_name* into wc_vlan_editor."""
     items_name = _vlan_items_name(group_name)
     items_wc = st.session_state.get(f"wc_{items_name}", [])
-    items_list = [
-        {"vid": r.get("vid", ""), "role": r.get("role", "")}
-        for r in items_wc
-        if r.get("vid", "") or r.get("role", "")
-    ]
+    # Determine if adapter key exists and has content
+    adapter_key = f"wc_{items_name}_vid_0" if items_wc else None
+    
+    if adapter_key and st.session_state.get(adapter_key, ""):
+        # Adapter has content - build list from existing working copy
+        items_list = [
+            {"vid": r.get("vid", ""), "role": r.get("role", "")}
+            for r in items_wc
+            if r.get("vid", "") or r.get("role", "")
+        ]
+    else:
+        # No adapter content - preserve existing wc_vlan_editor value
+        entry = _vlan_group_in_wc(wc_vlan_editor, group_name)
+        if entry is not None:
+            # Keep existing items from wc_vlan_editor entry
+            items_list = list(entry.get("items", []))
+        else:
+            # Create new empty entry
+            items_list = []
+    
     gnpat = st.session_state.get(f"vlan_pre_gnpat_{group_name}", "").strip()
     gppat = st.session_state.get(f"vlan_pre_gppat_{group_name}", "").strip()
+    
     entry = _vlan_group_in_wc(wc_vlan_editor, group_name)
     if entry is None:
-        entry = {"label": group_name, "pattern": {}, "items": []}
+        entry = {"label": group_name, "vlan_name_pattern": "", "prefix_pattern": "", "items": []}
         wc_vlan_editor.append(entry)
-    entry["pattern"] = {
-        "vlan_name_pattern": gnpat,
-        "prefix_pattern": gppat,
-    }
-    entry["items"] = items_list
+    
+    # Only update pattern if adapter has content
+    if adapter_key and st.session_state.get(adapter_key, ""):
+        entry["vlan_name_pattern"] = gnpat
+        entry["prefix_pattern"] = gppat
+    else:
+        # Preserve existing values from wc_vlan_editor
+        entry["vlan_name_pattern"] = entry.get("vlan_name_pattern", "")
+        entry["prefix_pattern"] = entry.get("prefix_pattern", "")
+    
+    # Preserve existing items unless adapter has content and should replace
+    if adapter_key and st.session_state.get(adapter_key, ""):
+        entry["items"] = items_list
+    else:
+        # Keep existing items to prevent data loss
+        pass
 
 
 def _vlan_presets_editor(rules: dict) -> None:
@@ -2002,8 +2027,8 @@ def _vlan_presets_editor(rules: dict) -> None:
                 entry = _vlan_group_in_wc(wc_vlan_editor, group_name)
                 if entry is not None:
                     group = {
-                        "vlan_name_pattern": entry.get("pattern", {}).get("vlan_name_pattern", "<role>"),
-                        "prefix_pattern": entry.get("pattern", {}).get("prefix_pattern", ""),
+                        "vlan_name_pattern": entry.get("vlan_name_pattern", "<role>"),
+                        "prefix_pattern": entry.get("prefix_pattern", ""),
                         "items": copy.deepcopy(entry.get("items", [])),
                     }
                 else:
@@ -2104,6 +2129,13 @@ def _vlan_presets_editor(rules: dict) -> None:
         else:
             if group_name is None:
                 return
+            # Capture current group before processing
+            current_items_wc = {}
+            for r in group_wc:
+                n = r["name"]
+                items_name = _vlan_items_name(n)
+                current_items_wc[n] = st.session_state.get(f"wc_{items_name}", [])
+            
             items_list = [{k: v for k, v in r.items() if k != "_uid"} for r in items_wc if r.get("vid", "") or r.get("role", "")]
             final_group = dict(group)
             final_group["items"] = items_list
@@ -2117,7 +2149,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                 if entry:
                     # Update entry with current UI values
                     items_name_current = _vlan_items_name(n)
-                    items_wc_current = st.session_state.get(f"wc_{items_name_current}", [])
+                    items_wc_current = current_items_wc.get(n, [])
                     items_list_current = [
                         {"vid": r.get("vid", ""), "role": r.get("role", "")}
                         for r in items_wc_current
@@ -2126,10 +2158,12 @@ def _vlan_presets_editor(rules: dict) -> None:
                     gnpat_current = st.session_state.get(f"vlan_pre_gnpat_{n}", "").strip()
                     gppat_current = st.session_state.get(f"vlan_pre_gppat_{n}", "").strip()
                     entry["items"] = items_list_current
-                    entry["pattern"] = {
-                        "vlan_name_pattern": gnpat_current,
-                        "prefix_pattern": gppat_current,
-                    }
+                    # Update pattern fields - preserve existing if UI has no content
+                    adapter_key = f"wc_{items_name_current}_vid_0" if items_wc_current else None
+                    if adapter_key and st.session_state.get(adapter_key, ""):
+                        entry["vlan_name_pattern"] = gnpat_current
+                        entry["prefix_pattern"] = gppat_current
+                    # else: preserve existing values from wc_vlan_editor entry
                 if n == group_name:
                     new_presets[n] = final_group
                 elif n in fresh_names:

@@ -203,34 +203,23 @@
       ]
     },
     "Data Center VLAN Preset": {
-      "vlan_name_pattern": "<role>",
-      "prefix_pattern": "<site> <role> -- VLAN <vid>",
+      "vlan_name_pattern": "",
+      "prefix_pattern": "",
       "items": [
         {
-          "vid": "10",
-          "role": "Server Management"
-        },
-        {
-          "vid": "20",
-          "role": "Production App"
-        },
-        {
-          "vid": "30",
-          "role": "Database"
-        },
-        {
-          "vid": "40",
-          "role": "DMZ"
-        },
-        {
-          "vid": "50",
-          "role": "Storage / vSAN"
+          "vid": "8888",
+          "role": "DC"
         }
       ]
     },
     "Custom / Empty Preset": {
       "vlan_name_pattern": "",
       "prefix_pattern": "",
+      "items": []
+    },
+    "Test vlan group": {
+      "vlan_name_pattern": "<role>",
+      "prefix_pattern": "<site> <role> -- VLAN <vid>",
       "items": []
     }
   },
