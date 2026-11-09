@@ -2196,18 +2196,21 @@ def _vlan_presets_editor(rules: dict) -> None:
         if group_name is not None:
             _wc_discard(items_name)
         _clear_session_state_prefixes("vlan_pre")
-        _restore_from_baseline("vlan_presets", "VLAN Allocation Presets",
-                               wc_prefixes=("vlan_pre", "vlan_items_"))
+        _restore_from_baseline(
+            "vlan_presets",
+            "VLAN Allocation Presets",
+            wc_prefixes=("vlan_pre", "vlan_items_"),
+        )
+        return
 
-        if saved_presets:
-        if group_name is not None:
-            _wc_discard(items_name)
-        
-        # Preserve the selected group before clearing its working copy
+    if saved_presets:
         selected_after_save = selected_group
-        
-        # Capture current group to wc_vlan_editor
-        _capture_vlan_group_into_wc(selected_after_save, wc_vlan_editor)
+
+        if selected_after_save is not None:
+            _capture_vlan_group_into_wc(
+                selected_after_save,
+                wc_vlan_editor,
+            )
 
         # Step 3: Build and persist the complete VLAN preset payload
         if is_custom:
@@ -2279,8 +2282,7 @@ def _vlan_presets_editor(rules: dict) -> None:
                       cleanup_prefixes=("vlan_pre", "vlan_items_"), rerun=False)
 
         # Step 4: Refresh Current Rules from the newly written disk state
-        from config.naming_rules import load_naming_rules
-        fresh_rules = load_naming_rules()
+        SSM.refresh_naming_rules()
         
         # Step 5: Clear all VLAN editor working-copy and widget state through the helper
         _clear_vlan_editor_session_state(preserve_selected_group=selected_after_save)
