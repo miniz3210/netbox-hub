@@ -1782,8 +1782,65 @@ def _vlan_group_skeleton() -> dict:
     return {"vlan_name_pattern": "<role>", "prefix_pattern": "<site> <role> -- VLAN <vid>", "items": []}
 
 
+def _wc_vlan_editor_init(rules: dict) -> list:
+    """Initialize the editor-level VLAN working copy once from saved presets.
+
+    Mirrors the VLAN preset schema: every existing group is represented with
+    ``label``, ``pattern`` (vlan_name_pattern + prefix_pattern), ``items``, and
+    group order (list order). Transient ``_uid`` values live only inside the
+    working copy / UI.
+    """
+    k = "wc_vlan_editor"
+    if k not in st.session_state:
+        presets = get_vlan_presets(rules)
+        groups = []
+        for name, g in presets.items():
+            groups.append({
+                "label": name,
+                "pattern": {
+                    "vlan_name_pattern": g.get("vlan_name_pattern", "<role>"),
+                    "prefix_pattern": g.get("prefix_pattern", ""),
+                },
+                "items": copy.deepcopy(g.get("items", [])),
+            })
+        st.session_state[k] = groups
+    return st.session_state[k]
+
+
+def _vlan_group_in_wc(wc_vlan_editor: list, group_name: str):
+    for entry in wc_vlan_editor:
+        if entry["label"] == group_name:
+            return entry
+    return None
+
+
+def _capture_vlan_group_into_wc(group_name: str, wc_vlan_editor: list) -> None:
+    """Capture the currently edited values of *group_name* into wc_vlan_editor."""
+    items_name = _vlan_items_name(group_name)
+    items_wc = st.session_state.get(f"wc_{items_name}", [])
+    items_list = [
+        {"vid": r.get("vid", ""), "role": r.get("role", "")}
+        for r in items_wc
+        if r.get("vid", "") or r.get("role", "")
+    ]
+    gnpat = st.session_state.get(f"vlan_pre_gnpat_{group_name}", "").strip()
+    gppat = st.session_state.get(f"vlan_pre_gppat_{group_name}", "").strip()
+    entry = _vlan_group_in_wc(wc_vlan_editor, group_name)
+    if entry is None:
+        entry = {"label": group_name, "pattern": {}, "items": []}
+        wc_vlan_editor.append(entry)
+    entry["pattern"] = {
+        "vlan_name_pattern": gnpat,
+        "prefix_pattern": gppat,
+    }
+    entry["items"] = items_list
+
+
 def _vlan_presets_editor(rules: dict) -> None:
     vlan_presets = get_vlan_presets(rules)
+
+    # Editor-level working copy: source of truth when switching groups.
+    wc_vlan_editor = _wc_vlan_editor_init(rules)
 
     total_count = sum(len(g.get("items", [])) for g in vlan_presets.values())
 
@@ -1812,6 +1869,12 @@ def _vlan_presets_editor(rules: dict) -> None:
         selected_group = st.session_state.get("vlan_pre_selected_group", None)
         if selected_group is None or selected_group not in preset_names:
             selected_group = preset_names[0] if preset_names else None
+
+        # Capture previously rendered group into wc_vlan_editor before switching.
+        previous_group = st.session_state.get("vlan_pre_previous_group")
+        if previous_group is not None and previous_group != "+ Create New Preset Group" and previous_group in preset_names:
+            _capture_vlan_group_into_wc(previous_group, wc_vlan_editor)
+        st.session_state["vlan_pre_previous_group"] = selected_group
 
         is_custom = selected_group == "+ Create New Preset Group"
 
@@ -1898,7 +1961,15 @@ def _vlan_presets_editor(rules: dict) -> None:
             elif group_name in wc_names and group_name not in vlan_presets:
                 group = dict(_vlan_group_skeleton())
             else:
-                group = dict(vlan_presets.get(group_name, {"vlan_name_pattern": "<role>", "prefix_pattern": "", "items": []}))
+                entry = _vlan_group_in_wc(wc_vlan_editor, group_name)
+                if entry is not None:
+                    group = {
+                        "vlan_name_pattern": entry.get("pattern", {}).get("vlan_name_pattern", "<role>"),
+                        "prefix_pattern": entry.get("pattern", {}).get("prefix_pattern", ""),
+                        "items": copy.deepcopy(entry.get("items", [])),
+                    }
+                else:
+                    group = dict(vlan_presets.get(group_name, {"vlan_name_pattern": "<role>", "prefix_pattern": "", "items": []}))
             items = list(group.get("items", []))
 
         new_group_name = None

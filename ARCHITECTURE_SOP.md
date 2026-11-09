@@ -31,11 +31,12 @@ AI 助理專屬模型：gemini/gemini-2.5-flash 或 deepseek/deepseek-chat（非
   - 數據「有就有，無就留空」，嚴禁 Python 代碼自行做主補字或硬塞預設容器。
 - 文字路徑例外：貼上的 vSphere 頁面文字是精確資料，不經 token_normalizations 與 noise_filters（否則真實 port group 名如 "Services"、"Firewall" 會被誤刪）。
 - 工廠預設豁免：工廠預設 preset 的 token_normalizations 內含站點名（PR Spain Fuenmayor / Age VLab），因屬工廠預設而豁免，列為 P3 觀察項，不屬違規；但 code 內的站點字眼（如 Vault 的 `_SWITCH_NAME_RE`）不豁免。
-- 預設值只播種一次 (Seed Once)：
-  - 工廠預設（PATTERN_VARIABLES、DEFAULT_HYPERVISOR_PRESETS、DEFAULT_AZURE_MAPPINGS）只在 YAML 沒有對應 key（None / 不存在）時寫入，或由使用者按 Reset to Defaults 觸發；載入與儲存時一律不得合併回 YAML。空 dict 視為「使用者已全部刪除」，不得重新播種。
-  - YAML 是唯一真相：Standards 刪除即真刪；需要還原時使用 Change History。
+- 無運行期工廠注入 (No Factory Injection)：
+  - 工廠預設常數（PATTERN_VARIABLES、DEFAULT_HYPERVISOR_PRESETS、DEFAULT_AZURE_MAPPINGS 等）僅保留供參考、遷移或明確範例，不得於載入、恢復或還原時靜默填入使用者可見運行配置。
+  - Current Rules 與 Global Baseline 均不可用時，回傳空安全 schema；不建立 VMware ESXi、Proxmox、預設、變數、範本、雜訊過濾等內容。
+  - 載入與儲存時一律不得合併回 YAML。空 dict 視為「使用者已全部刪除」，不得重新播種。
+  - YAML 是唯一真相：Standards 刪除即真刪；需要還原時使用 Global Baseline（Restore from Baseline）。
   - 程式碼不得假設某個 pattern variable 或平台一定存在，亦不得寫死變數名稱；需要時由 rules 動態取得（例如 `get_domain_suffix_variables`）。
-  - 副作用：日後在 code 新增的內建預設不會自動出現在既有安裝，須在 Standards 手動新增或按 Reset to Defaults。
 - 整合匯出輸出原始值：Azure KQL 等外部匯出只輸出原始值（Site = Azure region、Platform = OS type、Role 無值則留空），所有對應規則放在 Standards（azure_mappings），KQL 內不得出現 Site / Platform 對應或預設佔位字。
 
 ### 1.2 真正平台無關與未來適應力 (Platform-Agnostic & Future-Proof)
@@ -191,8 +192,8 @@ Step 3: Live NetBox Output Synthesizer
 ### 5.1 平台平等 CRUD 與唯一保護閘 (Platform Lifecycle Rules)
 
 - 廢除殭屍自動復活 (Abolish Phantom Auto-heal)：
-  - `_ensure_unified_parsing_defaults()` 僅在系統完全沒有任何平台預設集（`not rules.get("topology_parsing_presets")`）的全新初始化時注入預設工廠配置。
-  - hypervisor_presets 同樣只在 key 不存在時播種（見 1.1 Seed Once）；`_normalize_rules` 不再補回被刪除的工廠平台（驗證狀態見 9.3）。
+  - `_ensure_unified_parsing_defaults()` 僅在系統完全沒有任何平台預設集（`not rules.get("topology_parsing_presets")`）的全新初始化時注入預設工廠配置；不得於運行期靜默填充平台、ESXi、Proxmox、變數、範本或雜訊過濾內容。
+  - hypervisor_presets 同樣只在 key 不存在時播種；`_normalize_rules` 不再補回被刪除的工廠平台。
   - 運行中的系統絕對尊重使用者的刪除操作，嚴禁在儲存或重載時強制將已被使用者刪除之平台（如 Microsoft Azure）重新塞回 YAML。
 - 唯一安全保護閘 (Last Platform Guardrail)：
   - 系統內部任何平台（VMware ESXi、Proxmox VE、Azure 或使用者自訂平台）地位完全平等，均可被編輯或刪除。
@@ -235,6 +236,94 @@ topology_parsing_presets:
 - token_order：除 pattern 外亦保存 ipam_site_fields（IPAM Site / Scope ID / Supernet 的顯示次序）。
 - IPAM 三個欄位：label 與 placeholder 讀取 pattern_variables（site、scope_id、site_supernet 的 label / placeholder）；值的來源（資料庫 / 自動配對）不受影響；site 的 label 與 Naming 共用。
 - `_normalize_rules` 對頂層 key 為白名單；新增頂層 key 必須加入白名單，否則儲存 / 載入時會被丟棄。
+
+---
+
+## 5.4 Standards 配置生命週期：Current Rules / Global Baseline / Restore from Baseline (已驗證 Done)
+
+### 5.4.1 Current Rules 優先順序 (已驗證 Done)
+
+正常應用程式載入順序：
+
+1. 最新儲存的 Current Rules
+2. 當 Current Rules 缺失或不可讀時，使用 Global Baseline
+3. 兩者皆不可用時，使用空安全 schema (Empty Safe Schema)
+
+Current Rules 在 Save & Apply 後始終為權威來源。
+
+### 5.4.2 Global Baseline 生命週期 (已驗證 Done)
+
+**Solidify Current Rules as Baseline：**
+- 將最新儲存的 Current Rules 原封不變地做快照
+- 不注入工廠內容
+- 不修改 Current Rules
+
+**Restore All Standards to Baseline：**
+- 將整個 Global Baseline 還原到 Current Rules
+- 刷新規則/快取
+- 清除 Standards 工作複本
+- 遞增 standards_nonce
+- 立即重新執行
+- 無需瀏覽器 F5
+
+### 5.4.3 Local Restore from Baseline (已驗證 Done)
+
+所有持久化的 Naming、IPAM、Hypervisor、Hardware 與 Azure Standards 分段重設皆使用：
+
+**Restore from Baseline**
+
+每個本地恢復：
+- 讀取與全域恢復相同的 Global Baseline
+- 僅還原其自身的分段、預設集、範圍、平台或類別
+- 保留無關的 Current Rules
+- 持久化已恢復的分段
+- 立即刷新快取與小工具狀態
+- 清除相關工作複本
+- 遞增 nonce
+- 無需 F5
+
+本地恢復與全域恢復僅之範圍不同。
+
+### 5.4.4 Baseline 缺失與空值 (已驗證 Done)
+
+**Baseline 路徑缺失：**
+- 顯示警告
+- Current Rules 保持不變
+- 不發生工廠回退
+
+**Baseline 中明確的空 list/dict：**
+- 還原明確的空值
+
+### 5.4.5 移除的控制項與術語 (已驗證 Done)
+
+- `Reset Unsaved Changes` 已移除
+- 先前標記為 `Reset to Defaults` / `Reset` / `Factory Reset` 的持久化 Standards 控制項已統一為 `Restore from Baseline`
+- Noise Filters 僅保留：
+  - Save & Apply Noise Filters
+  - Restore from Baseline
+- 未儲存的 UI 編輯可由重載/導覽自然捨棄；不需要專用重設按鈕
+
+### 5.4.6 Noise Filters 已驗證行為 (已驗證 Done)
+
+- Baseline 包含 26 個 Noise Filters
+- Save 後 Current Rules 可包含 27 個
+- 正常重載遵循最新 Current Rules
+- Restore from Baseline 僅將 Noise Filters 回到 26 個
+- Restore All Standards to Baseline 還原完整 Standards 規則集
+- 本地與全域恢復均立即更新 UI，無需 F5
+- 舊的 39 項 `DEFAULT_UNIFIED_PLATFORM_PRESETS` 不再是 Noise Filters 恢復來源
+
+### 5.4.7 空安全配置 (Empty-Safe Configuration) (已驗證 Done)
+
+- 標準空字典/列表防止崩潰
+- 空配置屬有效配置
+- Standards 可明確建立第一個平台/預設集/變數
+- 使用者明確的空值被保留
+
+### 5.4.8 版本門禁 (Release Gate)
+
+- 不變更版本或標籤
+- 使用者擁有：commit、APP_VERSION 更新、標籤、推送、映像建置/發布
 
 ---
 
@@ -390,6 +479,14 @@ df -h /
 - [x] Batch processing row failing: process_row try/except。
 - [x] IPAM Excel reconciliation backup index：_build_backup_index returns prefixes, IPs, sites, db_record_map。
 - [x] Hostname generation architecture：moved to core.naming_dynamic_helper.format_generated_hostname。
+- [x] Current Rules priority：最新儲存 Current Rules 權威；缺失/不可讀時退回 Global Baseline；兩者皆不可用則空安全 schema。Save & Apply 後 Current Rules 始終為權威。
+- [x] 無運行期工廠注入：DEFAULT_* 常數不再靜默填入使用者可見運行配置；Current Rules 與 Baseline 均缺失時回傳空安全 schema；不建立 ESXi、Proxmox、預設、變數、範本、雜訊過濾等內容。
+- [x] Global Baseline 生命週期：Solidify 快照最新 Current Rules（不注入工廠內容、不修改 Current Rules）；Restore All Standards to Baseline 還原整個 Baseline、刷新規則/快取、清 Standards 工作複本、遞增 standards_nonce、立即重新執行、無需 F5。
+- [x] Local Restore from Baseline：Naming/IPAM/Hypervisor/Hardware/Azure 分段重設皆使用 Global Baseline；僅還原自身分段/預設集/範圍/平台/類別，保留無關 Current Rules，持久化、立即刷新快取與小工具狀態、清相關工作複本、遞增 nonce、無需 F5；本地與全域恢復僅範圍不同。
+- [x] Baseline 缺失/空值：Baseline 路徑缺失時顯示警告、Current Rules 不變、無工廠回退；Baseline 中明確空 list/dict 還原明確空值。
+- [x] 移除控制項與術語：Reset Unsaved Changes 已移除；Reset to Defaults/Reset/Factory Reset 已統一為 Restore from Baseline；Noise Filters 僅保留 Save & Apply Noise Filters 與 Restore from Baseline。
+- [x] Noise Filters 已驗證：Baseline 26 個、Save 後 Current Rules 可 27 個、正常重載遵循最新 Current Rules、Restore from Baseline 回到 26 個、Restore All Standards to Baseline 還原完整規則集、本地與全域恢復立即更新 UI 無需 F5、舊 39 項 DEFAULT_UNIFIED_PLATFORM_PRESETS 不再為 Noise Filters 恢復來源。
+- [x] 空安全配置：標準空字典/列表防止崩潰、空配置屬有效、Standards 可明確建立第一個平台/預設集/變數、使用者明確空值被保留。
 
 ### 9.2 已確認的設計決定 (Decisions)
 

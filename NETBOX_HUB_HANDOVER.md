@@ -27,6 +27,18 @@
 - [x] clear_backup_records completeness; minimal merged record_count; skipped/failed/duplicate endpoint reporting.
 - [x] batch_tab.process_row try/except; _build_backup_index returns prefixes/IPs/sites/db_record_map.
 
+## 1.5 Standards 配置生命週期（已驗證 Done）
+
+- Current Rules 優先：最新儲存的 Current Rules 權威；缺失/不可讀時退回 Global Baseline；兩者皆不可用則回傳空安全 schema；Save & Apply 後 Current Rules 始終為權威。
+- 無運行期工廠注入：DEFAULT_* 常數不再靜默填入使用者可見運行配置；Current Rules 與 Baseline 均缺失時回傳空安全 schema；不建立 ESXi、Proxmox、預設、變數、範本、雜訊過濾等內容；DEFAULT_* 僅供參考、遷移或明確範例。
+- Global Baseline：Solidify 將最新儲存 Current Rules 原封不變做快照，不注入工廠內容、不修改 Current Rules；Restore All Standards to Baseline 還原整個 Baseline、刷新規則/快取、清 Standards 工作複本、遞增 standards_nonce、立即重新執行、無需 F5。
+- Local Restore from Baseline：Naming/IPAM/Hypervisor/Hardware/Azure 分段重設皆讀取相同 Global Baseline；僅還原自身分段/預設集/範圍/平台/類別，保留無關 Current Rules；持久化、立即刷新快取與小工具狀態、清相關工作複本、遞增 nonce、無需 F5；本地與全域恢復僅範圍不同。
+- Baseline 缺失/空值：Baseline 路徑缺失時顯示警告、Current Rules 不變、無工廠回退；Baseline 中明確空 list/dict 還原明確空值。
+- 移除控制項與術語：Reset Unsaved Changes 已移除；Reset to Defaults / Reset / Factory Reset 已統一為 Restore from Baseline；Noise Filters 僅保留 Save & Apply Noise Filters 與 Restore from Baseline；未儲存 UI 編輯可由重載/導覽自然捨棄，不需專用重設按鈕。
+- Noise Filters 已驗證：Baseline 26 個、Save 後 Current Rules 可 27 個、正常重載遵循最新 Current Rules、Restore from Baseline 回到 26 個、Restore All Standards to Baseline 還原完整規則集、本地與全域恢復立即更新 UI 無需 F5、舊 39 項 DEFAULT_UNIFIED_PLATFORM_PRESETS 不再為 Noise Filters 恢復來源。
+- 空安全配置：標準空字典/列表防止崩潰、空配置屬有效、Standards 可明確建立第一個平台/預設集/變數、使用者明確空值被保留。
+- 版本門禁：不變更版本或標籤；使用者擁有 commit、APP_VERSION 更新、標籤、推送、映像建置/發布。
+
 ## 2. 已決定（Decisions）
 
 - Naming：Visual Cards 與 Data Grid **保留兩個都可編輯**。
@@ -60,7 +72,6 @@
 - [ ] P3: in `_vlan_presets_editor`, Save only writes items and patterns of the SELECTED group; unsaved item edits in another group are lost when user switches group and saves. Structure changes (order, new, deleted groups) apply to all groups.
 - [ ] P3: the `is_custom` branch in the Save block of `_vlan_presets_editor` is dead code (`is_custom` is never true), candidate for removal.
 - [ ] P3: Noise Filters text_area key "txt_noise_filters_{active_plat}" has no nonce, so Reset may show stale text until F5. Status: not confirmed.
-
 - [ ] Naming 資料處理段殘餘 "No Uplink" / "vmnic" 字面值，改讀 preset / token。
 - [ ] `layout_geometry`：接線 extractor 或從 preset 刪除。
 - [ ] `noise_filters` 13 個通用單字品質審查（防誤殺同名 Port Group）。
