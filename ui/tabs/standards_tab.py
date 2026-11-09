@@ -91,7 +91,7 @@ def _commit_fresh_rules(rules: dict, fresh: dict) -> None:
     """Replace rules in place with fresh, persist to session, refresh, and bump the widget nonce."""
     rules.clear()
     rules.update(fresh)
-    SSM.set_naming_rules(fresh.copy())
+    SSM.set_naming_rules(fresh.copy() tarjeta
     SSM.refresh_naming_rules()
     st.session_state["standards_nonce"] = st.session_state.get("standards_nonce", 0) + 1
 
@@ -686,7 +686,7 @@ def _persist_auto_corrections(data: dict, category: str = "") -> None:
     st.rerun()
 
 
-def _save_presets(rules: dict, section: str = "presets", section_label: str = "Presets") -> None:
+def _save_presets(rules: dict, section: str = "presets", section_label: str = "Presets", cleanup_prefixes: tuple = ()) -> None:
     save_naming_rules(rules, source="Presets Manager")
     fresh = SSM.get_cached_naming_rules() or load_naming_rules()
     _commit_fresh_rules(rules, fresh)
@@ -696,6 +696,8 @@ def _save_presets(rules: dict, section: str = "presets", section_label: str = "P
         "vlan_pre_vid_", "vlan_pre_role_", "vlan_pre_pat_", "vlan_pre_gnpat_", "vlan_pre_gppat_",
         "vlan_pre_new_vid", "vlan_pre_new_role"
     )
+    if cleanup_prefixes:
+        _clear_session_state_prefixes(*cleanup_prefixes)
     st.rerun()
 
 
@@ -2178,7 +2180,7 @@ def _vlan_presets_editor(rules: dict) -> None:
         rules["vlan_presets"] = vlan_presets
         if is_custom:
             st.session_state["pending_vlan_group"] = new_group_name.strip() if new_group_name and new_group_name.strip() else st.session_state.get("vlan_pre_selected_group")
-        _save_presets(rules, section="vlan_presets", section_label="VLAN Allocation Presets")
+        _save_presets(rules, section="vlan_presets", section_label="VLAN Allocation Presets", cleanup_prefixes=("vlan_pre", "vlan_items_"))
 
 
 def _render_azure_mappings_editor(rules: dict):
