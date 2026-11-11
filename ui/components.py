@@ -350,6 +350,8 @@ def _handle_json_backup_upload(uploader_key: str, scope_key: str) -> None:
     st.session_state[error_key] = ""
     st.session_state[result_key] = result
     st.session_state[f"netbox_backup_enabled_{scope_key}"] = True
+    st.session_state.pop("backup_session_rehydrate_attempted", None)
+    st.session_state.pop("backup_restore_status", None)
 
     skipped = result.get("skipped", {}) if result else {}
     if skipped:
@@ -432,6 +434,8 @@ def _process_confirmed_csv_uploads(scope_key: str, confirmed_classifications: di
         return
 
     st.session_state[error_key] = ""
+    st.session_state.pop("backup_session_rehydrate_attempted", None)
+    st.session_state.pop("backup_restore_status", None)
     
     # Clear pending confirmation
     del st.session_state[pending_key]
@@ -457,6 +461,8 @@ def _handle_backup_clear(scope_key: str) -> None:
     st.session_state[f"backup_upload_result_{scope_key}"] = None
     st.session_state[f"backup_upload_error_{scope_key}"] = ""
     st.session_state.pop(f"netbox_backup_enabled_{scope_key}", None)
+    st.session_state.pop("backup_session_rehydrate_attempted", None)
+    st.session_state.pop("backup_restore_status", None)
 
     st.session_state["backup_stats_version"] = st.session_state.get("backup_stats_version", 0) + 1
 
@@ -473,6 +479,8 @@ def _handle_backup_clear_all(scope_key: str) -> None:
     st.session_state[f"backup_upload_result_{scope_key}"] = None
     st.session_state[f"backup_upload_error_{scope_key}"] = ""
     st.session_state.pop(f"netbox_backup_enabled_{scope_key}", None)
+    st.session_state.pop("backup_session_rehydrate_attempted", None)
+    st.session_state.pop("backup_restore_status", None)
 
     st.session_state["backup_stats_version"] = st.session_state.get("backup_stats_version", 0) + 1
     st.toast("JSON, Minimal, CSV, endpoint catalogue and backup session state cleared.", icon="🗑️")
@@ -485,6 +493,8 @@ def _handle_csv_clear(scope_key: str) -> None:
         st.toast(f"Cleared {count} CSV entries", icon="✅")
     else:
         st.toast("No CSV data to clear", icon="ℹ️")
+    st.session_state.pop("backup_session_rehydrate_attempted", None)
+    st.session_state.pop("backup_restore_status", None)
 
 
 def _render_json_backup_section(scope_key: str, meta: dict, json_uploader_key: str, 
@@ -595,15 +605,19 @@ def _render_json_backup_section(scope_key: str, meta: dict, json_uploader_key: s
 
 def _render_backup_contents_section(scope_key: str, meta: dict) -> None:
     """Render the Backup contents expander with grouped endpoints."""
+    restore_status = st.session_state.get("backup_restore_status") or {}
+    counts_only = restore_status.get("mode") == "counts_only"
+
     # Try to restore dynamic state from database if needed
-    if not SharedBackupState.has_backup() and meta["loaded"]:
-        # JSON backup exists in DB but not in session state - restore it
-        try:
-            from core.backup_manager import restore_backup_to_session_state
-            restore_backup_to_session_state()
-        except Exception:
-            pass  # Fall back to legacy system if restore fails
-    
+    # For fresh sessions with CSV-only data, restore CSV overrides without requiring meta["loaded"]
+    try:
+        from core.backup_manager import restore_backup_to_session_state
+        restore_backup_to_session_state(fresh_session=True)
+        restore_status = st.session_state.get("backup_restore_status") or restore_status
+        counts_only = restore_status.get("mode") == "counts_only"
+    except Exception:
+        pass  # Fall back to legacy system if restore fails
+
     if SharedBackupState.has_backup():
         # Use dynamic inspection system
         object_registry = SharedBackupState.get_object_registry()
@@ -619,6 +633,8 @@ def _render_backup_contents_section(scope_key: str, meta: dict) -> None:
                 n_json_total += 1
         
         with st.expander(f"Backup contents (JSON {n_json_total} | CSV {n_csv_total})", expanded=False):
+            if counts_only:
+                st.warning(restore_status.get("message") or "Counts restored; detailed object data is unavailable.")
             skipped = st.session_state.get(f"backup_skipped_endpoints_{scope_key}", {})
             skip_caption_parts = []
             for ep_path, reason in list(skipped.items())[:5]:
@@ -1178,22 +1194,99 @@ def _render_csv_upload_section(scope_key: str, csv_uploader_key: str) -> None:
         )
 
 
+def _ensure_backup_session_rehydrated() -> dict:
+    """Restore persistent Full/CSV backup state into SharedBackupState once per session."""
+    flag_key = "backup_session_rehydrate_attempted"
+    status_key = "backup_restore_status"
+    if st.session_state.get(flag_key):
+        return st.session_state.get(status_key) or {"restored": False, "mode": "skipped"}
+
+    st.session_state[flag_key] = True
+
+    try:
+        # If usable registry data is already present, skip restore work.
+        if SharedBackupState.has_backup() and SharedBackupState.get_object_registry():
+            status = {"restored": True, "mode": "already_present"}
+            st.session_state[status_key] = status
+            return status
+    except Exception:
+        pass
+
+    should_attempt = False
+    try:
+        meta = get_backup_metadata()
+        if meta.get("loaded") or meta.get("record_count", 0) > 0:
+            should_attempt = True
+        else:
+            import sqlite3
+            conn = sqlite3.connect(DB_PATH)
+            cur = conn.cursor()
+            try:
+                cur.execute("SELECT backup_json_compressed FROM backup_metadata WHERE id = 1")
+                row = cur.fetchone()
+                if row and row[0]:
+                    should_attempt = True
+            except Exception:
+                pass
+            if not should_attempt:
+                try:
+                    cur.execute("SELECT COUNT(*) FROM backup_endpoints")
+                    if (cur.fetchone() or [0])[0] > 0:
+                        should_attempt = True
+                except Exception:
+                    pass
+            if not should_attempt:
+                try:
+                    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='csv_backup_entries'")
+                    if cur.fetchone():
+                        cur.execute("SELECT COUNT(*) FROM csv_backup_entries")
+                        if (cur.fetchone() or [0])[0] > 0:
+                            should_attempt = True
+                except Exception:
+                    pass
+            if not should_attempt:
+                try:
+                    cur.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name LIKE 'dynamic_%'")
+                    if (cur.fetchone() or [0])[0] > 0:
+                        should_attempt = True
+                except Exception:
+                    pass
+            conn.close()
+    except Exception:
+        should_attempt = False
+
+    if not should_attempt:
+        status = {"restored": False, "mode": "none"}
+        st.session_state[status_key] = status
+        return status
+
+    try:
+        from core.backup_manager import restore_backup_to_session_state
+        result = restore_backup_to_session_state() or {"restored": False, "mode": "unknown"}
+    except Exception as exc:
+        result = {"restored": False, "mode": "error", "message": str(exc)}
+
+    st.session_state[status_key] = result
+    return result
+
+
 def render_backup_uploader(scope_key: str) -> dict:
     """
     Main orchestrator for NetBox backup and CSV upload UI.
-    
+
     Renders a clean, modular interface for:
     - Step 1: JSON backup upload with PowerShell scripts
     - Backup contents display
     - Custom field choice sets display
     - Step 2: CSV/Excel upload with auto-classification
-    
+
     Args:
         scope_key: Unique key for this uploader instance (e.g., "ipam", "naming")
-        
+
     Returns:
         Backup metadata dictionary
     """
+    _ensure_backup_session_rehydrated()
     meta = get_backup_metadata()
     
     # Initialize uploader key counters if not present

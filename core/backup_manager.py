@@ -2395,18 +2395,61 @@ def _prune_stale_backup_files() -> int:
     return deleted
 
 
-def restore_backup_to_session_state():
+def _detect_csv_only_persistence() -> bool:
+    """Detect if CSV-only persistence exists (sites_records, ipam_records, inventory_records,
+    azure_csv_uploads, sync_metadata, dynamic_* tables)."""
+    import sqlite3
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT COUNT(*) FROM sites_records")
+        if cursor.fetchone()[0] > 0: return True
+        cursor.execute("SELECT COUNT(*) FROM ipam_records")
+        if cursor.fetchone()[0] > 0: return True
+        cursor.execute("SELECT COUNT(*) FROM inventory_records")
+        if cursor.fetchone()[0] > 0: return True
+        cursor.execute("SELECT COUNT(*) FROM azure_csv_uploads LIMIT 1")
+        if cursor.fetchone()[0] > 0: return True
+        cursor.execute("SELECT COUNT(*) FROM sync_metadata WHERE endpoint IN ('netbox_sites','netbox_VLANs','netbox_prefixes','netbox_devices','netbox_virtual_machines')")
+        if cursor.fetchone()[0] > 0: return True
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'dynamic_%'")
+        for (table_name,) in cursor.fetchall():
+            cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+            if cursor.fetchone()[0] > 0: return True
+        return False
+    finally:
+        conn.close()
+
+def restore_backup_to_session_state(fresh_session: bool = False):
     """
     Restore backup data from database to SharedBackupState session state.
     Called when page is refreshed and session state is lost.
 
     Rebuilds the effective payload from the merged compressed backup JSON first,
     falling back to per-endpoint storage (backup_endpoints), then to counts-only.
+    
+    On fresh session with CSV-only data (no meta["loaded"]), rebuild SharedBackupState CSV registry
+    without requiring meta["loaded"] or restoring cleared JSON.
     """
     from core.shared_backup_state import SharedBackupState
+    import streamlit as st
     import logging
     import gzip
+    import sqlite3
+    from datetime import datetime
     logger = logging.getLogger(__name__)
+
+    def _set_restore_status(status: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            st.session_state["backup_restore_status"] = status
+        except Exception:
+            pass
+        return status
+
+    # CSV-only persistence check for fresh sessions
+    if fresh_session and _detect_csv_only_persistence():
+        _restore_csv_overrides()
+        return _set_restore_status({"restored": True, "mode": "csv_only"})
 
     def _restore_from_blob(backup_data: Dict[str, Any],
                            filename: str, original_timestamp: str) -> None:
@@ -2490,7 +2533,7 @@ def restore_backup_to_session_state():
                 _restore_from_blob(backup_data,
                                    row[1] or "NetBox Backup",
                                    row[2] or "")
-                return
+                return _set_restore_status({"restored": True, "mode": "full_blob"})
             except Exception as e:
                 logger.warning(f"Failed to restore from compressed backup JSON: {e}")
 
@@ -2555,12 +2598,21 @@ def restore_backup_to_session_state():
 
             _restore_csv_overrides()
             logger.info(f"Restored {len(ep_rows)} endpoints from backup_endpoints")
-            return
+            return _set_restore_status({"restored": True, "mode": "endpoints"})
 
         # Fallback 2: counts-only from backup_records
         meta = get_backup_metadata()
         if meta["loaded"]:
             _restore_counts_only(meta)
+            return _set_restore_status({"restored": True, "mode": "counts_only", "message": "Counts restored; detailed object data is unavailable."})
+
+        # CSV-only restore path (e.g. after Clear JSON with preserved CSV projections/overrides)
+        _restore_csv_overrides()
+        if SharedBackupState.has_backup() and SharedBackupState.get_object_registry():
+            logger.info("Restored CSV-only backup state")
+            return _set_restore_status({"restored": True, "mode": "csv_only"})
+
+        return _set_restore_status({"restored": False, "mode": "none"})
 
     except Exception as e:
         logger.warning(f"Failed to restore backup to session state: {e}")
@@ -2568,170 +2620,74 @@ def restore_backup_to_session_state():
             meta = get_backup_metadata()
             if meta["loaded"]:
                 _restore_counts_only(meta)
-        except:
+                return _set_restore_status({"restored": True, "mode": "counts_only", "message": "Counts restored; detailed object data is unavailable."})
+            _restore_csv_overrides()
+            if SharedBackupState.has_backup() and SharedBackupState.get_object_registry():
+                return _set_restore_status({"restored": True, "mode": "csv_only"})
+        except Exception:
             pass
+        return _set_restore_status({"restored": False, "mode": "error", "message": str(e)})
 
 
 def _restore_csv_overrides():
     """
     Restore CSV overrides from database tables to session state.
-    Scans all dynamic_* tables created by the universal uploader and restores
-    them as CSV overrides in SharedBackupState.
+    Scans all dynamic_* tables and legacy records for CSV-only data.
     """
     from core.shared_backup_state import SharedBackupState
     import logging
+    import sqlite3
+    from datetime import datetime
     logger = logging.getLogger(__name__)
     
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        # Get all dynamic_* tables created by universal uploader
-        cursor.execute("""
-            SELECT name FROM sqlite_master 
-            WHERE type='table' AND name LIKE 'dynamic_%'
-        """)
-        dynamic_tables = cursor.fetchall()
-        
-        for (table_name,) in dynamic_tables:
+        # 1. Sites
+        cursor.execute("SELECT COUNT(*), source, MAX(imported_at) FROM sites_records WHERE source NOT IN ('NetBox Backup (JSON)', 'NetBox Backup') GROUP BY source")
+        row = cursor.fetchone()
+        if row and row[0] > 0:
+            SharedBackupState.add_csv_override("dcim/sites", row[0], row[1] or "CSV", row[2] or datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            
+        # 2. IPAM
+        cursor.execute("SELECT record_type, COUNT(*), source, MAX(imported_at) FROM ipam_records WHERE source NOT IN ('NetBox Backup (JSON)', 'NetBox Backup') GROUP BY record_type, source")
+        for rtype, count, source, ts in cursor.fetchall():
+            ep = "ipam/vlans" if rtype == 'vlan' else "ipam/prefixes"
+            SharedBackupState.add_csv_override(ep, count, source or "CSV", ts or datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+        # 3. Inventory
+        cursor.execute("SELECT category, COUNT(*), source, MAX(imported_at) FROM inventory_records WHERE source NOT IN ('NetBox Backup (JSON)', 'NetBox Backup') GROUP BY category, source")
+        for cat, count, source, ts in cursor.fetchall():
+            ep = "virtualization/virtual_machines" if cat == 'vm' else "dcim/devices"
+            SharedBackupState.add_csv_override(ep, count, source or "CSV", ts or datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+        # 4. dynamic_* tables
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'dynamic_%'")
+        for (table_name,) in cursor.fetchall():
             try:
-                # Check if table has the metadata columns (with underscores)
                 cursor.execute(f"PRAGMA table_info({table_name})")
-                columns = {row[1] for row in cursor.fetchall()}
-                
-                # Use correct column names (with underscores)
-                if '_uploaded_at' in columns and '_source_file' in columns:
+                cols = {c[1] for c in cursor.fetchall()}
+                if '_uploaded_at' in cols and '_source_file' in cols:
                     cursor.execute(f"SELECT COUNT(*), MAX(_uploaded_at), MAX(_source_file) FROM {table_name}")
                 else:
-                    # Fallback for tables without metadata columns
                     cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
-                    count_row = cursor.fetchone()
-                    if count_row and count_row[0] > 0:
-                        count = count_row[0]
-                        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        source = "CSV Upload"
-                    else:
-                        continue
                 
-                row = cursor.fetchone() if '_uploaded_at' in columns else None
-                
-                if row and row[0] > 0:
-                    count = row[0]
-                    timestamp = row[1] or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    source = row[2] or "CSV Upload"
-                    
-                    # Convert table name to endpoint format
-                    # dynamic_dcim_sites -> dcim/sites
-                    # dynamic_unclassified_filename -> unclassified/filename
+                res = cursor.fetchone()
+                if res and res[0] > 0:
+                    count = res[0]
+                    ts = res[1] if len(res) > 1 and res[1] else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    src = res[2] if len(res) > 2 and res[2] else "CSV Upload"
                     endpoint = table_name.replace('dynamic_', '').replace('_', '/', 1)
-                    # For remaining underscores, keep them (they're part of the model name)
-                    
-                    SharedBackupState.add_csv_override(endpoint, count, source, timestamp)
-                    logger.info(f"Restored CSV override: {endpoint} ({count} records from {source})")
-                elif count_row and count_row[0] > 0:
-                    # Use the count from earlier query
-                    endpoint = table_name.replace('dynamic_', '').replace('_', '/', 1)
-                    SharedBackupState.add_csv_override(endpoint, count, source, timestamp)
-                    logger.info(f"Restored CSV override: {endpoint} ({count} records from {source})")
-                    
-            except Exception as e:
-                logger.warning(f"Failed to restore CSV override from {table_name}: {e}")
-                continue
-        
-        # Also check legacy tables (sites_records, ipam_records, inventory_records)
-        # that are not prefixed with dynamic_
-        
-        # Sites
-        try:
-            cursor.execute("""
-                SELECT COUNT(*), source, MAX(imported_at) 
-                FROM sites_records 
-                WHERE source != 'NetBox Backup (JSON)'
-                GROUP BY source
-            """)
-            sites_row = cursor.fetchone()
-            if sites_row and sites_row[0] > 0:
-                count, source, timestamp = sites_row
-                SharedBackupState.add_csv_override("dcim/sites", count, source, timestamp)
-                logger.info(f"Restored CSV override: dcim/sites ({count} records from {source})")
-        except:
-            pass
-        
-        # VLANs
-        try:
-            cursor.execute("""
-                SELECT COUNT(*), source, MAX(imported_at) 
-                FROM ipam_records 
-                WHERE record_type = 'vlan' AND source != 'NetBox Backup (JSON)'
-                GROUP BY source
-            """)
-            vlan_row = cursor.fetchone()
-            if vlan_row and vlan_row[0] > 0:
-                count, source, timestamp = vlan_row
-                SharedBackupState.add_csv_override("ipam/vlans", count, source, timestamp)
-                logger.info(f"Restored CSV override: ipam/vlans ({count} records from {source})")
-        except:
-            pass
-        
-        # Prefixes
-        try:
-            cursor.execute("""
-                SELECT COUNT(*), source, MAX(imported_at) 
-                FROM ipam_records 
-                WHERE record_type = 'prefix' AND source != 'NetBox Backup (JSON)'
-                GROUP BY source
-            """)
-            prefix_row = cursor.fetchone()
-            if prefix_row and prefix_row[0] > 0:
-                count, source, timestamp = prefix_row
-                SharedBackupState.add_csv_override("ipam/prefixes", count, source, timestamp)
-                logger.info(f"Restored CSV override: ipam/prefixes ({count} records from {source})")
-        except:
-            pass
-        
-        # Devices
-        try:
-            cursor.execute("""
-                SELECT COUNT(*), source, MAX(imported_at) 
-                FROM inventory_records 
-                WHERE category IN ('device', 'hypervisor') AND source != 'NetBox Backup (JSON)'
-                GROUP BY source
-            """)
-            device_row = cursor.fetchone()
-            if device_row and device_row[0] > 0:
-                count, source, timestamp = device_row
-                SharedBackupState.add_csv_override("dcim/devices", count, source, timestamp)
-                logger.info(f"Restored CSV override: dcim/devices ({count} records from {source})")
-        except:
-            pass
-        
-        # VMs
-        try:
-            cursor.execute("""
-                SELECT COUNT(*), source, MAX(imported_at) 
-                FROM inventory_records 
-                WHERE category = 'vm' AND source != 'NetBox Backup (JSON)'
-                GROUP BY source
-            """)
-            vm_row = cursor.fetchone()
-            if vm_row and vm_row[0] > 0:
-                count, source, timestamp = vm_row
-                SharedBackupState.add_csv_override("virtualization/virtual_machines", count, source, timestamp)
-                logger.info(f"Restored CSV override: virtualization/virtual_machines ({count} records from {source})")
-        except:
-            pass
-        
+                    SharedBackupState.add_csv_override(endpoint, count, src, ts)
+            except: pass
+
         conn.close()
-        
     except Exception as e:
         logger.warning(f"Failed to restore CSV overrides: {e}")
 
 
 def _restore_counts_only(meta: Dict[str, Any]):
-    """
-    Fallback: restore counts-only mode when compressed JSON is not available.
-    Used for legacy backups uploaded before the compression feature.
-    """
     from core.shared_backup_state import SharedBackupState
     import logging
     logger = logging.getLogger(__name__)
@@ -2804,6 +2760,14 @@ def _restore_counts_only(meta: Dict[str, Any]):
         pass
 
     logger.info(f"Restored {len(object_registry)} object types (count-only mode) from database")
+    try:
+        st.session_state["backup_restore_status"] = {
+            "restored": True,
+            "mode": "counts_only",
+            "message": "Counts restored; detailed object data is unavailable.",
+        }
+    except Exception:
+        pass
 
 
 def get_backup_metadata() -> Dict[str, Any]:
