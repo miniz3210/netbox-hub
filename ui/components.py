@@ -121,6 +121,107 @@ def _authority_status() -> dict:
         "csv_count": csv_count,
     }
 
+
+def _backup_clear_availability() -> dict:
+    """Read-only availability of JSON and CSV backup data for clear-control gating.
+
+    Computed from persistent DB state and the rehydrated SharedBackupState registry.
+    Does NOT treat latest_full_backup_completed watermark alone as active JSON data.
+    """
+    import sqlite3
+    has_json = False
+    has_csv = False
+
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+
+        # meta["loaded"] (record_count > 0)
+        try:
+            cur.execute("SELECT record_count FROM backup_metadata WHERE id = 1")
+            row = cur.fetchone()
+            if row and row[0] and int(row[0]) > 0:
+                has_json = True
+        except Exception:
+            pass
+
+        # backup_json_compressed exists
+        if not has_json:
+            try:
+                cur.execute("SELECT backup_json_compressed FROM backup_metadata WHERE id = 1")
+                row = cur.fetchone()
+                if row and row[0]:
+                    has_json = True
+            except Exception:
+                pass
+
+        # backup_endpoints count > 0
+        if not has_json:
+            try:
+                cur.execute("SELECT COUNT(*) FROM backup_endpoints")
+                if (cur.fetchone() or [0])[0] > 0:
+                    has_json = True
+            except Exception:
+                pass
+
+        # backup_records count > 0
+        if not has_json:
+            try:
+                cur.execute("SELECT COUNT(*) FROM backup_records")
+                if (cur.fetchone() or [0])[0] > 0:
+                    has_json = True
+            except Exception:
+                pass
+
+        # full_endpoint_catalogue count > 0
+        if not has_json:
+            try:
+                cur.execute("SELECT COUNT(*) FROM full_endpoint_catalogue")
+                if (cur.fetchone() or [0])[0] > 0:
+                    has_json = True
+            except Exception:
+                pass
+
+        # CSV sync metadata / dynamic tables
+        if not has_csv:
+            try:
+                cur.execute("SELECT COUNT(*) FROM csv_backup_entries")
+                if (cur.fetchone() or [0])[0] > 0:
+                    has_csv = True
+            except Exception:
+                pass
+        if not has_csv:
+            try:
+                cur.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name LIKE 'dynamic_%'")
+                if (cur.fetchone() or [0])[0] > 0:
+                    has_csv = True
+            except Exception:
+                pass
+
+        conn.close()
+    except Exception:
+        pass
+
+    # Rehydrated SharedBackupState registry entries
+    try:
+        registry = SharedBackupState.get_object_registry()
+        for metadata in registry.values():
+            source_type = metadata.get("source_type", "json")
+            is_csv = (
+                source_type == "csv"
+                or str(metadata.get("source", "")).lower().endswith((".csv", ".xlsx"))
+            )
+            if is_csv:
+                has_csv = True
+            else:
+                has_json = True
+            if has_json and has_csv:
+                break
+    except Exception:
+        pass
+
+    return {"has_json_data": has_json, "has_csv_data": has_csv}
+
 # The PowerShell exporters ship in the repo and are read from disk so the scripts and
 # the download buttons can never drift apart. They walk the NetBox REST API and
 # write NetBox_Full_Backup_<timestamp>.json or NetBox_Minimal_Backup_<timestamp>.json.
@@ -557,7 +658,7 @@ def _render_json_backup_section(scope_key: str, meta: dict, json_uploader_key: s
         if checkbox_key not in st.session_state:
             st.session_state[checkbox_key] = meta["enabled"]
 
-        c_chk, c_clr = st.columns([3, 1])
+        c_chk = st.columns(1)[0]
         with c_chk:
             st.checkbox(
                 f"Include in AI Assistant — `{meta['filename']}` uploaded {meta['uploaded_at']} "
@@ -566,16 +667,6 @@ def _render_json_backup_section(scope_key: str, meta: dict, json_uploader_key: s
                 on_change=_handle_backup_toggle,
                 args=(checkbox_key,),
                 help="Tick to let the AI Assistant read this backup file. Untick to exclude it without deleting.",
-            )
-        with c_clr:
-            st.button(
-                "🗑️ Clear All JSON",
-                key=f"btn_clear_backup_{scope_key}",
-                on_click=_handle_backup_clear,
-                args=(scope_key,),
-                width="stretch",
-                type="secondary",
-                help="Clear all JSON backup data from backup_records table",
             )
 
         source = meta.get("source_info") or {}
@@ -600,7 +691,54 @@ def _render_json_backup_section(scope_key: str, meta: dict, json_uploader_key: s
     else:
         st.caption("⚪ No backup file uploaded — AI Assistant uses CSV/agent data only.")
 
-    # Clear Everything is rendered at the bottom of render_backup_uploader (A3)
+    # Clear JSON is gated on effective data availability (not just meta["loaded"]),
+    # so it remains visible after session rehydration when registry/catalogue data
+    # persists but meta["loaded"] is False. Clear CSV requires CSV data only.
+    clear_avail = _backup_clear_availability()
+    has_json_data = clear_avail["has_json_data"]
+    has_csv_data = clear_avail["has_csv_data"]
+
+    c_clr_json, c_clr_all = st.columns([1, 1])
+    with c_clr_json:
+        if has_json_data:
+            st.button(
+                "🗑️ Clear JSON",
+                key=f"btn_clear_backup_{scope_key}",
+                on_click=_handle_backup_clear,
+                args=(scope_key,),
+                width="stretch",
+                type="secondary",
+                help="Clear all JSON backup data from backup_records table",
+            )
+        else:
+            st.button(
+                "🗑️ Clear JSON",
+                key=f"btn_clear_backup_{scope_key}",
+                disabled=True,
+                width="stretch",
+                type="secondary",
+                help="No JSON backup data available to clear",
+            )
+    with c_clr_all:
+        if has_json_data or has_csv_data:
+            st.button(
+                "🗑️ Clear JSON + CSV",
+                key=f"btn_clear_all_backup_{scope_key}",
+                on_click=_handle_backup_clear_all,
+                args=(scope_key,),
+                width="stretch",
+                type="secondary",
+                help="Permanently clears JSON/Minimal backup data, CSV overrides, endpoint catalogue and backup session state.",
+            )
+        else:
+            st.button(
+                "🗑️ Clear JSON + CSV",
+                key=f"btn_clear_all_backup_{scope_key}",
+                disabled=True,
+                width="stretch",
+                type="secondary",
+                help="No backup data available to clear",
+            )
 
 
 def _render_backup_contents_section(scope_key: str, meta: dict) -> None:
@@ -1313,32 +1451,9 @@ def render_backup_uploader(scope_key: str) -> dict:
     _render_choice_sets_section()
     _render_csv_upload_section(scope_key, csv_uploader_key)
 
-    # Clear Everything rendered ONCE at bottom, gated per A3
-    _auth_csv = 0
-    _auth_cat = 0
-    try:
-        import sqlite3
-        _conn = sqlite3.connect(DB_PATH)
-        _cur = _conn.cursor()
-        _cur.execute("SELECT COUNT(DISTINCT endpoint) FROM csv_backup_entries")
-        _auth_csv = _cur.fetchone()[0] or 0
-        _cur.execute("SELECT COUNT(*) FROM endpoint_catalogue")
-        _auth_cat = _cur.fetchone()[0] or 0
-        _conn.close()
-    except Exception:
-        pass
-    if meta["loaded"] or _auth_csv > 0 or _auth_cat > 0:
-        st.button(
-            "🗑️ Clear Everything",
-            key=f"btn_clear_all_backup_{scope_key}",
-            on_click=_handle_backup_clear_all,
-            args=(scope_key,),
-            width="stretch",
-            type="secondary",
-            help="Permanently clears JSON/Minimal backup data, CSV overrides, endpoint catalogue and backup session state.",
-        )
-
     return meta
+
+
 def _sidebar_placeholder(loaded: bool, has_options: bool) -> str:
     if not loaded:
         return "-- Click refresh to load models --"
