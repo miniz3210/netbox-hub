@@ -4,6 +4,7 @@ import sqlite3
 import pandas as pd
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
+from core.backup_endpoint_merge import parse_ts
 
 DB_PATH = "data/netbox_hub.db"
 
@@ -712,6 +713,22 @@ def get_total_sites_count() -> int:
         total = cursor.fetchone()[0]
     return total
 
+def get_total_devices_count() -> int:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM inventory_records WHERE category IN ('device', 'hypervisor')")
+        total = cursor.fetchone()[0]
+    return total
+
+def get_total_vms_count() -> int:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM inventory_records WHERE category = 'vm'")
+        total = cursor.fetchone()[0]
+    return total
+
 def get_file_sync_metadata() -> Dict[str, str]:
     init_db()
     with sqlite3.connect(DB_PATH) as conn:
@@ -727,6 +744,69 @@ def get_file_sync_metadata() -> Dict[str, str]:
         "ipam_records": str(ipam) if ipam > 0 else "Never",
         "inventory_records": str(inventory) if inventory > 0 else "Never",
     }
+
+def get_newest_csv_timestamp() -> Optional[datetime]:
+    """Return the newest valid CSV watermark from authoritative CSV metadata only.
+
+    Uses sync_metadata.updated_at for CSV-owned modules and
+    azure_csv_uploads.uploaded_at. Does NOT read sites_records.imported_at,
+    ipam_records.imported_at, or inventory_records.imported_at because Full
+    ingestion also writes those tables.
+    """
+    init_db()
+    timestamps = []
+    csv_modules = [
+        "netbox_sites",
+        "netbox_VLANs",
+        "netbox_prefixes",
+        "netbox_devices",
+        "netbox_virtual_machines",
+    ]
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        # Authoritative CSV sync_metadata modules (written exclusively by CSV import)
+        for module in csv_modules:
+            try:
+                cursor.execute("SELECT updated_at FROM sync_metadata WHERE module = ?", (module,))
+                row = cursor.fetchone()
+                if row and row[0]:
+                    ts = parse_ts(row[0])
+                    if ts:
+                        timestamps.append(ts)
+            except sqlite3.OperationalError:
+                continue
+        # azure_csv_uploads.uploaded_at
+        try:
+            cursor.execute("SELECT MAX(uploaded_at) FROM azure_csv_uploads")
+            row = cursor.fetchone()
+            if row and row[0]:
+                ts = parse_ts(row[0])
+                if ts:
+                    timestamps.append(ts)
+        except sqlite3.OperationalError:
+            pass
+        # Existing dynamic CSV metadata only if explicitly marked CSV
+        try:
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'dynamic\\_%' ESCAPE '\\'"
+            )
+            for (table_name,) in cursor.fetchall():
+                safe_name = table_name.replace('"', '""')
+                try:
+                    cursor.execute(
+                        f'SELECT MAX(_uploaded_at) FROM "{safe_name}" '
+                        "WHERE LOWER(_source_file) LIKE '%.csv' OR LOWER(_source_file) LIKE '%.xlsx'"
+                    )
+                    row = cursor.fetchone()
+                    if row and row[0]:
+                        ts = parse_ts(row[0])
+                        if ts:
+                            timestamps.append(ts)
+                except sqlite3.OperationalError:
+                    continue
+        except sqlite3.OperationalError:
+            pass
+    return max(timestamps) if timestamps else None
 
 
 def get_max_scope_id() -> Optional[int]:

@@ -18,6 +18,8 @@ records custom field definitions and their choice sets (Instance Type Set,
 Resource Group Set, ...) so object-existence checks can use authoritative data.
 """
 
+import gzip
+import hashlib
 import json
 import logging
 import os
@@ -33,6 +35,11 @@ from core.db_manager import (
     save_records_batch,
     save_sites_batch,
     set_sync_metadata,
+    get_newest_csv_timestamp,
+    get_total_sites_count,
+    get_total_ipam_count,
+    get_total_devices_count,
+    get_total_vms_count,
 )
 from core.backup_endpoint_merge import parse_ts
 from config.naming_rules import get_hypervisor_device_hints
@@ -940,7 +947,149 @@ def _ingest_choice_values(
     return len(rows)
 
 
-# ── FULL-FIDELITY BACKUP ROWS ───────────────────────────────────────────
+
+def _compute_full_content_hash(payload: Dict[str, Any]) -> str:
+    """SHA-1 of canonical JSON serialization of a Full backup payload."""
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha1(canonical.encode("utf-8")).hexdigest()
+
+
+def _get_latest_full_metadata() -> Tuple[Optional[str], Optional[str]]:
+    """Return (latest_full_timestamp, stored_hash).
+
+    stored_hash is the SHA-1 of the canonical JSON content of the stored
+    compressed backup blob. Compressed bytes are never hashed directly.
+    If the stored blob is missing or unreadable, returns (ts, None).
+    """
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT latest_full_backup_completed, backup_json_compressed FROM backup_metadata WHERE id = 1")
+        row = cursor.fetchone()
+        if not row:
+            return None, None
+
+        ts = row[0]
+        comp = row[1]
+
+        h = None
+        if comp:
+            try:
+                payload = json.loads(gzip.decompress(comp).decode("utf-8"))
+                h = _compute_full_content_hash(payload)
+            except Exception as exc:
+                logger.warning("Stored Full backup JSON is unreadable: %s", exc)
+                return ts, None
+        return ts, h
+
+def _make_full_decision(
+    incoming_timestamp: str,
+    incoming_hash: str,
+) -> dict:
+    """Make authoritative decision on Full backup ingestion."""
+    latest_ts_str, stored_hash = _get_latest_full_metadata()
+    newest_csv_ts = get_newest_csv_timestamp()
+
+    incoming_ts = parse_ts(incoming_timestamp)
+    latest_ts = parse_ts(latest_ts_str) if latest_ts_str else None
+
+    # 5. Missing/unparseable incoming timestamp
+    if not incoming_ts:
+        return {
+            "decision": "FULL_REJECTED_INVALID_TIMESTAMP",
+            "accepted": False,
+            "preserve_csv": False,
+            "data_changed": False,
+            "reason": "Invalid or missing timestamp",
+            "recommended_action": "Generate a new Full backup with a valid completion timestamp.",
+            "incoming_full_timestamp": incoming_timestamp,
+            "latest_full_timestamp": latest_ts_str,
+            "newest_csv_timestamp": newest_csv_ts.strftime("%Y-%m-%d %H:%M:%S UTC") if newest_csv_ts else None,
+        }
+
+    # 1. incoming < latest Full
+    if latest_ts and incoming_ts < latest_ts:
+        return {
+            "decision": "FULL_REJECTED_STALE",
+            "accepted": False,
+            "preserve_csv": False,
+            "data_changed": False,
+            "reason": "uploaded Full is older, no existing data was changed",
+            "recommended_action": "Generate and upload a new Full backup.",
+            "incoming_full_timestamp": incoming_timestamp,
+            "latest_full_timestamp": latest_ts_str,
+            "newest_csv_timestamp": newest_csv_ts.strftime("%Y-%m-%d %H:%M:%S UTC") if newest_csv_ts else None,
+        }
+
+    # 2. incoming == latest Full
+    if latest_ts and incoming_ts == latest_ts:
+        # A. JSON authority is missing/cleared
+        if not stored_hash:
+            return {
+                "decision": "FULL_ACCEPTED_EQUAL_RESTORE",
+                "accepted": True,
+                "preserve_csv": True,
+                "data_changed": True,
+                "reason": "JSON authority cleared, restoring",
+                "recommended_action": None,
+                "incoming_full_timestamp": incoming_timestamp,
+                "latest_full_timestamp": latest_ts_str,
+                "newest_csv_timestamp": newest_csv_ts.strftime("%Y-%m-%d %H:%M:%S UTC") if newest_csv_ts else None,
+            }
+
+        # B. JSON exists and stored hash == incoming hash
+        if stored_hash == incoming_hash:
+            return {
+                "decision": "FULL_REJECTED_EQUAL_NOOP",
+                "accepted": False,
+                "preserve_csv": False,
+                "data_changed": False,
+                "reason": "This Full backup is already loaded. No data was changed.",
+                "recommended_action": None,
+                "incoming_full_timestamp": incoming_timestamp,
+                "latest_full_timestamp": latest_ts_str,
+                "newest_csv_timestamp": newest_csv_ts.strftime("%Y-%m-%d %H:%M:%S UTC") if newest_csv_ts else None,
+            }
+
+        # C. JSON exists and hashes differ
+        return {
+            "decision": "FULL_REJECTED_EQUAL_CONFLICT",
+            "accepted": False,
+            "preserve_csv": False,
+            "data_changed": False,
+            "reason": "Hash conflict",
+            "recommended_action": "Generate a fresh Full backup with a newer completion timestamp.",
+            "incoming_full_timestamp": incoming_timestamp,
+            "latest_full_timestamp": latest_ts_str,
+            "newest_csv_timestamp": newest_csv_ts.strftime("%Y-%m-%d %H:%M:%S UTC") if newest_csv_ts else None,
+        }
+
+    # 3. incoming > latest Full OR 4. No latest Full
+    # Shared logic for incoming > latest OR No latest
+    if newest_csv_ts and incoming_ts <= newest_csv_ts:
+        return {
+            "decision": "FULL_ACCEPTED_PRESERVE_NEWER_CSV",
+            "accepted": True,
+            "preserve_csv": True,
+            "data_changed": True,
+            "reason": "Incoming backup older than or equal to CSV data, preserving CSVs",
+            "recommended_action": None,
+            "incoming_full_timestamp": incoming_timestamp,
+            "latest_full_timestamp": latest_ts_str,
+            "newest_csv_timestamp": newest_csv_ts.strftime("%Y-%m-%d %H:%M:%S UTC") if newest_csv_ts else None,
+        }
+
+    return {
+        "decision": "FULL_ACCEPTED_OVERWRITE_ALL",
+        "accepted": True,
+        "preserve_csv": False,
+        "data_changed": True,
+        "reason": "Incoming backup is newer, overwriting all",
+        "recommended_action": None,
+        "incoming_full_timestamp": incoming_timestamp,
+        "latest_full_timestamp": latest_ts_str,
+        "newest_csv_timestamp": newest_csv_ts.strftime("%Y-%m-%d %H:%M:%S UTC") if newest_csv_ts else None,
+    }
+
 
 def _ingest_backup_rows(
     buckets: Dict[str, List[Dict[str, Any]]],
@@ -1513,21 +1662,27 @@ def save_netbox_backup(file_bytes: Any, filename: str = "",
     is_full = endpoint_count >= 100
     backup_completed = source_info.get("backup_completed") or ""
 
-    # Stale Full guard — reject before any destructive write
-    if is_full and backup_completed:
-        conn_stale = sqlite3.connect(DB_PATH)
-        cursor_stale = conn_stale.cursor()
-        cursor_stale.execute("SELECT latest_full_backup_completed FROM backup_metadata WHERE id = 1")
-        meta_row = cursor_stale.fetchone()
-        conn_stale.close()
+    # Authoritative Full decision — computed BEFORE any destructive clear/write.
+    # The comparison watermark is read here (via _make_full_decision -> _get_latest_full_metadata)
+    # before clear_backup_records can destroy it.  Minimal backups never reach
+    # this branch.
+    full_decision: Optional[Dict[str, Any]] = None
+    if is_full:
+        incoming_hash = _compute_full_content_hash(payload)
+        full_decision = _make_full_decision(
+            backup_completed,
+            incoming_hash,
+        )
 
-        stored_ts = None
-        incoming_ts = None
-        if meta_row and meta_row[0]:
-            stored_ts = parse_ts(meta_row[0])
-        incoming_ts = parse_ts(backup_completed)
-
-        if stored_ts and incoming_ts and incoming_ts < stored_ts:
+        if not full_decision["accepted"]:
+            # REJECT PATH: return before any database mutation.  No clear,
+            # no DELETE/INSERT/UPDATE, no metadata/registry/cache mutation.
+            reason_text = full_decision.get("reason") or "rejected"
+            logger.info(
+                "Full backup rejected: %s (%s)",
+                full_decision.get("decision"),
+                reason_text,
+            )
             return {
                 "total": 0,
                 "object_counts": {},
@@ -1537,9 +1692,19 @@ def save_netbox_backup(file_bytes: Any, filename: str = "",
                 "source_info": source_info,
                 "uploaded_at": uploaded_at,
                 "timings": timings,
-                "skipped": {"full_backup": f"stale Full rejected: incoming {backup_completed} < stored {meta_row[0]}"},
+                "skipped": {"full_backup": reason_text},
                 "backup_type": "full",
-                "error": "stale_full",
+                "error": "decision_rejected",
+                "decision": full_decision.get("decision"),
+                "accepted": False,
+                "preserve_csv": bool(full_decision.get("preserve_csv", False)),
+                "data_changed": bool(full_decision.get("data_changed", False)),
+                "reason": reason_text,
+                "recommended_action": full_decision.get("recommended_action"),
+                "incoming_full_timestamp": full_decision.get("incoming_full_timestamp"),
+                "latest_full_timestamp": full_decision.get("latest_full_timestamp"),
+                "newest_csv_timestamp": full_decision.get("newest_csv_timestamp"),
+                "full_decision": full_decision,
             }
 
     # Build incoming endpoint map for merge planning — from EVERY endpoint
@@ -1625,16 +1790,14 @@ def save_netbox_backup(file_bytes: Any, filename: str = "",
             skipped[path] = reason
 
     if is_full:
-        # FULL: clear everything, rebuild from scratch
+        preserve_csv = bool(full_decision["preserve_csv"])
+        # FULL (accepted): decision-controlled authoritative clear.  Called exactly
+        # once, before ingesting, with preserve_csv taken from the accepted Full
+        # decision.  This replaces the prior manual partial clear.
         if progress_callback:
             progress_callback("Clearing old backup data...")
         t0 = _time.perf_counter()
-        conn = sqlite3.connect(DB_PATH, timeout=30)
-        conn.execute("PRAGMA busy_timeout=30000")
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM backup_endpoints")
-        conn.commit()
-        conn.close()
+        clear_backup_records(preserve_csv=preserve_csv)
         timings["full_clear"] = _time.perf_counter() - t0
 
         # Re-ingest everything (same as before)
@@ -1648,11 +1811,20 @@ def save_netbox_backup(file_bytes: Any, filename: str = "",
             progress_callback("Processing sites and IPAM data...")
         t0 = _time.perf_counter()
         parent_sites = _build_parent_site_map(buckets)
-        sites = _ingest_sites(buckets)
-        ipam = _ingest_ipam(buckets)
-        inv_counts = _ingest_inventory(buckets)
-        devices = inv_counts.get("device", 0) + inv_counts.get("hypervisor", 0)
-        vms = inv_counts.get("vm", 0)
+        if preserve_csv:
+            # Preserve existing CSV projection tables: do not overwrite
+            # sites_records, ipam_records, inventory_records. Skip the Full
+            # ingest of those tables so CSV data survives.
+            sites = get_total_sites_count()
+            ipam = get_total_ipam_count()
+            devices = get_total_devices_count()
+            vms = get_total_vms_count()
+        else:
+            sites = _ingest_sites(buckets)
+            ipam = _ingest_ipam(buckets)
+            inv_counts = _ingest_inventory(buckets)
+            devices = inv_counts.get("device", 0) + inv_counts.get("hypervisor", 0)
+            vms = inv_counts.get("vm", 0)
         choice_values = _ingest_choice_values(buckets, uploaded_at)
         timings["structured_ingest"] = _time.perf_counter() - t0
 
@@ -2068,8 +2240,9 @@ def save_netbox_backup(file_bytes: Any, filename: str = "",
     conn.close()
     timings["compress_store"] = _time.perf_counter() - t0
 
-    # Drop CSV overlays and dynamic tables only after successful Full commit
-    if is_full:
+    # Drop CSV overlays and dynamic tables only after a successful Full commit,
+    # and only when the accepted Full did NOT preserve CSV-owned data.
+    if is_full and not preserve_csv:
         try:
             from core.shared_backup_state import SharedBackupState
             SharedBackupState.clear_csv_only()
@@ -2127,6 +2300,19 @@ def save_netbox_backup(file_bytes: Any, filename: str = "",
         "skipped": skipped,
         "backup_type": "full" if is_full else "minimal",
     }
+    if is_full and full_decision is not None:
+        result.update({
+            "decision": full_decision.get("decision"),
+            "accepted": bool(full_decision.get("accepted", True)),
+            "preserve_csv": bool(full_decision.get("preserve_csv", False)),
+            "data_changed": bool(full_decision.get("data_changed", True)),
+            "reason": full_decision.get("reason"),
+            "recommended_action": full_decision.get("recommended_action"),
+            "incoming_full_timestamp": full_decision.get("incoming_full_timestamp"),
+            "latest_full_timestamp": full_decision.get("latest_full_timestamp"),
+            "newest_csv_timestamp": full_decision.get("newest_csv_timestamp"),
+            "full_decision": full_decision,
+        })
     return result
 
 
@@ -2677,16 +2863,28 @@ def clear_backup_records(preserve_csv: bool = False) -> int:
     This clears:
     - backup_records (main backup table)
     - backup_choice_values (custom field choices)
-    - backup_metadata (upload metadata)
-    - sites_records (sites populated from JSON)
-    - ipam_records (VLANs and prefixes from JSON)
-    - inventory_records (devices and VMs from JSON)
-    - All related sync_metadata entries
+    - backup_metadata (upload metadata) - always cleared
+    - backup_metadata.latest_full_backup_completed (when preserve_csv=False)
+    - sites_records (sites populated from JSON) - when preserve_csv=False
+    - ipam_records (VLANs and prefixes from JSON) - when preserve_csv=False
+    - inventory_records (devices and VMs from JSON) - when preserve_csv=False
+    - interfaces
+    - cables
+    - backup_endpoints
+    - full_endpoint_catalogue (when preserve_csv=False)
+    - dynamic_* tables (when preserve_csv=False)
+    - All related sync_metadata entries except netbox_backup (when preserve_csv=True)
 
     When preserve_csv=True:
     - Dynamic CSV tables (dynamic_*) are left intact so CSV overrides persist
     - full_endpoint_catalogue is preserved
     - backup_metadata.latest_full_backup_completed is preserved
+    - Only netbox_backup sync_metadata is deleted; all others remain intact
+    - All JSON-owned data tables are cleared except CSV-owned data
+
+    When preserve_csv=False:
+    - All JSON-owned data tables are cleared
+    - All sync_metadata entries are cleared
     """
     init_backup_tables()
     conn = sqlite3.connect(DB_PATH)
@@ -2699,13 +2897,14 @@ def clear_backup_records(preserve_csv: bool = False) -> int:
         if not preserve_csv:
             cursor.execute('DELETE FROM "backup_metadata"')
         else:
-            # Preserve latest_full_backup_completed when clearing CSV-friendly
+            # Preserve latest_full_backup_completed when preserving CSV
             cursor.execute("UPDATE backup_metadata SET record_count=NULL, object_counts=NULL WHERE id=1")
 
         # Clear related data tables populated from JSON backup
-        cursor.execute('DELETE FROM "sites_records"')
-        cursor.execute('DELETE FROM "ipam_records"')
-        cursor.execute('DELETE FROM "inventory_records"')
+        if not preserve_csv:
+            cursor.execute('DELETE FROM "sites_records"')
+            cursor.execute('DELETE FROM "ipam_records"')
+            cursor.execute('DELETE FROM "inventory_records"')
 
         # Delete from interfaces, cables, backup_endpoints if they exist
         for tbl in ("interfaces", "cables", "backup_endpoints"):
@@ -2734,12 +2933,17 @@ def clear_backup_records(preserve_csv: bool = False) -> int:
                 cursor.execute(f'DELETE FROM "{safe_name}"')
 
         # Clear all related sync metadata
-        cursor.execute("""
-            DELETE FROM sync_metadata WHERE module IN (
-                'netbox_backup', 'ipam', 'naming', 'netbox_sites',
-                'netbox_VLANs', 'netbox_prefixes', 'netbox_devices', 'netbox_virtual_machines'
-            )
-        """)
+        if preserve_csv:
+            # When preserving CSV data, only delete netbox_backup module sync_metadata
+            cursor.execute("DELETE FROM sync_metadata WHERE module = 'netbox_backup'")
+        else:
+            # When not preserving CSV, delete all listed modules
+            cursor.execute("""
+                DELETE FROM sync_metadata WHERE module IN (
+                    'netbox_backup', 'ipam', 'naming', 'netbox_sites',
+                    'netbox_VLANs', 'netbox_prefixes', 'netbox_devices', 'netbox_virtual_machines'
+                )
+            """)
 
         conn.commit()
     except Exception:

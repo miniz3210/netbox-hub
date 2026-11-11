@@ -69,7 +69,13 @@
 - [ ] Standards 儲存流程重複：Add normalization block calls SSM.set_naming_rules without refresh（P3 consistency review）。
 
 ### P3
-- [ ] P3: in `_vlan_presets_editor`, Save only writes items and patterns of the SELECTED group; unsaved item edits in another group are lost when user switches group and saves. Structure changes (order, new, deleted groups) apply to all groups.
+- [x] VLAN Allocation Presets: working-copy behavior completed (verified as Done):
+  - Canonical VLAN working copy
+  - Cross-group unsaved state persistence
+  - Complete Save & Apply workflow
+  - Selected-group consistency maintained
+  - Regression fixes implemented
+  - Empty-state safety verified
 - [ ] P3: the `is_custom` branch in the Save block of `_vlan_presets_editor` is dead code (`is_custom` is never true), candidate for removal.
 - [ ] P3: Noise Filters text_area key "txt_noise_filters_{active_plat}" has no nonce, so Reset may show stale text until F5. Status: not confirmed.
 - [ ] Naming 資料處理段殘餘 "No Uplink" / "vmnic" 字面值，改讀 preset / token。

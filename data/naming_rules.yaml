@@ -232,32 +232,6 @@
       "vlan_name_pattern": "",
       "prefix_pattern": "",
       "items": []
-    },
-    "test vlan group": {
-      "vlan_name_pattern": "<role>",
-      "prefix_pattern": "<site> <role> -- VLAN <vid>",
-      "items": [
-        {
-          "vid": "900",
-          "role": "test role"
-        },
-        {
-          "vid": "800",
-          "role": "test role2"
-        },
-        {
-          "vid": "500",
-          "role": "test role3"
-        },
-        {
-          "vid": "444",
-          "role": "test role4"
-        },
-        {
-          "vid": "555",
-          "role": "test role5"
-        }
-      ]
     }
   },
   "naming_patterns": {
